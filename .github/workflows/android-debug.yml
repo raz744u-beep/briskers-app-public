@@ -88,6 +88,19 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Validate permanent signing keystore
+        working-directory: generated
+        env:
+          BRISKERS_KEYSTORE_PASSWORD: ${{ secrets.BRISKERS_KEYSTORE_PASSWORD }}
+          BRISKERS_KEY_ALIAS: ${{ secrets.BRISKERS_KEY_ALIAS }}
+        run: |
+          keytool -list -v \
+            -keystore android/app/briskers-release.jks \
+            -storepass "$BRISKERS_KEYSTORE_PASSWORD" \
+            -alias "$BRISKERS_KEY_ALIAS" \
+            | grep -E "Alias name:|Owner:|SHA256:"
+          echo "Permanent Briskers keystore validated."
+
       - name: Resolve packages
         working-directory: generated
         run: flutter pub get
