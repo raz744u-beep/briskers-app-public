@@ -6,6 +6,7 @@ import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import '../widgets/job_compact_card.dart';
 import 'jobs/job_detail_screen.dart';
+import 'jobs/job_document_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
@@ -35,6 +36,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _error;
   String? _checkingInId;
   String? _busyJobId;
+  bool _aiBusy = false;
 
   bool get _canManage =>
       widget.roleCode == 'owner' ||
@@ -73,6 +75,346 @@ class _DashboardScreenState extends State<DashboardScreen> {
       });
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<Map<String, dynamic>?> _resolveAiCustomer(String query) async {
+    final matches = await _api.customers(
+      widget.businessId,
+      search: query,
+      limit: 20,
+    );
+
+    if (!mounted) return null;
+    if (matches.isEmpty) {
+      setState(() => _error = 'No customer found for "$query".');
+      return null;
+    }
+    if (matches.length == 1) return matches.first;
+
+    return showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Text(
+                'Which customer?',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+            ),
+            ...matches.map(
+              (customer) => ListTile(
+                leading: const CircleAvatar(
+                  child: Icon(Icons.person_outline),
+                ),
+                title: Text(customer['display_name']?.toString() ?? ''),
+                subtitle: Text(
+                  '${customer['vehicle_count'] ?? 0} vehicle(s)',
+                ),
+                onTap: () => Navigator.pop(sheetContext, customer),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _aiVehicleLabel(Map<String, dynamic> vehicle) => <String>[
+        if (vehicle['year'] != null) vehicle['year'].toString(),
+        if ((vehicle['make']?.toString() ?? '').isNotEmpty)
+          vehicle['make'].toString(),
+        if ((vehicle['model']?.toString() ?? '').isNotEmpty)
+          vehicle['model'].toString(),
+      ].join(' ');
+
+  Future<Map<String, dynamic>?> _resolveAiVehicle(
+    String customerId, {
+    String? query,
+  }) async {
+    final detail = await _api.customerDetail(widget.businessId, customerId);
+    final vehicles = List<dynamic>.from(detail['vehicles'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+
+    if (vehicles.isEmpty) return null;
+
+    var filtered = vehicles;
+    if ((query ?? '').trim().isNotEmpty) {
+      final q = query!.trim().toLowerCase();
+      final hits = vehicles.where((v) {
+        final label = _aiVehicleLabel(v).toLowerCase();
+        final vin = v['vin']?.toString().toLowerCase() ?? '';
+        return label.contains(q) || vin.contains(q);
+      }).toList();
+      if (hits.isNotEmpty) filtered = hits;
+    }
+
+    if (filtered.length == 1) return filtered.first;
+    if (!mounted) return null;
+
+    return showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Text(
+                'Which vehicle?',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+            ),
+            ...filtered.map(
+              (vehicle) => ListTile(
+                leading: const Icon(Icons.directions_car_outlined),
+                title: Text(_aiVehicleLabel(vehicle)),
+                subtitle: (vehicle['vin']?.toString() ?? '').isEmpty
+                    ? null
+                    : Text('VIN: ${vehicle['vin']}'),
+                onTap: () => Navigator.pop(sheetContext, vehicle),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _askJobTitle(String? suggested) async {
+    final controller = TextEditingController(
+      text: (suggested ?? '').trim().isEmpty ? 'New Job' : suggested!.trim(),
+    );
+    final value = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Job title'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Job / service',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final title = controller.text.trim();
+              if (title.isNotEmpty) Navigator.pop(dialogContext, title);
+            },
+            child: const Text('Create Job'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return value;
+  }
+
+  Future<void> _executeAiPlan(Map<String, dynamic> plan) async {
+    final action = plan['action']?.toString() ?? 'unknown';
+    final clarification = plan['clarification']?.toString().trim() ?? '';
+
+    if (clarification.isNotEmpty) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Ask Briskers'),
+          content: Text(clarification),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    if (action != 'create_invoice' && action != 'create_job') {
+      if (!mounted) return;
+      final summary = plan['summary']?.toString() ?? 'Command not supported yet.';
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Ask Briskers'),
+          content: Text(
+            '$summary\n\nThis command is understood, but this action is not wired into the first AI version yet.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final customerQuery = plan['customer_query']?.toString().trim() ?? '';
+    if (customerQuery.isEmpty) {
+      setState(() => _error = 'The AI command needs a customer name.');
+      return;
+    }
+
+    final customer = await _resolveAiCustomer(customerQuery);
+    if (customer == null || !mounted) return;
+
+    final customerId = customer['id']?.toString() ?? '';
+    if (customerId.isEmpty) return;
+
+    final vehicle = await _resolveAiVehicle(
+      customerId,
+      query: plan['vehicle_query']?.toString(),
+    );
+    final vehicleId = vehicle?['id']?.toString();
+
+    if (action == 'create_invoice') {
+      final invoiceId = await _api.createQuickInvoice(
+        widget.businessId,
+        customerId: customerId,
+        vehicleId: vehicleId,
+      );
+
+      if (!mounted) return;
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => JobDocumentScreen(
+            businessId: widget.businessId,
+            documentId: invoiceId,
+            isOwner: widget.roleCode == 'owner',
+          ),
+        ),
+      );
+      await _load();
+      return;
+    }
+
+    final title = await _askJobTitle(plan['title']?.toString());
+    if (title == null || !mounted) return;
+
+    final jobId = await _api.createJob(
+      widget.businessId,
+      customerId: customerId,
+      vehicleId: vehicleId,
+      title: title,
+    );
+
+    if (!mounted) return;
+    await _openJob(jobId);
+  }
+
+  Future<void> _askBriskers() async {
+    if (!_canManage || _aiBusy) return;
+
+    final controller = TextEditingController();
+    final command = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.auto_awesome, color: BriskersColors.jobs),
+                  SizedBox(width: 8),
+                  Text(
+                    'Ask Briskers',
+                    style: TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                textInputAction: TextInputAction.send,
+                decoration: const InputDecoration(
+                  hintText: 'Make an invoice for Larry Carter',
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (value) {
+                  if (value.trim().isNotEmpty) {
+                    Navigator.pop(sheetContext, value.trim());
+                  }
+                },
+              ),
+              const SizedBox(height: 8),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Try: "Open a new job for Malcolm Ross"',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () {
+                    final value = controller.text.trim();
+                    if (value.isNotEmpty) {
+                      Navigator.pop(sheetContext, value);
+                    }
+                  },
+                  icon: const Icon(Icons.arrow_forward),
+                  label: const Text('Run command'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    controller.dispose();
+
+    if (command == null || command.isEmpty) return;
+
+    setState(() {
+      _aiBusy = true;
+      _error = null;
+    });
+
+    try {
+      final response = await _api.aiCommand(widget.businessId, command);
+      final planRaw = response['plan'];
+      if (planRaw is! Map) {
+        throw Exception('Briskers AI returned an invalid action.');
+      }
+      await _executeAiPlan(Map<String, dynamic>.from(planRaw));
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _aiBusy = false);
     }
   }
 
@@ -262,6 +604,61 @@ class _DashboardScreenState extends State<DashboardScreen> {
             style: Theme.of(context).textTheme.headlineSmall,
           ),
           const SizedBox(height: 14),
+          if (_canManage) ...[
+            Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              color: BriskersColors.jobs.withValues(alpha: 0.07),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: _aiBusy ? null : _askBriskers,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor:
+                            BriskersColors.jobs.withValues(alpha: 0.15),
+                        child: _aiBusy
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: BriskersColors.jobs,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.auto_awesome,
+                                color: BriskersColors.jobs,
+                              ),
+                      ),
+                      const SizedBox(width: 11),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Ask Briskers',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            Text(
+                              'Create invoices or jobs with a simple command',
+                              style: TextStyle(fontSize: 12.5),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
           Row(
             children: [
               Expanded(
