@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
-import '../core/employee_role_style.dart';
 import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
+import '../widgets/job_compact_card.dart';
 import 'jobs/job_detail_screen.dart';
-import 'jobs/job_document_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
@@ -36,7 +35,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _error;
   String? _checkingInId;
   String? _busyJobId;
-  final Set<String> _expandedJobIds = <String>{};
 
   bool get _canManage =>
       widget.roleCode == 'owner' ||
@@ -92,42 +90,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await _load();
   }
 
-
-  Future<void> _openDashboardDocument(String documentId) async {
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => JobDocumentScreen(
-          businessId: widget.businessId,
-          documentId: documentId,
-          isOwner: widget.roleCode == 'owner',
-        ),
-      ),
-    );
-    await _load();
-  }
-
-  Future<void> _dashboardDocumentAction(Map<String, dynamic> job, String action) async {
-    final jobId = job['id'].toString();
-    setState(() => _busyJobId = jobId);
-    try {
-      final documents = await _api.jobDocuments(widget.businessId, jobId);
-      final estimates = documents.where((d) => d['kind']?.toString() == 'estimate').toList();
-      final invoices = documents.where((d) => d['kind']?.toString() == 'invoice').toList();
-      String? id;
-      if (action == 'add_estimate') id = await _api.createEstimate(widget.businessId, jobId);
-      if (action == 'add_invoice') id = await _api.createInvoice(widget.businessId, jobId);
-      if (action == 'estimate' && estimates.isNotEmpty) id = estimates.last['id'].toString();
-      if (action == 'invoice' && invoices.isNotEmpty) id = invoices.last['id'].toString();
-      if (action == 'convert' && estimates.isNotEmpty) id = await _api.convertEstimate(widget.businessId, estimates.last['id'].toString());
-      if (!mounted || id == null) return;
-      await _openDashboardDocument(id);
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _busyJobId = null);
-    }
-  }
 
   Future<void> _checkIn(Map<String, dynamic> appointment) async {
     if (!_canManage) return;
@@ -191,12 +153,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } finally {
       if (mounted) setState(() => _busyJobId = null);
     }
-  }
-
-  String _hours(Object? raw) {
-    final value = num.tryParse(raw?.toString() ?? '') ?? 0;
-    if (value == value.roundToDouble()) return value.toInt().toString();
-    return value.toStringAsFixed(2);
   }
 
   Widget _todayStatusControl(Map<String, dynamic> job) {
@@ -274,221 +230,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _activeJobCard(Map<String, dynamic> job) {
-    final requested = job['requested_work']?.toString().trim() ?? '';
-    final title = job['title']?.toString().trim() ?? '';
-    final description = requested.isNotEmpty ? requested : title;
-    final number = job['job_number']?.toString().trim() ?? '';
-    final customer = job['customer']?.toString().trim() ?? '';
-    final mechanic = job['mechanic']?.toString().trim() ?? '';
-    final vehicle = job['vehicle']?.toString().trim() ?? '';
-    final mechanicStyle = employeeRoleStyle('mechanic');
-    final id = job['id'].toString();
-    final expanded = _expandedJobIds.contains(id);
-    final statusColor = colorFromHex(job['status_color']?.toString());
+  Widget _activeJobCard(Map<String, dynamic> job) => JobCompactCard(
+        job: job,
+        statusControl: _todayStatusControl(job),
+        onOpen: () => _openJob(job['id'].toString()),
+        canOpen: _busyJobId != job['id']?.toString(),
+      );
 
-    void toggleExpanded() {
-      setState(() {
-        if (expanded) {
-          _expandedJobIds.remove(id);
-        } else {
-          _expandedJobIds.add(id);
-        }
-      });
-    }
-
-    Widget separator() => Container(
-          width: 1,
-          height: 22,
-          margin: const EdgeInsets.symmetric(horizontal: 7),
-          color: statusColor.withValues(alpha: 0.28),
-        );
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 7),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 7, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        <String>[
-                          if (number.isNotEmpty) number,
-                          if (customer.isNotEmpty) customer,
-                        ].join('  '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w700,
-                          height: 1.2,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _todayStatusControl(job),
-                  ],
-                ),
-                const SizedBox(height: 7),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        description.isEmpty ? 'No description' : description,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color:
-                              Theme.of(context).colorScheme.onSurfaceVariant,
-                          height: 1.2,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    IconButton(
-                      tooltip: expanded ? 'Collapse job' : 'Expand job',
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                        minWidth: 34,
-                        minHeight: 34,
-                      ),
-                      onPressed:
-                          _busyJobId == id ? null : toggleExpanded,
-                      icon: Icon(
-                        expanded
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
-                        size: 24,
-                      ),
-                    ),
-                  ],
-                ),
-                Divider(
-                  height: 12,
-                  color: statusColor.withValues(alpha: 0.20),
-                ),
-                Row(
-                  children: [
-                    Expanded(
-                      flex: 5,
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          vehicle.isEmpty ? 'No vehicle' : vehicle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ),
-                    separator(),
-                    Expanded(
-                      flex: 5,
-                      child: Center(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(mechanicStyle.icon, size: 17, color: mechanicStyle.color),
-                            const SizedBox(width: 5),
-                            if (mechanic.isNotEmpty) ...[
-                              CircleAvatar(
-                                radius: 12,
-                                backgroundColor: mechanicStyle.color,
-                                child: Text(
-                                  mechanic.split(RegExp(r'\\s+')).where((p) => p.isNotEmpty).take(2).map((p) => p[0].toUpperCase()).join(),
-                                  style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.w800),
-                                ),
-                              ),
-                              const SizedBox(width: 5),
-                              Flexible(
-                                child: Text(
-                                  mechanic.split(RegExp(r'\\s+')).first,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                                ),
-                              ),
-                            ] else
-                              const Text('Unassigned', style: TextStyle(fontSize: 14)),
-                          ],
-                        ),
-                      ),
-                    ),
-                    separator(),
-                    SizedBox(
-                      width: 82,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Text('${_hours(job['planned_hours'])} hr', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-                          const SizedBox(width: 4),
-                          const Icon(Icons.timer_outlined, size: 17, color: BriskersColors.jobs),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          if (expanded) ...[
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 8, 10),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _busyJobId == id ? null : () => _openJob(id),
-                      icon: const Icon(Icons.open_in_new_outlined),
-                      label: const Text('Open full job', style: TextStyle(fontSize: 15)),
-                    ),
-                  ),
-                  FutureBuilder<List<Map<String, dynamic>>>(
-                    future: _api.jobDocuments(widget.businessId, id),
-                    builder: (context, snapshot) {
-                      final docs = snapshot.data ?? const <Map<String, dynamic>>[];
-                      final hasEstimate = docs.any((d) => d['kind']?.toString() == 'estimate');
-                      final hasInvoice = docs.any((d) => d['kind']?.toString() == 'invoice');
-                      return PopupMenuButton<String>(
-                        tooltip: 'Job actions',
-                        onSelected: (value) {
-                          if (value == 'open') _openJob(id);
-                          if (value == 'add_estimate' || value == 'add_invoice' ||
-                              value == 'estimate' || value == 'invoice' || value == 'convert') {
-                            _dashboardDocumentAction(job, value);
-                          }
-                        },
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(value: 'open', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.open_in_new_outlined), title: Text('Open full job'))),
-                          if (!hasEstimate && !hasInvoice) ...[
-                            const PopupMenuItem(value: 'add_estimate', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.description_outlined, color: BriskersColors.estimates), title: Text('Add estimate'))),
-                            const PopupMenuItem(value: 'add_invoice', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.receipt_long_outlined, color: BriskersColors.invoices), title: Text('Add invoice'))),
-                          ],
-                          if (hasEstimate) ...[
-                            const PopupMenuItem(value: 'estimate', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.description_outlined, color: BriskersColors.estimates), title: Text('View / edit estimate'))),
-                            if (!hasInvoice) const PopupMenuItem(value: 'convert', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.transform_outlined, color: BriskersColors.invoices), title: Text('Convert estimate to invoice'))),
-                          ],
-                          if (hasInvoice) const PopupMenuItem(value: 'invoice', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.receipt_long_outlined, color: BriskersColors.invoices), title: Text('View / edit invoice'))),
-                        ],
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
