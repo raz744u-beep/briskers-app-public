@@ -5,6 +5,7 @@ import '../core/briskers_colors.dart';
 import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import '../widgets/job_compact_card.dart';
+import 'customers/customer_detail_screen.dart';
 import 'jobs/job_detail_screen.dart';
 import 'jobs/job_document_screen.dart';
 
@@ -245,7 +246,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return;
     }
 
-    if (action != 'create_invoice' && action != 'create_job') {
+    if (action != 'create_invoice' &&
+        action != 'create_job' &&
+        action != 'create_customer') {
       if (!mounted) return;
       final summary = plan['summary']?.toString() ?? 'Command not supported yet.';
       await showDialog<void>(
@@ -269,6 +272,105 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final customerQuery = plan['customer_query']?.toString().trim() ?? '';
     if (customerQuery.isEmpty) {
       setState(() => _error = 'The AI command needs a customer name.');
+      return;
+    }
+
+    if (action == 'create_customer') {
+      final matches = await _api.customers(
+        widget.businessId,
+        search: customerQuery,
+        limit: 20,
+      );
+      if (!mounted) return;
+
+      final exact = matches.where((customer) {
+        final name = customer['display_name']?.toString().trim() ?? '';
+        return name.toLowerCase() == customerQuery.toLowerCase();
+      }).toList();
+
+      if (exact.isNotEmpty) {
+        final existing = exact.first;
+        final useExisting = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Customer already exists'),
+            content: Text(
+              '${existing['display_name']} already exists. Open that customer instead?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Open customer'),
+              ),
+            ],
+          ),
+        );
+
+        if (useExisting == true && mounted) {
+          await Navigator.push<void>(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CustomerDetailScreen(
+                businessId: widget.businessId,
+                customerId: existing['id'].toString(),
+              ),
+            ),
+          );
+          await _load();
+        }
+        return;
+      }
+
+      if (matches.isNotEmpty) {
+        final sampleNames = matches
+            .take(3)
+            .map((customer) => customer['display_name']?.toString() ?? '')
+            .where((name) => name.isNotEmpty)
+            .join(', ');
+
+        final createAnyway = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Similar customers found'),
+            content: Text(
+              'Briskers found similar names: $sampleNames. Create "$customerQuery" anyway?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Create customer'),
+              ),
+            ],
+          ),
+        );
+
+        if (createAnyway != true) return;
+      }
+
+      final customerId = await _api.createCustomer(
+        widget.businessId,
+        name: customerQuery,
+      );
+
+      if (!mounted) return;
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CustomerDetailScreen(
+            businessId: widget.businessId,
+            customerId: customerId,
+          ),
+        ),
+      );
+      await _load();
       return;
     }
 
