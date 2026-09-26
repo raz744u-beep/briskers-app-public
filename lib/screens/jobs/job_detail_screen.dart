@@ -155,22 +155,273 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     return value.toStringAsFixed(2);
   }
 
-  Future<void> _editJob() async {
-    if (!_canManage || _job == null) return;
+  Future<void> _updateCore({
+    required String customerId,
+    required String? vehicleId,
+    required num plannedHours,
+    required String requestedWork,
+  }) async {
+    if (_job == null) return;
+    await _api.updateJob(
+      widget.businessId,
+      widget.jobId,
+      customerId: customerId,
+      vehicleId: vehicleId,
+      title: _job!['title']?.toString() ?? 'Job',
+      requestedWork: requestedWork,
+      plannedHours: plannedHours,
+    );
+  }
 
-    final changed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => JobEditScreen(
-          businessId: widget.businessId,
-          job: _job!,
+  Future<Map<String, dynamic>?> _pickCustomer() async {
+    final customers = await _api.customers(widget.businessId, limit: 200);
+    if (!mounted) return null;
+    var query = '';
+    return showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          final visible = customers.where((customer) {
+            final name = customer['display_name']?.toString() ?? '';
+            return query.isEmpty ||
+                name.toLowerCase().contains(query.toLowerCase());
+          }).toList();
+          return SafeArea(
+            child: SizedBox(
+              height: MediaQuery.sizeOf(sheetContext).height * 0.72,
+              child: Column(
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Select customer',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: TextField(
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        labelText: 'Search customers',
+                      ),
+                      onChanged: (value) => setSheetState(() => query = value.trim()),
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: visible.length,
+                      itemBuilder: (context, index) {
+                        final customer = visible[index];
+                        return ListTile(
+                          leading: const CircleAvatar(child: Icon(Icons.person_outline)),
+                          title: Text(customer['display_name']?.toString() ?? ''),
+                          subtitle: Text(
+                            '${customer['vehicle_count'] ?? 0} vehicle(s)',
+                          ),
+                          onTap: () => Navigator.pop(sheetContext, customer),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>?> _pickVehicleForCustomer(
+    String customerId,
+  ) async {
+    final detail = await _api.customerDetail(widget.businessId, customerId);
+    final vehicles = List<dynamic>.from(detail['vehicles'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+    if (!mounted) return null;
+
+    return showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Text(
+                'Select vehicle',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+            ),
+            if (vehicles.isEmpty)
+              const ListTile(
+                leading: Icon(Icons.info_outline),
+                title: Text('This customer has no vehicles yet.'),
+              ),
+            ...vehicles.map((vehicle) {
+              final label = <String>[
+                if (vehicle['year'] != null) vehicle['year'].toString(),
+                if ((vehicle['make']?.toString() ?? '').isNotEmpty)
+                  vehicle['make'].toString(),
+                if ((vehicle['model']?.toString() ?? '').isNotEmpty)
+                  vehicle['model'].toString(),
+              ].join(' ');
+              return ListTile(
+                leading: const Icon(Icons.directions_car_outlined),
+                title: Text(label.isEmpty ? 'Vehicle' : label),
+                subtitle: (vehicle['vin']?.toString() ?? '').isEmpty
+                    ? null
+                    : Text('VIN: ${vehicle['vin']}'),
+                onTap: () => Navigator.pop(sheetContext, vehicle),
+              );
+            }),
+          ],
         ),
       ),
     );
+  }
 
-    if (changed == true) {
-      await _load();
-    }
+  Future<void> _changeCustomerVehicle() async {
+    if (!_canManage || _job == null || _busy) return;
+    final customer = await _pickCustomer();
+    if (customer == null || !mounted) return;
+    final customerId = customer['id']?.toString() ?? '';
+    if (customerId.isEmpty) return;
+
+    final vehicle = await _pickVehicleForCustomer(customerId);
+    if (vehicle == null) return;
+
+    await _run(() => _updateCore(
+          customerId: customerId,
+          vehicleId: vehicle['id']?.toString(),
+          plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
+          requestedWork: _job!['requested_work']?.toString() ?? '',
+        ));
+  }
+
+  Future<void> _changeVehicle() async {
+    if (!_canManage || _job == null || _busy) return;
+    final customerId = _job!['customer_id']?.toString() ?? '';
+    if (customerId.isEmpty) return;
+    final vehicle = await _pickVehicleForCustomer(customerId);
+    if (vehicle == null) return;
+
+    await _run(() => _updateCore(
+          customerId: customerId,
+          vehicleId: vehicle['id']?.toString(),
+          plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
+          requestedWork: _job!['requested_work']?.toString() ?? '',
+        ));
+  }
+
+  Future<void> _changePlannedHours() async {
+    if (!_canManage || _job == null || _busy) return;
+    final controller = TextEditingController(
+      text: _hours(_job!['planned_hours']),
+    );
+    final value = await showDialog<num>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Planned time'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Hours',
+            suffixText: 'hr',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final hours = num.tryParse(controller.text.trim());
+              if (hours != null && hours >= 0) {
+                Navigator.pop(dialogContext, hours);
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null || _job == null) return;
+
+    await _run(() => _updateCore(
+          customerId: _job!['customer_id'].toString(),
+          vehicleId: _job!['vehicle_id']?.toString(),
+          plannedHours: value,
+          requestedWork: _job!['requested_work']?.toString() ?? '',
+        ));
+  }
+
+  Future<String?> _editTextSheet({
+    required String title,
+    required String initialValue,
+    required String hint,
+  }) async {
+    final controller = TextEditingController(text: initialValue);
+    final value = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                minLines: 4,
+                maxLines: 9,
+                decoration: InputDecoration(hintText: hint),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(sheetContext, controller.text.trim()),
+                  child: const Text('Save'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    controller.dispose();
+    return value;
   }
 
   Future<void> _changeStatus(String code) async {
