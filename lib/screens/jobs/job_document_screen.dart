@@ -523,6 +523,294 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     });
   }
 
+  Future<Map<String, dynamic>?> _pickInvoiceCustomer() async {
+    final customers = await _api.customers(widget.businessId, limit: 200);
+    if (!mounted) return null;
+    var query = '';
+
+    return showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          final visible = customers.where((customer) {
+            final name = customer['display_name']?.toString() ?? '';
+            return query.isEmpty ||
+                name.toLowerCase().contains(query.toLowerCase());
+          }).toList();
+
+          return SafeArea(
+            child: SizedBox(
+              height: MediaQuery.sizeOf(sheetContext).height * 0.72,
+              child: Column(
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Select customer',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: TextField(
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        labelText: 'Search customers',
+                      ),
+                      onChanged: (value) =>
+                          setSheetState(() => query = value.trim()),
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: visible.length,
+                      itemBuilder: (context, index) {
+                        final customer = visible[index];
+                        return ListTile(
+                          leading: const CircleAvatar(
+                            child: Icon(Icons.person_outline),
+                          ),
+                          title: Text(
+                            customer['display_name']?.toString() ?? '',
+                          ),
+                          subtitle: Text(
+                            '${customer['vehicle_count'] ?? 0} vehicle(s)',
+                          ),
+                          onTap: () =>
+                              Navigator.pop(sheetContext, customer),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>?> _pickInvoiceVehicle(
+    String customerId,
+  ) async {
+    final detail = await _api.customerDetail(widget.businessId, customerId);
+    final vehicles = List<dynamic>.from(detail['vehicles'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+
+    if (!mounted) return null;
+
+    return showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Text(
+                'Select vehicle',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.remove_circle_outline),
+              title: const Text('No vehicle'),
+              onTap: () => Navigator.pop(
+                sheetContext,
+                <String, dynamic>{'id': null},
+              ),
+            ),
+            if (vehicles.isNotEmpty) const Divider(),
+            ...vehicles.map((vehicle) {
+              final label = <String>[
+                if (vehicle['year'] != null) vehicle['year'].toString(),
+                if ((vehicle['make']?.toString() ?? '').isNotEmpty)
+                  vehicle['make'].toString(),
+                if ((vehicle['model']?.toString() ?? '').isNotEmpty)
+                  vehicle['model'].toString(),
+              ].join(' ');
+
+              return ListTile(
+                leading: const Icon(Icons.directions_car_outlined),
+                title: Text(label.isEmpty ? 'Vehicle' : label),
+                subtitle: (vehicle['vin']?.toString() ?? '').isEmpty
+                    ? null
+                    : Text('VIN: ${vehicle['vin']}'),
+                onTap: () => Navigator.pop(sheetContext, vehicle),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _vehicleLabel(Map<String, dynamic>? vehicle) {
+    if (vehicle == null || vehicle['id'] == null) return '';
+    return <String>[
+      if (vehicle['year'] != null) vehicle['year'].toString(),
+      if ((vehicle['make']?.toString() ?? '').isNotEmpty)
+        vehicle['make'].toString(),
+      if ((vehicle['model']?.toString() ?? '').isNotEmpty)
+        vehicle['model'].toString(),
+    ].join(' ');
+  }
+
+  Future<void> _editDocumentHeader() async {
+    if (_readOnly || _detail == null || _busy) return;
+
+    var customerId = _detail!['customer_id']?.toString() ?? '';
+    var customerName = _detail!['customer_name']?.toString() ?? '';
+    String? vehicleId = _detail!['vehicle_id']?.toString();
+    var vehicleName = _detail!['vehicle']?.toString() ?? '';
+    var date = DateTime.tryParse(
+          _detail!['document_date']?.toString() ?? '',
+        ) ??
+        DateTime.now();
+
+    final save = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      _estimate
+                          ? 'Edit estimate details'
+                          : 'Edit invoice details',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ListTile(
+                  leading: const Icon(Icons.person_outline),
+                  title: const Text('Customer'),
+                  subtitle: Text(customerName),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    final customer = await _pickInvoiceCustomer();
+                    if (customer == null) return;
+                    final newId = customer['id']?.toString() ?? '';
+                    if (newId.isEmpty) return;
+
+                    final vehicle = await _pickInvoiceVehicle(newId);
+                    setSheetState(() {
+                      customerId = newId;
+                      customerName =
+                          customer['display_name']?.toString() ?? '';
+                      vehicleId = vehicle?['id']?.toString();
+                      vehicleName = _vehicleLabel(vehicle);
+                    });
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.directions_car_outlined),
+                  title: const Text('Vehicle'),
+                  subtitle: Text(
+                    vehicleName.isEmpty ? 'No vehicle' : vehicleName,
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: customerId.isEmpty
+                      ? null
+                      : () async {
+                          final vehicle =
+                              await _pickInvoiceVehicle(customerId);
+                          if (vehicle == null) return;
+                          setSheetState(() {
+                            vehicleId = vehicle['id']?.toString();
+                            vehicleName = _vehicleLabel(vehicle);
+                          });
+                        },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.calendar_month_outlined),
+                  title: const Text('Date'),
+                  subtitle: Text(
+                    DateFormat('MMM d, yyyy').format(date),
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    final selected = await showDatePicker(
+                      context: sheetContext,
+                      initialDate: date,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime(2100),
+                    );
+                    if (selected != null) {
+                      setSheetState(() => date = selected);
+                    }
+                  },
+                ),
+                if ((_detail!['job_number']?.toString() ?? '').isNotEmpty)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Changing the customer or vehicle will detach this document from its current Job.',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 4),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: customerId.isEmpty
+                        ? null
+                        : () => Navigator.pop(sheetContext, true),
+                    child: const Text('Save'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (save != true) return;
+
+    await _run(() => _api.updateDocumentHeader(
+          widget.businessId,
+          widget.documentId,
+          expectedVersion: _version,
+          customerId: customerId,
+          vehicleId: vehicleId,
+          documentDate: date,
+        ));
+  }
+
   Future<void> _editNotes() async {
     if (_readOnly || _detail == null || _busy) return;
 
