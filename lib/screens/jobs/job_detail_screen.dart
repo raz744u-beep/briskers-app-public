@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/employee_role_style.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
-import 'customer_complaint_edit_screen.dart';
 import 'job_document_screen.dart';
-import 'job_edit_screen.dart';
-import 'work_summary_edit_screen.dart';
 
 class JobDetailScreen extends StatefulWidget {
   const JobDetailScreen({
@@ -33,6 +31,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   List<Map<String, dynamic>> _employees = const [];
   List<Map<String, dynamic>> _statuses = const [];
   List<Map<String, dynamic>> _documents = const [];
+  List<Map<String, dynamic>> _findings = const [];
+  final ImagePicker _picker = ImagePicker();
 
   final ScrollController _scrollController = ScrollController();
 
@@ -70,6 +70,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
       List<Map<String, dynamic>> employees = const [];
       List<Map<String, dynamic>> documents = const [];
+      List<Map<String, dynamic>> findings = const [];
 
       if (_canManage) {
         try {
@@ -90,12 +91,25 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         }
       }
 
+      final vehicleId = job['vehicle_id']?.toString();
+      if (vehicleId != null && vehicleId.isNotEmpty) {
+        try {
+          findings = await _api.vehicleFindings(
+            widget.businessId,
+            vehicleId,
+          );
+        } catch (_) {
+          findings = const [];
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _job = job;
         _employees = employees;
         _statuses = statuses;
         _documents = documents;
+        _findings = findings;
         _loading = false;
         _error = null;
       });
