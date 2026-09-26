@@ -837,6 +837,98 @@ class BriskersApi {
     return result.toString();
   }
 
+  Future<List<Map<String, dynamic>>> vehicleFindings(
+    String businessId,
+    String vehicleId, {
+    bool includeResolved = true,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_vehicle_findings',
+      params: {
+        'p_business_id': businessId,
+        'p_vehicle_id': vehicleId,
+        'p_include_resolved': includeResolved,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<String> createVehicleFinding(
+    String businessId,
+    String jobId, {
+    required String body,
+    bool includeOnInvoice = false,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_vehicle_finding',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+        'p_body': body,
+        'p_include_on_invoice': includeOnInvoice,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> setVehicleFindingInvoiceFlag(
+    String businessId,
+    String findingId,
+    bool include,
+  ) async {
+    await supabase.rpc(
+      'briskers_set_vehicle_finding_invoice_flag',
+      params: {
+        'p_business_id': businessId,
+        'p_finding_id': findingId,
+        'p_include': include,
+      },
+    );
+  }
+
+  Future<void> resolveVehicleFinding(
+    String businessId,
+    String findingId,
+    String jobId,
+  ) async {
+    await supabase.rpc(
+      'briskers_resolve_vehicle_finding',
+      params: {
+        'p_business_id': businessId,
+        'p_finding_id': findingId,
+        'p_job_id': jobId,
+      },
+    );
+  }
+
+  Future<void> reopenVehicleFinding(
+    String businessId,
+    String findingId,
+  ) async {
+    await supabase.rpc(
+      'briskers_reopen_vehicle_finding',
+      params: {
+        'p_business_id': businessId,
+        'p_finding_id': findingId,
+      },
+    );
+  }
+
+  Future<void> deleteVehicleFinding(
+    String businessId,
+    String findingId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_vehicle_finding',
+      params: {
+        'p_business_id': businessId,
+        'p_finding_id': findingId,
+      },
+    );
+  }
+
   Future<String> createEstimate(
     String businessId,
     String jobId,
