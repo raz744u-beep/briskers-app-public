@@ -873,6 +873,57 @@ class BriskersApi {
     return result.toString();
   }
 
+  Future<Map<String, dynamic>> registerVehicleFindingPhoto(
+    String businessId,
+    String findingId, {
+    required String filename,
+    required String mimeType,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_register_finding_photo',
+      params: {
+        'p_business_id': businessId,
+        'p_finding_id': findingId,
+        'p_original_filename': filename,
+        'p_mime_type': mimeType,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<void> uploadVehicleFindingPhoto(
+    String businessId,
+    String findingId, {
+    required String filename,
+    required String mimeType,
+    required Uint8List bytes,
+  }) async {
+    final registration = await registerVehicleFindingPhoto(
+      businessId,
+      findingId,
+      filename: filename,
+      mimeType: mimeType,
+    );
+    final bucket = registration['bucket'].toString();
+    final key = registration['key'].toString();
+    final attachmentId = registration['attachment_id'].toString();
+
+    await supabase.storage.from(bucket).uploadBinary(
+      key,
+      bytes,
+      fileOptions: FileOptions(contentType: mimeType, upsert: false),
+    );
+
+    await supabase.rpc(
+      'briskers_finalize_attachment',
+      params: {
+        'p_business_id': businessId,
+        'p_attachment_id': attachmentId,
+        'p_byte_size': bytes.length,
+      },
+    );
+  }
+
   Future<void> setVehicleFindingInvoiceFlag(
     String businessId,
     String findingId,
