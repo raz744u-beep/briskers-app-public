@@ -1595,15 +1595,21 @@ class _EditLineDialog extends StatefulWidget {
 }
 
 class _EditLineDialogState extends State<_EditLineDialog> {
+  late final TextEditingController _name;
   late final TextEditingController _description;
   late final TextEditingController _quantity;
   late final TextEditingController _price;
   late final TextEditingController _taxPercent;
+  late String _lineKind;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    _name = TextEditingController(
+      text: widget.line['name']?.toString() ?? '',
+    );
+    _lineKind = widget.line['line_kind']?.toString() ?? 'item';
     _description = TextEditingController(
       text: widget.line['description']?.toString() ?? '',
     );
@@ -1621,6 +1627,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
 
   @override
   void dispose() {
+    _name.dispose();
     _description.dispose();
     _quantity.dispose();
     _price.dispose();
@@ -1632,7 +1639,8 @@ class _EditLineDialogState extends State<_EditLineDialog> {
     final quantity = num.tryParse(_quantity.text.trim());
     final price = num.tryParse(_price.text.trim());
     final taxPercent = num.tryParse(_taxPercent.text.trim());
-    if (quantity == null ||
+    if (_name.text.trim().isEmpty ||
+        quantity == null ||
         price == null ||
         taxPercent == null ||
         quantity <= 0 ||
@@ -1646,10 +1654,12 @@ class _EditLineDialogState extends State<_EditLineDialog> {
     Navigator.pop(
       context,
       <String, dynamic>{
+        'name': _name.text.trim(),
+        'line_kind': _lineKind,
         'description': _description.text.trim().isEmpty
             ? null
             : _description.text.trim(),
-        'quantity': widget.line['line_kind']?.toString() == 'discount'
+        'quantity': _lineKind == 'discount'
             ? -quantity.abs()
             : quantity,
         'unit_price': price,
@@ -1661,11 +1671,33 @@ class _EditLineDialogState extends State<_EditLineDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.line['name']?.toString() ?? 'Edit line'),
+      title: const Text('Edit item'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            TextField(
+              controller: _name,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Name'),
+            ),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<String>(
+              initialValue: _lineKind,
+              decoration: const InputDecoration(labelText: 'Type'),
+              items: const [
+                DropdownMenuItem(value: 'item', child: Text('Part / Item')),
+                DropdownMenuItem(value: 'labor', child: Text('Labor')),
+                DropdownMenuItem(value: 'supply', child: Text('Shop supply')),
+                DropdownMenuItem(value: 'discount', child: Text('Discount')),
+                DropdownMenuItem(value: 'other', child: Text('Other')),
+                DropdownMenuItem(value: 'shipping', child: Text('Shipping')),
+              ],
+              onChanged: (value) {
+                if (value != null) setState(() => _lineKind = value);
+              },
+            ),
+            const SizedBox(height: 10),
             TextField(
               controller: _description,
               decoration: const InputDecoration(labelText: 'Description'),
