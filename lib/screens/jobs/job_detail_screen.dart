@@ -525,7 +525,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   child: Opacity(
                     opacity: 0.32,
                     child: Image.asset(
-                      'assets/job_car_watermark.webp',
+                      'assets/job_car_watermark.png',
                       fit: BoxFit.contain,
                       alignment: Alignment.centerRight,
                     ),
