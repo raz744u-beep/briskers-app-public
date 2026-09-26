@@ -449,68 +449,66 @@ class _JobsScreenState extends State<JobsScreen> {
                     ),
                     Row(
                       children: [
-                        if (vehicle.isNotEmpty)
-                          Flexible(
-                            flex: 5,
+                        Expanded(
+                          flex: 5,
+                          child: Align(
+                            alignment: Alignment.centerLeft,
                             child: Text(
-                              vehicle,
+                              vehicle.isEmpty ? 'No vehicle' : vehicle,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                              ),
+                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
                             ),
-                          ),
-                        if (vehicle.isNotEmpty && mechanic.isNotEmpty)
-                          separator(),
-                        if (mechanic.isNotEmpty) ...[
-                          Icon(
-                            mechanicStyle.icon,
-                            size: 16,
-                            color: mechanicStyle.color,
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            flex: 4,
-                            child: Text(
-                              mechanic,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                          ),
-                        ],
-                        if (vehicle.isNotEmpty || mechanic.isNotEmpty)
-                          separator(),
-                        Text(
-                          '${_hours(job['planned_hours'])} hr',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                        const SizedBox(width: 4),
-                        const Icon(
-                          Icons.timer_outlined,
-                          size: 16,
-                          color: BriskersColors.jobs,
+                        separator(),
+                        Expanded(
+                          flex: 5,
+                          child: Center(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(mechanicStyle.icon, size: 17, color: mechanicStyle.color),
+                                const SizedBox(width: 5),
+                                if (mechanic.isNotEmpty) ...[
+                                  CircleAvatar(
+                                    radius: 12,
+                                    backgroundColor: mechanicStyle.color,
+                                    child: Text(
+                                      mechanic.split(RegExp(r'\\s+')).where((p) => p.isNotEmpty).take(2).map((p) => p[0].toUpperCase()).join(),
+                                      style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.w800),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Flexible(
+                                    child: Text(
+                                      mechanic.split(RegExp(r'\\s+')).first,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
+                                ] else
+                                  const Text('Unassigned', style: TextStyle(fontSize: 14)),
+                              ],
+                            ),
+                          ),
+                        ),
+                        separator(),
+                        SizedBox(
+                          width: 82,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Text('${_hours(job['planned_hours'])} hr', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                              const SizedBox(width: 4),
+                              const Icon(Icons.timer_outlined, size: 17, color: BriskersColors.jobs),
+                            ],
+                          ),
                         ),
                         if (_canManage && requests > 0) ...[
-                          const SizedBox(width: 7),
-                          const Icon(
-                            Icons.notifications_active_outlined,
-                            size: 14,
-                            color: BriskersColors.jobs,
-                          ),
-                          const SizedBox(width: 2),
-                          Text(
-                            '$requests',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                          const SizedBox(width: 5),
+                          Text('$requests', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                         ],
                       ],
                     ),
