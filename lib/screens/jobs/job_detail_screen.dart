@@ -586,45 +586,40 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _editComplaint() async {
-    if (!_canManage || _job == null) return;
-
-    final changed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => CustomerComplaintEditScreen(
-          businessId: widget.businessId,
-          jobId: widget.jobId,
-          job: _job!,
-          initialValue: _job!['requested_work']?.toString() ?? '',
-        ),
-      ),
+    if (!_canManage || _job == null || _busy) return;
+    final value = await _editTextSheet(
+      title: 'Customer complaint',
+      initialValue: _job!['requested_work']?.toString() ?? '',
+      hint: 'What did the customer ask us to check or repair?',
     );
+    if (value == null || _job == null) return;
 
-    if (changed == true) {
-      await _load();
-    }
+    await _run(() => _updateCore(
+          customerId: _job!['customer_id'].toString(),
+          vehicleId: _job!['vehicle_id']?.toString(),
+          plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
+          requestedWork: value,
+        ));
   }
 
   Future<void> _editWorkSummary() async {
     final visits = List<dynamic>.from(_job?['visits'] ?? const []);
-    if (visits.isEmpty) return;
+    if (visits.isEmpty || _busy) return;
     final current = Map<String, dynamic>.from(visits.first as Map);
     if (current['closed_at'] != null) return;
 
-    final changed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => WorkSummaryEditScreen(
-          businessId: widget.businessId,
-          jobId: widget.jobId,
-          initialValue: current['work_summary']?.toString() ?? '',
-        ),
-      ),
+    final value = await _editTextSheet(
+      title: 'Work performed',
+      initialValue: current['work_summary']?.toString() ?? '',
+      hint: 'Describe the work completed on this visit.',
     );
+    if (value == null) return;
 
-    if (changed == true) {
-      await _load();
-    }
+    await _run(() => _api.updateCurrentVisitWorkSummary(
+          widget.businessId,
+          widget.jobId,
+          workSummary: value,
+        ));
   }
 
   Future<void> _createEstimate() async {
