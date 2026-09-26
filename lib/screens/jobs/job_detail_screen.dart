@@ -1575,11 +1575,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
             const SizedBox(height: 10),
             _findingsCard(),
-            const SizedBox(height: 10),
-            CustomerNotesSection(
-              businessId: widget.businessId,
-              customerId: _job!['customer_id'].toString(),
-            ),
+            if (_canManage) ...[
+              const SizedBox(height: 10),
+              CustomerNotesSection(
+                businessId: widget.businessId,
+                customerId: _job!['customer_id'].toString(),
+              ),
+            ],
             if (_mechanic && unassigned) ...[
               const SizedBox(height: 10),
               SizedBox(
