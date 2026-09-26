@@ -6,7 +6,6 @@ import '../../core/briskers_colors.dart';
 import '../../core/employee_role_style.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
-import '../customers/customer_notes_section.dart';
 import 'job_document_screen.dart';
 
 class JobDetailScreen extends StatefulWidget {
@@ -1545,15 +1544,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         backgroundColor: statusColor.withValues(alpha: 0.08),
         titleSpacing: 0,
         title: Text(
-          <String>[
-            if (jobNumber.isNotEmpty) 'Job $jobNumber' else 'Job',
-            if (customerName.isNotEmpty) customerName,
-          ].join('  '),
+          jobNumber.isEmpty ? 'Job' : 'Job $jobNumber',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
             fontWeight: FontWeight.w700,
-            fontSize: 19,
+            fontSize: 21,
           ),
         ),
         actions: [
@@ -1575,13 +1571,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
             const SizedBox(height: 10),
             _findingsCard(),
-            if (_canManage) ...[
-              const SizedBox(height: 10),
-              CustomerNotesSection(
-                businessId: widget.businessId,
-                customerId: _job!['customer_id'].toString(),
-              ),
-            ],
             if (_mechanic && unassigned) ...[
               const SizedBox(height: 10),
               SizedBox(
