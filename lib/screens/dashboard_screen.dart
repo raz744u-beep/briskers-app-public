@@ -6,6 +6,7 @@ import '../core/employee_role_style.dart';
 import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import 'jobs/job_detail_screen.dart';
+import 'jobs/job_document_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
@@ -89,6 +90,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
     await _load();
+  }
+
+
+  Future<void> _openDashboardDocument(String documentId) async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: documentId,
+          roleCode: widget.roleCode,
+        ),
+      ),
+    );
+    await _load();
+  }
+
+  Future<void> _dashboardDocumentAction(Map<String, dynamic> job, String action) async {
+    final jobId = job['id'].toString();
+    setState(() => _busyJobId = jobId);
+    try {
+      final documents = await _api.jobDocuments(widget.businessId, jobId);
+      final estimates = documents.where((d) => d['kind']?.toString() == 'estimate').toList();
+      final invoices = documents.where((d) => d['kind']?.toString() == 'invoice').toList();
+      String? id;
+      if (action == 'add_estimate') id = await _api.createEstimate(widget.businessId, jobId);
+      if (action == 'add_invoice') id = await _api.createInvoice(widget.businessId, jobId);
+      if (action == 'estimate' && estimates.isNotEmpty) id = estimates.last['id'].toString();
+      if (action == 'invoice' && invoices.isNotEmpty) id = invoices.last['id'].toString();
+      if (action == 'convert' && estimates.isNotEmpty) id = await _api.convertEstimate(widget.businessId, estimates.last['id'].toString());
+      if (!mounted || id == null) return;
+      await _openDashboardDocument(id);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busyJobId = null);
+    }
   }
 
   Future<void> _checkIn(Map<String, dynamic> appointment) async {
@@ -366,7 +404,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           mechanic,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 11.5),
+                          style: const TextStyle(fontSize: 14),
                         ),
                       ),
                     ],
@@ -393,15 +431,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (expanded) ...[
             const Divider(height: 1),
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-              child: SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed:
-                      _busyJobId == id ? null : () => _openJob(id),
-                  icon: const Icon(Icons.open_in_new_outlined),
-                  label: const Text('Open full job'),
-                ),
+              padding: const EdgeInsets.fromLTRB(12, 8, 8, 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _busyJobId == id ? null : () => _openJob(id),
+                      icon: const Icon(Icons.open_in_new_outlined),
+                      label: const Text('Open full job', style: TextStyle(fontSize: 15)),
+                    ),
+                  ),
+                  FutureBuilder<List<Map<String, dynamic>>>(
+                    future: _api.jobDocuments(widget.businessId, id),
+                    builder: (context, snapshot) {
+                      final docs = snapshot.data ?? const <Map<String, dynamic>>[];
+                      final hasEstimate = docs.any((d) => d['kind']?.toString() == 'estimate');
+                      final hasInvoice = docs.any((d) => d['kind']?.toString() == 'invoice');
+                      return PopupMenuButton<String>(
+                        tooltip: 'Job actions',
+                        onSelected: (value) {
+                          if (value == 'open') _openJob(id);
+                          if (value == 'add_estimate' || value == 'add_invoice' ||
+                              value == 'estimate' || value == 'invoice' || value == 'convert') {
+                            _dashboardDocumentAction(job, value);
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(value: 'open', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.open_in_new_outlined), title: Text('Open full job'))),
+                          if (!hasEstimate && !hasInvoice) ...[
+                            const PopupMenuItem(value: 'add_estimate', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.description_outlined, color: BriskersColors.estimates), title: Text('Add estimate'))),
+                            const PopupMenuItem(value: 'add_invoice', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.receipt_long_outlined, color: BriskersColors.invoices), title: Text('Add invoice'))),
+                          ],
+                          if (hasEstimate) ...[
+                            const PopupMenuItem(value: 'estimate', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.description_outlined, color: BriskersColors.estimates), title: Text('View / edit estimate'))),
+                            if (!hasInvoice) const PopupMenuItem(value: 'convert', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.transform_outlined, color: BriskersColors.invoices), title: Text('Convert estimate to invoice'))),
+                          ],
+                          if (hasInvoice) const PopupMenuItem(value: 'invoice', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.receipt_long_outlined, color: BriskersColors.invoices), title: Text('View / edit invoice'))),
+                        ],
+                      );
+                    },
+                  ),
+                ],
               ),
             ),
           ],
