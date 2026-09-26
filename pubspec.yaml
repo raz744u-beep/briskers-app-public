@@ -1,0 +1,27 @@
+name: briskers_app
+description: Briskers auto repair office and owner app
+publish_to: none
+version: 0.9.9+37
+
+environment:
+  sdk: '>=3.9.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  intl: ^0.20.2
+  image_picker: ^1.2.0
+  mobile_scanner: ^7.4.2
+  supabase_flutter: ^2.17.2
+  pdf: ^3.11.3
+  printing: ^5.14.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/job_car_watermark.webp

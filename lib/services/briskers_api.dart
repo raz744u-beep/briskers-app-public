@@ -1,0 +1,1049 @@
+import 'dart:typed_data';
+
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../core/supabase_config.dart';
+
+class BriskersApi {
+  const BriskersApi();
+
+  Future<List<Map<String, dynamic>>> myBusinesses() async {
+    final result = await supabase.rpc('briskers_my_businesses');
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> dashboard(String businessId, String day) async {
+    final result = await supabase.rpc(
+      'briskers_dashboard',
+      params: {'p_business_id': businessId, 'p_day': day},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> customers(
+    String businessId, {
+    String? search,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_list_customers',
+      params: {
+        'p_business_id': businessId,
+        'p_search': search,
+        'p_limit': limit,
+        'p_offset': offset,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<String> createCustomer(
+    String businessId, {
+    required String name,
+    String? phone,
+    String? email,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_customer',
+      params: {
+        'p_business_id': businessId,
+        'p_name': name,
+        'p_phone': phone,
+        'p_email': email,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<Map<String, dynamic>> customerDetail(
+    String businessId,
+    String customerId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_customer_detail',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+
+  Future<List<Map<String, dynamic>>> customerAppointments(
+    String businessId,
+    String customerId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_customer_appointments',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> customerServiceHistory(
+    String businessId,
+    String customerId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_customer_service_history',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>?> customerAccountContext(
+    String businessId,
+    String customerId,
+  ) async {
+    try {
+      final result = await supabase.rpc(
+        'briskers_customer_account_context',
+        params: {
+          'p_business_id': businessId,
+          'p_customer_id': customerId,
+        },
+      );
+      return Map<String, dynamic>.from(result as Map);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>> customerAccountAction(
+    String businessId,
+    String customerId,
+    String action,
+  ) async {
+    try {
+      final result = await supabase.functions.invoke(
+        'customer-account-admin',
+        body: {
+          'business_id': businessId,
+          'customer_id': customerId,
+          'action': action,
+        },
+      );
+      return Map<String, dynamic>.from(result.data as Map);
+    } on FunctionException catch (error) {
+      final details = error.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception(
+        error.reasonPhrase ?? 'Customer account action failed.',
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> updateCustomerProfile(
+    String businessId,
+    String customerId, {
+    required String name,
+    String? phone,
+    String? email,
+  }) async {
+    try {
+      final result = await supabase.functions.invoke(
+        'customer-account-admin',
+        body: {
+          'business_id': businessId,
+          'customer_id': customerId,
+          'action': 'update_profile',
+          'name': name,
+          'phone': phone,
+          'email': email,
+        },
+      );
+      return Map<String, dynamic>.from(result.data as Map);
+    } on FunctionException catch (error) {
+      final details = error.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception(
+        error.reasonPhrase ?? 'Could not update customer.',
+      );
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> customerNotes(
+    String businessId,
+    String customerId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_list_customer_notes',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<void> updateCustomerNote(
+    String businessId,
+    String noteId, {
+    required String body,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_customer_note',
+      params: {
+        'p_business_id': businessId,
+        'p_note_id': noteId,
+        'p_body': body,
+      },
+    );
+  }
+
+  Future<void> deleteCustomerNote(
+    String businessId,
+    String noteId,
+  ) async {
+    try {
+      await supabase.functions.invoke(
+        'customer-note-admin',
+        body: {
+          'business_id': businessId,
+          'note_id': noteId,
+        },
+      );
+    } on FunctionException catch (error) {
+      final details = error.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception(
+        error.reasonPhrase ?? 'Could not delete customer note.',
+      );
+    }
+  }
+
+  Future<void> deleteCustomerNoteAttachment(
+    String businessId,
+    String noteId,
+    String attachmentId,
+  ) async {
+    try {
+      await supabase.functions.invoke(
+        'customer-note-admin',
+        body: {
+          'business_id': businessId,
+          'note_id': noteId,
+          'attachment_id': attachmentId,
+          'action': 'delete_attachment',
+        },
+      );
+    } on FunctionException catch (error) {
+      final details = error.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception(
+        error.reasonPhrase ?? 'Could not remove note picture.',
+      );
+    }
+  }
+
+  Future<String> createCustomerNote(
+    String businessId,
+    String customerId, {
+    String? body,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_customer_note',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_body': body,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<Map<String, dynamic>> registerCustomerNotePhoto(
+    String businessId,
+    String noteId, {
+    required String filename,
+    required String mimeType,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_register_customer_note_photo',
+      params: {
+        'p_business_id': businessId,
+        'p_note_id': noteId,
+        'p_original_filename': filename,
+        'p_mime_type': mimeType,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<void> uploadCustomerNotePhoto(
+    String businessId,
+    String noteId, {
+    required String filename,
+    required String mimeType,
+    required Uint8List bytes,
+  }) async {
+    final registration = await registerCustomerNotePhoto(
+      businessId,
+      noteId,
+      filename: filename,
+      mimeType: mimeType,
+    );
+    final bucket = registration['bucket'].toString();
+    final key = registration['key'].toString();
+    final attachmentId = registration['attachment_id'].toString();
+
+    await supabase.storage.from(bucket).uploadBinary(
+      key,
+      bytes,
+      fileOptions: FileOptions(contentType: mimeType, upsert: false),
+    );
+
+    await supabase.rpc(
+      'briskers_finalize_attachment',
+      params: {
+        'p_business_id': businessId,
+        'p_attachment_id': attachmentId,
+        'p_byte_size': bytes.length,
+      },
+    );
+  }
+
+  Future<String> signedAttachmentUrl(String bucket, String key) {
+    return supabase.storage.from(bucket).createSignedUrl(key, 3600);
+  }
+
+  Future<String> createVehicle(
+    String businessId,
+    String customerId, {
+    required String make,
+    required String model,
+    int? year,
+    String? vin,
+    String? licensePlate,
+    String? licenseState,
+    num? mileage,
+    String? color,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_vehicle_v3',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_make': make,
+        'p_model': model,
+        'p_year': year,
+        'p_vin': vin,
+        'p_license_plate': licensePlate,
+        'p_license_state': licenseState,
+        'p_mileage': mileage,
+        'p_color': color,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<String> updateVehicle(
+    String businessId,
+    String vehicleId, {
+    required String make,
+    required String model,
+    int? year,
+    String? vin,
+    String? licensePlate,
+    String? licenseState,
+    num? mileage,
+    String? color,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_update_vehicle',
+      params: {
+        'p_business_id': businessId,
+        'p_vehicle_id': vehicleId,
+        'p_make': make,
+        'p_model': model,
+        'p_year': year,
+        'p_vin': vin,
+        'p_license_plate': licensePlate,
+        'p_license_state': licenseState,
+        'p_mileage': mileage,
+        'p_color': color,
+      },
+    );
+    return result.toString();
+  }
+
+
+  Future<Map<String, dynamic>> businessSettings(String businessId) async {
+    final result = await supabase.rpc(
+      'briskers_business_settings',
+      params: {'p_business_id': businessId},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> updateBusinessSettings(
+    String businessId, {
+    required String name,
+    String? address,
+    num? latitude,
+    num? longitude,
+    String? operatingHours,
+    String? phone,
+    String? email,
+    String? googleReviewsUrl,
+    String? facebookPageUrl,
+    String? aboutService,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_update_business_settings',
+      params: {
+        'p_business_id': businessId,
+        'p_name': name,
+        'p_address': address,
+        'p_latitude': latitude,
+        'p_longitude': longitude,
+        'p_operating_hours': operatingHours,
+        'p_phone': phone,
+        'p_email': email,
+        'p_google_reviews_url': googleReviewsUrl,
+        'p_facebook_page_url': facebookPageUrl,
+        'p_about_service': aboutService,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> employeePositions(
+    String businessId, {
+    bool includeInactive = false,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_list_employee_positions',
+      params: {
+        'p_business_id': businessId,
+        'p_include_inactive': includeInactive,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<String> saveEmployeePosition(
+    String businessId, {
+    String? positionId,
+    required String name,
+    required bool active,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_employee_position',
+      params: {
+        'p_business_id': businessId,
+        'p_position_id': positionId,
+        'p_name': name,
+        'p_active': active,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> deleteEmployeePosition(
+    String businessId,
+    String positionId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_employee_position',
+      params: {
+        'p_business_id': businessId,
+        'p_position_id': positionId,
+      },
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> employeesSettings(
+    String businessId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_list_employees_settings',
+      params: {'p_business_id': businessId},
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> employeeSettingsDetail(
+    String businessId,
+    String employeeId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_employee_settings_detail',
+      params: {
+        'p_business_id': businessId,
+        'p_employee_id': employeeId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<String?> revealEmployeeSsn(
+    String businessId,
+    String employeeId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_reveal_employee_ssn',
+      params: {
+        'p_business_id': businessId,
+        'p_employee_id': employeeId,
+      },
+    );
+    return result?.toString();
+  }
+
+  Future<String> saveEmployeeSettings(
+    String businessId, {
+    String? employeeId,
+    required String name,
+    String? phone,
+    String? email,
+    String? address,
+    required String positionId,
+    required bool compensationEnabled,
+    String? paymentType,
+    num? hourlyRate,
+    num? weeklyRate,
+    required bool active,
+    String? ssn,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_employee_settings',
+      params: {
+        'p_business_id': businessId,
+        'p_employee_id': employeeId,
+        'p_name': name,
+        'p_phone': phone,
+        'p_email': email,
+        'p_address': address,
+        'p_position_id': positionId,
+        'p_compensation_enabled': compensationEnabled,
+        'p_payment_type': paymentType,
+        'p_hourly_rate': hourlyRate,
+        'p_weekly_rate': weeklyRate,
+        'p_active': active,
+        'p_ssn': ssn,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> deleteEmployee(
+    String businessId,
+    String employeeId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_employee',
+      params: {
+        'p_business_id': businessId,
+        'p_employee_id': employeeId,
+      },
+    );
+  }
+
+  Future<String> createJob(
+    String businessId, {
+    required String customerId,
+    String? vehicleId,
+    required String title,
+    String? description,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_job',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_title': title,
+        'p_description': description,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<Map<String, dynamic>> jobDetail(
+    String businessId,
+    String jobId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_job_detail',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> assignableEmployees(
+    String businessId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_assignable_employees',
+      params: {'p_business_id': businessId},
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<void> setPrimaryJobEmployee(
+    String businessId,
+    String jobId,
+    String employeeId,
+  ) async {
+    await supabase.rpc(
+      'briskers_set_primary_job_employee',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+        'p_employee_id': employeeId,
+      },
+    );
+  }
+
+  Future<void> clearJobAssignments(
+    String businessId,
+    String jobId,
+  ) async {
+    await supabase.rpc(
+      'briskers_clear_job_assignments',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+      },
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> jobs(
+    String businessId, {
+    String? status,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_list_jobs_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_status': status,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> jobStatuses(
+    String businessId, {
+    bool includeInactive = false,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_job_statuses',
+      params: {
+        'p_business_id': businessId,
+        'p_include_inactive': includeInactive,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<String> saveJobStatus(
+    String businessId, {
+    String? statusId,
+    required String name,
+    required String colorHex,
+    required String iconKey,
+    required bool active,
+    required int sortOrder,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_job_status',
+      params: {
+        'p_business_id': businessId,
+        'p_status_id': statusId,
+        'p_name': name,
+        'p_color_hex': colorHex,
+        'p_icon_key': iconKey,
+        'p_active': active,
+        'p_sort_order': sortOrder,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> deleteJobStatus(
+    String businessId,
+    String statusId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_job_status',
+      params: {
+        'p_business_id': businessId,
+        'p_status_id': statusId,
+      },
+    );
+  }
+
+  Future<void> updateJob(
+    String businessId,
+    String jobId, {
+    required String customerId,
+    String? vehicleId,
+    required String title,
+    String? requestedWork,
+    required num plannedHours,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_job_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_title': title,
+        'p_requested_work': requestedWork,
+        'p_planned_hours': plannedHours,
+      },
+    );
+  }
+
+  Future<void> updateCurrentVisitWorkSummary(
+    String businessId,
+    String jobId, {
+    String? workSummary,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_current_visit_work_summary',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+        'p_work_summary': workSummary,
+      },
+    );
+  }
+
+  Future<void> changeJobStatus(
+    String businessId,
+    String jobId,
+    String statusCode, {
+    String? note,
+  }) async {
+    await supabase.rpc(
+      'briskers_change_job_status',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+        'p_status_code': statusCode,
+        'p_note': note,
+      },
+    );
+  }
+
+  Future<String> requestJobAssignment(
+    String businessId,
+    String jobId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_request_job_assignment',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> decideJobAssignmentRequest(
+    String businessId,
+    String requestId, {
+    required bool approve,
+  }) async {
+    await supabase.rpc(
+      'briskers_decide_job_assignment_request',
+      params: {
+        'p_business_id': businessId,
+        'p_request_id': requestId,
+        'p_approve': approve,
+      },
+    );
+  }
+
+  Future<String> createAppointment(
+    String businessId, {
+    required String customerId,
+    String? vehicleId,
+    required String title,
+    String? description,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    String? employeeId,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_appointment',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_title': title,
+        'p_description': description,
+        'p_starts_at': startsAt.toUtc().toIso8601String(),
+        'p_ends_at': endsAt.toUtc().toIso8601String(),
+        'p_employee_id': employeeId,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<String> checkInAppointment(
+    String businessId,
+    String appointmentId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_check_in_appointment',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<String> createEstimate(
+    String businessId,
+    String jobId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_create_estimate',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<String> createInvoice(
+    String businessId,
+    String jobId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_create_invoice',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<String> convertEstimate(
+    String businessId,
+    String estimateId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_convert_estimate',
+      params: {
+        'p_business_id': businessId,
+        'p_estimate_id': estimateId,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<List<Map<String, dynamic>>> jobDocuments(
+    String businessId,
+    String jobId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_job_documents',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> documentDetail(
+    String businessId,
+    String documentId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_document_detail',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> catalogItemsForSale(
+    String businessId, {
+    String? search,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_catalog_items_for_sale',
+      params: {
+        'p_business_id': businessId,
+        'p_search': search,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<void> addDocumentLine(
+    String businessId,
+    String documentId, {
+    required int expectedVersion,
+    required String name,
+    required num quantity,
+    required num unitPrice,
+    num taxRate = 0,
+    String? description,
+    String? itemId,
+    String lineKind = 'item',
+  }) async {
+    await supabase.rpc(
+      'briskers_add_document_line',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_expected_document_version': expectedVersion,
+        'p_name': name,
+        'p_quantity': quantity,
+        'p_unit_price': unitPrice,
+        'p_tax_rate': taxRate,
+        'p_description': description,
+        'p_item_id': itemId,
+        'p_line_kind': lineKind,
+      },
+    );
+  }
+
+  Future<void> updateDocumentLine(
+    String businessId,
+    String lineId, {
+    required int expectedVersion,
+    required num quantity,
+    required num unitPrice,
+    required num taxRate,
+    String? description,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_document_line',
+      params: {
+        'p_business_id': businessId,
+        'p_line_id': lineId,
+        'p_expected_document_version': expectedVersion,
+        'p_quantity': quantity,
+        'p_unit_price': unitPrice,
+        'p_tax_rate': taxRate,
+        'p_description': description,
+      },
+    );
+  }
+
+  Future<void> deleteDocumentLine(
+    String businessId,
+    String lineId, {
+    required int expectedVersion,
+  }) async {
+    await supabase.rpc(
+      'briskers_delete_document_line',
+      params: {
+        'p_business_id': businessId,
+        'p_line_id': lineId,
+        'p_expected_document_version': expectedVersion,
+      },
+    );
+  }
+
+  Future<String> issueDocument(
+    String businessId,
+    String documentId, {
+    required int expectedVersion,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_issue_document',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_expected_version': expectedVersion,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<Map<String, dynamic>> paymentOptions(String businessId) async {
+    final result = await supabase.rpc(
+      'briskers_payment_options',
+      params: {'p_business_id': businessId},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<void> setPendingInvoicePayment(
+    String businessId,
+    String invoiceId, {
+    required num amount,
+    required String methodId,
+  }) async {
+    await supabase.rpc(
+      'briskers_set_pending_invoice_payment',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+        'p_amount': amount,
+        'p_method_id': methodId,
+      },
+    );
+  }
+
+  Future<String> finalizePendingInvoicePayment(
+    String businessId,
+    String invoiceId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_finalize_pending_invoice_payment',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+      },
+    );
+    return result.toString();
+  }
+}

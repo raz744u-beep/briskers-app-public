@@ -1,0 +1,22 @@
+.dart_tool/
+.packages
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.idea/
+.vscode/
+android/.gradle/
+android/local.properties
+ios/Pods/
+*.iml
+.DS_Store
+
+# Never commit signing credentials or local secrets
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+.env
+.env.*

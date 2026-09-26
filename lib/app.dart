@@ -1,0 +1,40 @@
+import 'package:flutter/material.dart';
+
+import 'screens/auth_gate.dart';
+
+class BriskersApp extends StatelessWidget {
+  const BriskersApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = ColorScheme.fromSeed(
+      seedColor: const Color(0xFF1976D2),
+      brightness: Brightness.light,
+    );
+
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Briskers',
+      theme: ThemeData(
+        colorScheme: scheme,
+        useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFFF6F8FB),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+        ),
+        cardTheme: const CardThemeData(
+          elevation: 1,
+          margin: EdgeInsets.zero,
+          surfaceTintColor: Colors.transparent,
+        ),
+        inputDecorationTheme: const InputDecorationTheme(
+          border: OutlineInputBorder(),
+          filled: true,
+          fillColor: Colors.white,
+        ),
+      ),
+      home: const AuthGate(),
+    );
+  }
+}
