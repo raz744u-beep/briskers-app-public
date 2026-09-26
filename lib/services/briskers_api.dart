@@ -14,6 +14,28 @@ class BriskersApi {
         .toList();
   }
 
+  Future<Map<String, dynamic>> aiCommand(
+    String businessId,
+    String command,
+  ) async {
+    try {
+      final result = await supabase.functions.invoke(
+        'briskers-ai-command',
+        body: {
+          'business_id': businessId,
+          'command': command,
+        },
+      );
+      return Map<String, dynamic>.from(result.data as Map);
+    } on FunctionException catch (error) {
+      final details = error.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception(error.reasonPhrase ?? 'Briskers AI command failed.');
+    }
+  }
+
   Future<Map<String, dynamic>> dashboard(String businessId, String day) async {
     final result = await supabase.rpc(
       'briskers_dashboard',
