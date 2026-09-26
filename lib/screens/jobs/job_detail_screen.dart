@@ -1559,6 +1559,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               title: jobTitle,
               assignment: assignment,
             ),
+            const SizedBox(height: 10),
+            _findingsCard(),
             if (_mechanic && unassigned) ...[
               const SizedBox(height: 10),
               SizedBox(
