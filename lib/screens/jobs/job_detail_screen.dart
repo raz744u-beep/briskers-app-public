@@ -953,25 +953,87 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     required String title,
     required Map<String, dynamic>? assignment,
   }) {
-    final mechanicName = assignment == null
+    final employeeName = assignment == null
         ? 'Unassigned'
         : assignment['employee_name']?.toString() ?? 'Assigned';
-    final mechanicPosition =
-        assignment?['position_name']?.toString() ?? 'Mechanic';
-    final mechanicStyle = employeeRoleStyle(mechanicPosition);
+    final employeePosition =
+        assignment?['position']?.toString() ?? 'Employee';
+    final roleStyle = employeeRoleStyle(employeePosition);
     final statusColor = colorFromHex(_job?['status_color']?.toString());
     final cardTint = Color.alphaBlend(
       statusColor.withValues(alpha: 0.12),
       const Color(0xFFFCFCFB),
     );
 
+    Widget editableRow({
+      required IconData icon,
+      required Color color,
+      required String label,
+      required String value,
+      String? subtitle,
+      VoidCallback? onTap,
+    }) {
+      final enabled = onTap != null && !_busy;
+      return InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 19,
+                backgroundColor: color.withValues(alpha: 0.13),
+                child: Icon(icon, color: color, size: 21),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (subtitle != null && subtitle.isNotEmpty)
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (enabled)
+                const Icon(Icons.chevron_right, size: 22),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Container(
       decoration: BoxDecoration(
         color: cardTint,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: statusColor.withValues(alpha: 0.18),
-        ),
+        border: Border.all(color: statusColor.withValues(alpha: 0.18)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.08),
@@ -991,7 +1053,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   widthFactor: 0.72,
                   heightFactor: 0.88,
                   child: Opacity(
-                    opacity: 0.32,
+                    opacity: 0.27,
                     child: Image.asset(
                       'assets/job_car_watermark.png',
                       fit: BoxFit.contain,
@@ -1003,147 +1065,143 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 10, 16),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    CircleAvatar(
-                      radius: 22,
-                      backgroundColor:
-                          statusColor.withValues(alpha: 0.16),
-                      child: Icon(
-                        Icons.person_outline,
-                        color: statusColor,
-                        size: 27,
+                editableRow(
+                  icon: Icons.person_outline,
+                  color: statusColor,
+                  label: 'Customer',
+                  value: customerName.isEmpty ? 'Customer' : customerName,
+                  onTap: _canManage ? _changeCustomerVehicle : null,
+                ),
+                Divider(color: statusColor.withValues(alpha: 0.20)),
+                editableRow(
+                  icon: Icons.directions_car_outlined,
+                  color: statusColor,
+                  label: 'Vehicle',
+                  value: vehicle.isEmpty ? 'No vehicle' : vehicle,
+                  subtitle: vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin',
+                  onTap: _canManage ? _changeVehicle : null,
+                ),
+                Divider(color: statusColor.withValues(alpha: 0.20)),
+                if (title.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
+                    child: Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 16.5,
+                        fontWeight: FontWeight.w700,
+                        height: 1.25,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            customerName.isEmpty ? 'Customer' : customerName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w700,
-                              height: 1.15,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          if (vehicle.isNotEmpty)
-                            Text(
-                              vehicle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 19,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          const SizedBox(height: 2),
-                          Text(
-                            vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                              fontSize: 11.5,
-                              letterSpacing: 0.15,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (_canManage)
-                      PopupMenuButton<String>(
-                        tooltip: 'Job details actions',
-                        color: Theme.of(context).colorScheme.surface,
-                        icon: const Icon(Icons.more_vert),
-                        onSelected: (value) {
-                          if (value == 'edit') _editJob();
-                          if (value == 'mechanic') _changeAssignment();
-                        },
-                        itemBuilder: (context) => const [
-                          PopupMenuItem(
-                            value: 'edit',
-                            child: ListTile(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              leading: Icon(Icons.edit_outlined),
-                              title: Text('Edit job details'),
-                            ),
-                          ),
-                          PopupMenuItem(
-                            value: 'mechanic',
-                            child: ListTile(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              leading: Icon(Icons.engineering_outlined),
-                              title: Text('Change mechanic'),
-                            ),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Divider(
-                  height: 1,
-                  color: statusColor.withValues(alpha: 0.24),
-                ),
-                const SizedBox(height: 13),
-                Text(
-                  title.isEmpty ? 'No job description' : title,
-                  style: const TextStyle(
-                    fontSize: 16.5,
-                    fontWeight: FontWeight.w700,
-                    height: 1.25,
                   ),
-                ),
-                const SizedBox(height: 13),
+                ],
                 Row(
                   children: [
-                    Icon(
-                      mechanicStyle.icon,
-                      color: mechanicStyle.color,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
-                        'Mechanic: $mechanicName',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w500,
+                      child: InkWell(
+                        onTap: _canManage && !_busy ? _changeAssignment : null,
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                roleStyle.icon,
+                                color: roleStyle.color,
+                                size: 21,
+                              ),
+                              const SizedBox(width: 7),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      employeePosition,
+                                      style: TextStyle(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                    Text(
+                                      employeeName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (_canManage)
+                                const Icon(Icons.chevron_right, size: 20),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 7),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.timer_outlined,
-                      color: statusColor,
-                      size: 20,
+                    Container(
+                      width: 1,
+                      height: 42,
+                      margin: const EdgeInsets.symmetric(horizontal: 8),
+                      color: statusColor.withValues(alpha: 0.25),
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Planned time: ${_hours(_job!['planned_hours'])} hr',
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w500,
+                    SizedBox(
+                      width: 125,
+                      child: InkWell(
+                        onTap: _canManage && !_busy ? _changePlannedHours : null,
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.timer_outlined,
+                                color: statusColor,
+                                size: 21,
+                              ),
+                              const SizedBox(width: 7),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Planned time',
+                                      style: TextStyle(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                    Text(
+                                      '${_hours(_job!['planned_hours'])} hr',
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (_canManage)
+                                const Icon(Icons.chevron_right, size: 20),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ],
