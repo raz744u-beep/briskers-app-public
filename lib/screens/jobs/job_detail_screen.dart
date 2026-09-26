@@ -515,16 +515,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
-          Positioned(
-            right: -38,
-            top: 28,
-            bottom: -18,
-            child: Opacity(
-              opacity: 0.42,
-              child: Image.asset(
-                'assets/job_car_watermark.webp',
-                width: 345,
-                fit: BoxFit.contain,
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FractionallySizedBox(
+                  widthFactor: 0.72,
+                  heightFactor: 0.88,
+                  child: Opacity(
+                    opacity: 0.32,
+                    child: Image.asset(
+                      'assets/job_car_watermark.webp',
+                      fit: BoxFit.contain,
+                      alignment: Alignment.centerRight,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
