@@ -161,12 +161,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final busy = _busyJobId == job['id']?.toString();
 
     final child = Container(
-      constraints: const BoxConstraints(maxWidth: 150),
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      constraints: const BoxConstraints(maxWidth: 155),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.13),
+        color: Colors.white.withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.34)),
+        border: Border.all(color: color.withValues(alpha: 0.65)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -191,7 +191,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   style: TextStyle(
                     color: color,
                     fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
