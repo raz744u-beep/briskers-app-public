@@ -42,7 +42,7 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
             width: 44,
             height: 44,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => const Icon(
+            errorBuilder: (context, error, stackTrace) => const Icon(
               Icons.broken_image_outlined,
               color: Colors.deepOrange,
             ),
