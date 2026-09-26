@@ -1068,6 +1068,23 @@ class BriskersApi {
         .toList();
   }
 
+  Future<void> updateDocumentNotes(
+    String businessId,
+    String documentId, {
+    required int expectedVersion,
+    String? memo,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_document_notes',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_expected_version': expectedVersion,
+        'p_memo': memo,
+      },
+    );
+  }
+
   Future<void> addDocumentLine(
     String businessId,
     String documentId, {
