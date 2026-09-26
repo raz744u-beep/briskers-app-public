@@ -622,6 +622,214 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         ));
   }
 
+  String _imageMime(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
+  }
+
+  Future<void> _addFinding() async {
+    if (!_canManage || _job == null || _busy) return;
+    if ((_job!['vehicle_id']?.toString() ?? '').isEmpty) {
+      setState(() => _error = 'Select a vehicle before adding a finding.');
+      return;
+    }
+
+    final controller = TextEditingController();
+    var includeOnInvoice = false;
+    final photos = <XFile>[];
+
+    final save = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            0,
+            16,
+            MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
+          ),
+          child: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Add vehicle finding',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    minLines: 3,
+                    maxLines: 7,
+                    decoration: const InputDecoration(
+                      labelText: 'Finding',
+                      hintText: 'Example: Oil leak visible around valve cover',
+                    ),
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Include on invoice notes'),
+                    value: includeOnInvoice,
+                    onChanged: (value) => setSheetState(
+                      () => includeOnInvoice = value == true,
+                    ),
+                  ),
+                  if (photos.isNotEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        photos.length == 1
+                            ? '1 photo selected'
+                            : '${photos.length} photos selected',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final picked = await _picker.pickMultiImage(
+                              imageQuality: 88,
+                              maxWidth: 1920,
+                              maxHeight: 1920,
+                            );
+                            if (picked.isNotEmpty) {
+                              setSheetState(() => photos.addAll(picked));
+                            }
+                          },
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: const Text('Gallery'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final photo = await _picker.pickImage(
+                              source: ImageSource.camera,
+                              imageQuality: 88,
+                              maxWidth: 1920,
+                              maxHeight: 1920,
+                            );
+                            if (photo != null) {
+                              setSheetState(() => photos.add(photo));
+                            }
+                          },
+                          icon: const Icon(Icons.photo_camera_outlined),
+                          label: const Text('Camera'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        if (controller.text.trim().isEmpty) return;
+                        Navigator.pop(sheetContext, true);
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add finding'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final body = controller.text.trim();
+    controller.dispose();
+    if (save != true || body.isEmpty) return;
+
+    await _run(() async {
+      final findingId = await _api.createVehicleFinding(
+        widget.businessId,
+        widget.jobId,
+        body: body,
+        includeOnInvoice: includeOnInvoice,
+      );
+      for (final photo in photos) {
+        await _api.uploadCustomerNotePhoto(
+          widget.businessId,
+          findingId,
+          filename: photo.name,
+          mimeType: _imageMime(photo.name),
+          bytes: await photo.readAsBytes(),
+        );
+      }
+    });
+  }
+
+  Future<void> _toggleFindingInvoice(
+    Map<String, dynamic> finding,
+    bool include,
+  ) async {
+    await _run(() => _api.setVehicleFindingInvoiceFlag(
+          widget.businessId,
+          finding['id'].toString(),
+          include,
+        ));
+  }
+
+  Future<void> _resolveFinding(Map<String, dynamic> finding) async {
+    await _run(() => _api.resolveVehicleFinding(
+          widget.businessId,
+          finding['id'].toString(),
+          widget.jobId,
+        ));
+  }
+
+  Future<void> _reopenFinding(Map<String, dynamic> finding) async {
+    await _run(() => _api.reopenVehicleFinding(
+          widget.businessId,
+          finding['id'].toString(),
+        ));
+  }
+
+  Future<void> _deleteFinding(Map<String, dynamic> finding) async {
+    if (!_owner) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete finding?'),
+        content: const Text(
+          'Delete this finding permanently? Normally a repaired issue should be marked Resolved instead.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _run(() => _api.deleteVehicleFinding(
+          widget.businessId,
+          finding['id'].toString(),
+        ));
+  }
+
   Future<void> _createEstimate() async {
     if (!_canSeeFinancial) return;
     String? id;
