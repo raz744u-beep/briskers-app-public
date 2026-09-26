@@ -867,17 +867,53 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _deleteOrVoidInvoice() async {
     if (_estimate || _detail == null || _busy) return;
 
-    final draft = _detail!['status']?.toString() == 'draft';
-    final action = draft ? 'Delete' : 'Void';
+    final finalizedPaid = _number(_detail!['paid_amount']);
+    final pendingPaid = _number(_detail!['pending_payment']);
+
+    if (finalizedPaid > 0) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Paid invoice'),
+          content: const Text(
+            'This invoice has finalized payment activity, so it cannot be deleted or reused. Use the correction/reversal workflow if it needs to be changed.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    if (pendingPaid > 0) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Payment pending close'),
+          content: const Text(
+            'Clear or correct the pending payment first. Once there is no pending payment, this invoice can be reassigned or deleted.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text('$action invoice?'),
-        content: Text(
-          draft
-              ? 'This unissued draft will be deleted. Its invoice number can be reused.'
-              : 'This invoice has already been issued. It will be marked Void and its number will remain reserved.',
+        title: const Text('Delete invoice?'),
+        content: const Text(
+          'This invoice has no finalized payment. It will be deleted and its invoice number can be reused, even if it was previously previewed, printed, emailed, or shown to the customer.',
         ),
         actions: [
           TextButton(
@@ -886,7 +922,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(action),
+            child: const Text('Delete invoice'),
           ),
         ],
       ),
@@ -899,19 +935,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _error = null;
       });
 
-      if (draft) {
-        await _api.deleteDraftInvoice(
-          widget.businessId,
-          widget.documentId,
-        );
-        if (mounted) Navigator.pop(context);
-      } else {
-        await _api.voidInvoice(
-          widget.businessId,
-          widget.documentId,
-        );
-        await _load();
-      }
+      await _api.deleteDraftInvoice(
+        widget.businessId,
+        widget.documentId,
+      );
+      if (mounted) Navigator.pop(context);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -2048,7 +2076,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                       leading: Icon(Icons.delete_outline),
-                      title: Text('Delete / Void invoice'),
+                      title: Text('Delete invoice'),
                     ),
                   ),
               ],
