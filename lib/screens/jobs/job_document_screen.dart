@@ -1490,10 +1490,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       if (mileage.isNotEmpty) '${_quantity(mileage)} mi',
     ].join(' · ');
 
-    return Container(
+    return Material(
       color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 14, 14, 13),
-      child: Row(
+      child: InkWell(
+        onTap: _readOnly || _busy ? null : _editDocumentHeader,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 14, 13),
+          child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
@@ -1536,6 +1539,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ),
           ),
         ],
+          ),
+        ),
       ),
     );
   }
@@ -1981,8 +1986,42 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               onSelected: (value) {
                 if (value == 'refresh') _load();
                 if (value == 'convert') _convertEstimate();
+                if (value == 'edit') _editDocumentHeader();
+                if (value == 'copy') _copyInvoice();
+                if (value == 'findings') _showInvoiceFindings();
+                if (value == 'delete') _deleteOrVoidInvoice();
               },
               itemBuilder: (context) => [
+                if (!_readOnly)
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.edit_outlined),
+                      title: Text('Edit document'),
+                    ),
+                  ),
+                if (!_estimate)
+                  const PopupMenuItem(
+                    value: 'copy',
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.copy_outlined),
+                      title: Text('Copy invoice'),
+                    ),
+                  ),
+                if (!_estimate)
+                  const PopupMenuItem(
+                    value: 'findings',
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.car_repair_outlined),
+                      title: Text('Vehicle findings'),
+                    ),
+                  ),
                 const PopupMenuItem(
                   value: 'refresh',
                   child: ListTile(
@@ -2000,6 +2039,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       contentPadding: EdgeInsets.zero,
                       leading: Icon(Icons.receipt_long_outlined),
                       title: Text('Create invoice'),
+                    ),
+                  ),
+                if (!_estimate)
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.delete_outline),
+                      title: Text('Delete / Void invoice'),
                     ),
                   ),
               ],
