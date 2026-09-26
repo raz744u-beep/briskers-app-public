@@ -6,6 +6,7 @@ import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import 'jobs/job_detail_screen.dart';
 import 'jobs/job_edit_screen.dart';
+import 'jobs/job_document_screen.dart';
 
 class JobsScreen extends StatefulWidget {
   const JobsScreen({
@@ -115,6 +116,48 @@ class _JobsScreenState extends State<JobsScreen> {
       if (mounted) setState(() => _busyJobId = null);
     }
   }
+
+
+  Future<void> _openDocument(String documentId) async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: documentId,
+          roleCode: widget.roleCode,
+        ),
+      ),
+    );
+    await _load();
+  }
+
+  Future<void> _documentAction(Map<String, dynamic> job, String action) async {
+    final jobId = job['id'].toString();
+    setState(() => _busyJobId = jobId);
+    try {
+      final documents = await _api.jobDocuments(widget.businessId, jobId);
+      final estimates = documents.where((d) => d['kind']?.toString() == 'estimate').toList();
+      final invoices = documents.where((d) => d['kind']?.toString() == 'invoice').toList();
+      String? id;
+      if (action == 'add_estimate') id = await _api.createEstimate(widget.businessId, jobId);
+      if (action == 'add_invoice') id = await _api.createInvoice(widget.businessId, jobId);
+      if (action == 'estimate' && estimates.isNotEmpty) id = estimates.last['id'].toString();
+      if (action == 'invoice' && invoices.isNotEmpty) id = invoices.last['id'].toString();
+      if (action == 'convert' && estimates.isNotEmpty) {
+        id = await _api.convertEstimate(widget.businessId, estimates.last['id'].toString());
+      }
+      if (!mounted || id == null) return;
+      await _openDocument(id);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busyJobId = null);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _documentsFor(Map<String, dynamic> job) =>
+      _api.jobDocuments(widget.businessId, job['id'].toString());
 
   Future<void> _changeStatus(
     Map<String, dynamic> job,
@@ -414,7 +457,7 @@ class _JobsScreenState extends State<JobsScreen> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 12,
+                                fontSize: 14,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -434,7 +477,7 @@ class _JobsScreenState extends State<JobsScreen> {
                               mechanic,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12),
+                              style: const TextStyle(fontSize: 14),
                             ),
                           ),
                         ],
@@ -500,46 +543,42 @@ class _JobsScreenState extends State<JobsScreen> {
                           value: mechanic.isEmpty ? 'Unassigned' : mechanic,
                         ),
                       ),
-                      PopupMenuButton<String>(
-                        tooltip: 'Job actions',
-                        onSelected: (value) {
-                          if (value == 'open') _openJob(job);
-                          if (value == 'edit') _editJob(job);
-                          if (value == 'cancel') _cancelJob(job);
+                      FutureBuilder<List<Map<String, dynamic>>>(
+                        future: _documentsFor(job),
+                        builder: (context, snapshot) {
+                          final docs = snapshot.data ?? const <Map<String, dynamic>>[];
+                          final estimates = docs.where((d) => d['kind']?.toString() == 'estimate').toList();
+                          final invoices = docs.where((d) => d['kind']?.toString() == 'invoice').toList();
+                          final hasEstimate = estimates.isNotEmpty;
+                          final hasInvoice = invoices.isNotEmpty;
+                          return PopupMenuButton<String>(
+                            tooltip: 'Job actions',
+                            onSelected: (value) {
+                              if (value == 'open') _openJob(job);
+                              if (value == 'edit') _editJob(job);
+                              if (value == 'cancel') _cancelJob(job);
+                              if (value == 'add_estimate' || value == 'add_invoice' ||
+                                  value == 'estimate' || value == 'invoice' || value == 'convert') {
+                                _documentAction(job, value);
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(value: 'open', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.open_in_new_outlined), title: Text('Open full job'))),
+                              if (_canManage) const PopupMenuItem(value: 'edit', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.edit_outlined), title: Text('Edit job'))),
+                              if (!hasEstimate && !hasInvoice) ...[
+                                const PopupMenuItem(value: 'add_estimate', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.description_outlined, color: BriskersColors.estimates), title: Text('Add estimate'))),
+                                const PopupMenuItem(value: 'add_invoice', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.receipt_long_outlined, color: BriskersColors.invoices), title: Text('Add invoice'))),
+                              ],
+                              if (hasEstimate) ...[
+                                const PopupMenuItem(value: 'estimate', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.description_outlined, color: BriskersColors.estimates), title: Text('View / edit estimate'))),
+                                if (!hasInvoice) const PopupMenuItem(value: 'convert', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.transform_outlined, color: BriskersColors.invoices), title: Text('Convert estimate to invoice'))),
+                              ],
+                              if (hasInvoice) const PopupMenuItem(value: 'invoice', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.receipt_long_outlined, color: BriskersColors.invoices), title: Text('View / edit invoice'))),
+                              if (_canManage && job['status']?.toString() != 'completed' && job['status']?.toString() != 'cancelled')
+                                const PopupMenuItem(value: 'cancel', child: ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: Icon(Icons.cancel_outlined), title: Text('Cancel job'))),
+                            ],
+                          );
                         },
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(
-                            value: 'open',
-                            child: ListTile(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              leading: Icon(Icons.open_in_new_outlined),
-                              title: Text('Open full job'),
-                            ),
-                          ),
-                          if (_canManage)
-                            const PopupMenuItem(
-                              value: 'edit',
-                              child: ListTile(
-                                dense: true,
-                                contentPadding: EdgeInsets.zero,
-                                leading: Icon(Icons.edit_outlined),
-                                title: Text('Edit job'),
-                              ),
-                            ),
-                          if (_canManage &&
-                              job['status']?.toString() != 'completed' &&
-                              job['status']?.toString() != 'cancelled')
-                            const PopupMenuItem(
-                              value: 'cancel',
-                              child: ListTile(
-                                dense: true,
-                                contentPadding: EdgeInsets.zero,
-                                leading: Icon(Icons.cancel_outlined),
-                                title: Text('Cancel job'),
-                              ),
-                            ),
-                        ],
                       ),
                     ],
                   ),
@@ -550,7 +589,7 @@ class _JobsScreenState extends State<JobsScreen> {
                       child: Text(
                         title,
                         style: const TextStyle(
-                          fontSize: 12.5,
+                          fontSize: 15,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -563,7 +602,7 @@ class _JobsScreenState extends State<JobsScreen> {
                       child: Text(
                         requested,
                         style: TextStyle(
-                          fontSize: 12.5,
+                          fontSize: 15,
                           color: Theme.of(context)
                               .colorScheme
                               .onSurfaceVariant,
@@ -727,7 +766,7 @@ class _DetailLine extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 12.5,
+                  fontSize: 15,
                   fontWeight: FontWeight.w600,
                 ),
               ),
