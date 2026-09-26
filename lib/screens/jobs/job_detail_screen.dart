@@ -50,6 +50,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   bool get _canSeeFinancial => _canManage;
   bool get _mechanic => widget.roleCode == 'mechanic';
+  bool get _canEditFindings => _canManage || _mechanic;
   bool get _owner => widget.roleCode == 'owner';
 
   @override
@@ -638,7 +639,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _addFinding() async {
-    if (!_canManage || _job == null || _busy) return;
+    if (!_canEditFindings || _job == null || _busy) return;
     if ((_job!['vehicle_id']?.toString() ?? '').isEmpty) {
       setState(() => _error = 'Select a vehicle before adding a finding.');
       return;
@@ -773,7 +774,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         includeOnInvoice: includeOnInvoice,
       );
       for (final photo in photos) {
-        await _api.uploadCustomerNotePhoto(
+        await _api.uploadVehicleFindingPhoto(
           widget.businessId,
           findingId,
           filename: photo.name,
@@ -1304,7 +1305,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 fontSize: 11.5,
               ),
             ),
-            if (isOpen && _canManage) ...[
+            if (isOpen && _canEditFindings) ...[
               const SizedBox(height: 4),
               Row(
                 children: [
@@ -1318,7 +1319,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         style: TextStyle(fontSize: 12.5),
                       ),
                       value: finding['include_on_invoice'] == true,
-                      onChanged: _busy
+                      onChanged: !_canManage || _busy
                           ? null
                           : (value) => _toggleFindingInvoice(
                                 finding,
@@ -1375,7 +1376,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   ? '1 open finding'
                   : '${open.length} open findings',
         ),
-        trailing: _canManage
+        trailing: _canEditFindings
             ? IconButton(
                 tooltip: 'Add finding',
                 onPressed: _busy ? null : _addFinding,
