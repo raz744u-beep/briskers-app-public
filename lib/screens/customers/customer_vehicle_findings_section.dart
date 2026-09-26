@@ -135,7 +135,10 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
                     final attachments = List<dynamic>.from(
                       finding['attachments'] ?? const [],
                     );
-                    final job = finding['found_job_number']?.toString() ?? '';
+                    final job =
+                        finding['found_job_number']?.toString() ?? '';
+                    final invoice =
+                        finding['found_document_number']?.toString() ?? '';
                     return ListTile(
                       leading: attachments.isEmpty
                           ? const Icon(
@@ -150,7 +153,8 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
                       title: Text(finding['body']?.toString() ?? ''),
                       subtitle: Text(
                         <String>[
-                          if (job.isNotEmpty) 'Found $job',
+                          if (invoice.isNotEmpty) 'Found Invoice #$invoice',
+                          if (invoice.isEmpty && job.isNotEmpty) 'Found $job',
                           if (attachments.isNotEmpty)
                             attachments.length == 1
                                 ? '1 photo'
@@ -178,11 +182,17 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
                               title:
                                   Text(finding['body']?.toString() ?? ''),
                               subtitle: Text(
-                                (finding['resolved_job_number']?.toString() ??
-                                        '')
-                                    .isEmpty
-                                    ? 'Resolved'
-                                    : 'Resolved ${finding['resolved_job_number']}',
+                                (finding['resolved_document_number']
+                                                ?.toString() ??
+                                            '')
+                                        .isNotEmpty
+                                    ? 'Resolved Invoice #${finding['resolved_document_number']}'
+                                    : (finding['resolved_job_number']
+                                                    ?.toString() ??
+                                                '')
+                                            .isNotEmpty
+                                        ? 'Resolved ${finding['resolved_job_number']}'
+                                        : 'Resolved',
                               ),
                             ),
                           )
