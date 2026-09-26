@@ -37,6 +37,57 @@ jobs:
           cp ../pubspec.yaml ./pubspec.yaml
           cp ../analysis_options.yaml ./analysis_options.yaml
 
+      - name: Configure persistent Android signing
+        working-directory: generated
+        env:
+          BRISKERS_KEYSTORE_BASE64: ${{ secrets.BRISKERS_KEYSTORE_BASE64 }}
+          BRISKERS_KEYSTORE_PASSWORD: ${{ secrets.BRISKERS_KEYSTORE_PASSWORD }}
+          BRISKERS_KEY_ALIAS: ${{ secrets.BRISKERS_KEY_ALIAS }}
+          BRISKERS_KEY_PASSWORD: ${{ secrets.BRISKERS_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$BRISKERS_KEYSTORE_BASE64" | base64 --decode > android/app/briskers-release.jks
+          cat > android/key.properties <<EOF
+          storePassword=$BRISKERS_KEYSTORE_PASSWORD
+          keyPassword=$BRISKERS_KEY_PASSWORD
+          keyAlias=$BRISKERS_KEY_ALIAS
+          storeFile=briskers-release.jks
+          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("android/app/build.gradle.kts")
+          s = p.read_text()
+          s = 'import java.util.Properties\nimport java.io.FileInputStream\n' + s
+          marker = 'android {'
+          setup = '''val keystoreProperties = Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+          }
+
+          '''
+          s = s.replace(marker, setup + marker, 1)
+          s = s.replace(
+              '    buildTypes {',
+              '''    signingConfigs {
+                  create("briskersRelease") {
+                      keyAlias = keystoreProperties["keyAlias"] as String
+                      keyPassword = keystoreProperties["keyPassword"] as String
+                      storeFile = file(keystoreProperties["storeFile"] as String)
+                      storePassword = keystoreProperties["storePassword"] as String
+                  }
+              }
+
+              buildTypes {''',
+              1,
+          )
+          s = s.replace(
+              '            signingConfig = signingConfigs.getByName("debug")',
+              '            signingConfig = signingConfigs.getByName("briskersRelease")',
+              1,
+          )
+          p.write_text(s)
+          PY
+
       - name: Resolve packages
         working-directory: generated
         run: flutter pub get
