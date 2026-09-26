@@ -264,11 +264,18 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
               ),
             ),
-            if (vehicles.isEmpty)
-              const ListTile(
-                leading: Icon(Icons.info_outline),
-                title: Text('This customer has no vehicles yet.'),
+            ListTile(
+              leading: const Icon(Icons.remove_circle_outline),
+              title: const Text('No vehicle'),
+              subtitle: vehicles.isEmpty
+                  ? const Text('This customer has no vehicles yet.')
+                  : null,
+              onTap: () => Navigator.pop(
+                sheetContext,
+                <String, dynamic>{'id': null},
               ),
+            ),
+            if (vehicles.isNotEmpty) const Divider(),
             ...vehicles.map((vehicle) {
               final label = <String>[
                 if (vehicle['year'] != null) vehicle['year'].toString(),
