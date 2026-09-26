@@ -32,7 +32,7 @@ const vehicleMakes = <String>[
   'Maserati',
   'Mazda',
   'McLaren',
-  'Mercedes-Benz',
+  'Mercedes',
   'Mercury',
   'MINI',
   'Mitsubishi',
