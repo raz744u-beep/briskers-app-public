@@ -316,15 +316,22 @@ class _JobsScreenState extends State<JobsScreen> {
         children: [
           Stack(
             children: [
-              Positioned(
-                right: -4,
-                bottom: -8,
-                child: Opacity(
-                  opacity: 0.13,
-                  child: Image.asset(
-                    'assets/job_car_watermark.png',
-                    width: 220,
-                    fit: BoxFit.contain,
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: FractionallySizedBox(
+                      widthFactor: 0.72,
+                      heightFactor: 0.88,
+                      child: Opacity(
+                        opacity: 0.32,
+                        child: Image.asset(
+                          'assets/job_car_watermark.png',
+                          fit: BoxFit.contain,
+                          alignment: Alignment.centerRight,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
