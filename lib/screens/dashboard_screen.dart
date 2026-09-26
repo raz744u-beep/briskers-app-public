@@ -85,7 +85,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (_) => JobDetailScreen(
           businessId: widget.businessId,
           jobId: jobId,
-          roleCode: widget.roleCode,
+          isOwner: widget.roleCode == 'owner',
         ),
       ),
     );
