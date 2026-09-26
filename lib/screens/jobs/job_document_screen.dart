@@ -294,6 +294,86 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     });
   }
 
+  Future<void> _copyLine(Map<String, dynamic> line) async {
+    if (_readOnly || _busy) return;
+    await _run(() => _api.copyDocumentLine(
+          widget.businessId,
+          line['id'].toString(),
+          expectedVersion: _version,
+        ));
+  }
+
+  Future<void> _moveLine(
+    Map<String, dynamic> line,
+    String direction,
+  ) async {
+    if (_readOnly || _busy) return;
+    await _run(() => _api.moveDocumentLine(
+          widget.businessId,
+          line['id'].toString(),
+          expectedVersion: _version,
+          direction: direction,
+        ));
+  }
+
+  Future<void> _showLineActions(
+    Map<String, dynamic> line, {
+    required bool canMoveUp,
+    required bool canMoveDown,
+  }) async {
+    if (_readOnly || _busy) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit item'),
+              onTap: () => Navigator.pop(sheetContext, 'edit'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy_outlined),
+              title: const Text('Copy item'),
+              onTap: () => Navigator.pop(sheetContext, 'copy'),
+            ),
+            ListTile(
+              enabled: canMoveUp,
+              leading: const Icon(Icons.arrow_upward),
+              title: const Text('Move up'),
+              onTap: canMoveUp
+                  ? () => Navigator.pop(sheetContext, 'up')
+                  : null,
+            ),
+            ListTile(
+              enabled: canMoveDown,
+              leading: const Icon(Icons.arrow_downward),
+              title: const Text('Move down'),
+              onTap: canMoveDown
+                  ? () => Navigator.pop(sheetContext, 'down')
+                  : null,
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete item'),
+              onTap: () => Navigator.pop(sheetContext, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted || action == null) return;
+    if (action == 'edit') await _editLine(line);
+    if (action == 'copy') await _copyLine(line);
+    if (action == 'up') await _moveLine(line, 'up');
+    if (action == 'down') await _moveLine(line, 'down');
+    if (action == 'delete') await _deleteLine(line);
+  }
+
   Future<Map<String, dynamic>?> _preparePdf() async {
     final lines = List<dynamic>.from(_detail?['lines'] ?? const []);
     if (lines.isEmpty) {
