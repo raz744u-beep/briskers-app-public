@@ -72,6 +72,27 @@ class DocumentPdfService {
         num.tryParse(detail['pending_payment']?.toString() ?? '') ?? 0;
     final shownPaid = finalizedPaid + pendingPaid;
     final balance = total - shownPaid;
+    final findingNotes = List<dynamic>.from(
+      detail['finding_notes'] ?? const [],
+    )
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .map((finding) => finding['body']?.toString().trim() ?? '')
+        .where((text) => text.isNotEmpty)
+        .toList();
+    final memo = detail['memo']?.toString().trim() ?? '';
+    final odometer = detail['odometer_in']?.toString().trim() ?? '';
+    final claimNumber = detail['claim_number']?.toString().trim() ?? '';
+    final authorizationNumber =
+        detail['authorization_number']?.toString().trim() ?? '';
+    final noteLines = <String>[
+      if (odometer.isNotEmpty) 'Mileage: $odometer',
+      if (claimNumber.isNotEmpty) 'Claim #: $claimNumber',
+      if (authorizationNumber.isNotEmpty)
+        'Authorization #: $authorizationNumber',
+      if (memo.isNotEmpty) memo,
+      ...findingNotes.map((finding) => 'Finding: $finding'),
+    ];
+
 
     doc.addPage(
       pw.MultiPage(
@@ -262,14 +283,19 @@ class DocumentPdfService {
               ),
             ),
           ),
-          if ((detail['memo']?.toString() ?? '').trim().isNotEmpty) ...[
+          if (noteLines.isNotEmpty) ...[
             pw.SizedBox(height: 24),
             pw.Text(
               'Notes',
               style: const pw.TextStyle(fontWeight: pw.FontWeight.bold),
             ),
             pw.SizedBox(height: 4),
-            pw.Text(detail['memo'].toString()),
+            ...noteLines.map(
+              (line) => pw.Padding(
+                padding: const pw.EdgeInsets.only(bottom: 3),
+                child: pw.Text(line),
+              ),
+            ),
           ],
           pw.SizedBox(height: 28),
           pw.Text(
