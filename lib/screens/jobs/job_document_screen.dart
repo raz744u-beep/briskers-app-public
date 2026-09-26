@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
 
 import '../../core/briskers_colors.dart';
@@ -24,6 +25,7 @@ class JobDocumentScreen extends StatefulWidget {
 
 class _JobDocumentScreenState extends State<JobDocumentScreen> {
   static const _api = BriskersApi();
+  final ImagePicker _picker = ImagePicker();
 
   Map<String, dynamic>? _detail;
   bool _loading = true;
@@ -242,14 +244,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (result == null) return;
 
     await _run(() async {
-      await _api.updateDocumentLine(
+      await _api.updateDocumentLineV2(
         widget.businessId,
         line['id'].toString(),
         expectedVersion: _version,
+        name: result['name'].toString(),
         quantity: result['quantity'] as num,
         unitPrice: result['unit_price'] as num,
         taxRate: result['tax_rate'] as num,
         description: result['description']?.toString(),
+        lineKind: result['line_kind'].toString(),
       );
     });
   }
