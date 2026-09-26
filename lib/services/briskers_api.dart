@@ -1085,6 +1085,183 @@ class BriskersApi {
     );
   }
 
+  Future<String> createQuickInvoice(
+    String businessId, {
+    required String customerId,
+    String? vehicleId,
+    DateTime? documentDate,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_quick_invoice',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_document_date': (documentDate ?? DateTime.now())
+            .toIso8601String()
+            .split('T')
+            .first,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> updateDocumentHeader(
+    String businessId,
+    String documentId, {
+    required int expectedVersion,
+    required String customerId,
+    String? vehicleId,
+    required DateTime documentDate,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_document_header',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_expected_version': expectedVersion,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_document_date': documentDate.toIso8601String().split('T').first,
+      },
+    );
+  }
+
+  Future<void> updateDocumentLineV2(
+    String businessId,
+    String lineId, {
+    required int expectedVersion,
+    required String name,
+    required num quantity,
+    required num unitPrice,
+    required num taxRate,
+    String? description,
+    required String lineKind,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_document_line_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_line_id': lineId,
+        'p_expected_version': expectedVersion,
+        'p_name': name,
+        'p_quantity': quantity,
+        'p_unit_price': unitPrice,
+        'p_tax_rate': taxRate,
+        'p_description': description,
+        'p_line_kind': lineKind,
+      },
+    );
+  }
+
+  Future<String> copyDocumentLine(
+    String businessId,
+    String lineId, {
+    required int expectedVersion,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_copy_document_line',
+      params: {
+        'p_business_id': businessId,
+        'p_line_id': lineId,
+        'p_expected_version': expectedVersion,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> moveDocumentLine(
+    String businessId,
+    String lineId, {
+    required int expectedVersion,
+    required String direction,
+  }) async {
+    await supabase.rpc(
+      'briskers_move_document_line',
+      params: {
+        'p_business_id': businessId,
+        'p_line_id': lineId,
+        'p_expected_version': expectedVersion,
+        'p_direction': direction,
+      },
+    );
+  }
+
+  Future<String> copyInvoice(
+    String businessId,
+    String invoiceId, {
+    bool copyNotes = false,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_copy_invoice',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+        'p_copy_notes': copyNotes,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> deleteDraftInvoice(
+    String businessId,
+    String invoiceId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_draft_invoice',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+      },
+    );
+  }
+
+  Future<void> voidInvoice(
+    String businessId,
+    String invoiceId,
+  ) async {
+    await supabase.rpc(
+      'briskers_void_invoice',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+      },
+    );
+  }
+
+  Future<String> createInvoiceFinding(
+    String businessId,
+    String invoiceId, {
+    required String body,
+    bool includeOnInvoice = true,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_invoice_finding',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+        'p_body': body,
+        'p_include_on_invoice': includeOnInvoice,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> resolveVehicleFindingByInvoice(
+    String businessId,
+    String findingId,
+    String invoiceId,
+  ) async {
+    await supabase.rpc(
+      'briskers_resolve_vehicle_finding_by_invoice',
+      params: {
+        'p_business_id': businessId,
+        'p_finding_id': findingId,
+        'p_invoice_id': invoiceId,
+      },
+    );
+  }
+
   Future<void> addDocumentLine(
     String businessId,
     String documentId, {
