@@ -85,7 +85,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (_) => JobDetailScreen(
           businessId: widget.businessId,
           jobId: jobId,
-          isOwner: widget.roleCode == 'owner',
+          roleCode: widget.roleCode,
         ),
       ),
     );
@@ -100,7 +100,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (_) => JobDocumentScreen(
           businessId: widget.businessId,
           documentId: documentId,
-          roleCode: widget.roleCode,
+          isOwner: widget.roleCode == 'owner',
         ),
       ),
     );
