@@ -81,7 +81,7 @@ class _JobsScreenState extends State<JobsScreen> {
         builder: (_) => JobDetailScreen(
           businessId: widget.businessId,
           jobId: job['id'].toString(),
-          roleCode: widget.roleCode,
+          isOwner: widget.roleCode == 'owner',
         ),
       ),
     );
