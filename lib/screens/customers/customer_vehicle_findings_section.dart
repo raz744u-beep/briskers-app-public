@@ -14,6 +14,44 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
 
   static const _api = BriskersApi();
 
+  Widget _thumbnail(Map<String, dynamic> attachment) {
+    final bucket = attachment['bucket']?.toString() ?? '';
+    final key = attachment['key']?.toString() ?? '';
+    if (bucket.isEmpty || key.isEmpty) {
+      return const Icon(
+        Icons.warning_amber_rounded,
+        color: Colors.deepOrange,
+      );
+    }
+    return FutureBuilder<String>(
+      future: _api.signedAttachmentUrl(bucket, key),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const SizedBox(
+            width: 44,
+            height: 44,
+            child: Center(
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        }
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            snapshot.data!,
+            width: 44,
+            height: 44,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const Icon(
+              Icons.broken_image_outlined,
+              color: Colors.deepOrange,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   String _vehicleLabel(Map<String, dynamic> vehicle) => <String>[
         if (vehicle['year'] != null) vehicle['year'].toString(),
         if ((vehicle['make']?.toString() ?? '').isNotEmpty)
@@ -99,10 +137,16 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
                     );
                     final job = finding['found_job_number']?.toString() ?? '';
                     return ListTile(
-                      leading: const Icon(
-                        Icons.warning_amber_rounded,
-                        color: Colors.deepOrange,
-                      ),
+                      leading: attachments.isEmpty
+                          ? const Icon(
+                              Icons.warning_amber_rounded,
+                              color: Colors.deepOrange,
+                            )
+                          : _thumbnail(
+                              Map<String, dynamic>.from(
+                                attachments.first as Map,
+                              ),
+                            ),
                       title: Text(finding['body']?.toString() ?? ''),
                       subtitle: Text(
                         <String>[
