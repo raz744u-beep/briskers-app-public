@@ -322,7 +322,7 @@ class _JobsScreenState extends State<JobsScreen> {
                 child: Opacity(
                   opacity: 0.13,
                   child: Image.asset(
-                    'assets/job_car_watermark.webp',
+                    'assets/job_car_watermark.png',
                     width: 220,
                     fit: BoxFit.contain,
                   ),
