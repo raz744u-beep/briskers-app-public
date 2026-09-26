@@ -115,7 +115,10 @@ jobs:
 
       - name: Build permanently signed Android APK
         working-directory: generated
-        run: flutter build apk --release
+        run: |
+          VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
+          BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
+          flutter build apk --release --build-name "$VERSION" --build-number "$BUILD_NUMBER"
 
       - name: Verify APK is signed
         working-directory: generated
@@ -132,7 +135,8 @@ jobs:
         working-directory: generated
         run: |
           VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
-          cp build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/Briskers-v${VERSION}.apk"
+          BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
+          cp build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/Briskers-v${VERSION}-b${BUILD_NUMBER}.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
