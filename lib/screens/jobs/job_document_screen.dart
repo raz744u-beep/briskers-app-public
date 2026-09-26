@@ -941,33 +941,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 onTap: _readOnly || _busy ? null : () => _editLine(line),
                 onLongPress: _readOnly || _busy
                     ? null
-                    : () async {
-                        final action = await showModalBottomSheet<String>(
-                          context: context,
-                          showDragHandle: true,
-                          builder: (sheetContext) => SafeArea(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                ListTile(
-                                  leading: const Icon(Icons.edit_outlined),
-                                  title: const Text('Edit item'),
-                                  onTap: () =>
-                                      Navigator.pop(sheetContext, 'edit'),
-                                ),
-                                ListTile(
-                                  leading: const Icon(Icons.delete_outline),
-                                  title: const Text('Remove item'),
-                                  onTap: () =>
-                                      Navigator.pop(sheetContext, 'remove'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                        if (action == 'edit') await _editLine(line);
-                        if (action == 'remove') await _deleteLine(line);
-                      },
+                    : () => _showLineActions(
+                          line,
+                          canMoveUp:
+                              line['position'] != lines.first['position'],
+                          canMoveDown:
+                              line['position'] != lines.last['position'],
+                        ),
                 child: Container(
                   padding: const EdgeInsets.fromLTRB(16, 11, 16, 11),
                   decoration: const BoxDecoration(
