@@ -1214,6 +1214,193 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
+  Widget _findingsCard() {
+    final open = _findings
+        .where((finding) => finding['status']?.toString() == 'open')
+        .toList();
+    final resolved = _findings
+        .where((finding) => finding['status']?.toString() == 'resolved')
+        .toList();
+
+    Widget findingTile(Map<String, dynamic> finding) {
+      final isOpen = finding['status']?.toString() == 'open';
+      final attachments = List<dynamic>.from(
+        finding['attachments'] ?? const [],
+      );
+      final foundJob = finding['found_job_number']?.toString() ?? '';
+      final resolvedJob =
+          finding['resolved_job_number']?.toString() ?? '';
+      final created = _dateTime(finding['created_at']);
+      final resolvedAt = _dateTime(finding['resolved_at']);
+
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 6, 8, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  isOpen
+                      ? Icons.warning_amber_rounded
+                      : Icons.check_circle_outline,
+                  color: isOpen ? Colors.deepOrange : Colors.green,
+                  size: 22,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    finding['body']?.toString() ?? '',
+                    style: const TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (_owner)
+                  PopupMenuButton<String>(
+                    tooltip: 'Finding actions',
+                    onSelected: (value) {
+                      if (value == 'delete') _deleteFinding(finding);
+                    },
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.delete_outline),
+                          title: Text('Delete finding'),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+            const SizedBox(height: 5),
+            Text(
+              <String>[
+                if (foundJob.isNotEmpty) 'Found $foundJob',
+                if (created.isNotEmpty) created,
+                if (attachments.isNotEmpty)
+                  attachments.length == 1
+                      ? '1 photo'
+                      : '${attachments.length} photos',
+                if (!isOpen && resolvedJob.isNotEmpty)
+                  'Resolved $resolvedJob',
+                if (!isOpen && resolvedAt.isNotEmpty) resolvedAt,
+              ].join(' • '),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 11.5,
+              ),
+            ),
+            if (isOpen && _canManage) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Expanded(
+                    child: CheckboxListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      title: const Text(
+                        'Include on invoice',
+                        style: TextStyle(fontSize: 12.5),
+                      ),
+                      value: finding['include_on_invoice'] == true,
+                      onChanged: _busy
+                          ? null
+                          : (value) => _toggleFindingInvoice(
+                                finding,
+                                value == true,
+                              ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed:
+                        _busy ? null : () => _resolveFinding(finding),
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Resolve'),
+                  ),
+                ],
+              ),
+            ] else if (!isOpen && _canManage) ...[
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed:
+                      _busy ? null : () => _reopenFinding(finding),
+                  icon: const Icon(Icons.replay_outlined),
+                  label: const Text('Reopen'),
+                ),
+              ),
+            ],
+            const Divider(height: 1),
+          ],
+        ),
+      );
+    }
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: ExpansionTile(
+        initiallyExpanded: open.isNotEmpty,
+        leading: CircleAvatar(
+          radius: 20,
+          backgroundColor: Colors.deepOrange.withValues(alpha: 0.12),
+          child: const Icon(
+            Icons.car_repair_outlined,
+            color: Colors.deepOrange,
+          ),
+        ),
+        title: const Text(
+          'Vehicle findings',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text(
+          open.isEmpty
+              ? 'No open findings'
+              : open.length == 1
+                  ? '1 open finding'
+                  : '${open.length} open findings',
+        ),
+        trailing: _canManage
+            ? IconButton(
+                tooltip: 'Add finding',
+                onPressed: _busy ? null : _addFinding,
+                icon: const Icon(Icons.add_circle_outline),
+              )
+            : null,
+        children: [
+          if (open.isEmpty)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 4, 16, 14),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('No unresolved issues are recorded for this vehicle.'),
+              ),
+            )
+          else
+            ...open.map(findingTile),
+          if (resolved.isNotEmpty)
+            ExpansionTile(
+              initiallyExpanded: false,
+              title: Text(
+                resolved.length == 1
+                    ? 'Resolved finding'
+                    : 'Resolved findings (${resolved.length})',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              children: resolved.map(findingTile).toList(),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _previewCard({
     required IconData icon,
     required String title,
