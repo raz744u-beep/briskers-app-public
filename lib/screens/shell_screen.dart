@@ -81,6 +81,7 @@ class _ShellScreenState extends State<ShellScreen> {
     String countKey,
   ) {
     final count = int.tryParse(_navCounts[countKey]?.toString() ?? '') ?? 0;
+    if (count <= 0) return Icon(icon);
     return Badge(
       label: Text('$count'),
       smallSize: 16,
