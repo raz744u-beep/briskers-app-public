@@ -15,6 +15,13 @@ class BriskersApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Briskers',
+      builder: (context, child) {
+        final media = MediaQuery.of(context);
+        return MediaQuery(
+          data: media.copyWith(textScaler: TextScaler.noScaling),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       theme: ThemeData(
         colorScheme: scheme,
         useMaterial3: true,
