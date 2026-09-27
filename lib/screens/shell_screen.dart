@@ -88,10 +88,18 @@ class _ShellScreenState extends State<ShellScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: activeColor.withValues(alpha: 0.08),
-        title: Text(
-          _businessName,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        titleSpacing: 16,
+        title: SizedBox(
+          width: double.infinity,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              _businessName,
+              maxLines: 1,
+              softWrap: false,
+            ),
+          ),
         ),
         actions: [
           if (widget.roleCode.isNotEmpty)
@@ -100,8 +108,8 @@ class _ShellScreenState extends State<ShellScreen> {
               child: Center(
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
+                    horizontal: 8,
+                    vertical: 4,
                   ),
                   decoration: BoxDecoration(
                     color: activeColor.withValues(alpha: 0.14),
@@ -112,7 +120,7 @@ class _ShellScreenState extends State<ShellScreen> {
                     style: TextStyle(
                       color: activeColor,
                       fontWeight: FontWeight.w700,
-                      fontSize: 12,
+                      fontSize: 11,
                     ),
                   ),
                 ),
