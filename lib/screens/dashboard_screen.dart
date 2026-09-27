@@ -245,19 +245,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   if (loadingMonth)
                     const LinearProgressIndicator(minHeight: 2),
                   const SizedBox(height: 6),
-                  const Row(
-                    children: [
-                      for (final label in ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
-                        Expanded(
-                          child: Text(
-                            label,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
+                  Row(
+                    children: const [
+                      Expanded(child: Text('S', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700))),
+                      Expanded(child: Text('M', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700))),
+                      Expanded(child: Text('T', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700))),
+                      Expanded(child: Text('W', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700))),
+                      Expanded(child: Text('T', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700))),
+                      Expanded(child: Text('F', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700))),
+                      Expanded(child: Text('S', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700))),
                     ],
                   ),
                   const SizedBox(height: 4),
