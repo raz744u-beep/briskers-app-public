@@ -73,14 +73,23 @@ class _EditCustomerScreenState extends State<EditCustomerScreen> {
     });
 
     try {
-      await _api.updateCustomerProfile(
+      final response = await _api.updateCustomerProfile(
         widget.businessId,
         widget.customerId,
         name: name,
         phone: phoneDigits.isEmpty ? null : phoneDigits,
         email: email.isEmpty ? null : email,
       );
-      if (mounted) Navigator.pop(context, true);
+      final saved = response['customer'];
+      final customer = saved is Map
+          ? Map<String, dynamic>.from(saved)
+          : <String, dynamic>{
+              'id': widget.customerId,
+              'name': name,
+              'phone': phoneDigits.isEmpty ? null : phoneDigits,
+              'email': email.isEmpty ? null : email,
+            };
+      if (mounted) Navigator.pop(context, customer);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
