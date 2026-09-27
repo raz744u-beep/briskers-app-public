@@ -1765,84 +1765,99 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       if (mileage.isNotEmpty) '${_quantity(mileage)} mi',
     ].join(' · ');
 
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 6,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                infoLine(
-                  Icons.person_outline,
-                  customer.isEmpty ? 'Customer' : customer,
-                  bold: true,
-                  maxLines: 2,
-                ),
-                if (phone.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  infoLine(
-                    Icons.phone_outlined,
-                    formatUsPhone(phone),
-                    maxLines: 1,
-                  ),
-                ],
-                const SizedBox(height: 8),
-                infoLine(
-                  Icons.directions_car_outlined,
-                  vehicleMileage.isEmpty ? 'No vehicle' : vehicleMileage,
-                  maxLines: 2,
-                ),
-                if (vin.isNotEmpty) ...[
-                  const SizedBox(height: 5),
-                  Padding(
-                    padding: const EdgeInsets.only(left: 30),
-                    child: Text(
-                      'VIN: $vin',
-                      softWrap: true,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: Color(0xFF405064),
-                        height: 1.2,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
+    final customerInfo = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        infoLine(
+          Icons.person_outline,
+          customer.isEmpty ? 'Customer' : customer,
+          bold: true,
+          maxLines: 2,
+        ),
+        if (phone.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          infoLine(
+            Icons.phone_outlined,
+            formatUsPhone(phone),
+            maxLines: 1,
           ),
-          Container(
-            width: 1,
-            constraints: const BoxConstraints(minHeight: 92),
-            margin: const EdgeInsets.symmetric(horizontal: 14),
-            color: const Color(0xFFD7E0E4),
-          ),
-          Expanded(
-            flex: 4,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                infoLine(
-                  Icons.calendar_month_outlined,
-                  date.isEmpty ? 'Date: —' : 'Date: $date',
-                  maxLines: 2,
-                ),
-                const SizedBox(height: 12),
-                infoLine(
-                  Icons.receipt_long_outlined,
-                  job.isEmpty ? 'No job' : 'Job $job',
-                  maxLines: 1,
-                  onTap: job.isEmpty ? null : _openLinkedJob,
-                  valueColor: job.isEmpty ? null : _accent,
-                  underline: job.isNotEmpty,
-                ),
-              ],
+        ],
+        const SizedBox(height: 8),
+        infoLine(
+          Icons.directions_car_outlined,
+          vehicleMileage.isEmpty ? 'No vehicle' : vehicleMileage,
+          maxLines: 2,
+        ),
+        if (vin.isNotEmpty) ...[
+          const SizedBox(height: 5),
+          Padding(
+            padding: const EdgeInsets.only(left: 30),
+            child: Text(
+              'VIN: $vin',
+              softWrap: true,
+              style: const TextStyle(
+                fontSize: 12.5,
+                color: Color(0xFF405064),
+                height: 1.2,
+              ),
             ),
           ),
         ],
+      ],
+    );
+
+    final documentInfo = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        infoLine(
+          Icons.calendar_month_outlined,
+          date.isEmpty ? 'Date: —' : 'Date: $date',
+          maxLines: 2,
+        ),
+        const SizedBox(height: 12),
+        infoLine(
+          Icons.receipt_long_outlined,
+          job.isEmpty ? 'No job' : 'Job $job',
+          maxLines: 1,
+          onTap: job.isEmpty ? null : _openLinkedJob,
+          valueColor: job.isEmpty ? null : _accent,
+          underline: job.isNotEmpty,
+        ),
+      ],
+    );
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 430) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                customerInfo,
+                const SizedBox(height: 12),
+                const Divider(height: 1, color: Color(0xFFD7E0E4)),
+                const SizedBox(height: 12),
+                documentInfo,
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 6, child: customerInfo),
+              Container(
+                width: 1,
+                constraints: const BoxConstraints(minHeight: 92),
+                margin: const EdgeInsets.symmetric(horizontal: 14),
+                color: const Color(0xFFD7E0E4),
+              ),
+              Expanded(flex: 4, child: documentInfo),
+            ],
+          );
+        },
       ),
     );
   }
