@@ -7,6 +7,7 @@ import 'job_statuses_settings_screen.dart';
 import 'item_categories_settings_screen.dart';
 import 'payment_methods_settings_screen.dart';
 import 'shop_info_settings_screen.dart';
+import 'tax_invoicing_settings_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({
@@ -135,10 +136,26 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
-          const ListTile(
-            leading: Icon(Icons.receipt_long_outlined, color: BriskersColors.jobs),
-            title: Text('Taxes & invoicing'),
-            subtitle: Text('Tax defaults, invoice options and numbering — coming next'),
+          ListTile(
+            leading: const Icon(
+              Icons.receipt_long_outlined,
+              color: BriskersColors.jobs,
+            ),
+            title: const Text('Taxes & Invoicing'),
+            subtitle: const Text(
+              'Default sales tax rate and invoice tax behavior',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => TaxInvoicingSettingsScreen(
+                    businessId: businessId,
+                  ),
+                ),
+              );
+            },
           ),
           ListTile(
             leading: const Icon(
