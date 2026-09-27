@@ -245,8 +245,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   if (loadingMonth)
                     const LinearProgressIndicator(minHeight: 2),
                   const SizedBox(height: 6),
-                  Row(
-                    children: const [
+                  const Row(
+                    children: [
                       Expanded(child: Text('S', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700))),
                       Expanded(child: Text('M', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700))),
                       Expanded(child: Text('T', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700))),
