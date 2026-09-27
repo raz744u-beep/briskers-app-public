@@ -21,6 +21,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
 
   final _search = TextEditingController();
   List<Map<String, dynamic>>? _items;
+  List<Map<String, dynamic>> _categories = const [];
   String? _error;
   bool _includeInactive = true;
   bool _busy = false;
@@ -40,14 +41,18 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
   Future<void> _load() async {
     try {
       final query = _search.text.trim();
-      final items = await _api.catalogItemsSettings(
-        widget.businessId,
-        search: query.isEmpty ? null : query,
-        includeInactive: _includeInactive,
-      );
+      final results = await Future.wait<dynamic>([
+        _api.catalogItemsSettings(
+          widget.businessId,
+          search: query.isEmpty ? null : query,
+          includeInactive: _includeInactive,
+        ),
+        _api.itemCategories(widget.businessId, includeInactive: true),
+      ]);
       if (!mounted) return;
       setState(() {
-        _items = items;
+        _items = List<Map<String, dynamic>>.from(results[0] as List);
+        _categories = List<Map<String, dynamic>>.from(results[1] as List);
         _error = null;
       });
     } catch (error) {
@@ -82,7 +87,10 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
-      builder: (_) => _CatalogItemDialog(item: item),
+      builder: (_) => _CatalogItemDialog(
+        item: item,
+        categories: _categories,
+      ),
     );
     if (result == null) return;
 
@@ -338,9 +346,13 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
 }
 
 class _CatalogItemDialog extends StatefulWidget {
-  const _CatalogItemDialog({this.item});
+  const _CatalogItemDialog({
+    this.item,
+    required this.categories,
+  });
 
   final Map<String, dynamic>? item;
+  final List<Map<String, dynamic>> categories;
 
   @override
   State<_CatalogItemDialog> createState() => _CatalogItemDialogState();
@@ -352,8 +364,8 @@ class _CatalogItemDialogState extends State<_CatalogItemDialog> {
   late final TextEditingController _price;
   late final TextEditingController _unit;
   late final TextEditingController _cost;
-  late final TextEditingController _category;
   late final TextEditingController _barcode;
+  late String _category;
   late String _itemType;
   late bool _taxable;
   late bool _active;
@@ -371,8 +383,7 @@ class _CatalogItemDialogState extends State<_CatalogItemDialog> {
     _unit =
         TextEditingController(text: item?['pricing_unit']?.toString() ?? '');
     _cost = TextEditingController(text: item?['cost']?.toString() ?? '0');
-    _category =
-        TextEditingController(text: item?['category']?.toString() ?? '');
+    _category = item?['category']?.toString() ?? '';
     _barcode =
         TextEditingController(text: item?['barcode']?.toString() ?? '');
     _itemType = item?['item_type']?.toString() ?? 'non_inventory';
@@ -387,7 +398,6 @@ class _CatalogItemDialogState extends State<_CatalogItemDialog> {
     _price.dispose();
     _unit.dispose();
     _cost.dispose();
-    _category.dispose();
     _barcode.dispose();
     super.dispose();
   }
@@ -420,7 +430,7 @@ class _CatalogItemDialogState extends State<_CatalogItemDialog> {
         'pricing_unit': _emptyToNull(_unit.text),
         'cost': cost,
         'taxable': _taxable,
-        'category': _emptyToNull(_category.text),
+        'category': _category.trim().isEmpty ? null : _category.trim(),
         'barcode': _emptyToNull(_barcode.text),
         'active': _active,
       },
@@ -579,13 +589,33 @@ class _CatalogItemDialogState extends State<_CatalogItemDialog> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      TextField(
-                        controller: _category,
-                        textCapitalization: TextCapitalization.words,
+                      DropdownButtonFormField<String>(
+                        initialValue: _category,
+                        isExpanded: true,
                         decoration: const InputDecoration(
                           labelText: 'Category',
                           border: fieldBorder,
                         ),
+                        items: [
+                          const DropdownMenuItem(
+                            value: '',
+                            child: Text('No category'),
+                          ),
+                          ...widget.categories.map((category) {
+                            final name =
+                                category['name']?.toString() ?? '';
+                            final active = category['active'] == true;
+                            return DropdownMenuItem(
+                              value: name,
+                              child: Text(
+                                active ? name : '$name (inactive)',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            );
+                          }),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _category = value ?? ''),
                       ),
                       const SizedBox(height: 12),
                       TextField(
