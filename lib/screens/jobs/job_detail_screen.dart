@@ -40,6 +40,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   bool _busy = false;
   bool _complaintExpanded = false;
   bool _workExpanded = false;
+  bool _findingsExpanded = false;
   String? _error;
 
   bool get _canManage =>
@@ -1222,6 +1223,119 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
+  Future<void> _showFindingPhoto(
+    Map<String, dynamic> attachment,
+  ) async {
+    final bucket = attachment['bucket']?.toString() ?? '';
+    final key = attachment['key']?.toString() ?? '';
+    if (bucket.isEmpty || key.isEmpty) return;
+
+    try {
+      final url = await _api.signedAttachmentUrl(bucket, key);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierColor: Colors.black87,
+        builder: (dialogContext) => Dialog(
+          insetPadding: const EdgeInsets.all(12),
+          backgroundColor: Colors.black,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 5,
+                  child: Center(
+                    child: Image.network(
+                      url,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.white70,
+                        size: 56,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 6,
+                right: 6,
+                child: IconButton.filled(
+                  tooltip: 'Close photo',
+                  onPressed: () => Navigator.pop(dialogContext),
+                  icon: const Icon(Icons.close),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Widget _findingPhotoThumbnail(Map<String, dynamic> attachment) {
+    final bucket = attachment['bucket']?.toString() ?? '';
+    final key = attachment['key']?.toString() ?? '';
+    if (bucket.isEmpty || key.isEmpty) {
+      return const SizedBox(
+        width: 72,
+        height: 72,
+        child: Center(
+          child: Icon(
+            Icons.broken_image_outlined,
+            color: Colors.deepOrange,
+          ),
+        ),
+      );
+    }
+
+    return FutureBuilder<String>(
+      future: _api.signedAttachmentUrl(bucket, key),
+      builder: (context, snapshot) {
+        final child = snapshot.hasData
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(9),
+                child: Image.network(
+                  snapshot.data!,
+                  width: 72,
+                  height: 72,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) =>
+                      const SizedBox(
+                    width: 72,
+                    height: 72,
+                    child: Center(
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.deepOrange,
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            : const SizedBox(
+                width: 72,
+                height: 72,
+                child: Center(
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              );
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(9),
+          onTap: snapshot.hasData
+              ? () => _showFindingPhoto(attachment)
+              : null,
+          child: child,
+        );
+      },
+    );
+  }
+
   Widget _findingsCard() {
     final open = _findings
         .where((finding) => finding['status']?.toString() == 'open')
@@ -1304,6 +1418,20 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 fontSize: 11.5,
               ),
             ),
+            if (attachments.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: attachments
+                    .map(
+                      (raw) => _findingPhotoThumbnail(
+                        Map<String, dynamic>.from(raw as Map),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
             if (isOpen && _canEditFindings) ...[
               const SizedBox(height: 4),
               Row(
@@ -1355,7 +1483,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     return Card(
       margin: EdgeInsets.zero,
       child: ExpansionTile(
-        initiallyExpanded: open.isNotEmpty,
+        initiallyExpanded: false,
+        onExpansionChanged: (expanded) =>
+            setState(() => _findingsExpanded = expanded),
         leading: CircleAvatar(
           radius: 20,
           backgroundColor: Colors.deepOrange.withValues(alpha: 0.12),
@@ -1375,13 +1505,39 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   ? '1 open finding'
                   : '${open.length} open findings',
         ),
-        trailing: _canEditFindings
-            ? IconButton(
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (open.isNotEmpty) ...[
+              const Icon(
+                Icons.warning_amber_rounded,
+                color: Color(0xFFF4B400),
+                size: 23,
+              ),
+              const SizedBox(width: 3),
+              Text(
+                '${open.length}',
+                style: const TextStyle(
+                  color: Color(0xFFA56B00),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                ),
+              ),
+              const SizedBox(width: 5),
+            ],
+            if (_canEditFindings)
+              IconButton(
                 tooltip: 'Add finding',
                 onPressed: _busy ? null : _addFinding,
                 icon: const Icon(Icons.add_circle_outline),
-              )
-            : null,
+              ),
+            Icon(
+              _findingsExpanded
+                  ? Icons.keyboard_arrow_up
+                  : Icons.keyboard_arrow_down,
+            ),
+          ],
+        ),
         children: [
           if (open.isEmpty)
             const Padding(

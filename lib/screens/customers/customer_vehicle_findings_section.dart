@@ -14,7 +14,61 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
 
   static const _api = BriskersApi();
 
-  Widget _thumbnail(Map<String, dynamic> attachment) {
+  Future<void> _showPhoto(
+    BuildContext context,
+    Map<String, dynamic> attachment,
+  ) async {
+    final bucket = attachment['bucket']?.toString() ?? '';
+    final key = attachment['key']?.toString() ?? '';
+    if (bucket.isEmpty || key.isEmpty) return;
+
+    final url = await _api.signedAttachmentUrl(bucket, key);
+    if (!context.mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) => Dialog(
+        insetPadding: const EdgeInsets.all(12),
+        backgroundColor: Colors.black,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: InteractiveViewer(
+                minScale: 1,
+                maxScale: 5,
+                child: Center(
+                  child: Image.network(
+                    url,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) => const Icon(
+                      Icons.broken_image_outlined,
+                      color: Colors.white70,
+                      size: 56,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 6,
+              right: 6,
+              child: IconButton.filled(
+                tooltip: 'Close photo',
+                onPressed: () => Navigator.pop(dialogContext),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _thumbnail(
+    BuildContext context,
+    Map<String, dynamic> attachment,
+  ) {
     final bucket = attachment['bucket']?.toString() ?? '';
     final key = attachment['key']?.toString() ?? '';
     if (bucket.isEmpty || key.isEmpty) {
@@ -26,27 +80,32 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
     return FutureBuilder<String>(
       future: _api.signedAttachmentUrl(bucket, key),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const SizedBox(
-            width: 44,
-            height: 44,
-            child: Center(
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          );
-        }
-        return ClipRRect(
+        final child = snapshot.hasData
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  snapshot.data!,
+                  width: 58,
+                  height: 58,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => const Icon(
+                    Icons.broken_image_outlined,
+                    color: Colors.deepOrange,
+                  ),
+                ),
+              )
+            : const SizedBox(
+                width: 58,
+                height: 58,
+                child: Center(
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              );
+
+        return InkWell(
           borderRadius: BorderRadius.circular(8),
-          child: Image.network(
-            snapshot.data!,
-            width: 44,
-            height: 44,
-            fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) => const Icon(
-              Icons.broken_image_outlined,
-              color: Colors.deepOrange,
-            ),
-          ),
+          onTap: snapshot.hasData ? () => _showPhoto(context, attachment) : null,
+          child: child,
         );
       },
     );
@@ -139,29 +198,49 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
                         finding['found_job_number']?.toString() ?? '';
                     final invoice =
                         finding['found_document_number']?.toString() ?? '';
-                    return ListTile(
-                      leading: attachments.isEmpty
-                          ? const Icon(
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 2, 8, 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          ListTile(
+                            leading: const Icon(
                               Icons.warning_amber_rounded,
-                              color: Colors.deepOrange,
-                            )
-                          : _thumbnail(
-                              Map<String, dynamic>.from(
-                                attachments.first as Map,
+                              color: Color(0xFFF4B400),
+                            ),
+                            title: Text(finding['body']?.toString() ?? ''),
+                            subtitle: Text(
+                              <String>[
+                                if (invoice.isNotEmpty)
+                                  'Found Invoice #$invoice',
+                                if (invoice.isEmpty && job.isNotEmpty)
+                                  'Found $job',
+                                if (attachments.isNotEmpty)
+                                  attachments.length == 1
+                                      ? '1 photo'
+                                      : '${attachments.length} photos',
+                                if (finding['include_on_invoice'] == true)
+                                  'Invoice note',
+                              ].join(' • '),
+                            ),
+                          ),
+                          if (attachments.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                              child: Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: attachments
+                                    .map(
+                                      (raw) => _thumbnail(
+                                        context,
+                                        Map<String, dynamic>.from(raw as Map),
+                                      ),
+                                    )
+                                    .toList(),
                               ),
                             ),
-                      title: Text(finding['body']?.toString() ?? ''),
-                      subtitle: Text(
-                        <String>[
-                          if (invoice.isNotEmpty) 'Found Invoice #$invoice',
-                          if (invoice.isEmpty && job.isNotEmpty) 'Found $job',
-                          if (attachments.isNotEmpty)
-                            attachments.length == 1
-                                ? '1 photo'
-                                : '${attachments.length} photos',
-                          if (finding['include_on_invoice'] == true)
-                            'Invoice note',
-                        ].join(' • '),
+                        ],
                       ),
                     );
                   }),
