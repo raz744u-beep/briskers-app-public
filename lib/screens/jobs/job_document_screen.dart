@@ -573,23 +573,25 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
   }
 
+  Future<List<Map<String, dynamic>>> _paymentMethods() async {
+    final options = await _api.paymentOptions(widget.businessId);
+    return List<dynamic>.from(options['methods'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+  }
+
   Future<void> _enterPayment() async {
     if (_estimate) return;
 
-    Map<String, dynamic> options;
+    List<Map<String, dynamic>> methods;
     try {
-      options = await _api.paymentOptions(widget.businessId);
+      methods = await _paymentMethods();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
       return;
     }
 
     if (!mounted) return;
-
-    final methods = List<dynamic>.from(options['methods'] ?? const [])
-        .map((raw) => Map<String, dynamic>.from(raw as Map))
-        .toList();
-
     if (methods.isEmpty) {
       setState(() => _error = 'No payment methods are configured.');
       return;
@@ -598,27 +600,94 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final finalized = _number(_detail?['paid_amount']);
     final pending = _number(_detail?['pending_payment']);
     final total = _number(_detail?['total_amount']);
-    final suggested = pending > 0 ? pending : (total - finalized);
-    final existingMethod = _detail?['pending_payment_method_id']?.toString();
+    final remaining = total - finalized - pending;
+    if (remaining <= 0.005) return;
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (_) => _PaymentEntryDialog(
         methods: methods,
-        initialAmount: suggested < 0 ? 0 : suggested,
-        initialMethodId: existingMethod,
+        initialAmount: remaining,
+        title: 'Add payment',
+        saveLabel: 'Add payment',
       ),
     );
     if (result == null) return;
 
     await _run(() async {
-      await _api.setPendingInvoicePayment(
+      await _api.addPendingInvoicePayment(
         widget.businessId,
         widget.documentId,
         amount: result['amount'] as num,
         methodId: result['method_id'].toString(),
       );
     });
+  }
+
+  Future<void> _editPayment(Map<String, dynamic> payment) async {
+    if (_estimate || payment['state']?.toString() != 'pending') return;
+
+    List<Map<String, dynamic>> methods;
+    try {
+      methods = await _paymentMethods();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+
+    if (!mounted || methods.isEmpty) return;
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _PaymentEntryDialog(
+        methods: methods,
+        initialAmount: _number(payment['amount']),
+        initialMethodId: payment['payment_method_id']?.toString(),
+        title: 'Edit payment',
+        saveLabel: 'Save changes',
+      ),
+    );
+    if (result == null) return;
+
+    await _run(() async {
+      await _api.updatePendingInvoicePayment(
+        widget.businessId,
+        payment['id'].toString(),
+        amount: result['amount'] as num,
+        methodId: result['method_id'].toString(),
+      );
+    });
+  }
+
+  Future<void> _deletePayment(Map<String, dynamic> payment) async {
+    if (_estimate || payment['state']?.toString() != 'pending') return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remove payment?'),
+        content: Text(
+          'Remove the ${_money(payment['amount'])} '
+          '${payment['payment_method_name'] ?? 'payment'} entry?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await _run(() => _api.deletePendingInvoicePayment(
+          widget.businessId,
+          payment['id'].toString(),
+        ));
   }
 
   Future<Map<String, dynamic>?> _pickInvoiceCustomer() async {
@@ -991,9 +1060,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       await showDialog<void>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Payment pending close'),
+          title: const Text('Payments entered'),
           content: const Text(
-            'Clear or correct the pending payment first. Once there is no pending payment, this invoice can be reassigned or deleted.',
+            'Remove the entered payments first. Once there are no payments on this invoice, it can be reassigned or deleted.',
           ),
           actions: [
             FilledButton(
@@ -1492,9 +1561,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       if (rawStatus == 'issued') return 'Issued';
       return 'Draft';
     }
-    if (pendingPaid > 0) return 'Pending Close';
-    if (total > 0 && finalizedPaid >= total - 0.005) return 'Paid';
-    if (finalizedPaid > 0) return 'Partial';
+    final shownPaid = finalizedPaid + pendingPaid;
+    if (total > 0 && shownPaid >= total - 0.005) return 'Paid';
+    if (shownPaid > 0) return 'Partial';
     return 'Open';
   }
 
@@ -2070,6 +2139,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     required num pendingPaid,
     required num balance,
   }) {
+    final payments = List<dynamic>.from(_detail?['payments'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+    final shownPaid = finalizedPaid + pendingPaid;
+    final safeBalance = balance < 0 ? 0 : balance;
+
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
@@ -2091,63 +2166,161 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   _AmountRow(label: 'Invoice total', value: _money(total)),
                   _AmountRow(
                     label: 'Paid',
-                    value: _money(finalizedPaid),
-                    valueColor: finalizedPaid > 0
-                        ? const Color(0xFF0C9A43)
-                        : null,
+                    value: _money(shownPaid),
+                    valueColor:
+                        shownPaid > 0 ? const Color(0xFF0C9A43) : null,
                   ),
-                  if (pendingPaid > 0)
-                    _AmountRow(
-                      label: 'Payment entered',
-                      value: _money(pendingPaid),
-                      valueColor: const Color(0xFFE58A00),
-                    ),
                   const Divider(height: 18),
                   _AmountRow(
                     label: 'Balance',
-                    value: _money(balance < 0 ? 0 : balance),
+                    value: _money(safeBalance),
                     bold: true,
                   ),
                 ],
               ),
             ),
           ),
-          if (pendingPaid > 0) ...[
-            const SizedBox(height: 12),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Payments',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ),
+              if (payments.isNotEmpty)
+                Text(
+                  '${payments.length}',
+                  style: const TextStyle(
+                    color: Color(0xFF405064),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (payments.isEmpty)
             Container(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFF4DE),
+                color: const Color(0xFFF5F8F7),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Row(
+              child: const Text('No payments entered yet.'),
+            )
+          else
+            Card(
+              margin: EdgeInsets.zero,
+              child: Column(
                 children: [
-                  Icon(Icons.schedule, color: Color(0xFFE58A00)),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Payment entered — Pending Close. It can still be edited before the financial batch is closed.',
+                  for (var index = 0; index < payments.length; index++) ...[
+                    Builder(
+                      builder: (context) {
+                        final payment = payments[index];
+                        final editable =
+                            payment['state']?.toString() == 'pending';
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor:
+                                const Color(0xFF0C9A43).withValues(alpha: 0.10),
+                            child: const Icon(
+                              Icons.payments_outlined,
+                              color: Color(0xFF0C9A43),
+                            ),
+                          ),
+                          title: Text(
+                            payment['payment_method_name']?.toString() ??
+                                'Payment',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _money(payment['amount']),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              if (editable && !_busy) ...[
+                                const SizedBox(width: 4),
+                                PopupMenuButton<String>(
+                                  tooltip: 'Payment options',
+                                  onSelected: (value) {
+                                    if (value == 'edit') _editPayment(payment);
+                                    if (value == 'remove') {
+                                      _deletePayment(payment);
+                                    }
+                                  },
+                                  itemBuilder: (_) => const [
+                                    PopupMenuItem(
+                                      value: 'edit',
+                                      child: ListTile(
+                                        dense: true,
+                                        contentPadding: EdgeInsets.zero,
+                                        leading: Icon(Icons.edit_outlined),
+                                        title: Text('Edit payment'),
+                                      ),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'remove',
+                                      child: ListTile(
+                                        dense: true,
+                                        contentPadding: EdgeInsets.zero,
+                                        leading: Icon(Icons.delete_outline),
+                                        title: Text('Remove payment'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                    if (index != payments.length - 1)
+                      const Divider(height: 1, indent: 72),
+                  ],
+                ],
+              ),
+            ),
+          const SizedBox(height: 16),
+          if (safeBalance > 0.005)
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _busy ? null : _enterPayment,
+                icon: const Icon(Icons.add_card_outlined),
+                label: const Text('Add Payment'),
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEAF8EE),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFCBEBD3)),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.check_circle, color: Color(0xFF0C9A43)),
+                  SizedBox(width: 8),
+                  Text(
+                    'Paid in full',
+                    style: TextStyle(
+                      color: Color(0xFF08752F),
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ],
               ),
             ),
-          ],
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _busy ? null : _enterPayment,
-              icon: Icon(
-                pendingPaid > 0
-                    ? Icons.edit_outlined
-                    : Icons.add_card_outlined,
-              ),
-              label: Text(
-                pendingPaid > 0 ? 'Edit payment' : 'Enter payment',
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -3280,11 +3453,15 @@ class _PaymentEntryDialog extends StatefulWidget {
     required this.methods,
     required this.initialAmount,
     this.initialMethodId,
+    this.title = 'Add payment',
+    this.saveLabel = 'Save payment',
   });
 
   final List<Map<String, dynamic>> methods;
   final num initialAmount;
   final String? initialMethodId;
+  final String title;
+  final String saveLabel;
 
   @override
   State<_PaymentEntryDialog> createState() => _PaymentEntryDialogState();
@@ -3316,7 +3493,7 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
 
   void _save() {
     final amount = num.tryParse(_amount.text.trim());
-    if (amount == null || amount < 0) {
+    if (amount == null || amount <= 0) {
       setState(() => _error = 'Enter a valid payment amount.');
       return;
     }
@@ -3332,7 +3509,7 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Enter payment'),
+      title: Text(widget.title),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -3377,7 +3554,7 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
         ),
         FilledButton(
           onPressed: _save,
-          child: const Text('Save payment'),
+          child: Text(widget.saveLabel),
         ),
       ],
     );

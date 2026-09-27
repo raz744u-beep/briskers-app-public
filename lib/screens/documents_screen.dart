@@ -32,7 +32,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   List<String> get _statuses => _estimate
       ? const ['Draft', 'Issued', 'Accepted', 'Declined', 'Expired', 'Void']
-      : const ['Open', 'Pending Close', 'Partial', 'Paid', 'Void'];
+      : const ['Open', 'Partial', 'Paid', 'Void'];
 
   String get _title => _estimate ? 'Estimates' : 'Invoices';
 

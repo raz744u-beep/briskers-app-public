@@ -1790,10 +1790,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                           <String>[
                             _money(document['total_amount']),
                             if (document['converted'] == true) 'Converted',
-                            if (!estimate && paid > 0)
-                              'Paid ${_money(paid)}',
-                            if (!estimate && pending > 0)
-                              'Payment entered ${_money(pending)}',
+                            if (!estimate && paid + pending > 0)
+                              'Paid ${_money(paid + pending)}',
                           ].join(' • '),
                         ),
                         trailing: const Icon(Icons.chevron_right),

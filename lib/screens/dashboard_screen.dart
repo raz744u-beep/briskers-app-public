@@ -480,6 +480,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     if (action != 'create_invoice' &&
+        action != 'create_estimate' &&
+        action != 'create_appointment' &&
         action != 'create_job' &&
         action != 'create_customer') {
       if (!mounted) return;
@@ -641,6 +643,73 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return;
     }
 
+
+    if (action == 'create_estimate') {
+      final estimateId = await _api.createQuickEstimate(
+        widget.businessId,
+        customerId: customerId,
+        vehicleId: vehicleId,
+      );
+
+      if (!mounted) return;
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => JobDocumentScreen(
+            businessId: widget.businessId,
+            documentId: estimateId,
+            isOwner: widget.roleCode == 'owner',
+          ),
+        ),
+      );
+      await _load();
+      return;
+    }
+
+    if (action == 'create_appointment') {
+      final rawStart = plan['appointment_start']?.toString().trim() ?? '';
+      final startsAt = DateTime.tryParse(rawStart);
+      if (startsAt == null) {
+        setState(() => _error =
+            'Briskers needs a valid appointment date and time.');
+        return;
+      }
+
+      final durationMinutes =
+          (int.tryParse(plan['appointment_duration_minutes']?.toString() ?? '') ??
+                  60)
+              .clamp(1, 1440)
+              .toInt();
+      final appointmentTitle = plan['title']?.toString().trim() ?? '';
+      final description = plan['description']?.toString().trim() ?? '';
+
+      await _api.createAppointment(
+        widget.businessId,
+        customerId: customerId,
+        vehicleId: vehicleId,
+        title: appointmentTitle.isEmpty
+            ? 'Service appointment'
+            : appointmentTitle,
+        description: description.isEmpty ? null : description,
+        startsAt: startsAt,
+        endsAt: startsAt.add(Duration(minutes: durationMinutes)),
+      );
+
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Appointment created for '
+            '${DateFormat('MMM d, h:mm a').format(startsAt.toLocal())}.',
+          ),
+        ),
+      );
+      widget.onAppointmentsTap?.call();
+      return;
+    }
+
     final title = await _askJobTitle(plan['title']?.toString());
     if (title == null || !mounted) return;
 
@@ -694,7 +763,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 autofocus: true,
                 textInputAction: TextInputAction.send,
                 decoration: const InputDecoration(
-                  hintText: 'Make an invoice for Larry Carter',
+                  hintText: 'Schedule Larry Carter tomorrow at 10 for an oil change',
                   border: OutlineInputBorder(),
                 ),
                 onTapOutside: (_) =>
@@ -710,7 +779,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Try: "Open a new job for Malcolm Ross"',
+                  'Try: "Create an estimate for Malcolm Ross"',
                   style: TextStyle(fontSize: 12),
                 ),
               ),
@@ -1042,7 +1111,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             ),
                             Text(
-                              'Create invoices or jobs with a simple command',
+                              'Create invoices, estimates, appointments or jobs',
                               style: TextStyle(fontSize: 12.5),
                             ),
                           ],

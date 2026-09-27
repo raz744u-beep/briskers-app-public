@@ -24,6 +24,7 @@ class BriskersApi {
         body: {
           'business_id': businessId,
           'command': command,
+          'local_now': DateTime.now().toIso8601String(),
         },
       );
       return Map<String, dynamic>.from(result.data as Map);
@@ -1321,6 +1322,28 @@ class BriskersApi {
     return result.toString();
   }
 
+
+  Future<String> createQuickEstimate(
+    String businessId, {
+    required String customerId,
+    String? vehicleId,
+    DateTime? documentDate,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_quick_estimate',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_document_date': (documentDate ?? DateTime.now())
+            .toIso8601String()
+            .split('T')
+            .first,
+      },
+    );
+    return result.toString();
+  }
+
   Future<void> updateDocumentHeader(
     String businessId,
     String documentId, {
@@ -1632,6 +1655,55 @@ class BriskersApi {
         'p_invoice_id': invoiceId,
         'p_amount': amount,
         'p_method_id': methodId,
+      },
+    );
+  }
+
+
+  Future<String> addPendingInvoicePayment(
+    String businessId,
+    String invoiceId, {
+    required num amount,
+    required String methodId,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_add_pending_invoice_payment',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+        'p_amount': amount,
+        'p_method_id': methodId,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> updatePendingInvoicePayment(
+    String businessId,
+    String paymentId, {
+    required num amount,
+    required String methodId,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_pending_invoice_payment',
+      params: {
+        'p_business_id': businessId,
+        'p_payment_id': paymentId,
+        'p_amount': amount,
+        'p_method_id': methodId,
+      },
+    );
+  }
+
+  Future<void> deletePendingInvoicePayment(
+    String businessId,
+    String paymentId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_pending_invoice_payment',
+      params: {
+        'p_business_id': businessId,
+        'p_payment_id': paymentId,
       },
     );
   }
