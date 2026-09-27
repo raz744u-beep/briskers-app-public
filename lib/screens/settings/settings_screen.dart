@@ -4,6 +4,8 @@ import '../../core/briskers_colors.dart';
 import 'catalog_settings_screen.dart';
 import 'employees_settings_screen.dart';
 import 'job_statuses_settings_screen.dart';
+import 'item_categories_settings_screen.dart';
+import 'payment_methods_settings_screen.dart';
 import 'shop_info_settings_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -112,15 +114,52 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
+          ListTile(
+            leading: const Icon(
+              Icons.category_outlined,
+              color: BriskersColors.invoices,
+            ),
+            title: const Text('Item Categories'),
+            subtitle: const Text(
+              'Edit the category list used by catalog items',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ItemCategoriesSettingsScreen(
+                    businessId: businessId,
+                  ),
+                ),
+              );
+            },
+          ),
           const ListTile(
             leading: Icon(Icons.receipt_long_outlined, color: BriskersColors.jobs),
             title: Text('Taxes & invoicing'),
             subtitle: Text('Tax defaults, invoice options and numbering — coming next'),
           ),
-          const ListTile(
-            leading: Icon(Icons.payments_outlined, color: BriskersColors.expenses),
-            title: Text('Payment methods'),
-            subtitle: Text('Accepted payment methods — coming next'),
+          ListTile(
+            leading: const Icon(
+              Icons.payments_outlined,
+              color: BriskersColors.expenses,
+            ),
+            title: const Text('Payment Methods'),
+            subtitle: const Text(
+              'Cash, cards, Zelle and other accepted methods',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PaymentMethodsSettingsScreen(
+                    businessId: businessId,
+                  ),
+                ),
+              );
+            },
           ),
           const ListTile(
             leading: Icon(Icons.notifications_outlined, color: BriskersColors.schedule),
