@@ -967,6 +967,21 @@ class BriskersApi {
     return result.toString();
   }
 
+  Future<void> updateVehicleFinding(
+    String businessId,
+    String findingId, {
+    required String body,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_vehicle_finding',
+      params: {
+        'p_business_id': businessId,
+        'p_finding_id': findingId,
+        'p_body': body,
+      },
+    );
+  }
+
   Future<String> createVehicleFinding(
     String businessId,
     String jobId, {

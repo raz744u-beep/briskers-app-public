@@ -524,98 +524,399 @@ class _CustomerVehicleFindingsSectionState
     );
   }
 
+  Future<List<Map<String, dynamic>>> _uploadMorePhotos(
+    String findingId,
+    List<Map<String, dynamic>> current,
+  ) async {
+    final source = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from gallery'),
+              subtitle: const Text('You can select multiple photos'),
+              onTap: () => Navigator.pop(sheetContext, 'gallery'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.pop(sheetContext, 'camera'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null) return current;
+
+    final picked = <XFile>[];
+    if (source == 'gallery') {
+      picked.addAll(
+        await _picker.pickMultiImage(
+          imageQuality: 88,
+          maxWidth: 1920,
+          maxHeight: 1920,
+        ),
+      );
+    } else {
+      final photo = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 88,
+        maxWidth: 1920,
+        maxHeight: 1920,
+      );
+      if (photo != null) picked.add(photo);
+    }
+
+    if (picked.isEmpty) return current;
+
+    setState(() => _busy = true);
+    try {
+      for (final photo in picked) {
+        await _api.uploadVehicleFindingPhoto(
+          widget.businessId,
+          findingId,
+          filename: photo.name,
+          mimeType: _imageMime(photo.name),
+          bytes: await photo.readAsBytes(),
+        );
+      }
+
+      final rows = await _allFindings();
+      final updated = rows.cast<Map<String, dynamic>?>().firstWhere(
+            (row) => row?['id']?.toString() == findingId,
+            orElse: () => null,
+          );
+      if (updated == null) return current;
+      return List<dynamic>.from(
+        updated['attachments'] ?? const [],
+      ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _openFinding(Map<String, dynamic> finding) async {
-    final attachments = List<dynamic>.from(
+    final findingId = finding['id']?.toString() ?? '';
+    if (findingId.isEmpty || !mounted) return;
+
+    var localBody = finding['body']?.toString().trim() ?? '';
+    var localAttachments = List<dynamic>.from(
       finding['attachments'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    var includeOnInvoice = finding['include_on_invoice'] == true;
+    var actionBusy = false;
+    var changed = false;
+    var addAnother = false;
 
-    if (!mounted) return;
-    final addAnother = await showModalBottomSheet<bool>(
+    await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (sheetContext) {
-        final body = finding['body']?.toString().trim() ?? '';
-        final vehicle = finding['_vehicle_label']?.toString().trim() ?? '';
-        final date = _dateLabel(finding['created_at']);
-        final status = finding['status']?.toString() == 'resolved'
-            ? 'Resolved'
-            : 'Open';
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          final vehicle = finding['_vehicle_label']?.toString().trim() ?? '';
+          final date = _dateLabel(finding['created_at']);
+          final status = finding['status']?.toString() == 'resolved'
+              ? 'Resolved'
+              : 'Open';
 
-        return SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Vehicle finding',
-                      style: TextStyle(
-                        fontSize: 21,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+          Future<void> editFinding() async {
+            final controller = TextEditingController(text: localBody);
+            final updatedBody = await showDialog<String>(
+              context: sheetContext,
+              builder: (dialogContext) => AlertDialog(
+                title: const Text('Edit finding'),
+                content: TextField(
+                  controller: controller,
+                  autofocus: true,
+                  minLines: 3,
+                  maxLines: 7,
+                  decoration: const InputDecoration(
+                    labelText: 'Finding',
                   ),
-                  Text(
-                    status,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      color: status == 'Open'
-                          ? const Color(0xFFA56B00)
-                          : Colors.green,
-                    ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () {
+                      final value = controller.text.trim();
+                      if (value.isNotEmpty) {
+                        Navigator.pop(dialogContext, value);
+                      }
+                    },
+                    child: const Text('Save'),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
-              if (vehicle.isNotEmpty)
-                Text(
-                  vehicle,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+            );
+            controller.dispose();
+            if (updatedBody == null || updatedBody == localBody) return;
+
+            setSheetState(() => actionBusy = true);
+            try {
+              await _api.updateVehicleFinding(
+                widget.businessId,
+                findingId,
+                body: updatedBody,
+              );
+              changed = true;
+              setSheetState(() => localBody = updatedBody);
+            } catch (error) {
+              if (sheetContext.mounted) {
+                ScaffoldMessenger.of(sheetContext).showSnackBar(
+                  SnackBar(content: Text(error.toString())),
+                );
+              }
+            } finally {
+              if (sheetContext.mounted) {
+                setSheetState(() => actionBusy = false);
+              }
+            }
+          }
+
+          Future<void> deleteFinding() async {
+            final confirmed = await showDialog<bool>(
+              context: sheetContext,
+              builder: (dialogContext) => AlertDialog(
+                title: const Text('Delete finding?'),
+                content: const Text(
+                  'This will permanently delete this vehicle finding.',
                 ),
-              if (date.isNotEmpty) Text(date),
-              const SizedBox(height: 14),
-              Text(
-                body.isEmpty ? 'Vehicle finding' : body,
-                style: const TextStyle(fontSize: 16, height: 1.35),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, false),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialogContext, true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Delete'),
+                  ),
+                ],
               ),
-              if (attachments.isNotEmpty) ...[
+            );
+            if (confirmed != true) return;
+
+            setSheetState(() => actionBusy = true);
+            try {
+              await _api.deleteVehicleFinding(
+                widget.businessId,
+                findingId,
+              );
+              changed = true;
+              if (sheetContext.mounted) Navigator.pop(sheetContext);
+            } catch (error) {
+              if (sheetContext.mounted) {
+                setSheetState(() => actionBusy = false);
+                ScaffoldMessenger.of(sheetContext).showSnackBar(
+                  SnackBar(content: Text(error.toString())),
+                );
+              }
+            }
+          }
+
+          Future<void> toggleInvoiceNotes(bool value) async {
+            setSheetState(() => actionBusy = true);
+            try {
+              await _api.setVehicleFindingInvoiceFlag(
+                widget.businessId,
+                findingId,
+                value,
+              );
+              changed = true;
+              setSheetState(() => includeOnInvoice = value);
+            } catch (error) {
+              if (sheetContext.mounted) {
+                ScaffoldMessenger.of(sheetContext).showSnackBar(
+                  SnackBar(content: Text(error.toString())),
+                );
+              }
+            } finally {
+              if (sheetContext.mounted) {
+                setSheetState(() => actionBusy = false);
+              }
+            }
+          }
+
+          Future<void> addPhotos() async {
+            try {
+              final updated = await _uploadMorePhotos(
+                findingId,
+                localAttachments,
+              );
+              if (updated.length != localAttachments.length) {
+                changed = true;
+                if (sheetContext.mounted) {
+                  setSheetState(() => localAttachments = updated);
+                }
+              }
+            } catch (error) {
+              if (sheetContext.mounted) {
+                ScaffoldMessenger.of(sheetContext).showSnackBar(
+                  SnackBar(content: Text(error.toString())),
+                );
+              }
+            }
+          }
+
+          return SafeArea(
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Vehicle finding',
+                        style: TextStyle(
+                          fontSize: 21,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      status,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: status == 'Open'
+                            ? const Color(0xFFA56B00)
+                            : Colors.green,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (vehicle.isNotEmpty)
+                  Text(
+                    vehicle,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                if (date.isNotEmpty) Text(date),
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Wrap(
+                    spacing: 4,
+                    children: [
+                      TextButton.icon(
+                        onPressed: actionBusy ? null : editFinding,
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('Edit'),
+                      ),
+                      TextButton.icon(
+                        onPressed: actionBusy ? null : deleteFinding,
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Delete'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  localBody.isEmpty ? 'Vehicle finding' : localBody,
+                  style: const TextStyle(fontSize: 16, height: 1.35),
+                ),
                 const SizedBox(height: 16),
                 Text(
-                  attachments.length == 1
-                      ? 'Photo'
-                      : 'Photos (${attachments.length})',
+                  localAttachments.isEmpty
+                      ? 'Photos'
+                      : 'Photos (${localAttachments.length})',
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: attachments
-                      .map(
-                        (attachment) => _findingThumbnail(
-                          sheetContext,
-                          [attachment],
+                  children: [
+                    ...localAttachments.map(
+                      (attachment) => _findingThumbnail(
+                        sheetContext,
+                        [attachment],
+                      ),
+                    ),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: actionBusy || _busy ? null : addPhotos,
+                      child: Container(
+                        width: 76,
+                        height: 76,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .outlineVariant,
+                          ),
                         ),
-                      )
-                      .toList(),
+                        child: const Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add, size: 30),
+                            SizedBox(height: 2),
+                            Text(
+                              'Add photo',
+                              style: TextStyle(fontSize: 11.5),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Divider(height: 1),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: includeOnInvoice,
+                  onChanged: actionBusy
+                      ? null
+                      : (value) =>
+                          toggleInvoiceNotes(value == true),
+                  title: const Text(
+                    'Include on invoice notes',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: Text(
+                    includeOnInvoice
+                        ? 'Included in invoice notes.'
+                        : 'Not included in invoice notes.',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: actionBusy
+                      ? null
+                      : () {
+                          addAnother = true;
+                          Navigator.pop(sheetContext);
+                        },
+                  icon: const Icon(Icons.add_circle_outline),
+                  label: const Text('Add another finding'),
                 ),
               ],
-              const SizedBox(height: 18),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.pop(sheetContext, true),
-                icon: const Icon(Icons.add_circle_outline),
-                label: const Text('Add another finding'),
-              ),
-            ],
-          ),
-        );
-      },
+            ),
+          );
+        },
+      ),
     );
 
-    if (addAnother == true) await _addFinding();
+    if (changed && mounted) await _refresh();
+    if (addAnother && mounted) await _addFinding();
   }
 
   Widget _findingRow(
