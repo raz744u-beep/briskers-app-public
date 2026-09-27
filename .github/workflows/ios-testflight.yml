@@ -46,6 +46,13 @@ jobs:
           s = s.replace("PRODUCT_BUNDLE_IDENTIFIER = com.briskers.briskersApp;", "PRODUCT_BUNDLE_IDENTIFIER = com.briskers.app;")
           s = s.replace("PRODUCT_BUNDLE_IDENTIFIER = com.briskers.briskersAppTests;", "PRODUCT_BUNDLE_IDENTIFIER = com.briskers.app.RunnerTests;")
           s = s.replace("CODE_SIGN_STYLE = Automatic;", "CODE_SIGN_STYLE = Automatic;\n\t\t\t\tDEVELOPMENT_TEAM = 2L4T6BTW73;")
+          # Configure distribution identity only on the Runner project Release settings.
+          # Do not pass CODE_SIGN_IDENTITY globally to xcodebuild because that also
+          # applies to Flutter Swift-package dependencies and causes signing conflicts.
+          s = s.replace(
+              'CODE_SIGN_STYLE = Automatic;',
+              'CODE_SIGN_STYLE = Automatic;\\n\\t\\t\\t\\tDEVELOPMENT_TEAM = 2L4T6BTW73;',
+          )
           p.write_text(s)
           PY
 
@@ -86,7 +93,7 @@ jobs:
         run: |
           VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
-          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release -archivePath build/ios/archive/Runner.xcarchive -allowProvisioningUpdates -authenticationKeyPath "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8" -authenticationKeyID "$APP_STORE_CONNECT_API_KEY_ID" -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" CODE_SIGN_STYLE=Automatic CODE_SIGN_IDENTITY="Apple Distribution" CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" archive
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release -archivePath build/ios/archive/Runner.xcarchive -allowProvisioningUpdates -authenticationKeyPath "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8" -authenticationKeyID "$APP_STORE_CONNECT_API_KEY_ID" -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" archive
           cat > ios/ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
