@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
+import '../services/briskers_api.dart';
 import 'appointments_screen.dart';
 import 'customers/customers_screen.dart';
 import 'dashboard_screen.dart';
@@ -24,6 +26,8 @@ class ShellScreen extends StatefulWidget {
 }
 
 class _ShellScreenState extends State<ShellScreen> {
+  static const _api = BriskersApi();
+
   static const _sectionColors = [
     BriskersColors.today,
     BriskersColors.customers,
@@ -36,12 +40,29 @@ class _ShellScreenState extends State<ShellScreen> {
   int _todayRefreshToken = 0;
   int _customersRefreshToken = 0;
   int _jobsRefreshToken = 0;
+  Map<String, dynamic> _navCounts = const {
+    'customers': 0,
+    'appointments': 0,
+    'jobs': 0,
+  };
   late String _businessName;
 
   @override
   void initState() {
     super.initState();
     _businessName = widget.businessName;
+    _refreshNavCounts();
+  }
+
+  Future<void> _refreshNavCounts() async {
+    try {
+      final counts = await _api.navCounts(
+        widget.businessId,
+        DateFormat('yyyy-MM-dd').format(DateTime.now()),
+      );
+      if (!mounted) return;
+      setState(() => _navCounts = counts);
+    } catch (_) {}
   }
 
   void _goTo(int index) {
@@ -51,6 +72,21 @@ class _ShellScreenState extends State<ShellScreen> {
       if (index == 1) _customersRefreshToken++;
       if (index == 3) _jobsRefreshToken++;
     });
+    _refreshNavCounts();
+  }
+
+  Widget _navIcon(
+    IconData icon,
+    String countKey, {
+    bool selected = false,
+  }) {
+    final count = int.tryParse(_navCounts[countKey]?.toString() ?? '') ?? 0;
+    return Badge(
+      label: Text('$count'),
+      smallSize: 16,
+      largeSize: 18,
+      child: Icon(icon),
+    );
   }
 
   @override
@@ -157,28 +193,40 @@ class _ShellScreenState extends State<ShellScreen> {
           selectedIndex: _index,
           onDestinationSelected: _goTo,
           labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-          destinations: const [
-            NavigationDestination(
+          destinations: [
+            const NavigationDestination(
               icon: Icon(Icons.dashboard_outlined),
               selectedIcon: Icon(Icons.dashboard),
               label: 'Today',
             ),
             NavigationDestination(
-              icon: Icon(Icons.people_outline),
-              selectedIcon: Icon(Icons.people),
+              icon: _navIcon(Icons.people_outline, 'customers'),
+              selectedIcon: _navIcon(
+                Icons.people,
+                'customers',
+                selected: true,
+              ),
               label: 'Customers',
             ),
             NavigationDestination(
-              icon: Icon(Icons.calendar_month_outlined),
-              selectedIcon: Icon(Icons.calendar_month),
+              icon: _navIcon(Icons.calendar_month_outlined, 'appointments'),
+              selectedIcon: _navIcon(
+                Icons.calendar_month,
+                'appointments',
+                selected: true,
+              ),
               label: 'Schedule',
             ),
             NavigationDestination(
-              icon: Icon(Icons.build_outlined),
-              selectedIcon: Icon(Icons.build),
+              icon: _navIcon(Icons.build_outlined, 'jobs'),
+              selectedIcon: _navIcon(
+                Icons.build,
+                'jobs',
+                selected: true,
+              ),
               label: 'Jobs',
             ),
-            NavigationDestination(
+            const NavigationDestination(
               icon: Icon(Icons.more_horiz),
               label: 'More',
             ),
