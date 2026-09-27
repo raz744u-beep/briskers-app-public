@@ -2666,10 +2666,18 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                     children: [
                       TextField(
                         controller: _name,
+                        readOnly: widget.lockCatalogFields,
                         textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Item',
-                          border: OutlineInputBorder(),
+                          border: const OutlineInputBorder(),
+                          filled: widget.lockCatalogFields,
+                          fillColor: widget.lockCatalogFields
+                              ? Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest
+                                  .withValues(alpha: 0.45)
+                              : null,
                         ),
                       ),
                       const SizedBox(height: 12),
