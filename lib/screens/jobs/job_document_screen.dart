@@ -28,6 +28,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   final ImagePicker _picker = ImagePicker();
 
   Map<String, dynamic>? _detail;
+  num _defaultTaxRate = 0;
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -47,13 +48,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   Future<void> _load() async {
     try {
-      final detail = await _api.documentDetail(
-        widget.businessId,
-        widget.documentId,
-      );
+      final results = await Future.wait<dynamic>([
+        _api.documentDetail(
+          widget.businessId,
+          widget.documentId,
+        ),
+        _api.taxSettings(widget.businessId),
+      ]);
       if (!mounted) return;
+      final detail = Map<String, dynamic>.from(results[0] as Map);
+      final taxSettings = Map<String, dynamic>.from(results[1] as Map);
       setState(() {
         _detail = detail;
+        _defaultTaxRate =
+            num.tryParse(taxSettings['sales_tax_rate']?.toString() ?? '') ?? 0;
         _loading = false;
         _error = null;
       });
@@ -204,7 +212,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         itemId: selected['id']?.toString(),
         quantity: 1,
         unitPrice: _number(selected['selling_price']),
-        taxRate: 0,
+        taxRate: selected['taxable'] == true ? _defaultTaxRate : 0,
         lineKind: 'item',
       );
     });
@@ -215,7 +223,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (_) => const _CustomLineDialog(),
+      builder: (_) => _CustomLineDialog(
+        defaultTaxRate: _defaultTaxRate,
+      ),
     );
     if (result == null) return;
 
@@ -2246,7 +2256,11 @@ class _AmountRow extends StatelessWidget {
 }
 
 class _CustomLineDialog extends StatefulWidget {
-  const _CustomLineDialog();
+  const _CustomLineDialog({
+    required this.defaultTaxRate,
+  });
+
+  final num defaultTaxRate;
 
   @override
   State<_CustomLineDialog> createState() => _CustomLineDialogState();
@@ -2257,9 +2271,22 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
   final _description = TextEditingController();
   final _quantity = TextEditingController(text: '1');
   final _price = TextEditingController(text: '0');
-  final _taxPercent = TextEditingController(text: '0');
+  late final TextEditingController _taxPercent;
   String _lineKind = 'item';
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    var percent = (widget.defaultTaxRate * 100).toStringAsFixed(3);
+    while (percent.contains('.') && percent.endsWith('0')) {
+      percent = percent.substring(0, percent.length - 1);
+    }
+    if (percent.endsWith('.')) {
+      percent = percent.substring(0, percent.length - 1);
+    }
+    _taxPercent = TextEditingController(text: percent);
+  }
 
   @override
   void dispose() {
