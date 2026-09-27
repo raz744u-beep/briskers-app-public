@@ -225,7 +225,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
                           )
                         : ListView.separated(
                             itemCount: items.length,
-                            separatorBuilder: (_, __) =>
+                            separatorBuilder: (context, index) =>
                                 const Divider(height: 1),
                             itemBuilder: (context, index) {
                               final item = items[index];
