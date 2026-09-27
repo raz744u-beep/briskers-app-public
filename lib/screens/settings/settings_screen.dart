@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
+import 'catalog_settings_screen.dart';
 import 'employees_settings_screen.dart';
 import 'job_statuses_settings_screen.dart';
 import 'shop_info_settings_screen.dart';
@@ -90,6 +91,27 @@ class SettingsScreen extends StatelessWidget {
             },
           ),
           const Divider(),
+          ListTile(
+            leading: const Icon(
+              Icons.inventory_2_outlined,
+              color: BriskersColors.invoices,
+            ),
+            title: const Text('Items / Catalog'),
+            subtitle: const Text(
+              'Parts, labor, services, prices, taxability and categories',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CatalogSettingsScreen(
+                    businessId: businessId,
+                  ),
+                ),
+              );
+            },
+          ),
           const ListTile(
             leading: Icon(Icons.receipt_long_outlined, color: BriskersColors.jobs),
             title: Text('Taxes & invoicing'),
