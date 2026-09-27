@@ -53,6 +53,36 @@ class BriskersApi {
         .toList();
   }
 
+  Future<Map<String, dynamic>> navCounts(
+    String businessId,
+    String day,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_nav_counts',
+      params: {
+        'p_business_id': businessId,
+        'p_day': day,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> documents(
+    String businessId, {
+    required String kind,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_list_documents_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_kind': kind,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
   Future<Map<String, dynamic>> dashboard(String businessId, String day) async {
     final result = await supabase.rpc(
       'briskers_dashboard',
