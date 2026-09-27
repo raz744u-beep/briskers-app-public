@@ -147,12 +147,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             const SizedBox(height: 10),
             Align(
               alignment: Alignment.centerLeft,
-              child: PopupMenuButton<String?>(
+              child: PopupMenuButton<String>(
                 tooltip: 'Filter $_title',
-                onSelected: (value) => setState(() => _selectedStatus = value),
+                onSelected: (value) => setState(
+                  () => _selectedStatus = value == '__all__' ? null : value,
+                ),
                 itemBuilder: (_) => [
-                  const PopupMenuItem<String?>(
-                    value: null,
+                  const PopupMenuItem<String>(
+                    value: '__all__',
                     child: Row(
                       children: [
                         Icon(Icons.all_inclusive),
@@ -161,7 +163,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       ],
                     ),
                   ),
-                  ..._statuses.map((status) => PopupMenuItem<String?>(
+                  ..._statuses.map((status) => PopupMenuItem<String>(
                         value: status,
                         child: Row(
                           children: [
