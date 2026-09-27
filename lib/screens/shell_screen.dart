@@ -77,9 +77,8 @@ class _ShellScreenState extends State<ShellScreen> {
 
   Widget _navIcon(
     IconData icon,
-    String countKey, {
-    bool selected = false,
-  }) {
+    String countKey,
+  ) {
     final count = int.tryParse(_navCounts[countKey]?.toString() ?? '') ?? 0;
     return Badge(
       label: Text('$count'),
@@ -204,7 +203,6 @@ class _ShellScreenState extends State<ShellScreen> {
               selectedIcon: _navIcon(
                 Icons.people,
                 'customers',
-                selected: true,
               ),
               label: 'Customers',
             ),
@@ -213,7 +211,6 @@ class _ShellScreenState extends State<ShellScreen> {
               selectedIcon: _navIcon(
                 Icons.calendar_month,
                 'appointments',
-                selected: true,
               ),
               label: 'Schedule',
             ),
@@ -222,7 +219,6 @@ class _ShellScreenState extends State<ShellScreen> {
               selectedIcon: _navIcon(
                 Icons.build,
                 'jobs',
-                selected: true,
               ),
               label: 'Jobs',
             ),
