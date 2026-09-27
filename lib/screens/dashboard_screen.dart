@@ -38,6 +38,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _checkingInId;
   String? _busyJobId;
   bool _aiBusy = false;
+  DateTime _selectedDay = DateTime.now();
+  DateTime _calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
+  Set<String> _eventDays = <String>{};
 
   bool get _canManage =>
       widget.roleCode == 'owner' ||
@@ -63,19 +66,244 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final results = await Future.wait<dynamic>([
         _api.dashboard(
           widget.businessId,
-          DateFormat('yyyy-MM-dd').format(DateTime.now()),
+          DateFormat('yyyy-MM-dd').format(_selectedDay),
         ),
         _api.jobStatuses(widget.businessId),
+        _api.calendarEventDays(widget.businessId, _calendarMonth),
       ]);
 
       if (!mounted) return;
       setState(() {
         _data = Map<String, dynamic>.from(results[0] as Map);
         _statuses = List<Map<String, dynamic>>.from(results[1] as List);
+        _eventDays = (results[2] as List<DateTime>)
+            .map((day) => DateFormat('yyyy-MM-dd').format(day))
+            .toSet();
         _error = null;
       });
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _selectDashboardDay(DateTime day) async {
+    final normalized = DateTime(day.year, day.month, day.day);
+    setState(() {
+      _selectedDay = normalized;
+      _calendarMonth = DateTime(normalized.year, normalized.month);
+    });
+    await _load();
+  }
+
+  bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  String _dayKey(DateTime day) => DateFormat('yyyy-MM-dd').format(day);
+
+  Future<void> _showDashboardCalendar() async {
+    var month = _calendarMonth;
+    var selected = _selectedDay;
+    var eventDays = Set<String>.from(_eventDays);
+    var loadingMonth = false;
+
+    Future<void> loadMonth(StateSetter setSheetState, DateTime value) async {
+      setSheetState(() => loadingMonth = true);
+      try {
+        final days = await _api.calendarEventDays(widget.businessId, value);
+        setSheetState(() {
+          month = DateTime(value.year, value.month);
+          eventDays = days.map(_dayKey).toSet();
+          loadingMonth = false;
+        });
+      } catch (_) {
+        setSheetState(() => loadingMonth = false);
+      }
+    }
+
+    final picked = await showModalBottomSheet<DateTime>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          final first = DateTime(month.year, month.month, 1);
+          final daysInMonth = DateUtils.getDaysInMonth(month.year, month.month);
+          final leading = first.weekday % 7;
+          final cells = leading + daysInMonth;
+          final rowCount = (cells / 7).ceil();
+
+          Widget dayCell(int index) {
+            final dayNumber = index - leading + 1;
+            if (dayNumber < 1 || dayNumber > daysInMonth) {
+              return const SizedBox(height: 44);
+            }
+
+            final day = DateTime(month.year, month.month, dayNumber);
+            final isSelected = _sameDay(day, selected);
+            final isToday = _sameDay(day, DateTime.now());
+            final hasEvent = eventDays.contains(_dayKey(day));
+
+            return InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: () {
+                setSheetState(() => selected = day);
+                Navigator.pop(sheetContext, day);
+              },
+              child: SizedBox(
+                height: 44,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 31,
+                      height: 31,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? BriskersColors.today
+                            : Colors.transparent,
+                        shape: BoxShape.circle,
+                        border: isToday && !isSelected
+                            ? Border.all(
+                                color: BriskersColors.today,
+                                width: 1.4,
+                              )
+                            : null,
+                      ),
+                      child: Text(
+                        '$dayNumber',
+                        style: TextStyle(
+                          color: isSelected
+                              ? Colors.white
+                              : Theme.of(context).colorScheme.onSurface,
+                          fontWeight: isSelected || isToday
+                              ? FontWeight.w700
+                              : FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      height: 5,
+                      child: hasEvent
+                          ? Container(
+                              width: 5,
+                              height: 5,
+                              decoration: const BoxDecoration(
+                                color: BriskersColors.appointments,
+                                shape: BoxShape.circle,
+                              ),
+                            )
+                          : null,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Previous month',
+                        onPressed: loadingMonth
+                            ? null
+                            : () => loadMonth(
+                                  setSheetState,
+                                  DateTime(month.year, month.month - 1),
+                                ),
+                        icon: const Icon(Icons.chevron_left),
+                      ),
+                      Expanded(
+                        child: Text(
+                          DateFormat('MMMM yyyy').format(month),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Next month',
+                        onPressed: loadingMonth
+                            ? null
+                            : () => loadMonth(
+                                  setSheetState,
+                                  DateTime(month.year, month.month + 1),
+                                ),
+                        icon: const Icon(Icons.chevron_right),
+                      ),
+                    ],
+                  ),
+                  if (loadingMonth)
+                    const LinearProgressIndicator(minHeight: 2),
+                  const SizedBox(height: 6),
+                  const Row(
+                    children: [
+                      for (final label in ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
+                        Expanded(
+                          child: Text(
+                            label,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  for (var row = 0; row < rowCount; row++)
+                    Row(
+                      children: [
+                        for (var column = 0; column < 7; column++)
+                          Expanded(child: dayCell(row * 7 + column)),
+                      ],
+                    ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const SizedBox(
+                        width: 7,
+                        height: 7,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: BriskersColors.appointments,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 7),
+                      const Text(
+                        'Scheduled event',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () =>
+                            Navigator.pop(sheetContext, DateTime.now()),
+                        child: const Text('Today'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    if (picked != null) {
+      await _selectDashboardDay(picked);
     }
   }
 
@@ -701,9 +929,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: ListView(
         padding: const EdgeInsets.all(14),
         children: [
-          Text(
-            DateFormat('EEEE, MMMM d').format(DateTime.now()),
-            style: Theme.of(context).textTheme.headlineSmall,
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: _showDashboardCalendar,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 4,
+                  vertical: 5,
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.calendar_month_outlined,
+                      color: BriskersColors.today,
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text(
+                        DateFormat('EEEE, MMMM d').format(_selectedDay),
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    if (!_sameDay(_selectedDay, DateTime.now()))
+                      TextButton(
+                        onPressed: () => _selectDashboardDay(DateTime.now()),
+                        child: const Text('Today'),
+                      ),
+                    const Icon(Icons.keyboard_arrow_down),
+                  ],
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: 14),
           if (_canManage) ...[
@@ -800,7 +1061,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(width: 7),
               Text(
-                'Appointments',
+                _sameDay(_selectedDay, DateTime.now())
+                    ? 'Appointments'
+                    : DateFormat('MMM d Appointments').format(_selectedDay),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: BriskersColors.appointments,
