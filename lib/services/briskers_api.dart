@@ -1091,6 +1091,58 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<List<Map<String, dynamic>>> catalogItemsSettings(
+    String businessId, {
+    String? search,
+    bool includeInactive = true,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_catalog_items_settings',
+      params: {
+        'p_business_id': businessId,
+        'p_search': search,
+        'p_include_inactive': includeInactive,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<String> saveCatalogItem(
+    String businessId, {
+    String? itemId,
+    required String name,
+    String? description,
+    required String itemType,
+    required num sellingPrice,
+    String? pricingUnit,
+    required num cost,
+    required bool taxable,
+    String? category,
+    String? barcode,
+    required bool active,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_catalog_item',
+      params: {
+        'p_business_id': businessId,
+        'p_item_id': itemId,
+        'p_name': name,
+        'p_description': description,
+        'p_item_type': itemType,
+        'p_selling_price': sellingPrice,
+        'p_pricing_unit': pricingUnit,
+        'p_cost': cost,
+        'p_taxable': taxable,
+        'p_category': category,
+        'p_barcode': barcode,
+        'p_active': active,
+      },
+    );
+    return result.toString();
+  }
+
   Future<List<Map<String, dynamic>>> catalogItemsForSale(
     String businessId, {
     String? search,
