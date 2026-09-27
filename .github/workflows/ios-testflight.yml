@@ -122,6 +122,25 @@ jobs:
           print(f"Configured {changed} Runner Release/Profile signing block(s).")
           PY
 
+      - name: Configure iOS privacy descriptions
+        working-directory: generated
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import plistlib
+
+          p = Path("ios/Runner/Info.plist")
+          with p.open("rb") as f:
+              data = plistlib.load(f)
+
+          data["NSCameraUsageDescription"] = "Briskers uses the camera to scan vehicle information and attach photos to customer and job records."
+          data["NSPhotoLibraryUsageDescription"] = "Briskers accesses your photo library so you can attach existing photos to customer and job records."
+          data["NSPhotoLibraryAddUsageDescription"] = "Briskers may save generated or captured images to your photo library when you choose to do so."
+
+          with p.open("wb") as f:
+              plistlib.dump(data, f)
+          PY
+
       - name: Resolve packages
         working-directory: generated
         run: flutter pub get
