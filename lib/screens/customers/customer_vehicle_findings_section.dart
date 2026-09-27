@@ -14,6 +14,27 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
 
   static const _api = BriskersApi();
 
+  Future<List<Map<String, dynamic>>> _allFindings() async {
+    final all = <Map<String, dynamic>>[];
+    for (final raw in vehicles) {
+      final vehicle = Map<String, dynamic>.from(raw as Map);
+      final vehicleId = vehicle['id']?.toString() ?? '';
+      if (vehicleId.isEmpty) continue;
+      final rows = await _api.vehicleFindings(
+        businessId,
+        vehicleId,
+        includeResolved: true,
+      );
+      for (final row in rows) {
+        all.add(<String, dynamic>{
+          ...row,
+          '_vehicle_id': vehicleId,
+        });
+      }
+    }
+    return all;
+  }
+
   Future<void> _showPhoto(
     BuildContext context,
     Map<String, dynamic> attachment,
@@ -123,49 +144,61 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     if (vehicles.isEmpty) return const SizedBox.shrink();
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: ExpansionTile(
-        initiallyExpanded: false,
-        leading: const Icon(
-          Icons.car_repair_outlined,
-          color: Colors.deepOrange,
-        ),
-        title: const Text(
-          'Vehicle Findings',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-        subtitle: const Text('Open issues that follow the vehicle'),
-        children: vehicles.map((raw) {
-          final vehicle = Map<String, dynamic>.from(raw as Map);
-          final vehicleId = vehicle['id']?.toString() ?? '';
-          final label = _vehicleLabel(vehicle);
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _allFindings(),
+      builder: (context, snapshot) {
+        final allRows = snapshot.data ?? const <Map<String, dynamic>>[];
+        final totalOpen = allRows
+            .where((finding) => finding['status']?.toString() == 'open')
+            .length;
 
-          return FutureBuilder<List<Map<String, dynamic>>>(
-            future: _api.vehicleFindings(
-              businessId,
-              vehicleId,
-              includeResolved: true,
+        return Card(
+          clipBehavior: Clip.antiAlias,
+          child: ExpansionTile(
+            initiallyExpanded: false,
+            leading: const Icon(
+              Icons.car_repair_outlined,
+              color: Colors.deepOrange,
             ),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const ListTile(
-                  leading: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+            title: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Vehicle Findings',
+                    style: TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  title: Text('Loading findings...'),
-                );
-              }
-
-              final rows = snapshot.data ?? const <Map<String, dynamic>>[];
+                ),
+                if (snapshot.connectionState == ConnectionState.waiting)
+                  const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: Padding(
+                      padding: EdgeInsets.all(3),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                else if (totalOpen > 0)
+                  _FindingCountTriangle(count: totalOpen),
+              ],
+            ),
+            subtitle: const Text('Open issues that follow the vehicle'),
+            children: vehicles.map((raw) {
+              final vehicle = Map<String, dynamic>.from(raw as Map);
+              final vehicleId = vehicle['id']?.toString() ?? '';
+              final label = _vehicleLabel(vehicle);
+              final rows = allRows
+                  .where(
+                    (finding) =>
+                        finding['_vehicle_id']?.toString() == vehicleId,
+                  )
+                  .toList();
               final open = rows
                   .where((finding) => finding['status']?.toString() == 'open')
                   .toList();
               final resolved = rows
                   .where(
-                    (finding) => finding['status']?.toString() == 'resolved',
+                    (finding) =>
+                        finding['status']?.toString() == 'resolved',
                   )
                   .toList();
 
@@ -198,17 +231,18 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
                         finding['found_job_number']?.toString() ?? '';
                     final invoice =
                         finding['found_document_number']?.toString() ?? '';
+
                     return Padding(
                       padding: const EdgeInsets.fromLTRB(8, 2, 8, 10),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           ListTile(
-                            leading: const Icon(
-                              Icons.warning_amber_rounded,
-                              color: Color(0xFFF4B400),
+                            contentPadding:
+                                const EdgeInsets.symmetric(horizontal: 16),
+                            title: Text(
+                              finding['body']?.toString() ?? '',
                             ),
-                            title: Text(finding['body']?.toString() ?? ''),
                             subtitle: Text(
                               <String>[
                                 if (invoice.isNotEmpty)
@@ -226,7 +260,8 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
                           ),
                           if (attachments.isNotEmpty)
                             Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 0, 16, 6),
                               child: Wrap(
                                 spacing: 8,
                                 runSpacing: 8,
@@ -234,7 +269,9 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
                                     .map(
                                       (raw) => _thumbnail(
                                         context,
-                                        Map<String, dynamic>.from(raw as Map),
+                                        Map<String, dynamic>.from(
+                                          raw as Map,
+                                        ),
                                       ),
                                     )
                                     .toList(),
@@ -279,10 +316,66 @@ class CustomerVehicleFindingsSection extends StatelessWidget {
                     ),
                 ],
               );
-            },
-          );
-        }).toList(),
+            }).toList(),
+          ),
+        );
+      },
+    );
+  }
+
+}
+
+
+class _FindingCountTriangle extends StatelessWidget {
+  const _FindingCountTriangle({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = count > 99 ? '99+' : count.toString();
+    return SizedBox(
+      width: 27,
+      height: 24,
+      child: CustomPaint(
+        painter: const _FindingTrianglePainter(),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: const Color(0xFF5A3A00),
+                fontSize: label.length > 2 ? 8.5 : 11.5,
+                fontWeight: FontWeight.w900,
+                height: 1,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
+}
+
+class _FindingTrianglePainter extends CustomPainter {
+  const _FindingTrianglePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFFF4B400)
+      ..style = PaintingStyle.fill;
+
+    final path = Path()
+      ..moveTo(size.width / 2, 0)
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _FindingTrianglePainter oldDelegate) => false;
 }
