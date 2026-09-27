@@ -220,6 +220,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         line: line,
         title: 'Add item to invoice',
         saveLabel: 'Add to Invoice',
+        lockCatalogFields: true,
       ),
     );
     if (result == null) return;
@@ -269,6 +270,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _editLine(Map<String, dynamic> line) async {
     if (_readOnly) return;
 
+    if (line['line_kind']?.toString() == 'discount') {
+      await _editDiscount(line);
+      return;
+    }
+
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
@@ -278,6 +284,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         line: line,
         title: 'Edit invoice item',
         saveLabel: 'Save Changes',
+        lockCatalogFields: line['item_id'] != null,
       ),
     );
     if (result == null) return;
@@ -293,6 +300,56 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         taxRate: result['tax_rate'] as num,
         description: result['description']?.toString(),
         lineKind: result['line_kind'].toString(),
+      );
+    });
+  }
+
+  Future<void> _addDiscount() async {
+    if (_readOnly) return;
+
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (_) => const _DiscountDialog(),
+    );
+    if (result == null) return;
+
+    await _run(() async {
+      await _api.addDocumentDiscount(
+        widget.businessId,
+        widget.documentId,
+        expectedVersion: _version,
+        name: result['name'].toString(),
+        method: result['method'].toString(),
+        value: result['value'] as num,
+        timing: result['timing'].toString(),
+        description: result['description']?.toString(),
+      );
+    });
+  }
+
+  Future<void> _editDiscount(Map<String, dynamic> line) async {
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (_) => _DiscountDialog(line: line),
+    );
+    if (result == null) return;
+
+    await _run(() async {
+      await _api.updateDocumentDiscount(
+        widget.businessId,
+        line['id'].toString(),
+        expectedVersion: _version,
+        name: result['name'].toString(),
+        method: result['method'].toString(),
+        value: result['value'] as num,
+        timing: result['timing'].toString(),
+        description: result['description']?.toString(),
       );
     });
   }
@@ -1670,8 +1727,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ...lines.map((line) {
               final description =
                   line['description']?.toString().trim() ?? '';
-              final amount = line['gross_amount'] ??
-                  (_number(line['net_amount']) + _number(line['tax_amount']));
+              final amount = _number(line['net_amount']);
               return InkWell(
                 onTap: _readOnly || _busy ? null : () => _editLine(line),
                 onLongPress: _readOnly || _busy
@@ -1752,8 +1808,28 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               children: [
                 _AmountRow(
                   label: 'Subtotal',
-                  value: _money(_detail!['net_amount']),
+                  value: _money(
+                    lines
+                        .where((line) => line['line_kind'] != 'discount')
+                        .fold<num>(
+                          0,
+                          (sum, line) => sum + _number(line['net_amount']),
+                        ),
+                  ),
                 ),
+                if (lines.any((line) => line['line_kind'] == 'discount'))
+                  _AmountRow(
+                    label: 'Discount',
+                    value: _money(
+                      lines
+                          .where((line) => line['line_kind'] == 'discount')
+                          .fold<num>(
+                            0,
+                            (sum, line) =>
+                                sum + _number(line['net_amount']),
+                          ),
+                    ),
+                  ),
                 _AmountRow(
                   label: _taxLabel(lines),
                   value: _money(_detail!['tax_amount']),
@@ -2210,12 +2286,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                     onTap: () =>
                                         Navigator.pop(sheetContext, 'custom'),
                                   ),
+                                  ListTile(
+                                    leading: const Icon(
+                                      Icons.percent_outlined,
+                                    ),
+                                    title: const Text('Add discount'),
+                                    onTap: () =>
+                                        Navigator.pop(sheetContext, 'discount'),
+                                  ),
                                 ],
                               ),
                             ),
                           );
                           if (action == 'catalog') await _addCatalogItem();
                           if (action == 'custom') await _addCustomLine();
+                          if (action == 'discount') await _addDiscount();
                         },
                 ),
                 Container(
@@ -2383,7 +2468,6 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
                 DropdownMenuItem(value: 'item', child: Text('Part / Item')),
                 DropdownMenuItem(value: 'labor', child: Text('Labor')),
                 DropdownMenuItem(value: 'supply', child: Text('Shop supply')),
-                DropdownMenuItem(value: 'discount', child: Text('Discount')),
                 DropdownMenuItem(value: 'other', child: Text('Other')),
               ],
               onChanged: (value) {
@@ -2446,11 +2530,13 @@ class _EditLineDialog extends StatefulWidget {
     required this.line,
     this.title = 'Edit item',
     this.saveLabel = 'Save',
+    this.lockCatalogFields = false,
   });
 
   final Map<String, dynamic> line;
   final String title;
   final String saveLabel;
+  final bool lockCatalogFields;
 
   @override
   State<_EditLineDialog> createState() => _EditLineDialogState();
@@ -2634,56 +2720,54 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _taxPercent,
-                        keyboardType:
-                            const TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(
-                          labelText: 'Tax',
-                          suffixText: '%',
-                          border: OutlineInputBorder(),
+                      if (!widget.lockCatalogFields) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _taxPercent,
+                          keyboardType:
+                              const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Tax',
+                            suffixText: '%',
+                            border: OutlineInputBorder(),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: _lineKind,
-                        decoration: const InputDecoration(
-                          labelText: 'Type',
-                          border: OutlineInputBorder(),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          initialValue: _lineKind,
+                          decoration: const InputDecoration(
+                            labelText: 'Type',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'item',
+                              child: Text('Part / Item'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'labor',
+                              child: Text('Labor'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'supply',
+                              child: Text('Shop supply'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'other',
+                              child: Text('Other'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'shipping',
+                              child: Text('Shipping'),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() => _lineKind = value);
+                            }
+                          },
                         ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'item',
-                            child: Text('Part / Item'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'labor',
-                            child: Text('Labor'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'supply',
-                            child: Text('Shop supply'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'discount',
-                            child: Text('Discount'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'other',
-                            child: Text('Other'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'shipping',
-                            child: Text('Shipping'),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() => _lineKind = value);
-                          }
-                        },
-                      ),
+                      ],
                       if (_error != null) ...[
                         const SizedBox(height: 10),
                         Text(
