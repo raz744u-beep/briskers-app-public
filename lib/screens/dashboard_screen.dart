@@ -697,8 +697,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   hintText: 'Make an invoice for Larry Carter',
                   border: OutlineInputBorder(),
                 ),
+                onTapOutside: (_) =>
+                    FocusManager.instance.primaryFocus?.unfocus(),
                 onSubmitted: (value) {
                   if (value.trim().isNotEmpty) {
+                    FocusManager.instance.primaryFocus?.unfocus();
                     Navigator.pop(sheetContext, value.trim());
                   }
                 },
@@ -718,6 +721,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   onPressed: () {
                     final value = controller.text.trim();
                     if (value.isNotEmpty) {
+                      FocusManager.instance.primaryFocus?.unfocus();
                       Navigator.pop(sheetContext, value);
                     }
                   },
@@ -730,6 +734,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
     );
+    FocusManager.instance.primaryFocus?.unfocus();
     controller.dispose();
 
     if (command == null || command.isEmpty) return;
