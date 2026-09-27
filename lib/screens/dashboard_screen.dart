@@ -943,12 +943,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(width: 9),
                     Expanded(
-                      child: Text(
-                        DateFormat('EEEE, MMMM d').format(_selectedDay),
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineSmall
-                            ?.copyWith(fontWeight: FontWeight.w700),
+                      child: SizedBox(
+                        height: 38,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            DateFormat('EEEE, MMMM d').format(_selectedDay),
+                            maxLines: 1,
+                            softWrap: false,
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineSmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ),
                       ),
                     ),
                     if (!_sameDay(_selectedDay, DateTime.now()))
