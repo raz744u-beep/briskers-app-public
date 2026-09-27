@@ -1091,6 +1091,78 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<List<Map<String, dynamic>>> itemCategories(
+    String businessId, {
+    bool includeInactive = true,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_item_categories',
+      params: {
+        'p_business_id': businessId,
+        'p_include_inactive': includeInactive,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<String> saveItemCategory(
+    String businessId, {
+    String? categoryId,
+    required String name,
+    required bool active,
+    required int sortOrder,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_item_category',
+      params: {
+        'p_business_id': businessId,
+        'p_category_id': categoryId,
+        'p_name': name,
+        'p_active': active,
+        'p_sort_order': sortOrder,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<List<Map<String, dynamic>>> paymentMethodsSettings(
+    String businessId, {
+    bool includeInactive = true,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_payment_methods_settings',
+      params: {
+        'p_business_id': businessId,
+        'p_include_inactive': includeInactive,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<String> savePaymentMethod(
+    String businessId, {
+    String? methodId,
+    required String name,
+    required bool active,
+    required int sortOrder,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_payment_method',
+      params: {
+        'p_business_id': businessId,
+        'p_method_id': methodId,
+        'p_name': name,
+        'p_active': active,
+        'p_sort_order': sortOrder,
+      },
+    );
+    return result.toString();
+  }
+
   Future<List<Map<String, dynamic>>> catalogItemsSettings(
     String businessId, {
     String? search,
