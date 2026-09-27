@@ -18,6 +18,11 @@ class BriskersApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: scheme,
         useMaterial3: true,
+        fontFamily: 'Roboto',
+        typography: Typography.material2021(
+          platform: TargetPlatform.android,
+          colorScheme: scheme,
+        ),
         scaffoldBackgroundColor: const Color(0xFFF6F8FB),
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
