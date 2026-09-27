@@ -238,17 +238,7 @@ class DocumentPdfService {
                     _bodyCell(line['quantity']?.toString() ?? ''),
                     _bodyCell(_money(line['unit_price'])),
                     _bodyCell(
-                      _money(
-                        line['gross_amount'] ??
-                            ((num.tryParse(
-                                          line['net_amount']?.toString() ?? '',
-                                        ) ??
-                                        0) +
-                                    (num.tryParse(
-                                          line['tax_amount']?.toString() ?? '',
-                                        ) ??
-                                        0)),
-                      ),
+                      _money(line['net_amount']),
                     ),
                   ],
                 );
@@ -262,7 +252,39 @@ class DocumentPdfService {
               width: 235,
               child: pw.Column(
                 children: [
-                  _totalRow('Subtotal', _money(detail['net_amount'])),
+                  _totalRow(
+                    'Subtotal',
+                    _money(
+                      lines
+                          .where((line) => line['line_kind'] != 'discount')
+                          .fold<num>(
+                            0,
+                            (sum, line) =>
+                                sum +
+                                (num.tryParse(
+                                      line['net_amount']?.toString() ?? '',
+                                    ) ??
+                                    0),
+                          ),
+                    ),
+                  ),
+                  if (lines.any((line) => line['line_kind'] == 'discount'))
+                    _totalRow(
+                      'Discount',
+                      _money(
+                        lines
+                            .where((line) => line['line_kind'] == 'discount')
+                            .fold<num>(
+                              0,
+                              (sum, line) =>
+                                  sum +
+                                  (num.tryParse(
+                                        line['net_amount']?.toString() ?? '',
+                                      ) ??
+                                      0),
+                            ),
+                      ),
+                    ),
                   _totalRow('Tax', _money(detail['tax_amount'])),
                   pw.Divider(),
                   _totalRow(
