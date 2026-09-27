@@ -6,6 +6,7 @@ import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import '../widgets/job_compact_card.dart';
 import 'customers/customer_detail_screen.dart';
+import 'documents_screen.dart';
 import 'jobs/job_detail_screen.dart';
 import 'jobs/job_document_screen.dart';
 
@@ -40,6 +41,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _aiBusy = false;
   bool _appointmentsExpanded = false;
   bool _activeJobsExpanded = false;
+  int _estimateCount = 0;
+  int _invoiceCount = 0;
   DateTime _selectedDay = DateTime.now();
   DateTime _calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
   Set<String> _eventDays = <String>{};
@@ -72,6 +75,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         _api.jobStatuses(widget.businessId),
         _api.calendarEventDays(widget.businessId, _calendarMonth),
+        _api.documents(widget.businessId, kind: 'estimate'),
+        _api.documents(widget.businessId, kind: 'invoice'),
       ]);
 
       if (!mounted) return;
@@ -81,6 +86,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _eventDays = (results[2] as List<DateTime>)
             .map((day) => DateFormat('yyyy-MM-dd').format(day))
             .toSet();
+        _estimateCount = (results[3] as List).length;
+        _invoiceCount = (results[4] as List).length;
         _error = null;
       });
     } catch (error) {
@@ -746,6 +753,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Future<void> _openDocuments(String kind) async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DocumentsScreen(
+          businessId: widget.businessId,
+          kind: kind,
+          isOwner: widget.roleCode == 'owner',
+        ),
+      ),
+    );
+    await _load();
+  }
+
   Future<void> _openJob(String jobId) async {
     await Navigator.push<void>(
       context,
@@ -1029,28 +1050,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
           ],
-          Row(
-            children: [
-              Expanded(
-                child: _StatCard(
-                  label: 'Customers',
-                  value: '${_data?['customer_count'] ?? '—'}',
-                  icon: Icons.people,
-                  color: BriskersColors.customers,
-                  onTap: widget.onCustomersTap,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _StatCard(
-                  label: 'Requests',
-                  value: '${_data?['pending_appointment_requests'] ?? 0}',
-                  icon: Icons.pending_actions,
-                  color: BriskersColors.appointments,
-                  onTap: widget.onAppointmentsTap,
-                ),
-              ),
-            ],
+          _DocumentShortcutRow(
+            label: 'Estimates',
+            count: _estimateCount,
+            icon: Icons.request_quote_outlined,
+            color: BriskersColors.estimates,
+            onTap: () => _openDocuments('estimate'),
+          ),
+          const SizedBox(height: 8),
+          _DocumentShortcutRow(
+            label: 'Invoices',
+            count: _invoiceCount,
+            icon: Icons.receipt_long_outlined,
+            color: BriskersColors.invoices,
+            onTap: () => _openDocuments('invoice'),
           ),
           if (_error != null) ...[
             const SizedBox(height: 10),
@@ -1238,6 +1251,59 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
           const SizedBox(height: 80),
         ],
+      ),
+    );
+  }
+}
+
+class _DocumentShortcutRow extends StatelessWidget {
+  const _DocumentShortcutRow({
+    required this.label,
+    required this.count,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  final String label;
+  final int count;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: Row(
+            children: [
+              Icon(icon, color: color),
+              const SizedBox(width: 7),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: color,
+                    ),
+              ),
+              const Spacer(),
+              Text(
+                '$count',
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 3),
+              Icon(Icons.chevron_right, color: color),
+            ],
+          ),
+        ),
       ),
     );
   }
