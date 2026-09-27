@@ -2812,6 +2812,251 @@ class _EditLineDialogState extends State<_EditLineDialog> {
   }
 }
 
+class _DiscountDialog extends StatefulWidget {
+  const _DiscountDialog({this.line});
+
+  final Map<String, dynamic>? line;
+
+  @override
+  State<_DiscountDialog> createState() => _DiscountDialogState();
+}
+
+class _DiscountDialogState extends State<_DiscountDialog> {
+  late final TextEditingController _name;
+  late final TextEditingController _description;
+  late final TextEditingController _value;
+  late String _method;
+  late String _timing;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final line = widget.line;
+    _name = TextEditingController(
+      text: line?['name']?.toString() ?? 'Discount',
+    );
+    _description = TextEditingController(
+      text: line?['description']?.toString() ?? '',
+    );
+    _method = line?['discount_method']?.toString() ?? 'amount';
+    _timing = line?['discount_timing']?.toString() ?? 'before_tax';
+
+    final rawValue = line?['discount_value'];
+    final fallback = (num.tryParse(line?['net_amount']?.toString() ?? '') ?? 0)
+        .abs();
+    _value = TextEditingController(
+      text: rawValue?.toString() ?? fallback.toString(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _description.dispose();
+    _value.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final value = num.tryParse(_value.text.trim());
+    if (value == null ||
+        value < 0 ||
+        (_method == 'percent' && value > 100)) {
+      setState(() => _error = _method == 'percent'
+          ? 'Enter a percentage from 0 to 100.'
+          : 'Enter a valid discount amount.');
+      return;
+    }
+
+    Navigator.pop(
+      context,
+      <String, dynamic>{
+        'name': _name.text.trim().isEmpty ? 'Discount' : _name.text.trim(),
+        'description': _description.text.trim().isEmpty
+            ? null
+            : _description.text.trim(),
+        'method': _method,
+        'value': value,
+        'timing': _timing,
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: viewInsets.bottom),
+      child: FractionallySizedBox(
+        heightFactor: 0.68,
+        child: Material(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(22),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 4, 12, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.line == null ? 'Add Discount' : 'Edit Discount',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: SingleChildScrollView(
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 22),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        controller: _name,
+                        decoration: const InputDecoration(
+                          labelText: 'Name',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(
+                            value: 'amount',
+                            label: Text('Amount'),
+                            icon: Icon(Icons.attach_money),
+                          ),
+                          ButtonSegment(
+                            value: 'percent',
+                            label: Text('Percentage'),
+                            icon: Icon(Icons.percent),
+                          ),
+                        ],
+                        selected: {_method},
+                        onSelectionChanged: (value) {
+                          setState(() => _method = value.first);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _value,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        decoration: InputDecoration(
+                          labelText: _method == 'percent'
+                              ? 'Discount percentage'
+                              : 'Discount amount',
+                          prefixText: _method == 'amount' ? '\$ ' : null,
+                          suffixText: _method == 'percent' ? '%' : null,
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(
+                            value: 'before_tax',
+                            label: Text('Before Tax'),
+                          ),
+                          ButtonSegment(
+                            value: 'after_tax',
+                            label: Text('After Tax'),
+                          ),
+                        ],
+                        selected: {_timing},
+                        onSelectionChanged: (value) {
+                          setState(() => _timing = value.first);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        _timing == 'before_tax'
+                            ? 'Tax is recalculated after this discount is applied.'
+                            : 'Tax is calculated first, then this discount is subtracted.',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _description,
+                        minLines: 2,
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          labelText: 'Description',
+                          hintText: 'Optional note',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          _error!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: FilledButton.icon(
+                        onPressed: _save,
+                        icon: const Icon(Icons.check),
+                        label: Text(
+                          widget.line == null
+                              ? 'Add Discount'
+                              : 'Save Discount',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PaymentEntryDialog extends StatefulWidget {
   const _PaymentEntryDialog({
     required this.methods,
