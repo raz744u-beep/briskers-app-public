@@ -114,6 +114,25 @@ class _JobsScreenState extends State<JobsScreen> {
         .toList();
   }
 
+  int _statusCount(String code) {
+    final rows = _rows ?? const <Map<String, dynamic>>[];
+    return rows.where((job) => job['status']?.toString() == code).length;
+  }
+
+  Widget _menuCount(int count, {bool alwaysShow = false}) {
+    if (count <= 0 && !alwaysShow) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(left: 14),
+      child: Text(
+        '$count',
+        style: const TextStyle(
+          fontWeight: FontWeight.w800,
+          color: Color(0xFF405064),
+        ),
+      ),
+    );
+  }
+
   List<Map<String, dynamic>> _availableStatusesFor(
     Map<String, dynamic> job,
   ) {
@@ -245,21 +264,24 @@ class _JobsScreenState extends State<JobsScreen> {
                 () => _selectedStatus = value == '__all__' ? null : value,
               ),
               itemBuilder: (_) => [
-                const PopupMenuItem<String>(
+                PopupMenuItem<String>(
                   value: '__all__',
                   child: Row(
                     children: [
-                      Icon(Icons.all_inclusive),
-                      SizedBox(width: 10),
-                      Text('All'),
+                      const Icon(Icons.all_inclusive),
+                      const SizedBox(width: 10),
+                      const Expanded(child: Text('All')),
+                      _menuCount(_rows?.length ?? 0, alwaysShow: true),
                     ],
                   ),
                 ),
                 ..._statuses.map((status) {
                   final color =
                       colorFromHex(status['color_hex']?.toString());
+                  final code = status['code']?.toString() ?? '';
+                  final count = _statusCount(code);
                   return PopupMenuItem<String>(
-                    value: status['code']?.toString(),
+                    value: code,
                     child: Row(
                       children: [
                         Icon(
@@ -267,7 +289,10 @@ class _JobsScreenState extends State<JobsScreen> {
                           color: color,
                         ),
                         const SizedBox(width: 10),
-                        Text(status['name']?.toString() ?? ''),
+                        Expanded(
+                          child: Text(status['name']?.toString() ?? ''),
+                        ),
+                        _menuCount(count),
                       ],
                     ),
                   );
