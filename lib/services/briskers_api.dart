@@ -1447,6 +1447,57 @@ class BriskersApi {
     );
   }
 
+  Future<String> addDocumentDiscount(
+    String businessId,
+    String documentId, {
+    required int expectedVersion,
+    required String name,
+    required String method,
+    required num value,
+    required String timing,
+    String? description,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_add_document_discount',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_expected_version': expectedVersion,
+        'p_name': name,
+        'p_method': method,
+        'p_value': value,
+        'p_timing': timing,
+        'p_description': description,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> updateDocumentDiscount(
+    String businessId,
+    String lineId, {
+    required int expectedVersion,
+    required String name,
+    required String method,
+    required num value,
+    required String timing,
+    String? description,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_document_discount',
+      params: {
+        'p_business_id': businessId,
+        'p_line_id': lineId,
+        'p_expected_version': expectedVersion,
+        'p_name': name,
+        'p_method': method,
+        'p_value': value,
+        'p_timing': timing,
+        'p_description': description,
+      },
+    );
+  }
+
   Future<void> addDocumentLine(
     String businessId,
     String documentId, {
