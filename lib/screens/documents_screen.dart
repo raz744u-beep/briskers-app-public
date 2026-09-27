@@ -91,6 +91,27 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         .toList();
   }
 
+  int _statusCount(String status) {
+    final rows = _rows ?? const <Map<String, dynamic>>[];
+    return rows
+        .where((row) => row['display_status']?.toString() == status)
+        .length;
+  }
+
+  Widget _menuCount(int count, {bool alwaysShow = false}) {
+    if (count <= 0 && !alwaysShow) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(left: 14),
+      child: Text(
+        '$count',
+        style: const TextStyle(
+          fontWeight: FontWeight.w800,
+          color: Color(0xFF405064),
+        ),
+      ),
+    );
+  }
+
   Future<void> _open(Map<String, dynamic> row) async {
     await Navigator.push<void>(
       context,
@@ -153,30 +174,35 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   () => _selectedStatus = value == '__all__' ? null : value,
                 ),
                 itemBuilder: (_) => [
-                  const PopupMenuItem<String>(
+                  PopupMenuItem<String>(
                     value: '__all__',
                     child: Row(
                       children: [
-                        Icon(Icons.all_inclusive),
-                        SizedBox(width: 10),
-                        Text('All'),
+                        const Icon(Icons.all_inclusive),
+                        const SizedBox(width: 10),
+                        const Expanded(child: Text('All')),
+                        _menuCount(_rows?.length ?? 0, alwaysShow: true),
                       ],
                     ),
                   ),
-                  ..._statuses.map((status) => PopupMenuItem<String>(
-                        value: status,
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.circle,
-                              size: 14,
-                              color: _statusColor(status),
-                            ),
-                            const SizedBox(width: 10),
-                            Text(status),
-                          ],
-                        ),
-                      )),
+                  ..._statuses.map((status) {
+                    final count = _statusCount(status);
+                    return PopupMenuItem<String>(
+                      value: status,
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.circle,
+                            size: 14,
+                            color: _statusColor(status),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(status)),
+                          _menuCount(count),
+                        ],
+                      ),
+                    );
+                  }),
                 ],
                 child: Container(
                   padding:
