@@ -239,13 +239,14 @@ class _JobsScreenState extends State<JobsScreen> {
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerLeft,
-            child: PopupMenuButton<String?>(
+            child: PopupMenuButton<String>(
               tooltip: 'Filter jobs',
-              onSelected: (value) =>
-                  setState(() => _selectedStatus = value),
+              onSelected: (value) => setState(
+                () => _selectedStatus = value == '__all__' ? null : value,
+              ),
               itemBuilder: (_) => [
-                const PopupMenuItem<String?>(
-                  value: null,
+                const PopupMenuItem<String>(
+                  value: '__all__',
                   child: Row(
                     children: [
                       Icon(Icons.all_inclusive),
@@ -257,7 +258,7 @@ class _JobsScreenState extends State<JobsScreen> {
                 ..._statuses.map((status) {
                   final color =
                       colorFromHex(status['color_hex']?.toString());
-                  return PopupMenuItem<String?>(
+                  return PopupMenuItem<String>(
                     value: status['code']?.toString(),
                     child: Row(
                       children: [
