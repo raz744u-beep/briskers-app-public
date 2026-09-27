@@ -77,8 +77,11 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
 
   Future<void> _edit([Map<String, dynamic>? item]) async {
     if (_busy) return;
-    final result = await showDialog<Map<String, dynamic>>(
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
       builder: (_) => _CatalogItemDialog(item: item),
     );
     if (result == null) return;
@@ -426,127 +429,234 @@ class _CatalogItemDialogState extends State<_CatalogItemDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.item == null ? 'Add catalog item' : 'Edit catalog item'),
-      content: SizedBox(
-        width: 520,
-        child: SingleChildScrollView(
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+
+    const fieldBorder = OutlineInputBorder();
+
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: viewInsets.bottom),
+      child: FractionallySizedBox(
+        heightFactor: 0.88,
+        child: Material(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(22),
+          ),
+          clipBehavior: Clip.antiAlias,
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
-                controller: _name,
-                autofocus: true,
-                decoration: const InputDecoration(labelText: 'Name'),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _description,
-                minLines: 2,
-                maxLines: 4,
-                decoration: const InputDecoration(labelText: 'Description'),
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                initialValue: _itemType,
-                decoration: const InputDecoration(labelText: 'Type'),
-                items: const [
-                  DropdownMenuItem(
-                    value: 'non_inventory',
-                    child: Text('Part / Item'),
-                  ),
-                  DropdownMenuItem(value: 'service', child: Text('Service')),
-                  DropdownMenuItem(value: 'labor', child: Text('Labor')),
-                  DropdownMenuItem(value: 'fee', child: Text('Fee')),
-                  DropdownMenuItem(value: 'other', child: Text('Other')),
-                ],
-                onChanged: (value) {
-                  if (value != null) setState(() => _itemType = value);
-                },
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _price,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(
-                        labelText: 'Default selling price',
-                        prefixText: '\$ ',
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 4, 12, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.item == null
+                            ? 'Add catalog item'
+                            : 'Edit catalog item',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w800),
                       ),
                     ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: SingleChildScrollView(
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        controller: _name,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(
+                          labelText: 'Item name',
+                          border: fieldBorder,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _description,
+                        minLines: 2,
+                        maxLines: 4,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: const InputDecoration(
+                          labelText: 'Description',
+                          hintText: 'Optional invoice description',
+                          border: fieldBorder,
+                          alignLabelWithHint: true,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: _itemType,
+                        decoration: const InputDecoration(
+                          labelText: 'Type',
+                          border: fieldBorder,
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'non_inventory',
+                            child: Text('Part / Item'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'service',
+                            child: Text('Service'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'labor',
+                            child: Text('Labor'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'fee',
+                            child: Text('Fee'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'other',
+                            child: Text('Other'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => _itemType = value);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: TextField(
+                              controller: _price,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                              decoration: const InputDecoration(
+                                labelText: 'Default price',
+                                prefixText: '\$ ',
+                                border: fieldBorder,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: _unit,
+                              decoration: const InputDecoration(
+                                labelText: 'Unit',
+                                hintText: 'pc, hr, gal.',
+                                border: fieldBorder,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _cost,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                          labelText: 'Default cost',
+                          prefixText: '\$ ',
+                          border: fieldBorder,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _category,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(
+                          labelText: 'Category',
+                          border: fieldBorder,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _barcode,
+                        decoration: const InputDecoration(
+                          labelText: 'Barcode',
+                          border: fieldBorder,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Taxable'),
+                        subtitle: const Text(
+                          'Apply the invoice tax rate to this item',
+                        ),
+                        value: _taxable,
+                        onChanged: (value) =>
+                            setState(() => _taxable = value),
+                      ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Active'),
+                        subtitle: const Text(
+                          'Inactive items stay in history but are hidden from normal invoice search',
+                        ),
+                        value: _active,
+                        onChanged: (value) =>
+                            setState(() => _active = value),
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _error!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: _unit,
-                      decoration: const InputDecoration(
-                        labelText: 'Pricing unit',
-                        hintText: 'pc, hr, gal.',
+                ),
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancel'),
                       ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _cost,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Default cost',
-                  prefixText: '\$ ',
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _category,
-                decoration: const InputDecoration(labelText: 'Category'),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _barcode,
-                decoration: const InputDecoration(labelText: 'Barcode'),
-              ),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Taxable'),
-                value: _taxable,
-                onChanged: (value) =>
-                    setState(() => _taxable = value == true),
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Active'),
-                value: _active,
-                onChanged: (value) => setState(() => _active = value),
-              ),
-              if (_error != null)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    _error!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: FilledButton.icon(
+                        onPressed: _save,
+                        icon: const Icon(Icons.check),
+                        label: const Text('Save Item'),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
+              ),
             ],
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _save,
-          child: const Text('Save'),
-        ),
-      ],
     );
   }
+
 }
