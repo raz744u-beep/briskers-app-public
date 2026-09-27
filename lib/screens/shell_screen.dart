@@ -34,6 +34,7 @@ class _ShellScreenState extends State<ShellScreen> {
 
   int _index = 0;
   int _todayRefreshToken = 0;
+  int _customersRefreshToken = 0;
   int _jobsRefreshToken = 0;
   late String _businessName;
 
@@ -47,6 +48,7 @@ class _ShellScreenState extends State<ShellScreen> {
     setState(() {
       _index = index;
       if (index == 0) _todayRefreshToken++;
+      if (index == 1) _customersRefreshToken++;
       if (index == 3) _jobsRefreshToken++;
     });
   }
@@ -62,7 +64,10 @@ class _ShellScreenState extends State<ShellScreen> {
         onCustomersTap: () => _goTo(1),
         onAppointmentsTap: () => _goTo(2),
       ),
-      CustomersScreen(businessId: widget.businessId),
+      CustomersScreen(
+        businessId: widget.businessId,
+        refreshToken: _customersRefreshToken,
+      ),
       AppointmentsScreen(
         businessId: widget.businessId,
         roleCode: widget.roleCode,
