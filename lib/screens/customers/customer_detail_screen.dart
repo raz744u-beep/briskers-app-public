@@ -57,7 +57,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _editCustomer(Map<String, dynamic> customer) async {
-    final changed = await Navigator.push<bool>(
+    final saved = await Navigator.push<Map<String, dynamic>?>(
       context,
       MaterialPageRoute(
         builder: (_) => EditCustomerScreen(
@@ -67,7 +67,19 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (saved == null || !mounted) return;
+
+    setState(() {
+      final data = Map<String, dynamic>.from(_data ?? const {});
+      final current = Map<String, dynamic>.from(
+        data['customer'] ?? const {},
+      );
+      current.addAll(saved);
+      data['customer'] = current;
+      _data = data;
+    });
+
+    await _load();
   }
 
   Future<void> _addVehicle() async {
