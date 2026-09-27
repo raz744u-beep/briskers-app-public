@@ -41,14 +41,85 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
+
           p = Path("ios/Runner.xcodeproj/project.pbxproj")
-          s = p.read_text()
-          s = s.replace("PRODUCT_BUNDLE_IDENTIFIER = com.briskers.briskersApp;", "PRODUCT_BUNDLE_IDENTIFIER = com.briskers.app;")
-          s = s.replace("PRODUCT_BUNDLE_IDENTIFIER = com.briskers.briskersAppTests;", "PRODUCT_BUNDLE_IDENTIFIER = com.briskers.app.RunnerTests;")
-          # Flutter's generated project already uses automatic signing.
-          # Add only the Apple team; do not force a signing identity on package targets.
-          s = s.replace("CODE_SIGN_STYLE = Automatic;", "CODE_SIGN_STYLE = Automatic;\n\t\t\t\tDEVELOPMENT_TEAM = 2L4T6BTW73;")
-          p.write_text(s)
+          lines = p.read_text().splitlines()
+
+          # Use the permanent Briskers bundle identifiers.
+          lines = [
+              line.replace("com.briskers.briskersAppTests", "com.briskers.app.RunnerTests")
+                  .replace("com.briskers.briskersApp", "com.briskers.app")
+              for line in lines
+          ]
+
+          # Apply App Store signing ONLY to the Runner target's Release/Profile
+          # XCBuildConfiguration objects. Flutter Swift packages are untouched.
+          i = 0
+          changed = 0
+          while i < len(lines):
+              if "/* Release */ = {" not in lines[i] and "/* Profile */ = {" not in lines[i]:
+                  i += 1
+                  continue
+
+              start = i
+              depth = lines[i].count("{") - lines[i].count("}")
+              i += 1
+              while i < len(lines) and depth > 0:
+                  depth += lines[i].count("{") - lines[i].count("}")
+                  i += 1
+              end = i
+              chunk = lines[start:end]
+
+              if not any("PRODUCT_BUNDLE_IDENTIFIER = com.briskers.app;" in x for x in chunk):
+                  continue
+
+              indent = "\t\t\t\t"
+              new_chunk = []
+              saw_identity = False
+              saw_team = False
+              saw_profile = False
+              saw_style = False
+
+              for line in chunk:
+                  stripped = line.strip()
+                  if stripped.startswith("CODE_SIGN_IDENTITY"):
+                      new_chunk.append(f'{indent}CODE_SIGN_IDENTITY = "Apple Distribution";')
+                      saw_identity = True
+                  elif stripped.startswith("CODE_SIGN_STYLE"):
+                      new_chunk.append(f"{indent}CODE_SIGN_STYLE = Manual;")
+                      saw_style = True
+                  elif stripped.startswith("DEVELOPMENT_TEAM"):
+                      new_chunk.append(f"{indent}DEVELOPMENT_TEAM = 2L4T6BTW73;")
+                      saw_team = True
+                  elif stripped.startswith("PROVISIONING_PROFILE_SPECIFIER"):
+                      new_chunk.append(f'{indent}PROVISIONING_PROFILE_SPECIFIER = "Briskers App Store";')
+                      saw_profile = True
+                  else:
+                      new_chunk.append(line)
+                      if "PRODUCT_BUNDLE_IDENTIFIER = com.briskers.app;" in line:
+                          if not saw_identity:
+                              new_chunk.insert(-1, f'{indent}CODE_SIGN_IDENTITY = "Apple Distribution";')
+                              saw_identity = True
+                          if not saw_style:
+                              new_chunk.insert(-1, f"{indent}CODE_SIGN_STYLE = Manual;")
+                              saw_style = True
+                          if not saw_team:
+                              new_chunk.insert(-1, f"{indent}DEVELOPMENT_TEAM = 2L4T6BTW73;")
+                              saw_team = True
+                          if not saw_profile:
+                              new_chunk.append(f'{indent}PROVISIONING_PROFILE_SPECIFIER = "Briskers App Store";')
+                              saw_profile = True
+
+              lines[start:end] = new_chunk
+              i = start + len(new_chunk)
+              changed += 1
+
+          if changed < 1:
+              raise SystemExit("Runner Release/Profile signing configuration was not found")
+
+          p.write_text("\n".join(lines) + "\n")
+          print(f"Configured {changed} Runner Release/Profile signing block(s).")
           PY
 
       - name: Resolve packages
@@ -113,7 +184,7 @@ jobs:
         run: |
           VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
-          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release -archivePath build/ios/archive/Runner.xcarchive -allowProvisioningUpdates -authenticationKeyPath "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8" -authenticationKeyID "$APP_STORE_CONNECT_API_KEY_ID" -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Apple Distribution" PROVISIONING_PROFILE_SPECIFIER="Briskers App Store" MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" archive
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release -archivePath build/ios/archive/Runner.xcarchive -allowProvisioningUpdates -authenticationKeyPath "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8" -authenticationKeyID "$APP_STORE_CONNECT_API_KEY_ID" -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" archive
           cat > ios/ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
