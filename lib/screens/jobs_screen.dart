@@ -237,44 +237,91 @@ class _JobsScreenState extends State<JobsScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          SizedBox(
-            height: 38,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: ChoiceChip(
-                    label: const Text('All'),
-                    selected: _selectedStatus == null,
-                    selectedColor:
-                        BriskersColors.jobs.withValues(alpha: 0.16),
-                    onSelected: (_) => setState(() => _selectedStatus = null),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: PopupMenuButton<String?>(
+              tooltip: 'Filter jobs',
+              onSelected: (value) =>
+                  setState(() => _selectedStatus = value),
+              itemBuilder: (_) => [
+                const PopupMenuItem<String?>(
+                  value: null,
+                  child: Row(
+                    children: [
+                      Icon(Icons.all_inclusive),
+                      SizedBox(width: 10),
+                      Text('All'),
+                    ],
                   ),
                 ),
                 ..._statuses.map((status) {
-                  final code = status['code']?.toString() ?? '';
-                  final color = colorFromHex(status['color_hex']?.toString());
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ChoiceChip(
-                      avatar: Icon(
-                        jobStatusIcon(status['icon_key']?.toString()),
-                        size: 15,
-                        color: color,
-                      ),
-                      label: Text(status['name']?.toString() ?? ''),
-                      selected: _selectedStatus == code,
-                      selectedColor: color.withValues(alpha: 0.16),
-                      side: BorderSide(
-                        color: color.withValues(alpha: 0.28),
-                      ),
-                      onSelected: (_) =>
-                          setState(() => _selectedStatus = code),
+                  final color =
+                      colorFromHex(status['color_hex']?.toString());
+                  return PopupMenuItem<String?>(
+                    value: status['code']?.toString(),
+                    child: Row(
+                      children: [
+                        Icon(
+                          jobStatusIcon(status['icon_key']?.toString()),
+                          color: color,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(status['name']?.toString() ?? ''),
+                      ],
                     ),
                   );
                 }),
               ],
+              child: Builder(
+                builder: (context) {
+                  Map<String, dynamic>? selected;
+                  if (_selectedStatus != null) {
+                    for (final status in _statuses) {
+                      if (status['code']?.toString() == _selectedStatus) {
+                        selected = status;
+                        break;
+                      }
+                    }
+                  }
+                  final color = selected == null
+                      ? BriskersColors.jobs
+                      : colorFromHex(selected['color_hex']?.toString());
+                  final label =
+                      selected?['name']?.toString() ?? 'All';
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: color.withValues(alpha: 0.45),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          label,
+                          style: TextStyle(
+                            color: color,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(width: 3),
+                        Icon(
+                          Icons.chevron_right,
+                          size: 18,
+                          color: color,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
             ),
           ),
           if (_error != null)
