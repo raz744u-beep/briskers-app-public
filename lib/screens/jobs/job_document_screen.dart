@@ -4,8 +4,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 import '../../services/document_pdf_service.dart';
+import 'job_detail_screen.dart';
 
 class JobDocumentScreen extends StatefulWidget {
   const JobDocumentScreen({
@@ -1564,107 +1566,262 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
   }
 
+  Future<void> _openLinkedJob() async {
+    final jobId = _detail?['job_id']?.toString() ?? '';
+    if (jobId.isEmpty || !mounted) return;
+
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDetailScreen(
+          businessId: widget.businessId,
+          jobId: jobId,
+          roleCode: widget.isOwner ? 'owner' : 'office',
+        ),
+      ),
+    );
+    await _load();
+  }
+
+  Future<void> _openConvertedInvoice() async {
+    final invoiceId = _detail?['converted_invoice_id']?.toString() ?? '';
+    if (invoiceId.isEmpty || !mounted) return;
+
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: invoiceId,
+          isOwner: widget.isOwner,
+        ),
+      ),
+    );
+    await _load();
+  }
+
+  Widget _convertedInvoiceBanner() {
+    final invoiceNumber =
+        _detail?['converted_invoice_number']?.toString().trim() ?? '';
+    final convertedDate = _dateLabel(_detail?['converted_invoice_date']);
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      padding: const EdgeInsets.fromLTRB(14, 13, 12, 13),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEAF8EE),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFCBEBD3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: const Color(0xFF159447),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.receipt_long_outlined,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  invoiceNumber.isEmpty
+                      ? 'Converted to Invoice'
+                      : 'Converted to Invoice #$invoiceNumber',
+                  style: const TextStyle(
+                    color: Color(0xFF08752F),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15.5,
+                  ),
+                ),
+                if (convertedDate.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'This estimate was converted on $convertedDate.',
+                    style: const TextStyle(
+                      color: Color(0xFF405064),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: _openConvertedInvoice,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF08752F),
+              side: const BorderSide(color: Color(0xFF59B875)),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+            ),
+            icon: const Icon(Icons.open_in_new, size: 18),
+            label: const Text(
+              'View Invoice',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _customerHeader() {
     final customer = _detail?['customer_name']?.toString().trim() ?? '';
+    final phone = _detail?['customer_phone']?.toString().trim() ?? '';
     final vehicle = _detail?['vehicle']?.toString().trim() ?? '';
+    final vin = _detail?['vehicle_vin']?.toString().trim() ?? '';
     final mileage = _detail?['odometer_in']?.toString().trim() ?? '';
     final date = _dateLabel(_detail?['document_date']);
     final job = _detail?['job_number']?.toString().trim() ?? '';
 
-    Widget leftLine(IconData icon, String value, {bool bold = false}) => Row(
-          children: [
-            Icon(icon, size: 20, color: const Color(0xFF26354D)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: bold ? 18 : 15.5,
-                  fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
-                  color: const Color(0xFF101827),
-                ),
+    Widget infoLine(
+      IconData icon,
+      String value, {
+      bool bold = false,
+      int maxLines = 2,
+      VoidCallback? onTap,
+      Color? valueColor,
+      bool underline = false,
+    }) {
+      final line = Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: const Color(0xFF26354D)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              value,
+              maxLines: maxLines,
+              overflow: TextOverflow.visible,
+              softWrap: true,
+              style: TextStyle(
+                fontSize: bold ? 18 : 15,
+                height: 1.2,
+                fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
+                color: valueColor ?? const Color(0xFF101827),
+                decoration:
+                    underline ? TextDecoration.underline : TextDecoration.none,
               ),
             ),
+          ),
+          if (onTap != null) ...[
+            const SizedBox(width: 4),
+            Icon(
+              Icons.chevron_right,
+              size: 22,
+              color: valueColor ?? _accent,
+            ),
           ],
-        );
+        ],
+      );
 
-    Widget rightLine(IconData icon, String value) => Row(
-          children: [
-            Icon(icon, size: 19, color: const Color(0xFF26354D)),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 14.5,
-                  color: Color(0xFF26354D),
-                  fontWeight: FontWeight.w500,
-                ),
+      return onTap == null
+          ? line
+          : InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: line,
               ),
-            ),
-          ],
-        );
+            );
+    }
 
     final vehicleMileage = <String>[
       if (vehicle.isNotEmpty) vehicle,
       if (mileage.isNotEmpty) '${_quantity(mileage)} mi',
     ].join(' · ');
 
-    return Material(
+    return Container(
       color: Colors.white,
-      child: InkWell(
-        onTap: _readOnly || _busy ? null : _editDocumentHeader,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 14, 13),
-          child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            flex: 7,
+            flex: 6,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                leftLine(
+                infoLine(
                   Icons.person_outline,
                   customer.isEmpty ? 'Customer' : customer,
                   bold: true,
+                  maxLines: 2,
                 ),
-                const SizedBox(height: 7),
-                leftLine(
+                if (phone.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  infoLine(
+                    Icons.phone_outlined,
+                    formatUsPhone(phone),
+                    maxLines: 1,
+                  ),
+                ],
+                const SizedBox(height: 8),
+                infoLine(
                   Icons.directions_car_outlined,
                   vehicleMileage.isEmpty ? 'No vehicle' : vehicleMileage,
+                  maxLines: 2,
                 ),
+                if (vin.isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 30),
+                    child: Text(
+                      'VIN: $vin',
+                      softWrap: true,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: Color(0xFF405064),
+                        height: 1.2,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
           Container(
             width: 1,
-            height: 56,
-            margin: const EdgeInsets.symmetric(horizontal: 12),
+            constraints: const BoxConstraints(minHeight: 92),
+            margin: const EdgeInsets.symmetric(horizontal: 14),
             color: const Color(0xFFD7E0E4),
           ),
           Expanded(
-            flex: 5,
+            flex: 4,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                rightLine(
+                infoLine(
                   Icons.calendar_month_outlined,
-                  date.isEmpty ? 'No date' : 'Date: $date',
+                  date.isEmpty ? 'Date: —' : 'Date: $date',
+                  maxLines: 2,
                 ),
-                const SizedBox(height: 8),
-                rightLine(
+                const SizedBox(height: 12),
+                infoLine(
                   Icons.receipt_long_outlined,
                   job.isEmpty ? 'No job' : 'Job $job',
+                  maxLines: 1,
+                  onTap: job.isEmpty ? null : _openLinkedJob,
+                  valueColor: job.isEmpty ? null : _accent,
+                  underline: job.isNotEmpty,
                 ),
               ],
             ),
           ),
         ],
-          ),
-        ),
       ),
     );
   }
@@ -2110,15 +2267,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           foregroundColor: Colors.white,
           elevation: 1,
           titleSpacing: 0,
-          title: Text(
-            number.isEmpty
-                ? (_estimate ? 'Estimate' : 'Invoice')
-                : (_estimate ? 'Estimate #$number' : 'Invoice #$number'),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 21,
-              fontWeight: FontWeight.w800,
+          title: SizedBox(
+            width: double.infinity,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                number.isEmpty
+                    ? (_estimate ? 'Estimate' : 'Invoice')
+                    : (_estimate ? 'Estimate #$number' : 'Invoice #$number'),
+                maxLines: 1,
+                softWrap: false,
+                style: const TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
           ),
           actions: [
@@ -2201,6 +2365,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         body: Column(
           children: [
             _customerHeader(),
+            if (_estimate && _converted) _convertedInvoiceBanner(),
             Container(
               decoration: const BoxDecoration(
                 color: Colors.white,
