@@ -45,14 +45,9 @@ jobs:
           s = p.read_text()
           s = s.replace("PRODUCT_BUNDLE_IDENTIFIER = com.briskers.briskersApp;", "PRODUCT_BUNDLE_IDENTIFIER = com.briskers.app;")
           s = s.replace("PRODUCT_BUNDLE_IDENTIFIER = com.briskers.briskersAppTests;", "PRODUCT_BUNDLE_IDENTIFIER = com.briskers.app.RunnerTests;")
+          # Flutter's generated project already uses automatic signing.
+          # Add only the Apple team; do not force a signing identity on package targets.
           s = s.replace("CODE_SIGN_STYLE = Automatic;", "CODE_SIGN_STYLE = Automatic;\n\t\t\t\tDEVELOPMENT_TEAM = 2L4T6BTW73;")
-          # Configure distribution identity only on the Runner project Release settings.
-          # Do not pass CODE_SIGN_IDENTITY globally to xcodebuild because that also
-          # applies to Flutter Swift-package dependencies and causes signing conflicts.
-          s = s.replace(
-              'CODE_SIGN_STYLE = Automatic;',
-              'CODE_SIGN_STYLE = Automatic;\\n\\t\\t\\t\\tDEVELOPMENT_TEAM = 2L4T6BTW73;',
-          )
           p.write_text(s)
           PY
 
