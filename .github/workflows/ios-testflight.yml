@@ -70,6 +70,15 @@ jobs:
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
           flutter build ios --release --no-codesign --build-name "$VERSION" --build-number "$BUILD_NUMBER"
 
+      - name: Prepare iOS signing files
+        working-directory: generated
+        env:
+          IOS_CERT: ${{ secrets.BRISKERS_IOS_P12_BASE64 }}
+          IOS_PROFILE: ${{ secrets.BRISKERS_IOS_PROFILE_BASE64 }}
+        run: |
+          printf '%s' "$IOS_CERT" | base64 --decode > "$RUNNER_TEMP/briskers.p12"
+          printf '%s' "$IOS_PROFILE" | base64 --decode > "$RUNNER_TEMP/briskers.mobileprovision"
+
       - name: Install App Store Connect API key
         working-directory: generated
         env:
