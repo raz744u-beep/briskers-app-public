@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../services/briskers_api.dart';
@@ -7,10 +8,12 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
   const CustomerVehicleFindingsSection({
     super.key,
     required this.businessId,
+    required this.customerId,
     required this.vehicles,
   });
 
   final String businessId;
+  final String customerId;
   final List<dynamic> vehicles;
 
   @override
@@ -21,9 +24,12 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
 class _CustomerVehicleFindingsSectionState
     extends State<CustomerVehicleFindingsSection> {
   static const _api = BriskersApi();
+  final ImagePicker _picker = ImagePicker();
 
   late Future<List<Map<String, dynamic>>> _findingsFuture;
   bool _expanded = false;
+  bool _busy = false;
+  String? _error;
 
   @override
   void initState() {
@@ -35,9 +41,19 @@ class _CustomerVehicleFindingsSectionState
   void didUpdateWidget(covariant CustomerVehicleFindingsSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.businessId != widget.businessId ||
+        oldWidget.customerId != widget.customerId ||
         oldWidget.vehicles != widget.vehicles) {
       _findingsFuture = _allFindings();
     }
+  }
+
+  Future<void> _refresh() async {
+    final future = _allFindings();
+    setState(() {
+      _findingsFuture = future;
+      _error = null;
+    });
+    await future;
   }
 
   Future<List<Map<String, dynamic>>> _allFindings() async {
@@ -79,6 +95,222 @@ class _CustomerVehicleFindingsSectionState
     final parsed = DateTime.tryParse(raw?.toString() ?? '');
     if (parsed == null) return '';
     return DateFormat('MMM d, yyyy').format(parsed.toLocal());
+  }
+
+  String _imageMime(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
+  }
+
+  Future<Map<String, dynamic>?> _chooseVehicle() async {
+    final vehicles = widget.vehicles
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .where((vehicle) => (vehicle['id']?.toString() ?? '').isNotEmpty)
+        .toList();
+
+    if (vehicles.isEmpty) return null;
+    if (vehicles.length == 1) return vehicles.first;
+
+    if (!mounted) return null;
+    return showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Text(
+                'Select vehicle',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+            ),
+            ...vehicles.map(
+              (vehicle) => ListTile(
+                leading: const Icon(Icons.directions_car_outlined),
+                title: Text(
+                  _vehicleLabel(vehicle).isEmpty
+                      ? 'Vehicle'
+                      : _vehicleLabel(vehicle),
+                ),
+                subtitle: (vehicle['vin']?.toString() ?? '').isEmpty
+                    ? null
+                    : Text('VIN: ${vehicle['vin']}'),
+                onTap: () => Navigator.pop(sheetContext, vehicle),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _addFinding() async {
+    if (_busy) return;
+
+    final vehicle = await _chooseVehicle();
+    if (vehicle == null || !mounted) return;
+    final vehicleId = vehicle['id']?.toString() ?? '';
+    if (vehicleId.isEmpty) return;
+
+    final controller = TextEditingController();
+    final photos = <XFile>[];
+    var includeOnInvoice = false;
+
+    final save = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            0,
+            16,
+            MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
+          ),
+          child: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Add finding — ${_vehicleLabel(vehicle)}',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    minLines: 3,
+                    maxLines: 7,
+                    decoration: const InputDecoration(
+                      labelText: 'Finding',
+                      hintText: 'Example: Oil leak visible around valve cover',
+                    ),
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Include on invoice notes'),
+                    value: includeOnInvoice,
+                    onChanged: (value) => setSheetState(
+                      () => includeOnInvoice = value == true,
+                    ),
+                  ),
+                  if (photos.isNotEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        photos.length == 1
+                            ? '1 photo selected'
+                            : '${photos.length} photos selected',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final picked = await _picker.pickMultiImage(
+                              imageQuality: 88,
+                              maxWidth: 1920,
+                              maxHeight: 1920,
+                            );
+                            if (picked.isNotEmpty) {
+                              setSheetState(() => photos.addAll(picked));
+                            }
+                          },
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: const Text('Gallery'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final photo = await _picker.pickImage(
+                              source: ImageSource.camera,
+                              imageQuality: 88,
+                              maxWidth: 1920,
+                              maxHeight: 1920,
+                            );
+                            if (photo != null) {
+                              setSheetState(() => photos.add(photo));
+                            }
+                          },
+                          icon: const Icon(Icons.photo_camera_outlined),
+                          label: const Text('Camera'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        if (controller.text.trim().isEmpty) return;
+                        Navigator.pop(sheetContext, true);
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add finding'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final body = controller.text.trim();
+    controller.dispose();
+    if (save != true || body.isEmpty) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      final findingId = await _api.createVehicleFindingForVehicle(
+        widget.businessId,
+        widget.customerId,
+        vehicleId,
+        body: body,
+        includeOnInvoice: includeOnInvoice,
+      );
+
+      for (final photo in photos) {
+        await _api.uploadVehicleFindingPhoto(
+          widget.businessId,
+          findingId,
+          filename: photo.name,
+          mimeType: _imageMime(photo.name),
+          bytes: await photo.readAsBytes(),
+        );
+      }
+
+      await _refresh();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _showPhotoGallery(
@@ -292,6 +524,100 @@ class _CustomerVehicleFindingsSectionState
     );
   }
 
+  Future<void> _openFinding(Map<String, dynamic> finding) async {
+    final attachments = List<dynamic>.from(
+      finding['attachments'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+
+    if (!mounted) return;
+    final addAnother = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final body = finding['body']?.toString().trim() ?? '';
+        final vehicle = finding['_vehicle_label']?.toString().trim() ?? '';
+        final date = _dateLabel(finding['created_at']);
+        final status = finding['status']?.toString() == 'resolved'
+            ? 'Resolved'
+            : 'Open';
+
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Vehicle finding',
+                      style: TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    status,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: status == 'Open'
+                          ? const Color(0xFFA56B00)
+                          : Colors.green,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              if (vehicle.isNotEmpty)
+                Text(
+                  vehicle,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              if (date.isNotEmpty) Text(date),
+              const SizedBox(height: 14),
+              Text(
+                body.isEmpty ? 'Vehicle finding' : body,
+                style: const TextStyle(fontSize: 16, height: 1.35),
+              ),
+              if (attachments.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text(
+                  attachments.length == 1
+                      ? 'Photo'
+                      : 'Photos (${attachments.length})',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: attachments
+                      .map(
+                        (attachment) => _findingThumbnail(
+                          sheetContext,
+                          [attachment],
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
+              const SizedBox(height: 18),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pop(sheetContext, true),
+                icon: const Icon(Icons.add_circle_outline),
+                label: const Text('Add another finding'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (addAnother == true) await _addFinding();
+  }
+
   Widget _findingRow(
     BuildContext context,
     Map<String, dynamic> finding, {
@@ -310,47 +636,50 @@ class _CustomerVehicleFindingsSectionState
       if (showVehicle && vehicle.isNotEmpty) vehicle,
     ].join(' • ');
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 7, 12, 7),
-      child: Row(
-        children: [
-          _findingThumbnail(context, attachments),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  body.isEmpty ? 'Vehicle finding' : body,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (subtitle.isNotEmpty) ...[
-                  const SizedBox(height: 3),
+    return InkWell(
+      onTap: () => _openFinding(finding),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 7, 12, 7),
+        child: Row(
+          children: [
+            _findingThumbnail(context, attachments),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    subtitle,
-                    maxLines: 1,
+                    body.isEmpty ? 'Vehicle finding' : body,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontSize: 12.5,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          const Icon(
-            Icons.chevron_right,
-            size: 24,
-            color: Color(0xFF374151),
-          ),
-        ],
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.chevron_right,
+              size: 24,
+              color: Color(0xFF374151),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -414,6 +743,30 @@ class _CustomerVehicleFindingsSectionState
               ],
             ),
             children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 2, 12, 4),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: _busy ? null : _addFinding,
+                    icon: const Icon(Icons.add_circle_outline, size: 19),
+                    label: const Text('Add finding'),
+                  ),
+                ),
+              ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+                ),
               if (open.isEmpty)
                 const Padding(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 18),

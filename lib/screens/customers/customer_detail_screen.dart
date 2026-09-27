@@ -362,6 +362,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                   const SizedBox(height: 18),
                   CustomerVehicleFindingsSection(
                     businessId: widget.businessId,
+                    customerId: widget.customerId,
                     vehicles: vehicles,
                   ),
                   const SizedBox(height: 18),

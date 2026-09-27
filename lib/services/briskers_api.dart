@@ -947,6 +947,26 @@ class BriskersApi {
         .toList();
   }
 
+  Future<String> createVehicleFindingForVehicle(
+    String businessId,
+    String customerId,
+    String vehicleId, {
+    required String body,
+    bool includeOnInvoice = false,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_vehicle_finding_for_vehicle',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_body': body,
+        'p_include_on_invoice': includeOnInvoice,
+      },
+    );
+    return result.toString();
+  }
+
   Future<String> createVehicleFinding(
     String businessId,
     String jobId, {
