@@ -1562,7 +1562,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       return 'Draft';
     }
     final shownPaid = finalizedPaid + pendingPaid;
-    if (total > 0 && shownPaid >= total - 0.005) return 'Paid';
+    if (pendingPaid > 0 &&
+        total > 0 &&
+        shownPaid >= total - 0.005) {
+      return 'Pending Close';
+    }
+    if (total > 0 && finalizedPaid >= total - 0.005) return 'Paid';
     if (shownPaid > 0) return 'Partial';
     return 'Open';
   }
@@ -2302,19 +2307,34 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
               decoration: BoxDecoration(
-                color: const Color(0xFFEAF8EE),
+                color: pendingPaid > 0
+                    ? const Color(0xFFFFF4DE)
+                    : const Color(0xFFEAF8EE),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFCBEBD3)),
+                border: Border.all(
+                  color: pendingPaid > 0
+                      ? const Color(0xFFF1CC7A)
+                      : const Color(0xFFCBEBD3),
+                ),
               ),
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.check_circle, color: Color(0xFF0C9A43)),
-                  SizedBox(width: 8),
+                  Icon(
+                    pendingPaid > 0 ? Icons.schedule : Icons.check_circle,
+                    color: pendingPaid > 0
+                        ? const Color(0xFFE58A00)
+                        : const Color(0xFF0C9A43),
+                  ),
+                  const SizedBox(width: 8),
                   Text(
-                    'Paid in full',
+                    pendingPaid > 0
+                        ? 'Paid in full — Pending Close'
+                        : 'Paid in full',
                     style: TextStyle(
-                      color: Color(0xFF08752F),
+                      color: pendingPaid > 0
+                          ? const Color(0xFFA45F00)
+                          : const Color(0xFF08752F),
                       fontWeight: FontWeight.w800,
                     ),
                   ),
