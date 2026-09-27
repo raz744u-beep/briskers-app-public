@@ -1604,10 +1604,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final invoiceNumber =
         _detail?['converted_invoice_number']?.toString().trim() ?? '';
     final convertedDate = _dateLabel(_detail?['converted_invoice_date']);
+    final title = invoiceNumber.isEmpty
+        ? 'Converted to Invoice'
+        : 'Converted to Invoice #$invoiceNumber';
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      padding: const EdgeInsets.fromLTRB(14, 13, 12, 13),
+      padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
       decoration: BoxDecoration(
         color: const Color(0xFFEAF8EE),
         borderRadius: BorderRadius.circular(14),
@@ -1616,8 +1619,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       child: Row(
         children: [
           Container(
-            width: 42,
-            height: 42,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: const Color(0xFF159447),
               borderRadius: BorderRadius.circular(10),
@@ -1625,30 +1628,47 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             child: const Icon(
               Icons.receipt_long_outlined,
               color: Colors.white,
+              size: 23,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  invoiceNumber.isEmpty
-                      ? 'Converted to Invoice'
-                      : 'Converted to Invoice #$invoiceNumber',
-                  style: const TextStyle(
-                    color: Color(0xFF08752F),
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15.5,
+                SizedBox(
+                  width: double.infinity,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: const TextStyle(
+                        color: Color(0xFF08752F),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15.5,
+                      ),
+                    ),
                   ),
                 ),
                 if (convertedDate.isNotEmpty) ...[
                   const SizedBox(height: 2),
-                  Text(
-                    'This estimate was converted on $convertedDate.',
-                    style: const TextStyle(
-                      color: Color(0xFF405064),
-                      fontSize: 13,
+                  SizedBox(
+                    width: double.infinity,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Converted $convertedDate',
+                        maxLines: 1,
+                        softWrap: false,
+                        style: const TextStyle(
+                          color: Color(0xFF405064),
+                          fontSize: 13,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -1662,13 +1682,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               foregroundColor: const Color(0xFF08752F),
               side: const BorderSide(color: Color(0xFF59B875)),
               padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
+                horizontal: 9,
+                vertical: 9,
               ),
+              visualDensity: VisualDensity.compact,
             ),
-            icon: const Icon(Icons.open_in_new, size: 18),
+            icon: const Icon(Icons.open_in_new, size: 17),
             label: const Text(
-              'View Invoice',
+              'View',
               style: TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
@@ -2267,26 +2288,35 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           foregroundColor: Colors.white,
           elevation: 1,
           titleSpacing: 0,
-          title: SizedBox(
-            width: double.infinity,
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                number.isEmpty
-                    ? (_estimate ? 'Estimate' : 'Invoice')
-                    : (_estimate ? 'Estimate #$number' : 'Invoice #$number'),
-                maxLines: 1,
-                softWrap: false,
-                style: const TextStyle(
-                  fontSize: 21,
-                  fontWeight: FontWeight.w800,
+          title: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      number.isEmpty
+                          ? (_estimate ? 'Estimate' : 'Invoice')
+                          : (_estimate
+                              ? 'Estimate #$number'
+                              : 'Invoice #$number'),
+                      maxLines: 1,
+                      softWrap: false,
+                      style: const TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
+              const SizedBox(width: 8),
+              _statusPill(statusLabel),
+            ],
           ),
           actions: [
-            Center(child: _statusPill(statusLabel)),
             PopupMenuButton<String>(
               tooltip: 'More actions',
               icon: const Icon(Icons.more_vert),
