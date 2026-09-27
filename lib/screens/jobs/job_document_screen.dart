@@ -200,20 +200,42 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       },
     );
 
-    if (selected == null) return;
+    if (selected == null || !mounted) return;
+
+    final line = <String, dynamic>{
+      'name': selected['name']?.toString() ?? 'Item',
+      'description': selected['description']?.toString(),
+      'quantity': 1,
+      'unit_price': _number(selected['selling_price']),
+      'tax_rate': selected['taxable'] == true ? _defaultTaxRate : 0,
+      'line_kind': 'item',
+    };
+
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (_) => _EditLineDialog(
+        line: line,
+        title: 'Add item to invoice',
+        saveLabel: 'Add to Invoice',
+      ),
+    );
+    if (result == null) return;
 
     await _run(() async {
       await _api.addDocumentLine(
         widget.businessId,
         widget.documentId,
         expectedVersion: _version,
-        name: selected['name']?.toString() ?? 'Item',
-        description: selected['description']?.toString(),
+        name: result['name'].toString(),
+        description: result['description']?.toString(),
         itemId: selected['id']?.toString(),
-        quantity: 1,
-        unitPrice: _number(selected['selling_price']),
-        taxRate: selected['taxable'] == true ? _defaultTaxRate : 0,
-        lineKind: 'item',
+        quantity: result['quantity'] as num,
+        unitPrice: result['unit_price'] as num,
+        taxRate: result['tax_rate'] as num,
+        lineKind: result['line_kind'].toString(),
       );
     });
   }
@@ -247,9 +269,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _editLine(Map<String, dynamic> line) async {
     if (_readOnly) return;
 
-    final result = await showDialog<Map<String, dynamic>>(
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
-      builder: (_) => _EditLineDialog(line: line),
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (_) => _EditLineDialog(
+        line: line,
+        title: 'Edit invoice item',
+        saveLabel: 'Save Changes',
+      ),
     );
     if (result == null) return;
 
@@ -2413,9 +2442,15 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
 }
 
 class _EditLineDialog extends StatefulWidget {
-  const _EditLineDialog({required this.line});
+  const _EditLineDialog({
+    required this.line,
+    this.title = 'Edit item',
+    this.saveLabel = 'Save',
+  });
 
   final Map<String, dynamic> line;
+  final String title;
+  final String saveLabel;
 
   @override
   State<_EditLineDialog> createState() => _EditLineDialogState();
@@ -2497,85 +2532,198 @@ class _EditLineDialogState extends State<_EditLineDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Edit item'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _name,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: 'Name'),
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              initialValue: _lineKind,
-              decoration: const InputDecoration(labelText: 'Type'),
-              items: const [
-                DropdownMenuItem(value: 'item', child: Text('Part / Item')),
-                DropdownMenuItem(value: 'labor', child: Text('Labor')),
-                DropdownMenuItem(value: 'supply', child: Text('Shop supply')),
-                DropdownMenuItem(value: 'discount', child: Text('Discount')),
-                DropdownMenuItem(value: 'other', child: Text('Other')),
-                DropdownMenuItem(value: 'shipping', child: Text('Shipping')),
-              ],
-              onChanged: (value) {
-                if (value != null) setState(() => _lineKind = value);
-              },
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _description,
-              decoration: const InputDecoration(labelText: 'Description'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _quantity,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Quantity'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _price,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Unit price',
-                prefixText: '\$ ',
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: viewInsets.bottom),
+      child: FractionallySizedBox(
+        heightFactor: 0.80,
+        child: Material(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(22),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 4, 12, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _taxPercent,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Tax',
-                suffixText: '%',
+              const Divider(height: 1),
+              Expanded(
+                child: SingleChildScrollView(
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 22),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        controller: _name,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(
+                          labelText: 'Item',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _description,
+                        minLines: 2,
+                        maxLines: 5,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: const InputDecoration(
+                          labelText: 'Description',
+                          hintText: 'Optional line description',
+                          border: OutlineInputBorder(),
+                          alignLabelWithHint: true,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: _quantity,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                              decoration: const InputDecoration(
+                                labelText: 'Qty',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 3,
+                            child: TextField(
+                              controller: _price,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                              decoration: const InputDecoration(
+                                labelText: 'Price',
+                                prefixText: '\$ ',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _taxPercent,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                          labelText: 'Tax',
+                          suffixText: '%',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: _lineKind,
+                        decoration: const InputDecoration(
+                          labelText: 'Type',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'item',
+                            child: Text('Part / Item'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'labor',
+                            child: Text('Labor'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'supply',
+                            child: Text('Shop supply'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'discount',
+                            child: Text('Discount'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'other',
+                            child: Text('Other'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'shipping',
+                            child: Text('Shipping'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => _lineKind = value);
+                          }
+                        },
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          _error!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: FilledButton.icon(
+                        onPressed: _save,
+                        icon: const Icon(Icons.check),
+                        label: Text(widget.saveLabel),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
-          ],
+          ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _save,
-          child: const Text('Save'),
-        ),
-      ],
     );
   }
 }
