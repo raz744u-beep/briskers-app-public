@@ -38,6 +38,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _checkingInId;
   String? _busyJobId;
   bool _aiBusy = false;
+  bool _appointmentsExpanded = false;
+  bool _activeJobsExpanded = false;
   DateTime _selectedDay = DateTime.now();
   DateTime _calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
   Set<String> _eventDays = <String>{};
@@ -1058,140 +1060,182 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ],
           const SizedBox(height: 20),
-          Row(
-            children: [
-              const Icon(
-                Icons.calendar_month_outlined,
-                color: BriskersColors.appointments,
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => setState(
+                () => _appointmentsExpanded = !_appointmentsExpanded,
               ),
-              const SizedBox(width: 7),
-              Text(
-                _sameDay(_selectedDay, DateTime.now())
-                    ? 'Appointments'
-                    : DateFormat('MMM d Appointments').format(_selectedDay),
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: BriskersColors.appointments,
-                    ),
-              ),
-              const Spacer(),
-              Text(
-                '${appointments.length}',
-                style: const TextStyle(
-                  color: BriskersColors.appointments,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 7),
-          if (appointments.isEmpty)
-            const Card(
               child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('No confirmed appointments for today.'),
-              ),
-            )
-          else
-            ...appointments.map((item) {
-              final start =
-                  DateTime.tryParse(item['starts_at']?.toString() ?? '');
-              final time = start == null
-                  ? ''
-                  : DateFormat('h:mm a').format(start.toLocal());
-              final mechanic = item['mechanic']?.toString() ?? '';
-              final checking = _checkingInId == item['id']?.toString();
-
-              return Card(
-                margin: const EdgeInsets.only(bottom: 7),
-                child: ListTile(
-                  dense: true,
-                  leading: CircleAvatar(
-                    radius: 19,
-                    backgroundColor:
-                        BriskersColors.appointments.withValues(alpha: 0.14),
-                    child: const Icon(
-                      Icons.event_outlined,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.calendar_month_outlined,
                       color: BriskersColors.appointments,
-                      size: 21,
                     ),
-                  ),
-                  title: Text(
-                    <String>[
-                      if (time.isNotEmpty) time,
-                      item['title']?.toString() ?? 'Appointment',
-                    ].join(' • '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
+                    const SizedBox(width: 7),
+                    Text(
+                      _sameDay(_selectedDay, DateTime.now())
+                          ? 'Appointments'
+                          : DateFormat('MMM d Appointments').format(_selectedDay),
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: BriskersColors.appointments,
+                          ),
                     ),
-                  ),
-                  subtitle: Text(
-                    <String>[
-                      item['customer']?.toString() ?? '',
-                      if ((item['vehicle']?.toString() ?? '').isNotEmpty)
-                        item['vehicle'].toString(),
-                      if (mechanic.isNotEmpty) 'Planned: $mechanic',
-                    ].where((value) => value.isNotEmpty).join(' • '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: _canManage
-                      ? checking
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : IconButton(
-                              tooltip: 'Check in / Create job',
-                              onPressed: () => _checkIn(item),
-                              icon: const Icon(
-                                Icons.login_outlined,
-                                color: BriskersColors.appointments,
-                              ),
-                            )
-                      : null,
+                    const Spacer(),
+                    Text(
+                      '${appointments.length}',
+                      style: const TextStyle(
+                        color: BriskersColors.appointments,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      _appointmentsExpanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      color: BriskersColors.appointments,
+                    ),
+                  ],
                 ),
-              );
-            }),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              const Icon(
-                Icons.build_outlined,
-                color: BriskersColors.jobs,
               ),
-              const SizedBox(width: 7),
-              Text(
-                'Active Jobs',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (_appointmentsExpanded) ...[
+            const SizedBox(height: 7),
+            if (appointments.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No confirmed appointments for this day.'),
+                ),
+              )
+            else
+              ...appointments.map((item) {
+                final start =
+                    DateTime.tryParse(item['starts_at']?.toString() ?? '');
+                final time = start == null
+                    ? ''
+                    : DateFormat('h:mm a').format(start.toLocal());
+                final mechanic = item['mechanic']?.toString() ?? '';
+                final checking = _checkingInId == item['id']?.toString();
+
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 7),
+                  child: ListTile(
+                    dense: true,
+                    leading: CircleAvatar(
+                      radius: 19,
+                      backgroundColor:
+                          BriskersColors.appointments.withValues(alpha: 0.14),
+                      child: const Icon(
+                        Icons.event_outlined,
+                        color: BriskersColors.appointments,
+                        size: 21,
+                      ),
+                    ),
+                    title: Text(
+                      <String>[
+                        if (time.isNotEmpty) time,
+                        item['title']?.toString() ?? 'Appointment',
+                      ].join(' • '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: Text(
+                      <String>[
+                        item['customer']?.toString() ?? '',
+                        if ((item['vehicle']?.toString() ?? '').isNotEmpty)
+                          item['vehicle'].toString(),
+                        if (mechanic.isNotEmpty) 'Planned: $mechanic',
+                      ].where((value) => value.isNotEmpty).join(' • '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: _canManage
+                        ? checking
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : IconButton(
+                                tooltip: 'Check in / Create job',
+                                onPressed: () => _checkIn(item),
+                                icon: const Icon(
+                                  Icons.login_outlined,
+                                  color: BriskersColors.appointments,
+                                ),
+                              )
+                        : null,
+                  ),
+                );
+              }),
+          ],
+          const SizedBox(height: 20),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => setState(
+                () => _activeJobsExpanded = !_activeJobsExpanded,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.build_outlined,
                       color: BriskersColors.jobs,
                     ),
-              ),
-              const Spacer(),
-              Text(
-                '${activeJobs.length}',
-                style: const TextStyle(
-                  color: BriskersColors.jobs,
-                  fontWeight: FontWeight.w700,
+                    const SizedBox(width: 7),
+                    Text(
+                      'Active Jobs',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: BriskersColors.jobs,
+                          ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${activeJobs.length}',
+                      style: const TextStyle(
+                        color: BriskersColors.jobs,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      _activeJobsExpanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      color: BriskersColors.jobs,
+                    ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
-          const SizedBox(height: 7),
-          if (activeJobs.isEmpty)
-            const Card(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('No active jobs right now.'),
-              ),
-            )
-          else
-            ...activeJobs.map(_activeJobCard),
+          if (_activeJobsExpanded) ...[
+            const SizedBox(height: 7),
+            if (activeJobs.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No active jobs right now.'),
+                ),
+              )
+            else
+              ...activeJobs.map(_activeJobCard),
+          ],
           const SizedBox(height: 80),
         ],
       ),
