@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
-import '../../core/briskers_colors.dart';
+import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
+import '../../widgets/job_compact_card.dart';
+import '../jobs/job_detail_screen.dart';
 
 class CustomerServiceHistorySection extends StatefulWidget {
   const CustomerServiceHistorySection({
@@ -26,6 +27,7 @@ class _CustomerServiceHistorySectionState
   List<Map<String, dynamic>> _jobs = const [];
   bool _loading = true;
   String? _error;
+  String _roleCode = 'office';
 
   @override
   void initState() {
@@ -35,13 +37,27 @@ class _CustomerServiceHistorySectionState
 
   Future<void> _load() async {
     try {
-      final rows = await _api.customerServiceHistory(
-        widget.businessId,
-        widget.customerId,
+      final results = await Future.wait<dynamic>([
+        _api.customerServiceHistory(
+          widget.businessId,
+          widget.customerId,
+        ),
+        _api.myBusinesses(),
+      ]);
+
+      final rows = List<Map<String, dynamic>>.from(results[0] as List);
+      final businesses =
+          List<Map<String, dynamic>>.from(results[1] as List);
+      final current = businesses.where(
+        (business) => business['id']?.toString() == widget.businessId,
       );
+
       if (!mounted) return;
       setState(() {
         _jobs = rows;
+        if (current.isNotEmpty) {
+          _roleCode = current.first['role']?.toString() ?? 'office';
+        }
         _loading = false;
         _error = null;
       });
@@ -54,26 +70,43 @@ class _CustomerServiceHistorySectionState
     }
   }
 
-  String _label(Object? raw) {
-    final value = raw?.toString().replaceAll('_', ' ') ?? '';
-    if (value.isEmpty) return '';
-    return value
-        .split(' ')
-        .where((part) => part.isNotEmpty)
-        .map((part) => part[0].toUpperCase() + part.substring(1))
-        .join(' ');
+  Widget _statusControl(Map<String, dynamic> job) {
+    final color = colorFromHex(job['status_color']?.toString());
+    final label = job['status_name']?.toString() ?? 'Status';
+
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 150),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.65)),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: color,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
   }
 
-  String _date(Object? raw) {
-    final date = DateTime.tryParse(raw?.toString() ?? '');
-    if (date == null) return '';
-    return DateFormat('MMM d, yyyy').format(date.toLocal());
-  }
-
-  String _money(Object? raw) {
-    final amount = num.tryParse(raw?.toString() ?? '');
-    if (amount == null) return '';
-    return NumberFormat.currency(symbol: '\$').format(amount);
+  Future<void> _openJob(Map<String, dynamic> job) async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDetailScreen(
+          businessId: widget.businessId,
+          jobId: job['id'].toString(),
+          roleCode: _roleCode,
+        ),
+      ),
+    );
+    await _load();
   }
 
   @override
@@ -83,10 +116,9 @@ class _CustomerServiceHistorySectionState
     return Card(
       child: ExpansionTile(
         initiallyExpanded: false,
-        maintainState: false,
+        maintainState: true,
         leading: const Icon(
           Icons.history_outlined,
-          color: BriskersColors.jobs,
         ),
         title: const Text(
           'Service History',
@@ -109,7 +141,9 @@ class _CustomerServiceHistorySectionState
                 alignment: Alignment.centerLeft,
                 child: Text(
                   _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
                 ),
               ),
             )
@@ -125,119 +159,15 @@ class _CustomerServiceHistorySectionState
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
               child: Column(
-                children: _jobs.map((job) {
-                  final vehicle = '${job['vehicle'] ?? ''}'.trim();
-                  final title = '${job['title'] ?? ''}'.trim();
-                  final jobNumber = '${job['job_number'] ?? ''}'.trim();
-                  final status = _label(job['status']);
-                  final requested = '${job['requested_work'] ?? ''}'.trim();
-                  final date = _date(job['completed_at'] ?? job['created_at']);
-                  final documents = List<dynamic>.from(
-                    job['documents'] ?? const [],
-                  );
-                  final heading = <String>[
-                    if (vehicle.isNotEmpty) vehicle,
-                    if (title.isNotEmpty) title,
-                  ].join(' — ');
-
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: ExpansionTile(
-                      leading: const Icon(
-                        Icons.build_outlined,
-                        color: BriskersColors.jobs,
+                children: _jobs
+                    .map(
+                      (job) => JobCompactCard(
+                        job: job,
+                        statusControl: _statusControl(job),
+                        onOpen: () => _openJob(job),
                       ),
-                      title: Text(
-                        heading.isEmpty ? 'Service job' : heading,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Text(
-                        <String>[
-                          if (jobNumber.isNotEmpty) 'Job $jobNumber',
-                          if (status.isNotEmpty) status,
-                          if (date.isNotEmpty) date,
-                        ].join(' • '),
-                      ),
-                      children: [
-                        const Divider(height: 1),
-                        Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              if (requested.isNotEmpty) ...[
-                                Text(
-                                  'Requested work',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelLarge,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(requested),
-                                const SizedBox(height: 12),
-                              ],
-                              if (job['odometer_in'] != null)
-                                Text('Mileage in: ${job['odometer_in']} mi'),
-                              if (documents.isNotEmpty) ...[
-                                const SizedBox(height: 12),
-                                Text(
-                                  'Documents',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelLarge,
-                                ),
-                                const SizedBox(height: 4),
-                                ...documents.map((raw) {
-                                  final document =
-                                      Map<String, dynamic>.from(raw as Map);
-                                  final kind = _label(document['kind']);
-                                  final number =
-                                      '${document['document_number'] ?? ''}'
-                                          .trim();
-                                  final docStatus =
-                                      _label(document['status']);
-                                  final total =
-                                      _money(document['total_amount']);
-
-                                  return ListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    dense: true,
-                                    leading: Icon(
-                                      document['kind'] == 'invoice'
-                                          ? Icons.receipt_long_outlined
-                                          : Icons.request_quote_outlined,
-                                      color: document['kind'] == 'invoice'
-                                          ? BriskersColors.invoices
-                                          : BriskersColors.estimates,
-                                    ),
-                                    title: Text(
-                                      <String>[
-                                        kind,
-                                        if (number.isNotEmpty) number,
-                                      ].join(' '),
-                                    ),
-                                    subtitle: docStatus.isEmpty
-                                        ? null
-                                        : Text(docStatus),
-                                    trailing:
-                                        total.isEmpty ? null : Text(total),
-                                  );
-                                }),
-                              ] else
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 8),
-                                  child: Text(
-                                    'No estimates or invoices for this job.',
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }).toList(),
+                    )
+                    .toList(),
               ),
             ),
         ],
