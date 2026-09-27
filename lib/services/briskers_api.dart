@@ -433,6 +433,28 @@ class BriskersApi {
   }
 
 
+  Future<Map<String, dynamic>> taxSettings(String businessId) async {
+    final result = await supabase.rpc(
+      'briskers_tax_settings',
+      params: {'p_business_id': businessId},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> updateTaxSettings(
+    String businessId, {
+    required num salesTaxRate,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_update_tax_settings',
+      params: {
+        'p_business_id': businessId,
+        'p_sales_tax_rate': salesTaxRate,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> businessSettings(String businessId) async {
     final result = await supabase.rpc(
       'briskers_business_settings',
