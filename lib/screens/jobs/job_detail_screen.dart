@@ -1698,6 +1698,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: statusColor.withValues(alpha: 0.08),
+        centerTitle: false,
         titleSpacing: 0,
         title: Text(
           jobNumber.isEmpty ? 'Job' : 'Job $jobNumber',
