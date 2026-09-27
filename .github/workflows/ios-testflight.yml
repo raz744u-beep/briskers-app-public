@@ -68,9 +68,36 @@ jobs:
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
           flutter build ios --release --no-codesign --build-name "$VERSION" --build-number "$BUILD_NUMBER"
 
-      - name: Signing setup required
-        if: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID == '' }}
+      - name: Install App Store Connect API key
+        working-directory: generated
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
         run: |
-          echo "Unsigned iOS build succeeded."
-          echo "Next step: add App Store Connect API signing credentials as GitHub Actions secrets."
-          echo "After those secrets are configured, this workflow can archive and upload Briskers to TestFlight."
+          mkdir -p "$HOME/private_keys"
+          printf '%s\n' "$APP_STORE_CONNECT_API_PRIVATE_KEY" > "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
+          chmod 600 "$HOME/private_keys/AuthKey_${APP_STORE_CONNECT_API_KEY_ID}.p8"
+
+      - name: Build signed IPA
+        working-directory: generated
+        run: |
+          VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
+          BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
+          flutter build ipa --release --build-name "$VERSION" --build-number "$BUILD_NUMBER"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-ios
+          path: generated/build/ios/ipa/*.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload to TestFlight
+        working-directory: generated
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          IPA="$(find build/ios/ipa -name '*.ipa' -print -quit)"
+          xcrun altool --upload-app --type ios --file "$IPA" --apiKey "$APP_STORE_CONNECT_API_KEY_ID" --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
