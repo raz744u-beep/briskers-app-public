@@ -79,6 +79,22 @@ jobs:
           printf '%s' "$IOS_CERT" | base64 --decode > "$RUNNER_TEMP/briskers.p12"
           printf '%s' "$IOS_PROFILE" | base64 --decode > "$RUNNER_TEMP/briskers.mobileprovision"
 
+      - name: Install iOS signing assets
+        working-directory: generated
+        env:
+          IOS_CERT_PASSWORD: ${{ secrets.BRISKERS_IOS_P12_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/briskers.keychain-db"
+          security create-keychain -p briskers-ci "$KEYCHAIN"
+          security unlock-keychain -p briskers-ci "$KEYCHAIN"
+          security import "$RUNNER_TEMP/briskers.p12" -P "$IOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k briskers-ci "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          PROFILE_UUID="$(security cms -D -i "$RUNNER_TEMP/briskers.mobileprovision" | plutil -extract UUID raw -)"
+          cp "$RUNNER_TEMP/briskers.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
       - name: Install App Store Connect API key
         working-directory: generated
         env:
