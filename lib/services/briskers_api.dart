@@ -36,6 +36,23 @@ class BriskersApi {
     }
   }
 
+  Future<List<DateTime>> calendarEventDays(
+    String businessId,
+    DateTime month,
+  ) async {
+    final first = DateTime(month.year, month.month, 1);
+    final result = await supabase.rpc(
+      'briskers_calendar_event_days',
+      params: {
+        'p_business_id': businessId,
+        'p_month': first.toIso8601String().split('T').first,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((value) => DateTime.parse(value.toString()))
+        .toList();
+  }
+
   Future<Map<String, dynamic>> dashboard(String businessId, String day) async {
     final result = await supabase.rpc(
       'briskers_dashboard',
