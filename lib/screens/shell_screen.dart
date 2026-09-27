@@ -66,6 +66,7 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   void _goTo(int index) {
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _index = index;
       if (index == 0) _todayRefreshToken++;
