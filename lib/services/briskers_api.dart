@@ -1196,6 +1196,27 @@ class BriskersApi {
     );
   }
 
+  Future<void> deleteExpensePhoto(
+    String businessId,
+    String transactionId,
+    String attachmentId, {
+    required String bucket,
+    required String key,
+  }) async {
+    if (key.isNotEmpty) {
+      await supabase.storage.from(bucket).remove([key]);
+    }
+
+    await supabase.rpc(
+      'briskers_archive_expense_attachment',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+        'p_attachment_id': attachmentId,
+      },
+    );
+  }
+
   Future<List<Map<String, dynamic>>> assignableEmployees(
     String businessId,
   ) async {

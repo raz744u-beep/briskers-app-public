@@ -27,6 +27,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   Map<String, dynamic>? _detail;
   bool _loading = true;
   bool _uploading = false;
+  String? _deletingAttachmentId;
   bool _busy = false;
   String? _error;
 
@@ -136,6 +137,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         attachment['key']?.toString() ?? '',
       );
       if (!mounted) return;
+      final editable = _detail?['editable'] == true;
       await showDialog<void>(
         context: context,
         builder: (dialogContext) => Dialog(
@@ -162,12 +164,80 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                   icon: const Icon(Icons.close),
                 ),
               ),
+              if (editable)
+                Positioned(
+                  right: 4,
+                  bottom: 4,
+                  child: FilledButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(dialogContext);
+                      await _deleteAttachment(attachment);
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.error,
+                    ),
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Delete photo'),
+                  ),
+                ),
             ],
           ),
         ),
       );
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _deleteAttachment(
+    Map<String, dynamic> attachment,
+  ) async {
+    final attachmentId = attachment['attachment_id']?.toString() ?? '';
+    if (attachmentId.isEmpty || _deletingAttachmentId != null) return;
+
+    final filename = attachment['filename']?.toString() ?? 'this receipt photo';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete receipt photo?'),
+        content: Text(
+          'Delete "$filename"? The photo will be removed from this transaction.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _deletingAttachmentId = attachmentId;
+      _error = null;
+    });
+
+    try {
+      await _api.deleteExpensePhoto(
+        widget.businessId,
+        widget.transactionId,
+        attachmentId,
+        bucket: attachment['bucket']?.toString() ?? 'briskers-private',
+        key: attachment['key']?.toString() ?? '',
+      );
+      await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _deletingAttachmentId = null);
     }
   }
 
@@ -435,7 +505,34 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                   subtitle: Text(
                     attachment['mime_type']?.toString() ?? '',
                   ),
-                  trailing: const Icon(Icons.zoom_in),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'View receipt',
+                        onPressed: () => _openAttachment(attachment),
+                        icon: const Icon(Icons.zoom_in),
+                      ),
+                      if (editable)
+                        IconButton(
+                          tooltip: 'Delete receipt photo',
+                          onPressed:
+                              _deletingAttachmentId ==
+                                      attachment['attachment_id']?.toString()
+                                  ? null
+                                  : () => _deleteAttachment(attachment),
+                          icon: _deletingAttachmentId ==
+                                  attachment['attachment_id']?.toString()
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.delete_outline),
+                        ),
+                    ],
+                  ),
                   onTap: () => _openAttachment(attachment),
                 ),
               ),
