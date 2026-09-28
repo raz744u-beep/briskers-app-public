@@ -3022,6 +3022,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
   @override
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.viewInsetsOf(context);
+    final keyboardOpen = viewInsets.bottom > 0;
 
     return AnimatedPadding(
       duration: const Duration(milliseconds: 150),
@@ -3063,7 +3064,12 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                 child: SingleChildScrollView(
                   keyboardDismissBehavior:
                       ScrollViewKeyboardDismissBehavior.onDrag,
-                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 22),
+                  padding: EdgeInsets.fromLTRB(
+                    18,
+                    16,
+                    18,
+                    keyboardOpen ? 110 : 22,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -3303,7 +3309,7 @@ class _DiscountDialogState extends State<_DiscountDialog> {
       curve: Curves.easeOut,
       padding: EdgeInsets.only(bottom: viewInsets.bottom),
       child: FractionallySizedBox(
-        heightFactor: 0.68,
+        heightFactor: keyboardOpen ? 0.96 : 0.68,
         child: Material(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: const BorderRadius.vertical(
@@ -3373,6 +3379,10 @@ class _DiscountDialogState extends State<_DiscountDialog> {
                         controller: _value,
                         keyboardType:
                             const TextInputType.numberWithOptions(decimal: true),
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => FocusScope.of(context).unfocus(),
+                        onTapOutside: (_) => FocusScope.of(context).unfocus(),
+                        scrollPadding: const EdgeInsets.only(bottom: 180),
                         decoration: InputDecoration(
                           labelText: _method == 'percent'
                               ? 'Discount percentage'
