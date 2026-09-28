@@ -169,7 +169,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                         )
                       : ListView.separated(
                           itemCount: expenses.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          separatorBuilder: (_, _) => const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final expense = expenses[index];
                             final id = expense['id']?.toString() ?? '';

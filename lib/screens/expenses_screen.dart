@@ -124,7 +124,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       return;
     }
 
-    final folder = await FilePicker.platform.getDirectoryPath(
+    final folder = await FilePicker.getDirectoryPath(
       dialogTitle: 'Select ExpenseIQ photos folder',
       initialDirectory: '/storage/emulated/0/ExpenseIQ/photos',
     );
@@ -163,6 +163,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       final file = filesByPhotoId[photoId];
       if (file != null) matches.add((candidate, file));
     }
+
+    if (!mounted) return;
 
     final proceed = await showDialog<bool>(
       context: context,

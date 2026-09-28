@@ -146,7 +146,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                 child: Image.network(
                   url,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const SizedBox(
+                  errorBuilder: (_, _, _) => const SizedBox(
                     height: 300,
                     child: Center(child: Text('Could not load receipt.')),
                   ),
@@ -329,7 +329,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                               ? Image.network(
                                   snapshot.data!,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => const ColoredBox(
+                                  errorBuilder: (_, _, _) => const ColoredBox(
                                     color: Color(0xFFF1F3F4),
                                     child: Center(
                                       child: Icon(Icons.broken_image_outlined),
