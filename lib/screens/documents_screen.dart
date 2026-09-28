@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/invoice_status_style.dart';
 import '../services/briskers_api.dart';
 import 'jobs/job_document_screen.dart';
 
@@ -25,6 +26,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   static const _api = BriskersApi();
 
   List<Map<String, dynamic>>? _rows;
+  List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
   String? _error;
 
@@ -32,20 +34,36 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   List<String> get _statuses => _estimate
       ? const ['Draft', 'Issued', 'Accepted', 'Declined', 'Expired', 'Void']
-      : const ['Open', 'Partial', 'Pending Close', 'Paid', 'Void'];
+      : _invoiceStyles
+          .map((item) => item['name']?.toString() ?? '')
+          .where((name) => name.isNotEmpty)
+          .toList();
 
   String get _title => _estimate ? 'Estimates' : 'Invoices';
 
+  Map<String, dynamic>? _invoiceStyleByName(String status) {
+    for (final item in _invoiceStyles) {
+      if (item['name']?.toString() == status) return item;
+    }
+    return null;
+  }
+
   Color _statusColor(String status) {
+    if (!_estimate) {
+      final style = _invoiceStyleByName(status);
+      if (style != null) {
+        return invoiceStatusColorFromHex(
+          style['color_hex']?.toString(),
+          fallback: BriskersColors.invoices,
+        );
+      }
+    }
+
     switch (status) {
       case 'Accepted':
-      case 'Paid':
         return const Color(0xFF169B62);
       case 'Issued':
-      case 'Partial':
         return const Color(0xFF1976D2);
-      case 'Pending Close':
-        return const Color(0xFFE58A00);
       case 'Declined':
       case 'Expired':
       case 'Void':
@@ -55,6 +73,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       default:
         return _estimate ? BriskersColors.estimates : BriskersColors.invoices;
     }
+  }
+
+  IconData _statusIcon(String status) {
+    if (!_estimate) {
+      final style = _invoiceStyleByName(status);
+      if (style != null) {
+        return invoiceStatusIcon(style['icon_key']?.toString());
+      }
+    }
+    return Icons.circle;
   }
 
   @override
@@ -69,9 +97,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         widget.businessId,
         kind: widget.kind,
       );
+      final styles = _estimate
+          ? const <Map<String, dynamic>>[]
+          : await _api.invoiceStatusStyles(widget.businessId);
       if (!mounted) return;
       setState(() {
         _rows = rows;
+        _invoiceStyles = styles;
         _error = null;
       });
     } catch (error) {
@@ -192,8 +224,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       child: Row(
                         children: [
                           Icon(
-                            Icons.circle,
-                            size: 14,
+                            _statusIcon(status),
+                            size: 16,
                             color: _statusColor(status),
                           ),
                           const SizedBox(width: 10),
@@ -286,7 +318,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       child: Icon(
                         _estimate
                             ? Icons.request_quote_outlined
-                            : Icons.receipt_long_outlined,
+                            : invoiceStatusIcon(
+                                row['status_icon']?.toString(),
+                              ),
                         color: color,
                       ),
                     ),

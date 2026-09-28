@@ -4,6 +4,7 @@ import '../../core/briskers_colors.dart';
 import 'catalog_settings_screen.dart';
 import 'employees_settings_screen.dart';
 import 'job_statuses_settings_screen.dart';
+import 'invoice_statuses_settings_screen.dart';
 import 'item_categories_settings_screen.dart';
 import 'payment_methods_settings_screen.dart';
 import 'shop_info_settings_screen.dart';
@@ -87,6 +88,27 @@ class SettingsScreen extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (_) => JobStatusesSettingsScreen(
+                    businessId: businessId,
+                  ),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(
+              Icons.receipt_long_outlined,
+              color: BriskersColors.invoices,
+            ),
+            title: const Text('Invoice statuses'),
+            subtitle: const Text(
+              'Names, colors, icons and display order',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => InvoiceStatusesSettingsScreen(
                     businessId: businessId,
                   ),
                 ),

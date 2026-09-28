@@ -5,6 +5,7 @@ import 'package:printing/printing.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/formatters.dart';
+import '../../core/invoice_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/document_pdf_service.dart';
 import '../expenses/expense_detail_screen.dart';
@@ -32,6 +33,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   final ImagePicker _picker = ImagePicker();
 
   Map<String, dynamic>? _detail;
+  List<Map<String, dynamic>> _invoiceStyles = const [];
   num _defaultTaxRate = 0;
   bool _loading = true;
   bool _busy = false;
@@ -52,18 +54,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   Future<void> _load() async {
     try {
-      final results = await Future.wait<dynamic>([
-        _api.documentDetail(
-          widget.businessId,
-          widget.documentId,
-        ),
-        _api.taxSettings(widget.businessId),
-      ]);
+      final detail = await _api.documentDetail(
+        widget.businessId,
+        widget.documentId,
+      );
+      final taxSettings = await _api.taxSettings(widget.businessId);
+      List<Map<String, dynamic>> invoiceStyles = const [];
+      if (detail['kind']?.toString() == 'invoice') {
+        invoiceStyles = await _api.invoiceStatusStyles(widget.businessId);
+      }
       if (!mounted) return;
-      final detail = Map<String, dynamic>.from(results[0] as Map);
-      final taxSettings = Map<String, dynamic>.from(results[1] as Map);
       setState(() {
         _detail = detail;
+        _invoiceStyles = invoiceStyles;
         _defaultTaxRate =
             num.tryParse(taxSettings['sales_tax_rate']?.toString() ?? '') ?? 0;
         _loading = false;
@@ -1683,40 +1686,82 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     return 'Tax ($value%)';
   }
 
+  Map<String, dynamic>? _invoiceStyle(String code) {
+    for (final item in _invoiceStyles) {
+      if (item['code']?.toString() == code) return item;
+    }
+    return null;
+  }
+
+  String _invoiceStatusCode({
+    required num total,
+    required num finalizedPaid,
+    required num pendingPaid,
+  }) {
+    final rawStatus = _detail?['status']?.toString() ?? 'draft';
+    if (rawStatus == 'void') return 'void';
+    final shownPaid = finalizedPaid + pendingPaid;
+    if (pendingPaid > 0 &&
+        total > 0 &&
+        shownPaid >= total - 0.005) {
+      return 'pending_close';
+    }
+    if (total > 0 && finalizedPaid >= total - 0.005) return 'paid';
+    if (shownPaid > 0) return 'partial';
+    return 'open';
+  }
+
   String _statusLabel({
     required num total,
     required num finalizedPaid,
     required num pendingPaid,
   }) {
     final rawStatus = _detail?['status']?.toString() ?? 'draft';
-    if (rawStatus == 'void') return 'Void';
     if (_readOnly) return 'Converted';
     if (_estimate) {
+      if (rawStatus == 'void') return 'Void';
       if (rawStatus == 'accepted') return 'Accepted';
       if (rawStatus == 'declined') return 'Declined';
       if (rawStatus == 'expired') return 'Expired';
       if (rawStatus == 'issued') return 'Issued';
       return 'Draft';
     }
-    final shownPaid = finalizedPaid + pendingPaid;
-    if (pendingPaid > 0 &&
-        total > 0 &&
-        shownPaid >= total - 0.005) {
-      return 'Pending Close';
+
+    final code = _invoiceStatusCode(
+      total: total,
+      finalizedPaid: finalizedPaid,
+      pendingPaid: pendingPaid,
+    );
+    final style = _invoiceStyle(code);
+    if (style != null) return style['name']?.toString() ?? 'Open';
+    switch (code) {
+      case 'partial':
+        return 'Partial';
+      case 'pending_close':
+        return 'Pending Close';
+      case 'paid':
+        return 'Paid';
+      case 'void':
+        return 'Void';
+      default:
+        return 'Open';
     }
-    if (total > 0 && finalizedPaid >= total - 0.005) return 'Paid';
-    if (shownPaid > 0) return 'Partial';
-    return 'Open';
   }
 
-  Color _statusColor(String label) {
+  Color _statusColor(String label, {String? code}) {
+    if (!_estimate && code != null) {
+      final style = _invoiceStyle(code);
+      if (style != null) {
+        return invoiceStatusColorFromHex(
+          style['color_hex']?.toString(),
+          fallback: BriskersColors.invoices,
+        );
+      }
+    }
+
     switch (label) {
-      case 'Paid':
       case 'Accepted':
         return const Color(0xFF169B62);
-      case 'Pending Close':
-        return const Color(0xFFE58A00);
-      case 'Partial':
       case 'Issued':
         return const Color(0xFF1976D2);
       case 'Void':
@@ -1730,15 +1775,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     }
   }
 
-  IconData _statusIcon(String label) {
+  IconData _statusIcon(String label, {String? code}) {
+    if (!_estimate && code != null) {
+      final style = _invoiceStyle(code);
+      if (style != null) {
+        return invoiceStatusIcon(style['icon_key']?.toString());
+      }
+    }
+
     switch (label) {
-      case 'Paid':
       case 'Accepted':
         return Icons.check_circle;
-      case 'Pending Close':
-        return Icons.schedule;
-      case 'Partial':
-        return Icons.timelapse;
       case 'Void':
       case 'Declined':
       case 'Expired':
@@ -1750,8 +1797,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     }
   }
 
-  Widget _statusPill(String label) {
-    final color = _statusColor(label);
+  Widget _statusPill(String label, {String? code}) {
+    final color = _statusColor(label, code: code);
     return Container(
       margin: const EdgeInsets.only(right: 4),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1762,7 +1809,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(_statusIcon(label), size: 16, color: color),
+          Icon(_statusIcon(label, code: code), size: 16, color: color),
           const SizedBox(width: 5),
           Text(
             label,
@@ -2617,6 +2664,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final total = _number(_detail!['total_amount']);
     final shownPaid = finalizedPaid + pendingPaid;
     final balance = total - shownPaid;
+    final statusCode = _estimate
+        ? null
+        : _invoiceStatusCode(
+            total: total,
+            finalizedPaid: finalizedPaid,
+            pendingPaid: pendingPaid,
+          );
     final statusLabel = _statusLabel(
       total: total,
       finalizedPaid: finalizedPaid,
@@ -2658,7 +2712,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              _statusPill(statusLabel),
+              _statusPill(statusLabel, code: statusCode),
             ],
           ),
           actions: [

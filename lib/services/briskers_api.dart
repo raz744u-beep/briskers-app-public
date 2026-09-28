@@ -933,6 +933,40 @@ class BriskersApi {
         .toList();
   }
 
+  Future<List<Map<String, dynamic>>> invoiceStatusStyles(
+    String businessId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_invoice_status_styles',
+      params: {'p_business_id': businessId},
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<String> saveInvoiceStatusStyle(
+    String businessId, {
+    required String code,
+    required String name,
+    required String colorHex,
+    required String iconKey,
+    required int sortOrder,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_invoice_status_style',
+      params: {
+        'p_business_id': businessId,
+        'p_code': code,
+        'p_name': name,
+        'p_color_hex': colorHex,
+        'p_icon_key': iconKey,
+        'p_sort_order': sortOrder,
+      },
+    );
+    return result.toString();
+  }
+
   Future<String> saveJobStatus(
     String businessId, {
     String? statusId,
