@@ -1186,17 +1186,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _expandedAction = null;
       _activeJobsExpanded = true;
     });
-    await Future<void>.delayed(const Duration(milliseconds: 60));
-    if (!mounted) return;
-    final contextForJobs = _jobsSectionKey.currentContext;
-    if (contextForJobs != null) {
-      await Scrollable.ensureVisible(
-        contextForJobs,
-        duration: const Duration(milliseconds: 320),
-        curve: Curves.easeOut,
-        alignment: 0,
-      );
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final contextForJobs = _jobsSectionKey.currentContext;
+      if (contextForJobs != null) {
+        Scrollable.ensureVisible(
+          contextForJobs,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOut,
+          alignment: 0,
+        );
+      }
+    });
   }
 
   Future<void> _openJob(String jobId) async {
