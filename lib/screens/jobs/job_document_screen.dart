@@ -3303,6 +3303,7 @@ class _DiscountDialogState extends State<_DiscountDialog> {
   @override
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.viewInsetsOf(context);
+    final keyboardOpen = viewInsets.bottom > 0;
 
     return AnimatedPadding(
       duration: const Duration(milliseconds: 150),
