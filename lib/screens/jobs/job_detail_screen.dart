@@ -801,17 +801,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     });
   }
 
-  Future<void> _toggleFindingInvoice(
-    Map<String, dynamic> finding,
-    bool include,
-  ) async {
-    await _run(() => _api.setVehicleFindingInvoiceFlag(
-          widget.businessId,
-          finding['id'].toString(),
-          include,
-        ));
-  }
-
   Future<void> _addFindingToJob(Map<String, dynamic> finding) async {
     await _run(() => _api.addVehicleFindingToJob(
           widget.businessId,
