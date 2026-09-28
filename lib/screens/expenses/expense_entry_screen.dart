@@ -686,6 +686,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   textInputAction: TextInputAction.next,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
                   decoration: const InputDecoration(
                     labelText: 'Amount',
                     prefixText: '\$',
@@ -751,6 +755,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                       controller: controller,
                       focusNode: focusNode,
                       textInputAction: TextInputAction.next,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
                       onSubmitted: (_) => focusNode.unfocus(),
                       onTapOutside: (_) => focusNode.unfocus(),
                       onChanged: (_) => _counterpartyId = null,
@@ -787,7 +795,13 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                               final option = rows[index];
                               return ListTile(
                                 dense: true,
-                                title: Text(option),
+                                title: Text(
+                                  option,
+                                  style: const TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
                                 onTap: () => onSelected(option),
                               );
                             },

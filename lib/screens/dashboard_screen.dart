@@ -1146,7 +1146,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ],
-          const SizedBox(height: 20),
+          const SizedBox(height: 8),
           Material(
             color: Colors.transparent,
             child: InkWell(
@@ -1155,7 +1155,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 () => _appointmentsExpanded = !_appointmentsExpanded,
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
+                padding: const EdgeInsets.symmetric(vertical: 5),
                 child: Row(
                   children: [
                     const Icon(
@@ -1267,7 +1267,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 );
               }),
           ],
-          const SizedBox(height: 20),
+          const SizedBox(height: 8),
           Material(
             color: Colors.transparent,
             child: InkWell(
@@ -1276,7 +1276,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 () => _activeJobsExpanded = !_activeJobsExpanded,
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
+                padding: const EdgeInsets.symmetric(vertical: 5),
                 child: Row(
                   children: [
                     const Icon(
