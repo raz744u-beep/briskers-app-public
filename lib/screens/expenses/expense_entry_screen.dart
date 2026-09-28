@@ -35,6 +35,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   final _picker = ImagePicker();
   final _amountController = TextEditingController();
   final _counterpartyController = TextEditingController();
+  final _counterpartyFocusNode = FocusNode();
   final _remarksController = TextEditingController();
 
   List<Map<String, dynamic>> _accounts = const [];
@@ -80,6 +81,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   void dispose() {
     _amountController.dispose();
     _counterpartyController.dispose();
+    _counterpartyFocusNode.dispose();
     _remarksController.dispose();
     super.dispose();
   }
@@ -198,9 +200,28 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           final preferred = categories.where(
             (x) => x['normal_direction']?.toString() == _direction,
           );
-          _categoryId = preferred.isNotEmpty
-              ? preferred.first['id']?.toString()
-              : (categories.isEmpty ? null : categories.first['id']?.toString());
+          if (_linked && _direction == 'expense') {
+            Map<String, dynamic>? customerParts;
+            for (final item in categories) {
+              if ((item['name']?.toString().trim().toLowerCase() ?? '') ==
+                  'customer parts') {
+                customerParts = item;
+                break;
+              }
+            }
+            _categoryId = customerParts?['id']?.toString() ??
+                (preferred.isNotEmpty
+                    ? preferred.first['id']?.toString()
+                    : (categories.isEmpty
+                        ? null
+                        : categories.first['id']?.toString()));
+          } else {
+            _categoryId = preferred.isNotEmpty
+                ? preferred.first['id']?.toString()
+                : (categories.isEmpty
+                    ? null
+                    : categories.first['id']?.toString());
+          }
           if (widget.quickTemplate != null) {
             _applyQuickTemplate(widget.quickTemplate!, updateState: false);
           }
@@ -307,6 +328,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   }
 
   Future<void> _pickDate() async {
+    _counterpartyFocusNode.unfocus();
     final value = await showDatePicker(
       context: context,
       initialDate: _date,
@@ -337,6 +359,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   }
 
   Future<void> _addReceipts() async {
+    _counterpartyFocusNode.unfocus();
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       showDragHandle: true,
@@ -535,16 +558,81 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         title: Text(title),
         actions: [
           if (!_editing)
-            IconButton(
-              tooltip: 'Quick transaction',
-              onPressed: _saving ? null : _chooseQuickTemplate,
-              icon: const Icon(Icons.bolt_outlined),
+            Padding(
+              padding: const EdgeInsets.only(right: 8, top: 7, bottom: 7),
+              child: Tooltip(
+                message: _quickTemplates.isEmpty
+                    ? 'No quick transactions are defined'
+                    : 'Quick transaction',
+                child: Material(
+                  color: _quickTemplates.isEmpty
+                      ? Colors.grey.shade200
+                      : const Color(0xFFD9F6DD),
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: _saving || _quickTemplates.isEmpty
+                        ? null
+                        : () {
+                            _counterpartyFocusNode.unfocus();
+                            _chooseQuickTemplate();
+                          },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 3,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.bolt,
+                            size: 24,
+                            color: _quickTemplates.isEmpty
+                                ? Colors.grey.shade500
+                                : const Color(0xFF185C2B),
+                          ),
+                          const SizedBox(width: 4),
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Quick',
+                                style: TextStyle(
+                                  height: 1.0,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: _quickTemplates.isEmpty
+                                      ? Colors.grey.shade600
+                                      : const Color(0xFF154F27),
+                                ),
+                              ),
+                              Text(
+                                'transaction',
+                                style: TextStyle(
+                                  height: 1.0,
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: _quickTemplates.isEmpty
+                                      ? Colors.grey.shade600
+                                      : const Color(0xFF154F27),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               children: [
                 if ((_contextLabel ?? '').isNotEmpty) ...[
@@ -622,8 +710,92 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                         ),
                       )
                       .toList(),
-                  onChanged:
-                      _saving ? null : (value) => setState(() => _categoryId = value),
+                  onChanged: _saving
+                      ? null
+                      : (value) {
+                          _counterpartyFocusNode.unfocus();
+                          setState(() => _categoryId = value);
+                        },
+                ),
+                const SizedBox(height: 12),
+                RawAutocomplete<String>(
+                  textEditingController: _counterpartyController,
+                  focusNode: _counterpartyFocusNode,
+                  optionsBuilder: (value) {
+                    final query = value.text.trim().toLowerCase();
+                    if (query.isEmpty) return counterpartyNames.take(8);
+                    return counterpartyNames
+                        .where(
+                          (name) => name.toLowerCase().contains(query),
+                        )
+                        .take(8);
+                  },
+                  onSelected: (value) {
+                    _counterpartyController.text = value;
+                    _counterpartyId = null;
+                    for (final item in _counterparties) {
+                      if (item['name']?.toString() == value) {
+                        _counterpartyId = item['id']?.toString();
+                        break;
+                      }
+                    }
+                    _counterpartyFocusNode.unfocus();
+                  },
+                  fieldViewBuilder: (
+                    context,
+                    controller,
+                    focusNode,
+                    onFieldSubmitted,
+                  ) {
+                    return TextField(
+                      controller: controller,
+                      focusNode: focusNode,
+                      textInputAction: TextInputAction.next,
+                      onSubmitted: (_) => focusNode.unfocus(),
+                      onTapOutside: (_) => focusNode.unfocus(),
+                      onChanged: (_) => _counterpartyId = null,
+                      decoration: InputDecoration(
+                        labelText: _direction == 'income' ? 'Payer' : 'Payee',
+                        hintText: 'Example: Worldpac, FedEx or Entergy',
+                        border: const OutlineInputBorder(),
+                      ),
+                    );
+                  },
+                  optionsViewBuilder: (
+                    context,
+                    onSelected,
+                    options,
+                  ) {
+                    final rows = options.toList();
+                    return Align(
+                      alignment: Alignment.topLeft,
+                      child: Material(
+                        elevation: 6,
+                        borderRadius: BorderRadius.circular(10),
+                        clipBehavior: Clip.antiAlias,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            maxHeight: 280,
+                            maxWidth: 680,
+                            minWidth: 280,
+                          ),
+                          child: ListView.builder(
+                            padding: EdgeInsets.zero,
+                            shrinkWrap: true,
+                            itemCount: rows.length,
+                            itemBuilder: (context, index) {
+                              final option = rows[index];
+                              return ListTile(
+                                dense: true,
+                                title: Text(option),
+                                onTap: () => onSelected(option),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
@@ -640,54 +812,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                         ),
                       )
                       .toList(),
-                  onChanged:
-                      _saving ? null : (value) => setState(() => _accountId = value),
-                ),
-                const SizedBox(height: 12),
-                Autocomplete<String>(
-                  optionsBuilder: (value) {
-                    final query = value.text.trim().toLowerCase();
-                    if (query.isEmpty) return counterpartyNames;
-                    return counterpartyNames.where(
-                      (name) => name.toLowerCase().contains(query),
-                    );
-                  },
-                  onSelected: (value) {
-                    _counterpartyController.text = value;
-                    for (final item in _counterparties) {
-                      if (item['name']?.toString() == value) {
-                        _counterpartyId = item['id']?.toString();
-                        break;
-                      }
-                    }
-                  },
-                  fieldViewBuilder: (
-                    context,
-                    controller,
-                    focusNode,
-                    onFieldSubmitted,
-                  ) {
-                    if (controller.text != _counterpartyController.text) {
-                      controller.text = _counterpartyController.text;
-                      controller.selection = TextSelection.collapsed(
-                        offset: controller.text.length,
-                      );
-                    }
-                    return TextField(
-                      controller: controller,
-                      focusNode: focusNode,
-                      textInputAction: TextInputAction.next,
-                      onChanged: (value) {
-                        _counterpartyController.text = value;
-                        _counterpartyId = null;
-                      },
-                      decoration: InputDecoration(
-                        labelText: _direction == 'income' ? 'Payer' : 'Payee',
-                        hintText: 'Example: Worldpac, FedEx or Entergy',
-                        border: const OutlineInputBorder(),
-                      ),
-                    );
-                  },
+                  onChanged: _saving
+                      ? null
+                      : (value) {
+                          _counterpartyFocusNode.unfocus();
+                          setState(() => _accountId = value);
+                        },
                 ),
                 const SizedBox(height: 12),
                 ListTile(
