@@ -185,9 +185,9 @@ class SettingsScreen extends StatelessWidget {
               Icons.account_balance_wallet_outlined,
               color: BriskersColors.expenses,
             ),
-            title: const Text('Expense accounts & categories'),
+            title: const Text('Transactions setup'),
             subtitle: const Text(
-              'Edit bank, card and cash accounts plus expense categories',
+              'Accounts, categories, payees, quick and recurring transactions',
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {

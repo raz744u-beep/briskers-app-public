@@ -724,6 +724,294 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> transactionOptions(String businessId) async {
+    final result = await supabase.rpc(
+      'briskers_transaction_options',
+      params: {'p_business_id': businessId},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> transactions(
+    String businessId, {
+    int limit = 500,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_list_transactions',
+      params: {'p_business_id': businessId, 'p_limit': limit},
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> transactionDetail(
+    String businessId,
+    String transactionId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_transaction_detail',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<String> createManualTransaction(
+    String businessId, {
+    required String direction,
+    required String accountId,
+    required String categoryId,
+    required num amount,
+    required DateTime date,
+    String? jobId,
+    String? documentId,
+    String? counterpartyId,
+    String? counterpartyName,
+    String? remarks,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_manual_transaction',
+      params: {
+        'p_business_id': businessId,
+        'p_direction': direction,
+        'p_account_id': accountId,
+        'p_category_id': categoryId,
+        'p_amount': amount,
+        'p_date': date.toIso8601String().split('T').first,
+        'p_job_id': jobId,
+        'p_document_id': documentId,
+        'p_counterparty_id': counterpartyId,
+        'p_counterparty_name': counterpartyName,
+        'p_remarks': remarks,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> updateManualTransaction(
+    String businessId,
+    String transactionId, {
+    required String direction,
+    required String accountId,
+    required String categoryId,
+    required num amount,
+    required DateTime date,
+    String? jobId,
+    String? documentId,
+    String? counterpartyId,
+    String? counterpartyName,
+    String? remarks,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_manual_transaction',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+        'p_direction': direction,
+        'p_account_id': accountId,
+        'p_category_id': categoryId,
+        'p_amount': amount,
+        'p_date': date.toIso8601String().split('T').first,
+        'p_job_id': jobId,
+        'p_document_id': documentId,
+        'p_counterparty_id': counterpartyId,
+        'p_counterparty_name': counterpartyName,
+        'p_remarks': remarks,
+      },
+    );
+  }
+
+  Future<void> voidManualTransaction(
+    String businessId,
+    String transactionId,
+  ) async {
+    await supabase.rpc(
+      'briskers_void_manual_transaction',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> transactionSettings(String businessId) async {
+    final result = await supabase.rpc(
+      'briskers_transaction_settings',
+      params: {'p_business_id': businessId},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<String> saveTransactionCategory(
+    String businessId, {
+    String? categoryId,
+    required String name,
+    required String normalDirection,
+    required bool active,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_transaction_category',
+      params: {
+        'p_business_id': businessId,
+        'p_category_id': categoryId,
+        'p_name': name,
+        'p_normal_direction': normalDirection,
+        'p_active': active,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> deleteTransactionCategory(
+    String businessId,
+    String categoryId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_transaction_category',
+      params: {
+        'p_business_id': businessId,
+        'p_category_id': categoryId,
+      },
+    );
+  }
+
+  Future<String> saveCounterparty(
+    String businessId, {
+    String? counterpartyId,
+    required String name,
+    required bool active,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_counterparty',
+      params: {
+        'p_business_id': businessId,
+        'p_counterparty_id': counterpartyId,
+        'p_name': name,
+        'p_active': active,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> deleteCounterparty(
+    String businessId,
+    String counterpartyId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_counterparty',
+      params: {
+        'p_business_id': businessId,
+        'p_counterparty_id': counterpartyId,
+      },
+    );
+  }
+
+  Future<String> saveQuickTransaction(
+    String businessId, {
+    String? templateId,
+    required String name,
+    required String direction,
+    String? vendorId,
+    required String accountId,
+    required String categoryId,
+    String? remarks,
+    int sortOrder = 0,
+    bool active = true,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_quick_transaction',
+      params: {
+        'p_business_id': businessId,
+        'p_template_id': templateId,
+        'p_name': name,
+        'p_direction': direction,
+        'p_vendor_id': vendorId,
+        'p_account_id': accountId,
+        'p_category_id': categoryId,
+        'p_remarks': remarks,
+        'p_sort_order': sortOrder,
+        'p_active': active,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> deleteQuickTransaction(
+    String businessId,
+    String templateId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_quick_transaction',
+      params: {
+        'p_business_id': businessId,
+        'p_template_id': templateId,
+      },
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> recurringTransactions(
+    String businessId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_recurring_transactions',
+      params: {'p_business_id': businessId},
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<String> saveRecurringTransaction(
+    String businessId, {
+    String? ruleId,
+    String? sourceTransactionId,
+    required String direction,
+    String? vendorId,
+    required String accountId,
+    required String categoryId,
+    required num amount,
+    String? remarks,
+    required String frequency,
+    required int intervalCount,
+    required DateTime nextDate,
+    DateTime? endDate,
+    bool isRepeating = true,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_recurring_transaction',
+      params: {
+        'p_business_id': businessId,
+        'p_rule_id': ruleId,
+        'p_source_transaction_id': sourceTransactionId,
+        'p_direction': direction,
+        'p_vendor_id': vendorId,
+        'p_account_id': accountId,
+        'p_category_id': categoryId,
+        'p_amount': amount,
+        'p_remarks': remarks,
+        'p_frequency': frequency,
+        'p_interval_count': intervalCount,
+        'p_next_date': nextDate.toIso8601String().split('T').first,
+        'p_end_date': endDate?.toIso8601String().split('T').first,
+        'p_is_repeating': isRepeating,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> stopRecurringTransaction(
+    String businessId,
+    String ruleId,
+  ) async {
+    await supabase.rpc(
+      'briskers_stop_recurring_transaction',
+      params: {'p_business_id': businessId, 'p_rule_id': ruleId},
+    );
+  }
+
   Future<Map<String, dynamic>> expenseSettings(String businessId) async {
     final result = await supabase.rpc(
       'briskers_expense_settings',
