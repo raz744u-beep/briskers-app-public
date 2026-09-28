@@ -41,9 +41,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   bool _loading = true;
   bool _busy = false;
-  bool _complaintExpanded = false;
-  bool _workExpanded = false;
-  bool _findingsExpanded = false;
+  String? _expandedSection;
   String? _error;
 
   bool get _canManage =>
@@ -1000,11 +998,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         onTap: enabled ? onTap : null,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
           child: Row(
             children: [
               CircleAvatar(
-                radius: 19,
+                radius: 17,
                 backgroundColor: color.withValues(alpha: 0.13),
                 child: Icon(icon, color: color, size: 21),
               ),
@@ -1087,7 +1085,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            padding: const EdgeInsets.fromLTRB(12, 7, 12, 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1110,7 +1108,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 Divider(color: statusColor.withValues(alpha: 0.20)),
                 if (title.isNotEmpty) ...[
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
+                    padding: const EdgeInsets.fromLTRB(4, 3, 4, 5),
                     child: Text(
                       title,
                       style: const TextStyle(
@@ -1130,14 +1128,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 4,
-                            vertical: 8,
+                            vertical: 5,
                           ),
                           child: Row(
                             children: [
                               Icon(
                                 roleStyle.icon,
                                 color: roleStyle.color,
-                                size: 21,
+                                size: 20,
                               ),
                               const SizedBox(width: 7),
                               Expanded(
@@ -1186,14 +1184,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 4,
-                            vertical: 8,
+                            vertical: 5,
                           ),
                           child: Row(
                             children: [
                               Icon(
                                 Icons.timer_outlined,
                                 color: statusColor,
-                                size: 21,
+                                size: 20,
                               ),
                               const SizedBox(width: 7),
                               Expanded(
@@ -1349,7 +1347,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
-  Widget _findingsCard() {
+  Widget _findingsDrawer() {
     final open = _findings
         .where((finding) => finding['status']?.toString() == 'open')
         .toList();
@@ -1360,50 +1358,39 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         .where((finding) => finding['status']?.toString() == 'resolved')
         .toList();
 
-    Widget findingTile(Map<String, dynamic> finding) {
+    Widget findingRow(Map<String, dynamic> finding) {
       final status = finding['status']?.toString() ?? 'open';
-      final isOpen = status == 'open';
-      final isInJob = status == 'in_job';
-      final isResolved = status == 'resolved';
       final repairJobId = finding['repair_job_id']?.toString() ?? '';
       final repairJob = finding['repair_job_number']?.toString() ?? '';
-      final inThisJob = isInJob && repairJobId == widget.jobId;
-      final attachments = List<dynamic>.from(
-        finding['attachments'] ?? const [],
-      );
-      final foundJob = finding['found_job_number']?.toString() ?? '';
-      final resolvedJob = finding['resolved_job_number']?.toString() ?? '';
-      final created = _dateTime(finding['created_at']);
-      final resolvedAt = _dateTime(finding['resolved_at']);
-
-      final icon = isResolved
-          ? Icons.check_circle_outline
-          : isInJob
-              ? Icons.handyman_outlined
-              : Icons.warning_amber_rounded;
-      final iconColor = isResolved
-          ? Colors.green
-          : isInJob
-              ? BriskersColors.jobs
-              : Colors.deepOrange;
+      final inThisJob = status == 'in_job' && repairJobId == widget.jobId;
+      final attachments = List<dynamic>.from(finding['attachments'] ?? const []);
 
       return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 8, 10),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(icon, color: iconColor, size: 22),
+                Icon(
+                  status == 'resolved'
+                      ? Icons.check_circle_outline
+                      : status == 'in_job'
+                          ? Icons.handyman_outlined
+                          : Icons.warning_amber_rounded,
+                  color: status == 'resolved'
+                      ? Colors.green
+                      : status == 'in_job'
+                          ? BriskersColors.jobs
+                          : Colors.deepOrange,
+                  size: 21,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     finding['body']?.toString() ?? '',
-                    style: const TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
                 if (_owner)
@@ -1412,44 +1399,20 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     onSelected: (value) {
                       if (value == 'delete') _deleteFinding(finding);
                     },
-                    itemBuilder: (context) => const [
+                    itemBuilder: (_) => const [
                       PopupMenuItem(
                         value: 'delete',
-                        child: ListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(Icons.delete_outline),
-                          title: Text('Delete finding'),
-                        ),
+                        child: Text('Delete finding'),
                       ),
                     ],
                   ),
               ],
             ),
-            const SizedBox(height: 5),
-            Text(
-              <String>[
-                if (foundJob.isNotEmpty) 'Found $foundJob',
-                if (created.isNotEmpty) created,
-                if (attachments.isNotEmpty)
-                  attachments.length == 1
-                      ? '1 photo'
-                      : '${attachments.length} photos',
-                if (isInJob && repairJob.isNotEmpty) 'In $repairJob',
-                if (isResolved && resolvedJob.isNotEmpty)
-                  'Resolved $resolvedJob',
-                if (isResolved && resolvedAt.isNotEmpty) resolvedAt,
-              ].join(' • '),
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                fontSize: 11.5,
-              ),
-            ),
             if (attachments.isNotEmpty) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 7),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 7,
+                runSpacing: 7,
                 children: attachments
                     .map(
                       (raw) => _findingPhotoThumbnail(
@@ -1459,19 +1422,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     .toList(),
               ),
             ],
-            if (isOpen && _canManage) ...[
-              const SizedBox(height: 4),
+            if (status == 'open' && _canManage)
               CheckboxListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 controlAffinity: ListTileControlAffinity.leading,
-                title: const Text(
-                  'Repair on this job',
-                  style: TextStyle(fontSize: 12.5),
-                ),
+                title: const Text('Repair on this job'),
                 subtitle: const Text(
-                  'It will be marked resolved when this job is completed.',
-                  style: TextStyle(fontSize: 11.5),
+                  'Completing the job will mark it resolved.',
                 ),
                 value: false,
                 onChanged: _busy
@@ -1479,42 +1437,30 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     : (value) {
                         if (value == true) _addFindingToJob(finding);
                       },
-              ),
-            ] else if (inThisJob && _canManage) ...[
-              const SizedBox(height: 4),
+              )
+            else if (inThisJob && _canManage)
               CheckboxListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 controlAffinity: ListTileControlAffinity.leading,
-                title: const Text(
-                  'Repair on this job',
-                  style: TextStyle(fontSize: 12.5),
-                ),
-                subtitle: const Text(
-                  'Checked — completing the job will resolve this finding.',
-                  style: TextStyle(fontSize: 11.5),
-                ),
+                title: const Text('Repair on this job'),
+                subtitle: const Text('Checked'),
                 value: true,
                 onChanged: _busy
                     ? null
                     : (value) {
                         if (value == false) _removeFindingFromJob(finding);
                       },
-              ),
-            ] else if (isInJob && !inThisJob) ...[
-              const SizedBox(height: 6),
-              Text(
-                repairJob.isEmpty
-                    ? 'Already assigned to another job'
-                    : 'Already assigned to $repairJob',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
+              )
+            else if (status == 'in_job')
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  repairJob.isEmpty ? 'In another job' : 'In $repairJob',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
-              ),
-            ] else if (isResolved && _canManage) ...[
-              const SizedBox(height: 4),
+              )
+            else if (status == 'resolved' && _canManage)
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
@@ -1523,107 +1469,36 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   label: const Text('Reopen'),
                 ),
               ),
-            ],
             const Divider(height: 1),
           ],
         ),
       );
     }
 
-    final activeCount = open.length + inJob.length;
-    final inThisJobCount = inJob
-        .where((finding) =>
-            finding['repair_job_id']?.toString() == widget.jobId)
-        .length;
-
-    return Card(
-      margin: EdgeInsets.zero,
-      child: ExpansionTile(
-        initiallyExpanded: false,
-        onExpansionChanged: (expanded) =>
-            setState(() => _findingsExpanded = expanded),
-        leading: CircleAvatar(
-          radius: 20,
-          backgroundColor: Colors.deepOrange.withValues(alpha: 0.12),
-          child: const Icon(
-            Icons.car_repair_outlined,
-            color: Colors.deepOrange,
-          ),
-        ),
-        title: const Text(
-          'Vehicle findings',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-        subtitle: Text(
-          activeCount == 0
-              ? 'No unresolved findings'
-              : <String>[
-                  if (open.isNotEmpty)
-                    open.length == 1
-                        ? '1 open'
-                        : '${open.length} open',
-                  if (inThisJobCount > 0)
-                    inThisJobCount == 1
-                        ? '1 in this job'
-                        : '$inThisJobCount in this job',
-                ].join(' • '),
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (activeCount > 0) ...[
-              const Icon(
-                Icons.warning_amber_rounded,
-                color: Color(0xFFF4B400),
-                size: 23,
-              ),
-              const SizedBox(width: 3),
-              Text(
-                '$activeCount',
-                style: const TextStyle(
-                  color: Color(0xFFA56B00),
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
-                ),
-              ),
-              const SizedBox(width: 5),
-            ],
-            if (_canEditFindings)
-              IconButton(
-                tooltip: 'Add finding',
-                onPressed: _busy ? null : _addFinding,
-                icon: const Icon(Icons.add_circle_outline),
-              ),
-            Icon(
-              _findingsExpanded
-                  ? Icons.keyboard_arrow_up
-                  : Icons.keyboard_arrow_down,
-            ),
-          ],
-        ),
+    final active = [...open, ...inJob];
+    return _JobDrawerSurface(
+      color: Colors.deepOrange,
+      child: Column(
         children: [
-          if (open.isEmpty && inJob.isEmpty)
+          if (active.isEmpty)
             const Padding(
-              padding: EdgeInsets.fromLTRB(16, 4, 16, 14),
+              padding: EdgeInsets.all(16),
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: Text('No unresolved issues are recorded for this vehicle.'),
+                child: Text('No unresolved findings for this vehicle.'),
               ),
             )
-          else ...[
-            ...open.map(findingTile),
-            ...inJob.map(findingTile),
-          ],
+          else
+            ...active.map(findingRow),
           if (resolved.isNotEmpty)
             ExpansionTile(
-              initiallyExpanded: false,
               title: Text(
                 resolved.length == 1
-                    ? 'Resolved finding'
-                    : 'Resolved findings (${resolved.length})',
-                style: const TextStyle(fontWeight: FontWeight.w600),
+                    ? '1 resolved finding'
+                    : '${resolved.length} resolved findings',
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
-              children: resolved.map(findingTile).toList(),
+              children: resolved.map(findingRow).toList(),
             ),
         ],
       ),
@@ -1647,6 +1522,175 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     if (changed == true) await _load();
   }
 
+  Future<void> _addQuickJobExpense() async {
+    final job = _job;
+    if (job == null) return;
+
+    try {
+      final data = await _api.transactionOptions(widget.businessId);
+      final quick = List<dynamic>.from(data['quick_templates'] ?? const [])
+          .map((raw) => Map<String, dynamic>.from(raw as Map))
+          .where((row) => row['direction']?.toString() == 'expense')
+          .toList();
+
+      if (!mounted) return;
+      if (quick.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No expense quick transactions are defined yet. Add them in Settings.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      final selected = await showModalBottomSheet<Map<String, dynamic>>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(
+                title: Text(
+                  'Quick expense',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: Text('This expense will stay linked to this job.'),
+              ),
+              ...quick.map(
+                (item) => ListTile(
+                  leading: const Icon(
+                    Icons.bolt,
+                    color: BriskersColors.expenses,
+                  ),
+                  title: Text(item['name']?.toString() ?? ''),
+                  subtitle: Text(
+                    <String>[
+                      if ((item['vendor']?.toString() ?? '').isNotEmpty)
+                        item['vendor'].toString(),
+                      item['category']?.toString() ?? '',
+                      item['account']?.toString() ?? '',
+                    ].where((value) => value.isNotEmpty).join(' • '),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, item),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (selected == null || !mounted) return;
+
+      final number = job['job_number']?.toString().trim() ?? '';
+      final changed = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ExpenseEntryScreen(
+            businessId: widget.businessId,
+            jobId: widget.jobId,
+            contextLabel: number.isEmpty ? 'This job' : 'Job $number',
+            initialDirection: 'expense',
+            quickTemplate: selected,
+          ),
+        ),
+      );
+      if (changed == true) await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _showNewMenu() async {
+    final size = MediaQuery.sizeOf(context);
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        size.width - 260,
+        size.height - 430,
+        18,
+        92,
+      ),
+      items: [
+        if (_canEditFindings)
+          const PopupMenuItem(
+            value: 'finding',
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.add_circle_outline),
+              title: Text('New finding'),
+            ),
+          ),
+        if (_canSeeFinancial)
+          const PopupMenuItem(
+            value: 'estimate',
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.request_quote_outlined,
+                color: BriskersColors.estimates,
+              ),
+              title: Text('New estimate'),
+            ),
+          ),
+        if (_canSeeFinancial)
+          const PopupMenuItem(
+            value: 'invoice',
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.receipt_long_outlined,
+                color: BriskersColors.invoices,
+              ),
+              title: Text('New invoice'),
+            ),
+          ),
+        if (_canManage)
+          const PopupMenuItem(
+            value: 'expense',
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.add_card_outlined,
+                color: BriskersColors.expenses,
+              ),
+              title: Text('New expense'),
+            ),
+          ),
+        if (_canManage)
+          const PopupMenuItem(
+            value: 'quick_expense',
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.bolt,
+                color: BriskersColors.expenses,
+              ),
+              title: Text('Quick expense'),
+            ),
+          ),
+      ],
+    );
+
+    if (choice == 'finding') await _addFinding();
+    if (choice == 'estimate') await _createEstimate();
+    if (choice == 'invoice') await _createInvoice();
+    if (choice == 'expense') await _addJobExpense();
+    if (choice == 'quick_expense') await _addQuickJobExpense();
+  }
+
+  void _toggleSection(String key) {
+    setState(() {
+      _expandedSection = _expandedSection == key ? null : key;
+    });
+  }
+
   Future<void> _openExpense(String transactionId) async {
     await Navigator.push<void>(
       context,
@@ -1660,9 +1704,17 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     await _load();
   }
 
-  Widget _profitabilityCard() {
+  Widget _profitabilityDrawer() {
     final data = _profitability;
-    if (!_owner || data == null) return const SizedBox.shrink();
+    if (!_owner || data == null) {
+      return const _JobDrawerSurface(
+        color: BriskersColors.reports,
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text('Profitability is not available.'),
+        ),
+      );
+    }
 
     num value(String key) =>
         num.tryParse(data[key]?.toString() ?? '') ?? 0;
@@ -1671,35 +1723,21 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final salesTax = value('sales_tax');
     final directCost = value('direct_cost');
     final mechanicCost = value('mechanic_cost');
-    final totalCost = value('total_cost');
     final profit = value('profit');
-    final margin = num.tryParse(data['margin_percent']?.toString() ?? '');
     final expenses = List<dynamic>.from(data['expenses'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
-    final historicalLaborPending =
-        (_job?['job_number']?.toString() ?? '').startsWith('MB-') &&
-            mechanicCost == 0;
 
-    final profitColor =
-        profit < 0 ? Theme.of(context).colorScheme.error : Colors.green.shade700;
-
-    Widget amountRow(
-      String label,
-      num amount, {
-      bool bold = false,
-      Color? valueColor,
-    }) {
+    Widget amountRow(String label, num amount, {bool bold = false}) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         child: Row(
           children: [
             Expanded(child: Text(label)),
             Text(
               _money(amount),
               style: TextStyle(
-                fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
-                color: valueColor,
+                fontWeight: bold ? FontWeight.w900 : FontWeight.w700,
               ),
             ),
           ],
@@ -1707,108 +1745,19 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       );
     }
 
-    return Card(
-      margin: EdgeInsets.zero,
-      clipBehavior: Clip.antiAlias,
-      child: ExpansionTile(
-        initiallyExpanded: false,
-        leading: CircleAvatar(
-          backgroundColor: BriskersColors.reports.withValues(alpha: 0.12),
-          child: const Icon(
-            Icons.analytics_outlined,
-            color: BriskersColors.reports,
-          ),
-        ),
-        title: Row(
-          children: [
-            const Expanded(
-              child: Text(
-                'Job profitability',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              decoration: BoxDecoration(
-                color: profitColor.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                margin == null ? '—' : '${margin.toStringAsFixed(1)}%',
-                style: TextStyle(
-                  color: profitColor,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-        subtitle: Text(
-          'Revenue ${_money(revenue)}  •  Cost ${_money(totalCost)}  •  Profit ${_money(profit)}',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
+    return _JobDrawerSurface(
+      color: BriskersColors.reports,
+      child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
-            child: Column(
-              children: [
-                amountRow('Revenue before sales tax', revenue),
-                amountRow('Parts / direct expenses', directCost),
-                amountRow('Mechanic labor', mechanicCost),
-                const Divider(height: 18),
-                amountRow(
-                  'Gross profit',
-                  profit,
-                  bold: true,
-                  valueColor: profitColor,
-                ),
-                amountRow('Sales tax collected', salesTax),
-                if (historicalLaborPending) ...[
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Historical mechanic labor has not been linked yet, so this sample currently reflects the direct expenses we imported from Expense IQ.',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontSize: 12.5,
-                        height: 1.3,
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _busy ? null : _addJobExpense,
-                    icon: const Icon(Icons.add_card_outlined),
-                    label: const Text('Add expense'),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          amountRow('Revenue before sales tax', revenue),
+          amountRow('Parts / direct expenses', directCost),
+          amountRow('Mechanic labor', mechanicCost),
+          const Divider(height: 1),
+          amountRow('Gross profit', profit, bold: true),
+          amountRow('Sales tax collected', salesTax),
           if (expenses.isNotEmpty) ...[
             const Divider(height: 1),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Direct expenses',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-            ),
             ...expenses.map((expense) {
-              final vendor = expense['vendor']?.toString() ?? 'Expense';
-              final category = expense['category']?.toString() ?? '';
-              final date = expense['date']?.toString() ?? '';
-              final amount =
-                  num.tryParse(expense['amount']?.toString() ?? '') ?? 0;
               final transactionId =
                   expense['transaction_id']?.toString() ?? '';
               return ListTile(
@@ -1817,117 +1766,199 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Icons.payments_outlined,
                   color: BriskersColors.expenses,
                 ),
-                title: Text(vendor),
+                title: Text(expense['vendor']?.toString() ?? 'Expense'),
                 subtitle: Text(
                   <String>[
-                    if (category.isNotEmpty) category,
-                    if (date.isNotEmpty) date,
-                  ].join(' • '),
+                    expense['category']?.toString() ?? '',
+                    expense['date']?.toString() ?? '',
+                  ].where((x) => x.isNotEmpty).join(' • '),
                 ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _money(amount),
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.chevron_right, size: 20),
-                  ],
+                trailing: Text(
+                  _money(expense['amount']),
+                  style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 onTap: transactionId.isEmpty
                     ? null
                     : () => _openExpense(transactionId),
               );
             }),
-            const SizedBox(height: 6),
           ],
         ],
       ),
     );
   }
 
-  Widget _previewCard({
-    required IconData icon,
-    required String title,
-    required String text,
-    required bool expanded,
-    required VoidCallback onToggle,
-    VoidCallback? onEdit,
-    String emptyText = 'Nothing entered yet.',
-  }) {
-    final displayText = text.trim().isEmpty ? emptyText : text.trim();
 
-    return Card(
-      margin: EdgeInsets.zero,
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onToggle,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 13, 8, 13),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CircleAvatar(
-                radius: 20,
-                backgroundColor: BriskersColors.jobs.withValues(alpha: 0.12),
-                child: Icon(icon, color: BriskersColors.jobs, size: 22),
-              ),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            title,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        Icon(
-                          expanded
-                              ? Icons.keyboard_arrow_up
-                              : Icons.keyboard_arrow_down,
-                          size: 23,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      displayText,
-                      maxLines: expanded ? null : 2,
-                      overflow:
-                          expanded ? TextOverflow.visible : TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        height: 1.3,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    if (expanded && onEdit != null) ...[
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton.icon(
-                          onPressed: _busy ? null : onEdit,
-                          icon: const Icon(Icons.edit_note_outlined, size: 18),
-                          label: const Text('Edit'),
-                        ),
-                      ),
-                    ],
-                  ],
+  Widget _complaintDrawer(String complaint) {
+    return _JobDrawerSurface(
+      color: BriskersColors.customers,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              complaint.isEmpty
+                  ? 'No customer complaint entered.'
+                  : complaint,
+            ),
+            if (_canManage) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: _busy ? null : _editComplaint,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit'),
                 ),
               ),
             ],
-          ),
+          ],
         ),
       ),
     );
+  }
+
+  Widget _workPerformedDrawer(
+    String workSummary,
+    Map<String, dynamic>? currentVisit,
+  ) {
+    return _JobDrawerSurface(
+      color: BriskersColors.jobs,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              workSummary.isEmpty
+                  ? 'No work performed entered yet.'
+                  : workSummary,
+            ),
+            if (currentVisit != null && currentVisit['closed_at'] == null) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: _busy ? null : _editWorkSummary,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit'),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _workHistoryDrawer(List<Map<String, dynamic>> visits) {
+    return _JobDrawerSurface(
+      color: const Color(0xFF6842C2),
+      child: visits.isEmpty
+          ? const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('No visit history yet.'),
+            )
+          : Column(
+              children: visits.map((visit) {
+                final mechanics = List<dynamic>.from(
+                  visit['mechanics'] ?? const [],
+                ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+                final names = mechanics
+                    .map((item) => item['employee_name']?.toString() ?? '')
+                    .where((name) => name.isNotEmpty)
+                    .join(', ');
+                final summary = visit['work_summary']?.toString().trim() ?? '';
+                final reason = visit['reason']?.toString().trim() ?? '';
+                final opened = _dateTime(visit['opened_at']);
+                final closed = _dateTime(visit['closed_at']);
+
+                return ListTile(
+                  leading: const Icon(Icons.history_outlined),
+                  title: Text(
+                    'Visit ${visit['visit_number']}',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: Text(
+                    <String>[
+                      if (opened.isNotEmpty)
+                        closed.isEmpty ? 'Started $opened' : '$opened → $closed',
+                      if (names.isNotEmpty) 'Mechanic: $names',
+                      if (reason.isNotEmpty) reason,
+                      if (summary.isNotEmpty) summary,
+                    ].join('\n'),
+                  ),
+                  isThreeLine: true,
+                );
+              }).toList(),
+            ),
+    );
+  }
+
+  Widget _documentsDrawer() {
+    return _JobDrawerSurface(
+      color: BriskersColors.invoices,
+      child: _documents.isEmpty
+          ? const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('No estimate or invoice linked yet.'),
+            )
+          : Column(
+              children: _documents.map((document) {
+                final estimate = document['kind']?.toString() == 'estimate';
+                final color = estimate
+                    ? BriskersColors.estimates
+                    : BriskersColors.invoices;
+                final number = document['document_number']?.toString() ?? '';
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: color.withValues(alpha: 0.14),
+                    child: Icon(
+                      estimate
+                          ? Icons.request_quote_outlined
+                          : Icons.receipt_long_outlined,
+                      color: color,
+                    ),
+                  ),
+                  title: Text(
+                    number.isEmpty
+                        ? (estimate ? 'Estimate' : 'Invoice')
+                        : (estimate
+                            ? 'Estimate #$number'
+                            : 'Invoice #$number'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: Text(_money(document['total_amount'])),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _openDocument(document['id'].toString()),
+                );
+              }).toList(),
+            ),
+    );
+  }
+
+  Widget _drawerForSection(
+    String key, {
+    required String complaint,
+    required String workSummary,
+    required Map<String, dynamic>? currentVisit,
+    required List<Map<String, dynamic>> visits,
+  }) {
+    switch (key) {
+      case 'complaint':
+        return _complaintDrawer(complaint);
+      case 'findings':
+        return _findingsDrawer();
+      case 'work':
+        return _workPerformedDrawer(workSummary, currentVisit);
+      case 'history':
+        return _workHistoryDrawer(visits);
+      case 'documents':
+        return _documentsDrawer();
+      default:
+        return _profitabilityDrawer();
+    }
   }
 
   @override
@@ -1956,11 +1987,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final assignment = assignments.isEmpty
         ? null
         : Map<String, dynamic>.from(assignments.first as Map);
-
     final requests = List<dynamic>.from(
       _job!['pending_requests'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-
     final visits = List<dynamic>.from(_job!['visits'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
@@ -1977,6 +2006,46 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final unassigned = _job!['is_unassigned'] == true;
     final statusColor = colorFromHex(_job!['status_color']?.toString());
 
+    final activeFindings = _findings
+        .where((finding) => finding['status']?.toString() != 'resolved')
+        .length;
+    final margin = num.tryParse(
+      _profitability?['margin_percent']?.toString() ?? '',
+    );
+
+    Widget tile(
+      String key,
+      String label,
+      IconData icon,
+      Color color,
+      String subtitle,
+    ) {
+      return _JobSectionTile(
+        label: label,
+        icon: icon,
+        color: color,
+        subtitle: subtitle,
+        expanded: _expandedSection == key,
+        onTap: () => _toggleSection(key),
+      );
+    }
+
+    Widget rowDrawer(String a, String b) {
+      final expanded =
+          _expandedSection == a || _expandedSection == b;
+      if (!expanded) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: _drawerForSection(
+          _expandedSection!,
+          complaint: complaint,
+          workSummary: workSummary,
+          currentVisit: currentVisit,
+          visits: visits,
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: statusColor.withValues(alpha: 0.08),
@@ -1991,15 +2060,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             fontSize: 21,
           ),
         ),
-        actions: [
-          Center(child: _statusControl()),
-        ],
+        actions: [Center(child: _statusControl())],
       ),
+      floatingActionButton: (_canEditFindings || _canManage)
+          ? FloatingActionButton.extended(
+              onPressed: _busy ? null : _showNewMenu,
+              backgroundColor: BriskersColors.jobs,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New'),
+            )
+          : null,
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
           controller: _scrollController,
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 36),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 110),
           children: [
             _summaryCard(
               customerName: customerName,
@@ -2008,54 +2084,34 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               title: jobTitle,
               assignment: assignment,
             ),
-            if (_owner && _profitability != null) ...[
-              const SizedBox(height: 10),
-              _profitabilityCard(),
-            ],
-            const SizedBox(height: 10),
-            _findingsCard(),
             if (_mechanic && unassigned) ...[
               const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: _busy ? null : _requestJob,
-                  icon: const Icon(Icons.pan_tool_alt_outlined),
-                  label: const Text('Request this job'),
-                ),
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _requestJob,
+                icon: const Icon(Icons.pan_tool_alt_outlined),
+                label: const Text('Request this job'),
               ),
             ],
             if (_canManage && requests.isNotEmpty) ...[
               const SizedBox(height: 10),
               Card(
                 child: ExpansionTile(
-                  initiallyExpanded: false,
-                  leading: const Icon(
-                    Icons.notifications_active_outlined,
-                    color: BriskersColors.jobs,
-                  ),
+                  leading: const Icon(Icons.notifications_active_outlined),
                   title: Text(
                     requests.length == 1
                         ? '1 mechanic requested this job'
                         : '${requests.length} mechanics requested this job',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   children: requests.map((request) {
-                    final position =
-                        request['position']?.toString() ?? 'Mechanic';
-                    final roleStyle = employeeRoleStyle(position);
                     return ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor:
-                            roleStyle.color.withValues(alpha: 0.14),
-                        child: Icon(roleStyle.icon, color: roleStyle.color),
-                      ),
                       title: Text(
                         request['employee_name']?.toString() ?? '',
                       ),
-                      subtitle: Text(position),
+                      subtitle: Text(
+                        request['position']?.toString() ?? 'Mechanic',
+                      ),
                       trailing: Wrap(
-                        spacing: 4,
                         children: [
                           IconButton(
                             tooltip: 'Deny',
@@ -2082,199 +2138,99 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               ),
             ],
             const SizedBox(height: 10),
-            _previewCard(
-              icon: Icons.description_outlined,
-              title: 'Customer complaint',
-              text: complaint,
-              expanded: _complaintExpanded,
-              onToggle: () => setState(
-                () => _complaintExpanded = !_complaintExpanded,
-              ),
-              onEdit: _canManage ? _editComplaint : null,
-              emptyText: 'No customer complaint entered.',
-            ),
-            const SizedBox(height: 10),
-            _previewCard(
-              icon: Icons.build_outlined,
-              title: 'Work performed',
-              text: workSummary,
-              expanded: _workExpanded,
-              onToggle: () => setState(
-                () => _workExpanded = !_workExpanded,
-              ),
-              onEdit: currentVisit != null &&
-                      currentVisit['closed_at'] == null
-                  ? _editWorkSummary
-                  : null,
-              emptyText: 'No work performed entered yet.',
-            ),
-            if (visits.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Card(
-                child: ExpansionTile(
-                  initiallyExpanded: false,
-                  leading: const Icon(
-                    Icons.history_outlined,
-                    color: BriskersColors.jobs,
-                  ),
-                  title: const Text(
-                    'Work / Visit history',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: Text(
-                    visits.length == 1
-                        ? '1 shop visit'
-                        : '${visits.length} shop visits',
-                  ),
-                  children: visits.map((visit) {
-                    final mechanics = List<dynamic>.from(
-                      visit['mechanics'] ?? const [],
-                    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-
-                    final names = mechanics
-                        .map((item) => item['employee_name']?.toString() ?? '')
-                        .where((name) => name.isNotEmpty)
-                        .join(', ');
-
-                    final summary =
-                        visit['work_summary']?.toString().trim() ?? '';
-                    final reason = visit['reason']?.toString().trim() ?? '';
-                    final opened = _dateTime(visit['opened_at']);
-                    final closed = _dateTime(visit['closed_at']);
-
-                    return Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            'Visit ${visit['visit_number']}',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          if (opened.isNotEmpty)
-                            Text(
-                              closed.isEmpty
-                                  ? 'Started $opened'
-                                  : '$opened → $closed',
-                            ),
-                          if (names.isNotEmpty) Text('Mechanic: $names'),
-                          if (reason.isNotEmpty) Text('Reason: $reason'),
-                          if (summary.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(summary),
-                          ],
-                          const Divider(height: 18),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ],
-            if (_canSeeFinancial) ...[
-              const SizedBox(height: 10),
-              Card(
-                child: ExpansionTile(
-                  initiallyExpanded: false,
-                  onExpansionChanged: (expanded) {
-                    if (expanded) _scrollFinancialActionsIntoView();
-                  },
-                  leading: const Icon(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: tile(
+                    'complaint',
+                    'Customer Complaint',
                     Icons.description_outlined,
-                    color: BriskersColors.invoices,
+                    const Color(0xFF15988F),
+                    complaint.isEmpty
+                        ? 'Nothing entered'
+                        : complaint,
                   ),
-                  title: const Text(
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: tile(
+                    'findings',
+                    'Vehicle Findings',
+                    Icons.car_repair_outlined,
+                    Colors.deepOrange,
+                    activeFindings == 0
+                        ? 'No unresolved findings'
+                        : '$activeFindings unresolved',
+                  ),
+                ),
+              ],
+            ),
+            rowDrawer('complaint', 'findings'),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: tile(
+                    'work',
+                    'Work Performed',
+                    Icons.build_outlined,
+                    BriskersColors.jobs,
+                    workSummary.isEmpty ? 'Not started' : workSummary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: tile(
+                    'history',
+                    'Work History',
+                    Icons.history_outlined,
+                    const Color(0xFF6842C2),
+                    visits.isEmpty
+                        ? 'No visits yet'
+                        : visits.length == 1
+                            ? '1 shop visit'
+                            : '${visits.length} shop visits',
+                  ),
+                ),
+              ],
+            ),
+            rowDrawer('work', 'history'),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: tile(
+                    'documents',
                     'Estimate / Invoice',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: Text(
+                    Icons.receipt_long_outlined,
+                    const Color(0xFFE5A400),
                     _documents.isEmpty
-                        ? 'No documents yet'
+                        ? 'No documents linked'
                         : '${_documents.length} document(s)',
                   ),
-                  children: [
-                    ..._documents.map((document) {
-                      final estimate =
-                          document['kind']?.toString() == 'estimate';
-                      final color = estimate
-                          ? BriskersColors.estimates
-                          : BriskersColors.invoices;
-                      final number =
-                          document['document_number']?.toString() ?? '';
-                      final paid = num.tryParse(
-                            document['paid_amount']?.toString() ?? '',
-                          ) ??
-                          0;
-                      final pending = num.tryParse(
-                            document['pending_payment']?.toString() ?? '',
-                          ) ??
-                          0;
-
-                      return ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: color.withValues(alpha: 0.14),
-                          child: Icon(
-                            estimate
-                                ? Icons.request_quote_outlined
-                                : Icons.receipt_long_outlined,
-                            color: color,
-                          ),
-                        ),
-                        title: Text(
-                          number.isEmpty
-                              ? (estimate ? 'Estimate' : 'Invoice')
-                              : (estimate
-                                  ? 'Estimate #$number'
-                                  : 'Invoice #$number'),
-                        ),
-                        subtitle: Text(
-                          <String>[
-                            _money(document['total_amount']),
-                            if (document['converted'] == true) 'Converted',
-                            if (!estimate && paid + pending > 0)
-                              'Paid ${_money(paid + pending)}',
-                          ].join(' • '),
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => _openDocument(
-                          document['id'].toString(),
-                        ),
-                      );
-                    }),
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _busy ? null : _createEstimate,
-                              icon: const Icon(
-                                Icons.request_quote_outlined,
-                                color: BriskersColors.estimates,
-                              ),
-                              label: const Text('Estimate'),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _busy ? null : _createInvoice,
-                              icon: const Icon(
-                                Icons.receipt_long_outlined,
-                                color: BriskersColors.invoices,
-                              ),
-                              label: const Text('Invoice'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
                 ),
-              ),
-            ],
+                const SizedBox(width: 10),
+                Expanded(
+                  child: tile(
+                    'profit',
+                    'Job Profitability',
+                    Icons.analytics_outlined,
+                    BriskersColors.reports,
+                    _profitability == null
+                        ? 'Not available'
+                        : <String>[
+                            'Profit ${_money(_profitability!['profit'])}',
+                            if (margin != null)
+                              '${margin.toStringAsFixed(1)}%',
+                          ].join(' • '),
+                  ),
+                ),
+              ],
+            ),
+            rowDrawer('documents', 'profit'),
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(
@@ -2285,6 +2241,106 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           ],
         ),
       ),
+    );
+  }
+
+}
+
+
+class _JobSectionTile extends StatelessWidget {
+  const _JobSectionTile({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.subtitle,
+    required this.expanded,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  final String subtitle;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: color.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: SizedBox(
+          height: 126,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(13, 12, 10, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 22,
+                      backgroundColor: color.withValues(alpha: 0.12),
+                      child: Icon(icon, color: color, size: 26),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      expanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      color: color,
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.2,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _JobDrawerSurface extends StatelessWidget {
+  const _JobDrawerSurface({
+    required this.color,
+    required this.child,
+  });
+
+  final Color color;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      color: color.withValues(alpha: 0.045),
+      child: child,
     );
   }
 }
