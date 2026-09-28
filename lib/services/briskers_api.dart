@@ -710,6 +710,157 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> expenseOptions(
+    String businessId, {
+    bool directOnly = false,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_expense_options',
+      params: {
+        'p_business_id': businessId,
+        'p_direct_only': directOnly,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<String> createExpense(
+    String businessId, {
+    required String accountId,
+    required String categoryId,
+    required num amount,
+    required DateTime date,
+    String? jobId,
+    String? documentId,
+    String? vendorName,
+    String? remarks,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_expense_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_account_id': accountId,
+        'p_category_id': categoryId,
+        'p_amount': amount,
+        'p_date': date.toIso8601String().split('T').first,
+        'p_job_id': jobId,
+        'p_document_id': documentId,
+        'p_vendor_name': vendorName,
+        'p_remarks': remarks,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<List<Map<String, dynamic>>> expenses(
+    String businessId, {
+    int limit = 200,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_list_expenses',
+      params: {
+        'p_business_id': businessId,
+        'p_limit': limit,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> documentExpenses(
+    String businessId,
+    String documentId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_document_expenses',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> expenseDetail(
+    String businessId,
+    String transactionId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_expense_detail',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> expenseReceiptImportCandidates(
+    String businessId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_expense_receipt_import_candidates',
+      params: {'p_business_id': businessId},
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> registerExpensePhoto(
+    String businessId,
+    String transactionId, {
+    required String filename,
+    required String mimeType,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_register_expense_photo',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+        'p_original_filename': filename,
+        'p_mime_type': mimeType,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<void> uploadExpensePhoto(
+    String businessId,
+    String transactionId, {
+    required String filename,
+    required String mimeType,
+    required Uint8List bytes,
+  }) async {
+    final registration = await registerExpensePhoto(
+      businessId,
+      transactionId,
+      filename: filename,
+      mimeType: mimeType,
+    );
+    final bucket = registration['bucket'].toString();
+    final key = registration['key'].toString();
+    final attachmentId = registration['attachment_id'].toString();
+
+    await supabase.storage.from(bucket).uploadBinary(
+      key,
+      bytes,
+      fileOptions: FileOptions(contentType: mimeType, upsert: false),
+    );
+
+    await supabase.rpc(
+      'briskers_finalize_attachment',
+      params: {
+        'p_business_id': businessId,
+        'p_attachment_id': attachmentId,
+        'p_byte_size': bytes.length,
+      },
+    );
+  }
+
   Future<List<Map<String, dynamic>>> assignableEmployees(
     String businessId,
   ) async {

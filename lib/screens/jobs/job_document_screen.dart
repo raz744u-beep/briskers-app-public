@@ -7,6 +7,8 @@ import '../../core/briskers_colors.dart';
 import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 import '../../services/document_pdf_service.dart';
+import '../expenses/expense_detail_screen.dart';
+import '../expenses/expense_entry_screen.dart';
 import 'job_detail_screen.dart';
 
 class JobDocumentScreen extends StatefulWidget {
@@ -97,6 +99,141 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _addInvoiceExpense() async {
+    if (_estimate || !widget.isOwner || _detail == null) return;
+    final number = _detail!['document_number']?.toString().trim() ?? '';
+    final jobId = _detail!['job_id']?.toString();
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExpenseEntryScreen(
+          businessId: widget.businessId,
+          jobId: jobId == null || jobId.isEmpty ? null : jobId,
+          documentId: widget.documentId,
+          contextLabel: number.isEmpty ? 'This invoice' : 'Invoice #$number',
+        ),
+      ),
+    );
+    if (changed == true) await _load();
+  }
+
+  Future<void> _showInvoiceExpenses() async {
+    if (_estimate || !widget.isOwner) return;
+    try {
+      final expenses = await _api.documentExpenses(
+        widget.businessId,
+        widget.documentId,
+      );
+      if (!mounted) return;
+
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (sheetContext) => SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(sheetContext).height * 0.72,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Invoice expenses',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () async {
+                          Navigator.pop(sheetContext);
+                          await _addInvoiceExpense();
+                        },
+                        icon: const Icon(Icons.add_card_outlined),
+                        label: const Text('Add'),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: expenses.isEmpty
+                      ? const Center(
+                          child: Text('No expenses linked to this invoice yet.'),
+                        )
+                      : ListView.separated(
+                          itemCount: expenses.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final expense = expenses[index];
+                            final id = expense['id']?.toString() ?? '';
+                            final vendor =
+                                expense['vendor']?.toString() ?? 'Expense';
+                            final category =
+                                expense['category']?.toString() ?? '';
+                            final date =
+                                expense['transaction_date']?.toString() ?? '';
+                            final receiptCount = int.tryParse(
+                                  expense['receipt_count']?.toString() ?? '',
+                                ) ??
+                                0;
+                            return ListTile(
+                              leading: const CircleAvatar(
+                                child: Icon(Icons.payments_outlined),
+                              ),
+                              title: Text(vendor),
+                              subtitle: Text(
+                                <String>[
+                                  if (category.isNotEmpty) category,
+                                  if (date.isNotEmpty) date,
+                                  if (receiptCount > 0)
+                                    '$receiptCount receipt photo(s)',
+                                ].join(' • '),
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _money(expense['amount']),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  const Icon(Icons.chevron_right),
+                                ],
+                              ),
+                              onTap: id.isEmpty
+                                  ? null
+                                  : () async {
+                                      Navigator.pop(sheetContext);
+                                      await Navigator.push<void>(
+                                        this.context,
+                                        MaterialPageRoute(
+                                          builder: (_) => ExpenseDetailScreen(
+                                            businessId: widget.businessId,
+                                            transactionId: id,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
     }
   }
 
@@ -2534,6 +2671,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 if (value == 'edit') _editDocumentHeader();
                 if (value == 'copy') _copyInvoice();
                 if (value == 'findings') _showInvoiceFindings();
+                if (value == 'expenses') _showInvoiceExpenses();
+                if (value == 'add_expense') _addInvoiceExpense();
                 if (value == 'delete') _deleteOrVoidInvoice();
               },
               itemBuilder: (context) => [
@@ -2565,6 +2704,26 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       contentPadding: EdgeInsets.zero,
                       leading: Icon(Icons.car_repair_outlined),
                       title: Text('Vehicle findings'),
+                    ),
+                  ),
+                if (!_estimate && widget.isOwner)
+                  const PopupMenuItem(
+                    value: 'expenses',
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.payments_outlined),
+                      title: Text('View expenses'),
+                    ),
+                  ),
+                if (!_estimate && widget.isOwner)
+                  const PopupMenuItem(
+                    value: 'add_expense',
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.add_card_outlined),
+                      title: Text('Add expense'),
                     ),
                   ),
                 const PopupMenuItem(

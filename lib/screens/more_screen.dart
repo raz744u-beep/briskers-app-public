@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/supabase_config.dart';
+import 'expenses_screen.dart';
 import 'settings/settings_screen.dart';
 
 class MoreScreen extends StatelessWidget {
@@ -25,10 +26,25 @@ class MoreScreen extends StatelessWidget {
 
     return ListView(
       children: [
-        const ListTile(
-          leading: Icon(Icons.receipt_long, color: BriskersColors.expenses),
-          title: Text('Expenses & income'),
-          subtitle: Text('Coming in the next build'),
+        ListTile(
+          leading: const Icon(
+            Icons.receipt_long,
+            color: BriskersColors.expenses,
+          ),
+          title: const Text('Expenses & income'),
+          subtitle: const Text('Expenses, receipts and job costs'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ExpensesScreen(
+                  businessId: businessId,
+                  roleCode: roleCode,
+                ),
+              ),
+            );
+          },
         ),
         const ListTile(
           leading: Icon(Icons.calendar_month, color: BriskersColors.schedule),

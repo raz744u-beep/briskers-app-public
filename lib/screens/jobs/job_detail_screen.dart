@@ -6,6 +6,8 @@ import '../../core/briskers_colors.dart';
 import '../../core/employee_role_style.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
+import '../expenses/expense_detail_screen.dart';
+import '../expenses/expense_entry_screen.dart';
 import 'job_document_screen.dart';
 
 class JobDetailScreen extends StatefulWidget {
@@ -1579,6 +1581,36 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
+  Future<void> _addJobExpense() async {
+    final job = _job;
+    if (job == null) return;
+    final number = job['job_number']?.toString().trim() ?? '';
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExpenseEntryScreen(
+          businessId: widget.businessId,
+          jobId: widget.jobId,
+          contextLabel: number.isEmpty ? 'This job' : 'Job $number',
+        ),
+      ),
+    );
+    if (changed == true) await _load();
+  }
+
+  Future<void> _openExpense(String transactionId) async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExpenseDetailScreen(
+          businessId: widget.businessId,
+          transactionId: transactionId,
+        ),
+      ),
+    );
+    await _load();
+  }
+
   Widget _profitabilityCard() {
     final data = _profitability;
     if (!_owner || data == null) return const SizedBox.shrink();
@@ -1698,6 +1730,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     ),
                   ),
                 ],
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _busy ? null : _addJobExpense,
+                    icon: const Icon(Icons.add_card_outlined),
+                    label: const Text('Add expense'),
+                  ),
+                ),
               ],
             ),
           ),
@@ -1719,6 +1760,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               final date = expense['date']?.toString() ?? '';
               final amount =
                   num.tryParse(expense['amount']?.toString() ?? '') ?? 0;
+              final transactionId =
+                  expense['transaction_id']?.toString() ?? '';
               return ListTile(
                 dense: true,
                 leading: const Icon(
@@ -1732,10 +1775,20 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     if (date.isNotEmpty) date,
                   ].join(' • '),
                 ),
-                trailing: Text(
-                  _money(amount),
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _money(amount),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.chevron_right, size: 20),
+                  ],
                 ),
+                onTap: transactionId.isEmpty
+                    ? null
+                    : () => _openExpense(transactionId),
               );
             }),
             const SizedBox(height: 6),
