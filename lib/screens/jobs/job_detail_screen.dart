@@ -28,6 +28,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   static const _api = BriskersApi();
 
   Map<String, dynamic>? _job;
+  Map<String, dynamic>? _profitability;
   List<Map<String, dynamic>> _employees = const [];
   List<Map<String, dynamic>> _statuses = const [];
   List<Map<String, dynamic>> _documents = const [];
@@ -73,6 +74,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       List<Map<String, dynamic>> employees = const [];
       List<Map<String, dynamic>> documents = const [];
       List<Map<String, dynamic>> findings = const [];
+      Map<String, dynamic>? profitability;
 
       if (_canManage) {
         try {
@@ -93,6 +95,17 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         }
       }
 
+      if (_owner) {
+        try {
+          profitability = await _api.jobProfitability(
+            widget.businessId,
+            widget.jobId,
+          );
+        } catch (_) {
+          profitability = null;
+        }
+      }
+
       final vehicleId = job['vehicle_id']?.toString();
       if (vehicleId != null && vehicleId.isNotEmpty) {
         try {
@@ -108,6 +121,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       if (!mounted) return;
       setState(() {
         _job = job;
+        _profitability = profitability;
         _employees = employees;
         _statuses = statuses;
         _documents = documents;
@@ -1565,6 +1579,172 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
+  Widget _profitabilityCard() {
+    final data = _profitability;
+    if (!_owner || data == null) return const SizedBox.shrink();
+
+    num value(String key) =>
+        num.tryParse(data[key]?.toString() ?? '') ?? 0;
+
+    final revenue = value('revenue');
+    final salesTax = value('sales_tax');
+    final directCost = value('direct_cost');
+    final mechanicCost = value('mechanic_cost');
+    final totalCost = value('total_cost');
+    final profit = value('profit');
+    final margin = num.tryParse(data['margin_percent']?.toString() ?? '');
+    final expenses = List<dynamic>.from(data['expenses'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+    final historicalLaborPending =
+        (_job?['job_number']?.toString() ?? '').startsWith('MB-') &&
+            mechanicCost == 0;
+
+    final profitColor =
+        profit < 0 ? Theme.of(context).colorScheme.error : Colors.green.shade700;
+
+    Widget amountRow(
+      String label,
+      num amount, {
+      bool bold = false,
+      Color? valueColor,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(child: Text(label)),
+            Text(
+              _money(amount),
+              style: TextStyle(
+                fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+                color: valueColor,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        initiallyExpanded: false,
+        leading: CircleAvatar(
+          backgroundColor: BriskersColors.reports.withValues(alpha: 0.12),
+          child: const Icon(
+            Icons.analytics_outlined,
+            color: BriskersColors.reports,
+          ),
+        ),
+        title: Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Job profitability',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(
+                color: profitColor.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                margin == null ? '—' : '${margin.toStringAsFixed(1)}%',
+                style: TextStyle(
+                  color: profitColor,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+        subtitle: Text(
+          'Revenue ${_money(revenue)}  •  Cost ${_money(totalCost)}  •  Profit ${_money(profit)}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
+            child: Column(
+              children: [
+                amountRow('Revenue before sales tax', revenue),
+                amountRow('Parts / direct expenses', directCost),
+                amountRow('Mechanic labor', mechanicCost),
+                const Divider(height: 18),
+                amountRow(
+                  'Gross profit',
+                  profit,
+                  bold: true,
+                  valueColor: profitColor,
+                ),
+                amountRow('Sales tax collected', salesTax),
+                if (historicalLaborPending) ...[
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Historical mechanic labor has not been linked yet, so this sample currently reflects the direct expenses we imported from Expense IQ.',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 12.5,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (expenses.isNotEmpty) ...[
+            const Divider(height: 1),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Direct expenses',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+            ...expenses.map((expense) {
+              final vendor = expense['vendor']?.toString() ?? 'Expense';
+              final category = expense['category']?.toString() ?? '';
+              final date = expense['date']?.toString() ?? '';
+              final amount =
+                  num.tryParse(expense['amount']?.toString() ?? '') ?? 0;
+              return ListTile(
+                dense: true,
+                leading: const Icon(
+                  Icons.payments_outlined,
+                  color: BriskersColors.expenses,
+                ),
+                title: Text(vendor),
+                subtitle: Text(
+                  <String>[
+                    if (category.isNotEmpty) category,
+                    if (date.isNotEmpty) date,
+                  ].join(' • '),
+                ),
+                trailing: Text(
+                  _money(amount),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              );
+            }),
+            const SizedBox(height: 6),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _previewCard({
     required IconData icon,
     required String title,
@@ -1726,6 +1906,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               title: jobTitle,
               assignment: assignment,
             ),
+            if (_owner && _profitability != null) ...[
+              const SizedBox(height: 10),
+              _profitabilityCard(),
+            ],
             const SizedBox(height: 10),
             _findingsCard(),
             if (_mechanic && unassigned) ...[

@@ -696,6 +696,20 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> jobProfitability(
+    String businessId,
+    String jobId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_job_profitability',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<List<Map<String, dynamic>>> assignableEmployees(
     String businessId,
   ) async {
