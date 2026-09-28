@@ -37,6 +37,188 @@ jobs:
           cp ../pubspec.yaml ./pubspec.yaml
           cp ../analysis_options.yaml ./analysis_options.yaml
 
+          cat > android/app/src/main/kotlin/com/briskers/briskers_app/MainActivity.kt <<'KOTLIN'
+          package com.briskers.briskers_app
+
+          import android.app.Activity
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Build
+          import android.provider.DocumentsContract
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+
+          class MainActivity : FlutterActivity() {
+              private val channelName = "com.briskers/expenseiq"
+              private val pickFolderRequestCode = 7441
+              private var pendingFolderResult: MethodChannel.Result? = null
+
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  MethodChannel(
+                      flutterEngine.dartExecutor.binaryMessenger,
+                      channelName
+                  ).setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "pickExpenseIqFolder" -> openExpenseIqFolderPicker(result)
+                          "readExpenseIqFile" -> {
+                              val uriText = call.argument<String>("uri")
+                              if (uriText.isNullOrBlank()) {
+                                  result.error("invalid_uri", "Receipt URI is missing.", null)
+                              } else {
+                                  try {
+                                      val bytes = contentResolver
+                                          .openInputStream(Uri.parse(uriText))
+                                          ?.use { it.readBytes() }
+                                      if (bytes == null) {
+                                          result.error(
+                                              "read_failed",
+                                              "Could not open the receipt photo.",
+                                              null
+                                          )
+                                      } else {
+                                          result.success(bytes)
+                                      }
+                                  } catch (error: Exception) {
+                                      result.error(
+                                          "read_failed",
+                                          error.message ?: "Could not read receipt photo.",
+                                          null
+                                      )
+                                  }
+                              }
+                          }
+                          else -> result.notImplemented()
+                      }
+                  }
+              }
+
+              private fun openExpenseIqFolderPicker(result: MethodChannel.Result) {
+                  if (pendingFolderResult != null) {
+                      result.error(
+                          "picker_busy",
+                          "The folder picker is already open.",
+                          null
+                      )
+                      return
+                  }
+
+                  pendingFolderResult = result
+                  val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                      addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                      addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          putExtra(
+                              DocumentsContract.EXTRA_INITIAL_URI,
+                              Uri.parse(
+                                  "content://com.android.externalstorage.documents/document/primary%3AExpenseIQ%2Fphotos"
+                              )
+                          )
+                      }
+                  }
+                  startActivityForResult(intent, pickFolderRequestCode)
+              }
+
+              override fun onActivityResult(
+                  requestCode: Int,
+                  resultCode: Int,
+                  data: Intent?
+              ) {
+                  super.onActivityResult(requestCode, resultCode, data)
+                  if (requestCode != pickFolderRequestCode) return
+
+                  val pending = pendingFolderResult ?: return
+                  pendingFolderResult = null
+
+                  val treeUri = data?.data
+                  if (resultCode != Activity.RESULT_OK || treeUri == null) {
+                      pending.success(null)
+                      return
+                  }
+
+                  try {
+                      contentResolver.takePersistableUriPermission(
+                          treeUri,
+                          Intent.FLAG_GRANT_READ_URI_PERMISSION
+                      )
+                  } catch (_: Exception) {
+                      // The current grant is still valid for this import session.
+                  }
+
+                  try {
+                      pending.success(listReceiptPhotos(treeUri))
+                  } catch (error: Exception) {
+                      pending.error(
+                          "folder_read_failed",
+                          error.message ?: "Could not read the selected folder.",
+                          null
+                      )
+                  }
+              }
+
+              private fun listReceiptPhotos(treeUri: Uri): List<Map<String, String>> {
+                  val treeDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
+                  val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                      treeUri,
+                      treeDocumentId
+                  )
+                  val projection = arrayOf(
+                      DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                      DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                      DocumentsContract.Document.COLUMN_MIME_TYPE
+                  )
+                  val photos = mutableListOf<Map<String, String>>()
+
+                  contentResolver.query(
+                      childrenUri,
+                      projection,
+                      null,
+                      null,
+                      null
+                  )?.use { cursor ->
+                      val idIndex = cursor.getColumnIndexOrThrow(
+                          DocumentsContract.Document.COLUMN_DOCUMENT_ID
+                      )
+                      val nameIndex = cursor.getColumnIndexOrThrow(
+                          DocumentsContract.Document.COLUMN_DISPLAY_NAME
+                      )
+                      val mimeIndex = cursor.getColumnIndexOrThrow(
+                          DocumentsContract.Document.COLUMN_MIME_TYPE
+                      )
+
+                      while (cursor.moveToNext()) {
+                          val documentId = cursor.getString(idIndex)
+                          val name = cursor.getString(nameIndex) ?: continue
+                          val mime = cursor.getString(mimeIndex) ?: ""
+                          val lower = name.lowercase()
+
+                          if (
+                              mime != DocumentsContract.Document.MIME_TYPE_DIR &&
+                              (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
+                          ) {
+                              val documentUri =
+                                  DocumentsContract.buildDocumentUriUsingTree(
+                                      treeUri,
+                                      documentId
+                                  )
+                              photos.add(
+                                  mapOf(
+                                      "name" to name,
+                                      "uri" to documentUri.toString()
+                                  )
+                              )
+                          }
+                      }
+                  }
+
+                  return photos
+              }
+          }
+          KOTLIN
+
       - name: Configure persistent Android signing
         working-directory: generated
         env:

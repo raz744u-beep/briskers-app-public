@@ -1,6 +1,7 @@
 import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -25,6 +26,7 @@ class ExpensesScreen extends StatefulWidget {
 
 class _ExpensesScreenState extends State<ExpensesScreen> {
   static const _api = BriskersApi();
+  static const _expenseIqChannel = MethodChannel('com.briskers/expenseiq');
 
   List<Map<String, dynamic>> _expenses = const [];
   bool _loading = true;
@@ -124,39 +126,33 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       return;
     }
 
-    final folder = await FilePicker.getDirectoryPath(
-      dialogTitle: 'Select ExpenseIQ photos folder',
-      initialDirectory: '/storage/emulated/0/ExpenseIQ/photos',
-    );
-    if (folder == null || !mounted) return;
-
-    final directory = Directory(folder);
-    if (!await directory.exists()) {
-      setState(() => _error = 'The selected photo folder is not readable.');
-      return;
-    }
-
-    final filesByPhotoId = <String, File>{};
+    List<dynamic>? pickedFiles;
     try {
-      await for (final entity in directory.list(followLinks: false)) {
-        if (entity is! File) continue;
-        final filename = entity.uri.pathSegments.isEmpty
-            ? entity.path.split('/').last
-            : entity.uri.pathSegments.last;
-        final key = _photoKey(filename);
-        if (key.isNotEmpty) filesByPhotoId[key] = entity;
-      }
+      pickedFiles = await _expenseIqChannel.invokeMethod<List<dynamic>>(
+        'pickExpenseIqFolder',
+      );
     } catch (error) {
       if (mounted) {
         setState(() {
           _error =
-              'Briskers could not read that folder. Select the ExpenseIQ/photos folder when Android asks for access.\n$error';
+              'Android could not open the ExpenseIQ photos folder.\n$error';
         });
       }
       return;
     }
+    if (pickedFiles == null || !mounted) return;
 
-    final matches = <(Map<String, dynamic>, File)>[];
+    final filesByPhotoId = <String, Map<String, dynamic>>{};
+    for (final raw in pickedFiles) {
+      if (raw is! Map) continue;
+      final file = Map<String, dynamic>.from(raw);
+      final filename = file['name']?.toString() ?? '';
+      final key = _photoKey(filename);
+      if (key.isNotEmpty) filesByPhotoId[key] = file;
+    }
+
+    final matches =
+        <(Map<String, dynamic>, Map<String, dynamic>)>[];
     for (final candidate in candidates) {
       final photoId = candidate['photo_id']?.toString().trim().toLowerCase();
       if (photoId == null || photoId.isEmpty) continue;
@@ -200,15 +196,20 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       final candidate = match.$1;
       final file = match.$2;
       try {
-        final filename = file.uri.pathSegments.isEmpty
-            ? file.path.split('/').last
-            : file.uri.pathSegments.last;
+        final filename = file['name']?.toString() ?? 'receipt.jpg';
+        final uri = file['uri']?.toString() ?? '';
+        if (uri.isEmpty) throw Exception('Receipt file URI is missing.');
+        final bytes = await _expenseIqChannel.invokeMethod<Uint8List>(
+          'readExpenseIqFile',
+          {'uri': uri},
+        );
+        if (bytes == null) throw Exception('Could not read $filename.');
         await _api.uploadExpensePhoto(
           widget.businessId,
           candidate['transaction_id'].toString(),
           filename: filename,
           mimeType: 'image/jpeg',
-          bytes: await file.readAsBytes(),
+          bytes: bytes,
         );
       } catch (_) {
         failed += 1;
