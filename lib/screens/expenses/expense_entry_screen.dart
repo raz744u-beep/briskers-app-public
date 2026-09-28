@@ -470,13 +470,21 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
 
       if (!_linked && !_copying) {
         if (_repeat) {
+          var recurringVendorId = _counterpartyId;
+          if (recurringVendorId == null && counterpartyName.isNotEmpty) {
+            final refreshed = await _api.transactionDetail(
+              widget.businessId,
+              transactionId,
+            );
+            recurringVendorId = refreshed['counterparty_id']?.toString();
+          }
           final repeatParts = _repeatParts;
           _recurringRuleId = await _api.saveRecurringTransaction(
             widget.businessId,
             ruleId: _recurringRuleId,
             sourceTransactionId: transactionId,
             direction: _direction,
-            vendorId: _counterpartyId,
+            vendorId: recurringVendorId,
             accountId: _accountId!,
             categoryId: _categoryId!,
             amount: rounded,

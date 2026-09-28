@@ -147,7 +147,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                     children: [
                       const Expanded(
                         child: Text(
-                          'Invoice expenses',
+                          'Invoice expenses & credits',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w800,
@@ -168,7 +168,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 Expanded(
                   child: expenses.isEmpty
                       ? const Center(
-                          child: Text('No expenses linked to this invoice yet.'),
+                          child: Text('No expenses or credits linked to this invoice yet.'),
                         )
                       : ListView.separated(
                           itemCount: expenses.length,
@@ -186,9 +186,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                   expense['receipt_count']?.toString() ?? '',
                                 ) ??
                                 0;
+                            final income =
+                                expense['direction']?.toString() == 'income';
                             return ListTile(
-                              leading: const CircleAvatar(
-                                child: Icon(Icons.payments_outlined),
+                              leading: CircleAvatar(
+                                child: Icon(
+                                  income ? Icons.south_west : Icons.north_east,
+                                ),
                               ),
                               title: Text(vendor),
                               subtitle: Text(
@@ -203,7 +207,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Text(
-                                    _money(expense['amount']),
+                                    '${income ? '+' : '-'}${_money(expense['amount'])}',
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w800,
                                     ),
@@ -225,6 +229,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                           ),
                                         ),
                                       );
+                                      await _load();
                                     },
                             );
                           },
