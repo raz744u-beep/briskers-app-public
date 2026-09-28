@@ -40,7 +40,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, dynamic>? _data;
   List<Map<String, dynamic>> _statuses = const [];
   String? _error;
-  String? _checkingInId;
   String? _busyJobId;
   bool _aiBusy = false;
   bool _activeJobsExpanded = false;
@@ -1188,6 +1187,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _activeJobsExpanded = true;
     });
     await Future<void>.delayed(const Duration(milliseconds: 60));
+    if (!mounted) return;
     final contextForJobs = _jobsSectionKey.currentContext;
     if (contextForJobs != null) {
       await Scrollable.ensureVisible(
@@ -1213,47 +1213,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await _load();
   }
 
-
-  Future<void> _checkIn(Map<String, dynamic> appointment) async {
-    if (!_canManage) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Check in vehicle?'),
-        content: Text(
-          'Check in ${appointment['customer'] ?? 'this customer'} and create the Job?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Check In'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-
-    final appointmentId = appointment['id'].toString();
-    setState(() => _checkingInId = appointmentId);
-
-    try {
-      final jobId = await _api.checkInAppointment(
-        widget.businessId,
-        appointmentId,
-      );
-      await _load();
-      if (mounted) await _openJob(jobId);
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _checkingInId = null);
-    }
-  }
 
   Future<void> _changeJobStatus(
     Map<String, dynamic> job,
