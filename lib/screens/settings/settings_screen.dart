@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/briskers_colors.dart';
 import 'catalog_settings_screen.dart';
 import 'employees_settings_screen.dart';
+import 'expense_settings_screen.dart';
 import 'job_statuses_settings_screen.dart';
 import 'invoice_statuses_settings_screen.dart';
 import 'item_categories_settings_screen.dart';
@@ -173,6 +174,27 @@ class SettingsScreen extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (_) => TaxInvoicingSettingsScreen(
+                    businessId: businessId,
+                  ),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(
+              Icons.account_balance_wallet_outlined,
+              color: BriskersColors.expenses,
+            ),
+            title: const Text('Expense accounts & categories'),
+            subtitle: const Text(
+              'Edit bank, card and cash accounts plus expense categories',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ExpenseSettingsScreen(
                     businessId: businessId,
                   ),
                 ),

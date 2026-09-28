@@ -724,6 +724,54 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> expenseSettings(String businessId) async {
+    final result = await supabase.rpc(
+      'briskers_expense_settings',
+      params: {'p_business_id': businessId},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<String> saveFinancialAccount(
+    String businessId, {
+    String? accountId,
+    required String name,
+    required String accountKind,
+    required bool active,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_financial_account',
+      params: {
+        'p_business_id': businessId,
+        'p_account_id': accountId,
+        'p_name': name,
+        'p_account_kind': accountKind,
+        'p_active': active,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<String> saveExpenseCategory(
+    String businessId, {
+    String? categoryId,
+    required String name,
+    required String reportTreatment,
+    required bool active,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_expense_category',
+      params: {
+        'p_business_id': businessId,
+        'p_category_id': categoryId,
+        'p_name': name,
+        'p_report_treatment': reportTreatment,
+        'p_active': active,
+      },
+    );
+    return result.toString();
+  }
+
   Future<String> createExpense(
     String businessId, {
     required String accountId,
