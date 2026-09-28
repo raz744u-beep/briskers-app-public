@@ -756,7 +756,6 @@ class BriskersApi {
     String businessId, {
     String? categoryId,
     required String name,
-    required String reportTreatment,
     required bool active,
   }) async {
     final result = await supabase.rpc(
@@ -765,7 +764,7 @@ class BriskersApi {
         'p_business_id': businessId,
         'p_category_id': categoryId,
         'p_name': name,
-        'p_report_treatment': reportTreatment,
+        'p_report_treatment': 'review',
         'p_active': active,
       },
     );

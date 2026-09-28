@@ -40,8 +40,6 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   bool _saving = false;
   String? _error;
 
-  bool get _directOnly => widget.jobId != null || widget.documentId != null;
-
   @override
   void initState() {
     super.initState();
@@ -58,10 +56,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
 
   Future<void> _load() async {
     try {
-      final data = await _api.expenseOptions(
-        widget.businessId,
-        directOnly: _directOnly,
-      );
+      final data = await _api.expenseOptions(widget.businessId);
       final accounts = List<dynamic>.from(data['accounts'] ?? const [])
           .map((raw) => Map<String, dynamic>.from(raw as Map))
           .toList();
@@ -284,9 +279,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                 if (_categoryId != null) ...[
                   const SizedBox(height: 4),
                   Text(
-                    _directOnly
-                        ? 'Direct job cost: ${_categoryName(_categoryId!)}'
-                        : _categoryName(_categoryId!),
+                    _categoryName(_categoryId!),
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                       fontSize: 12,
@@ -349,8 +342,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                       focusNode: focusNode,
                       textInputAction: TextInputAction.next,
                       decoration: const InputDecoration(
-                        labelText: 'Vendor / payee',
-                        hintText: 'Example: Worldpac',
+                        labelText: 'Payee',
+                        hintText: 'Example: UPS, FedEx or Worldpac',
                         border: OutlineInputBorder(),
                       ),
                     );

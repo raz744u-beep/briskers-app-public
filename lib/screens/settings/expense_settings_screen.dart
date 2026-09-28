@@ -89,17 +89,6 @@ class _ExpenseSettingsScreenState extends State<ExpenseSettingsScreen> {
     }
   }
 
-  String _categoryTypeLabel(String? value) {
-    switch (value) {
-      case 'direct_cost':
-        return 'Job / direct cost';
-      case 'overhead':
-        return 'Overhead';
-      default:
-        return 'Review / uncategorized';
-    }
-  }
-
   IconData _accountIcon(String? value) {
     switch (value) {
       case 'bank':
@@ -132,7 +121,7 @@ class _ExpenseSettingsScreenState extends State<ExpenseSettingsScreen> {
                   const Padding(
                     padding: EdgeInsets.fromLTRB(4, 2, 4, 12),
                     child: Text(
-                      'Manage the accounts and categories available when recording expenses. Inactive items stay on old records but no longer appear when adding a new expense.',
+                      'Manage the accounts and simple categories used when recording expenses. Inactive items stay on old records but no longer appear when adding a new expense.',
                     ),
                   ),
                   if (_error != null) ...[
@@ -191,7 +180,7 @@ class _ExpenseSettingsScreenState extends State<ExpenseSettingsScreen> {
                   const SizedBox(height: 18),
                   _SectionHeader(
                     title: 'Expense categories',
-                    subtitle: 'Controls how each expense is reported',
+                    subtitle: 'Simple labels such as Shipping, Towing or Parts',
                     onAdd: () => _editCategory(),
                   ),
                   if (_categories!.isEmpty)
@@ -199,8 +188,6 @@ class _ExpenseSettingsScreenState extends State<ExpenseSettingsScreen> {
                   else
                     ..._categories!.map((category) {
                       final active = category['active'] != false;
-                      final treatment =
-                          category['report_treatment']?.toString();
                       return Card(
                         margin: const EdgeInsets.only(bottom: 8),
                         child: ListTile(
@@ -210,11 +197,7 @@ class _ExpenseSettingsScreenState extends State<ExpenseSettingsScreen> {
                                     .withValues(alpha: 0.12)
                                 : Colors.grey.withValues(alpha: 0.12),
                             child: Icon(
-                              treatment == 'direct_cost'
-                                  ? Icons.build_outlined
-                                  : treatment == 'overhead'
-                                      ? Icons.store_outlined
-                                      : Icons.help_outline,
+                              Icons.category_outlined,
                               color: active
                                   ? BriskersColors.expenses
                                   : Colors.grey,
@@ -228,10 +211,7 @@ class _ExpenseSettingsScreenState extends State<ExpenseSettingsScreen> {
                             ),
                           ),
                           subtitle: Text(
-                            <String>[
-                              _categoryTypeLabel(treatment),
-                              if (!active) 'Inactive',
-                            ].join(' • '),
+                            active ? 'Expense category' : 'Expense category • Inactive',
                           ),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () => _editCategory(category),
@@ -468,7 +448,6 @@ class _CategoryDialogState extends State<_CategoryDialog> {
   static const _api = BriskersApi();
 
   late final TextEditingController _name;
-  late String _treatment;
   late bool _active;
 
   bool _saving = false;
@@ -480,8 +459,6 @@ class _CategoryDialogState extends State<_CategoryDialog> {
     _name = TextEditingController(
       text: widget.category?['name']?.toString() ?? '',
     );
-    _treatment =
-        widget.category?['report_treatment']?.toString() ?? 'direct_cost';
     _active = widget.category?['active'] != false;
   }
 
@@ -508,7 +485,6 @@ class _CategoryDialogState extends State<_CategoryDialog> {
         widget.businessId,
         categoryId: widget.category?['id']?.toString(),
         name: name,
-        reportTreatment: _treatment,
         active: _active,
       );
       if (mounted) Navigator.pop(context, true);
@@ -536,41 +512,11 @@ class _CategoryDialogState extends State<_CategoryDialog> {
               textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(labelText: 'Category name'),
             ),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              initialValue: _treatment,
-              decoration: const InputDecoration(labelText: 'Category type'),
-              items: const [
-                DropdownMenuItem(
-                  value: 'direct_cost',
-                  child: Text('Job / direct cost'),
-                ),
-                DropdownMenuItem(
-                  value: 'overhead',
-                  child: Text('Overhead'),
-                ),
-                DropdownMenuItem(
-                  value: 'review',
-                  child: Text('Review / uncategorized'),
-                ),
-              ],
-              onChanged: _saving
-                  ? null
-                  : (value) {
-                      if (value != null) {
-                        setState(() => _treatment = value);
-                      }
-                    },
-            ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                _treatment == 'direct_cost'
-                    ? 'Use for expenses tied directly to a job, such as parts, towing or sublet work.'
-                    : _treatment == 'overhead'
-                        ? 'Use for general business costs that are not assigned to one job.'
-                        : 'Use when the expense needs to be reviewed or categorized later.',
+                'Examples: Shipping, Towing, Parts, Rent, Utilities or Tools.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
