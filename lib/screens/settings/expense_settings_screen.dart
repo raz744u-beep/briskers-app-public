@@ -245,7 +245,7 @@ class _AccountsSettingsScreenState
                   const Padding(
                     padding: EdgeInsets.fromLTRB(4, 0, 4, 10),
                     child: Text(
-                      'Accounts that have been used are kept for history. Turn them inactive to remove them from new transactions.',
+                      'Accounts that have been used are kept for history. Choose one active account as the default for new expenses. Turn accounts inactive to remove them from new transactions.',
                     ),
                   ),
                   if (error != null)
@@ -257,6 +257,8 @@ class _AccountsSettingsScreenState
                     ),
                   ...rows!.map((row) {
                     final active = row['active'] != false;
+                    final isDefaultExpense =
+                        row['is_default_expense'] == true;
                     return Card(
                       child: ListTile(
                         leading: CircleAvatar(
@@ -280,6 +282,7 @@ class _AccountsSettingsScreenState
                         subtitle: Text(
                           <String>[
                             _kind(row['kind']?.toString()),
+                            if (isDefaultExpense) 'Default for expenses',
                             '${usage(row)} transaction(s)',
                             if (!active) 'Inactive',
                           ].join(' • '),
@@ -315,6 +318,7 @@ class _AccountDialogState extends State<_AccountDialog> {
   late final TextEditingController name;
   late String kind;
   late bool active;
+  late bool isDefaultExpense;
   bool saving = false;
   String? error;
 
@@ -326,6 +330,7 @@ class _AccountDialogState extends State<_AccountDialog> {
     );
     kind = widget.account?['kind']?.toString() ?? 'bank';
     active = widget.account?['active'] != false;
+    isDefaultExpense = widget.account?['is_default_expense'] == true;
   }
 
   @override
@@ -350,6 +355,7 @@ class _AccountDialogState extends State<_AccountDialog> {
         name: name.text.trim(),
         accountKind: kind,
         active: active,
+        isDefaultExpense: isDefaultExpense,
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -395,6 +401,18 @@ class _AccountDialogState extends State<_AccountDialog> {
                       if (value != null) setState(() => kind = value);
                     },
             ),
+            const SizedBox(height: 4),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Default for expenses'),
+              subtitle: const Text(
+                'New general and recurring expenses will use this account automatically.',
+              ),
+              value: isDefaultExpense,
+              onChanged: saving || !active
+                  ? null
+                  : (value) => setState(() => isDefaultExpense = value),
+            ),
             if (widget.account != null)
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -403,8 +421,12 @@ class _AccountDialogState extends State<_AccountDialog> {
                   'Inactive accounts stay on historical transactions.',
                 ),
                 value: active,
-                onChanged:
-                    saving ? null : (value) => setState(() => active = value),
+                onChanged: saving
+                    ? null
+                    : (value) => setState(() {
+                          active = value;
+                          if (!value) isDefaultExpense = false;
+                        }),
               ),
             if (error != null) ...[
               const SizedBox(height: 8),
@@ -1653,12 +1675,19 @@ class _RecurringDialogState extends State<_RecurringDialog> {
         ? 'income'
         : 'expense';
     vendorId = widget.row?['vendor_id']?.toString();
-    accountId = widget.row?['account_id']?.toString() ??
-        (_list('accounts').isEmpty ? null : _list('accounts').first['id']?.toString());
-    categoryId = widget.row?['category_id']?.toString() ??
-        (_list('categories').isEmpty
-            ? null
-            : _list('categories').first['id']?.toString());
+    if (widget.row != null) {
+      accountId = widget.row?['account_id']?.toString();
+      categoryId = widget.row?['category_id']?.toString();
+    } else {
+      accountId = null;
+      for (final account in _list('accounts')) {
+        if (account['is_default_expense'] == true) {
+          accountId = account['id']?.toString();
+          break;
+        }
+      }
+      categoryId = null;
+    }
     if (widget.row != null) {
       nextDate =
           DateTime.tryParse(widget.row!['next_date']?.toString() ?? '') ??
@@ -1771,7 +1800,10 @@ class _RecurringDialogState extends State<_RecurringDialog> {
               selected: {direction},
               onSelectionChanged: saving
                   ? null
-                  : (value) => setState(() => direction = value.first),
+                  : (value) => setState(() {
+                        direction = value.first;
+                        categoryId = null;
+                      }),
             ),
             const SizedBox(height: 10),
             TextField(
@@ -1787,6 +1819,7 @@ class _RecurringDialogState extends State<_RecurringDialog> {
             const SizedBox(height: 10),
             DropdownButtonFormField<String?>(
               initialValue: vendorId,
+              isExpanded: true,
               decoration: const InputDecoration(labelText: 'Payee / payer'),
               items: [
                 const DropdownMenuItem<String?>(
@@ -1796,7 +1829,11 @@ class _RecurringDialogState extends State<_RecurringDialog> {
                 ...counterparties.map(
                   (x) => DropdownMenuItem<String?>(
                     value: x['id']?.toString(),
-                    child: Text(x['name']?.toString() ?? ''),
+                    child: Text(
+                      x['name']?.toString() ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ),
               ],
@@ -1806,12 +1843,20 @@ class _RecurringDialogState extends State<_RecurringDialog> {
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               initialValue: categoryId,
-              decoration: const InputDecoration(labelText: 'Category'),
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Category',
+                hintText: 'Select a category',
+              ),
               items: categories
                   .map(
                     (x) => DropdownMenuItem(
                       value: x['id']?.toString(),
-                      child: Text(x['name']?.toString() ?? ''),
+                      child: Text(
+                        x['name']?.toString() ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   )
                   .toList(),
@@ -1821,12 +1866,20 @@ class _RecurringDialogState extends State<_RecurringDialog> {
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               initialValue: accountId,
-              decoration: const InputDecoration(labelText: 'Account'),
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Account',
+                hintText: 'Select an account',
+              ),
               items: accounts
                   .map(
                     (x) => DropdownMenuItem(
                       value: x['id']?.toString(),
-                      child: Text(x['name']?.toString() ?? ''),
+                      child: Text(
+                        x['name']?.toString() ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   )
                   .toList(),
@@ -1859,30 +1912,96 @@ class _RecurringDialogState extends State<_RecurringDialog> {
                       if (value != null) setState(() => preset = value);
                     },
             ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Next transaction'),
-              subtitle: Text(
-                '${nextDate.month}/${nextDate.day}/${nextDate.year}',
+            const SizedBox(height: 10),
+            Material(
+              color: BriskersColors.appointments.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: saving ? null : _pickNext,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.calendar_month_outlined,
+                        color: BriskersColors.appointments,
+                        size: 28,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Start / next transaction',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                            Text(
+                              '${nextDate.month}/${nextDate.day}/${nextDate.year}',
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right),
+                    ],
+                  ),
+                ),
               ),
-              onTap: saving ? null : _pickNext,
             ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('End date'),
-              subtitle: Text(
-                endDate == null
-                    ? 'No end date'
-                    : '${endDate!.month}/${endDate!.day}/${endDate!.year}',
+            const SizedBox(height: 10),
+            Material(
+              color: BriskersColors.appointments.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: saving ? null : _pickEnd,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.event_busy_outlined,
+                        color: BriskersColors.appointments,
+                        size: 28,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'End date',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                            Text(
+                              endDate == null
+                                  ? 'No end date'
+                                  : '${endDate!.month}/${endDate!.day}/${endDate!.year}',
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (endDate != null)
+                        IconButton(
+                          tooltip: 'No end date',
+                          onPressed: saving
+                              ? null
+                              : () => setState(() => endDate = null),
+                          icon: const Icon(Icons.close),
+                        )
+                      else
+                        const Icon(Icons.chevron_right),
+                    ],
+                  ),
+                ),
               ),
-              trailing: endDate == null
-                  ? null
-                  : IconButton(
-                      onPressed:
-                          saving ? null : () => setState(() => endDate = null),
-                      icon: const Icon(Icons.close),
-                    ),
-              onTap: saving ? null : _pickEnd,
             ),
             if (error != null)
               Text(

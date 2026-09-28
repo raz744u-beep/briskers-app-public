@@ -196,10 +196,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             }
           }
         } else {
-          _accountId = accounts.isEmpty ? null : accounts.first['id']?.toString();
-          final preferred = categories.where(
-            (x) => x['normal_direction']?.toString() == _direction,
-          );
+          Map<String, dynamic>? defaultExpenseAccount;
+          for (final account in accounts) {
+            if (account['is_default_expense'] == true) {
+              defaultExpenseAccount = account;
+              break;
+            }
+          }
+          _accountId = defaultExpenseAccount?['id']?.toString();
+
           if (_linked && _direction == 'expense') {
             Map<String, dynamic>? customerParts;
             for (final item in categories) {
@@ -209,18 +214,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                 break;
               }
             }
-            _categoryId = customerParts?['id']?.toString() ??
-                (preferred.isNotEmpty
-                    ? preferred.first['id']?.toString()
-                    : (categories.isEmpty
-                        ? null
-                        : categories.first['id']?.toString()));
+            _categoryId = customerParts?['id']?.toString();
           } else {
-            _categoryId = preferred.isNotEmpty
-                ? preferred.first['id']?.toString()
-                : (categories.isEmpty
-                    ? null
-                    : categories.first['id']?.toString());
+            _categoryId = null;
           }
           if (widget.quickTemplate != null) {
             _applyQuickTemplate(widget.quickTemplate!, updateState: false);
@@ -571,7 +567,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   borderRadius: BorderRadius.circular(12),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
-                    onTap: _saving || _quickTemplates.isEmpty
+                    onTap: _saving
                         ? null
                         : () {
                             _counterpartyFocusNode.unfocus();
@@ -670,12 +666,19 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                       ? null
                       : (value) => setState(() {
                             _direction = value.first;
-                            final preferred = _orderedCategories.where(
-                              (x) =>
-                                  x['normal_direction']?.toString() == _direction,
-                            );
-                            if (preferred.isNotEmpty) {
-                              _categoryId = preferred.first['id']?.toString();
+                            _categoryId = null;
+                            if (_linked && _direction == 'expense') {
+                              for (final item in _categories) {
+                                if ((item['name']
+                                            ?.toString()
+                                            .trim()
+                                            .toLowerCase() ??
+                                        '') ==
+                                    'customer parts') {
+                                  _categoryId = item['id']?.toString();
+                                  break;
+                                }
+                              }
                             }
                           }),
                 ),
@@ -699,8 +702,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   initialValue: _categoryId,
+                  isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'Category',
+                    hintText: 'Select a category',
                     border: OutlineInputBorder(),
                   ),
                   items: _orderedCategories
@@ -814,15 +819,23 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   initialValue: _accountId,
+                  isExpanded: true,
                   decoration: InputDecoration(
                     labelText: _direction == 'income' ? 'Deposited to' : 'Paid from',
+                    hintText: _direction == 'income'
+                        ? 'Select deposit account'
+                        : 'Select payment account',
                     border: const OutlineInputBorder(),
                   ),
                   items: _accounts
                       .map(
                         (item) => DropdownMenuItem<String>(
                           value: item['id']?.toString(),
-                          child: Text(item['name']?.toString() ?? ''),
+                          child: Text(
+                            item['name']?.toString() ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       )
                       .toList(),

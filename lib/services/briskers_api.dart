@@ -1026,6 +1026,7 @@ class BriskersApi {
     required String name,
     required String accountKind,
     required bool active,
+    required bool isDefaultExpense,
   }) async {
     final result = await supabase.rpc(
       'briskers_save_financial_account',
@@ -1035,6 +1036,7 @@ class BriskersApi {
         'p_name': name,
         'p_account_kind': accountKind,
         'p_active': active,
+        'p_is_default_expense': isDefaultExpense,
       },
     );
     return result.toString();
