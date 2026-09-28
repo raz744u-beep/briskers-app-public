@@ -620,9 +620,12 @@ class _CustomerVehicleFindingsSectionState
         builder: (context, setSheetState) {
           final vehicle = finding['_vehicle_label']?.toString().trim() ?? '';
           final date = _dateLabel(finding['created_at']);
-          final status = finding['status']?.toString() == 'resolved'
+          final rawStatus = finding['status']?.toString() ?? 'open';
+          final status = rawStatus == 'resolved'
               ? 'Resolved'
-              : 'Open';
+              : rawStatus == 'in_job'
+                  ? 'In Job'
+                  : 'Open';
 
           Future<void> editFinding() async {
             final controller = TextEditingController(text: localBody);
@@ -791,7 +794,9 @@ class _CustomerVehicleFindingsSectionState
                         fontWeight: FontWeight.w800,
                         color: status == 'Open'
                             ? const Color(0xFFA56B00)
-                            : Colors.green,
+                            : status == 'In Job'
+                                ? Colors.blue
+                                : Colors.green,
                       ),
                     ),
                   ],
@@ -932,7 +937,11 @@ class _CustomerVehicleFindingsSectionState
     final date = _dateLabel(finding['created_at']);
     final vehicle = finding['_vehicle_label']?.toString().trim() ?? '';
 
+    final status = finding['status']?.toString() ?? 'open';
+    final repairJob = finding['repair_job_number']?.toString() ?? '';
     final subtitle = <String>[
+      if (status == 'in_job')
+        repairJob.isEmpty ? 'In job' : 'In $repairJob',
       if (date.isNotEmpty) date,
       if (showVehicle && vehicle.isNotEmpty) vehicle,
     ].join(' • ');
@@ -994,7 +1003,8 @@ class _CustomerVehicleFindingsSectionState
       builder: (context, snapshot) {
         final allRows = snapshot.data ?? const <Map<String, dynamic>>[];
         final open = allRows
-            .where((finding) => finding['status']?.toString() == 'open')
+            .where((finding) =>
+                finding['status']?.toString() != 'resolved')
             .toList();
         final resolved = allRows
             .where((finding) => finding['status']?.toString() == 'resolved')

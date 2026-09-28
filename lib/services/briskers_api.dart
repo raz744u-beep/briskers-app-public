@@ -1623,6 +1623,36 @@ class BriskersApi {
     );
   }
 
+  Future<void> addVehicleFindingToJob(
+    String businessId,
+    String findingId,
+    String jobId,
+  ) async {
+    await supabase.rpc(
+      'briskers_add_finding_to_job',
+      params: {
+        'p_business_id': businessId,
+        'p_finding_id': findingId,
+        'p_job_id': jobId,
+      },
+    );
+  }
+
+  Future<void> removeVehicleFindingFromJob(
+    String businessId,
+    String findingId,
+    String jobId,
+  ) async {
+    await supabase.rpc(
+      'briskers_remove_finding_from_job',
+      params: {
+        'p_business_id': businessId,
+        'p_finding_id': findingId,
+        'p_job_id': jobId,
+      },
+    );
+  }
+
   Future<void> resolveVehicleFinding(
     String businessId,
     String findingId,

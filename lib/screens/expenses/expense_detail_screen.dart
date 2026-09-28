@@ -320,6 +320,65 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     if (value == 'delete') await _delete();
   }
 
+  Widget _receiptThumbnail(Map<String, dynamic> attachment) {
+    const size = 52.0;
+    final bucket = attachment['bucket']?.toString() ?? '';
+    final key = attachment['key']?.toString() ?? '';
+
+    if (bucket.isEmpty || key.isEmpty) {
+      return Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: BriskersColors.expenses.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(Icons.broken_image_outlined),
+      );
+    }
+
+    return FutureBuilder<String>(
+      future: _api.signedAttachmentUrl(bucket, key),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return Container(
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: snapshot.hasError
+                ? const Icon(Icons.broken_image_outlined)
+                : const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+          );
+        }
+
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            snapshot.data!,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => Container(
+              width: size,
+              height: size,
+              alignment: Alignment.center,
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              child: const Icon(Icons.broken_image_outlined),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -495,10 +554,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
               (attachment) => Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
-                  leading: const Icon(
-                    Icons.image_outlined,
-                    color: BriskersColors.expenses,
-                  ),
+                  leading: _receiptThumbnail(attachment),
                   title: Text(
                     attachment['filename']?.toString() ?? 'Receipt',
                   ),
@@ -562,16 +618,31 @@ class _DetailRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (value.isEmpty) return const SizedBox.shrink();
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      dense: true,
-      title: Text(label),
-      trailing: Flexible(
-        child: Text(
-          value,
-          textAlign: TextAlign.right,
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
       ),
     );
   }

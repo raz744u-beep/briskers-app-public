@@ -812,8 +812,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         ));
   }
 
-  Future<void> _resolveFinding(Map<String, dynamic> finding) async {
-    await _run(() => _api.resolveVehicleFinding(
+  Future<void> _addFindingToJob(Map<String, dynamic> finding) async {
+    await _run(() => _api.addVehicleFindingToJob(
+          widget.businessId,
+          finding['id'].toString(),
+          widget.jobId,
+        ));
+  }
+
+  Future<void> _removeFindingFromJob(Map<String, dynamic> finding) async {
+    await _run(() => _api.removeVehicleFindingFromJob(
           widget.businessId,
           finding['id'].toString(),
           widget.jobId,
@@ -1356,20 +1364,39 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final open = _findings
         .where((finding) => finding['status']?.toString() == 'open')
         .toList();
+    final inJob = _findings
+        .where((finding) => finding['status']?.toString() == 'in_job')
+        .toList();
     final resolved = _findings
         .where((finding) => finding['status']?.toString() == 'resolved')
         .toList();
 
     Widget findingTile(Map<String, dynamic> finding) {
-      final isOpen = finding['status']?.toString() == 'open';
+      final status = finding['status']?.toString() ?? 'open';
+      final isOpen = status == 'open';
+      final isInJob = status == 'in_job';
+      final isResolved = status == 'resolved';
+      final repairJobId = finding['repair_job_id']?.toString() ?? '';
+      final repairJob = finding['repair_job_number']?.toString() ?? '';
+      final inThisJob = isInJob && repairJobId == widget.jobId;
       final attachments = List<dynamic>.from(
         finding['attachments'] ?? const [],
       );
       final foundJob = finding['found_job_number']?.toString() ?? '';
-      final resolvedJob =
-          finding['resolved_job_number']?.toString() ?? '';
+      final resolvedJob = finding['resolved_job_number']?.toString() ?? '';
       final created = _dateTime(finding['created_at']);
       final resolvedAt = _dateTime(finding['resolved_at']);
+
+      final icon = isResolved
+          ? Icons.check_circle_outline
+          : isInJob
+              ? Icons.handyman_outlined
+              : Icons.warning_amber_rounded;
+      final iconColor = isResolved
+          ? Colors.green
+          : isInJob
+              ? BriskersColors.jobs
+              : Colors.deepOrange;
 
       return Padding(
         padding: const EdgeInsets.fromLTRB(12, 6, 8, 10),
@@ -1379,13 +1406,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  isOpen
-                      ? Icons.warning_amber_rounded
-                      : Icons.check_circle_outline,
-                  color: isOpen ? Colors.deepOrange : Colors.green,
-                  size: 22,
-                ),
+                Icon(icon, color: iconColor, size: 22),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -1425,9 +1446,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   attachments.length == 1
                       ? '1 photo'
                       : '${attachments.length} photos',
-                if (!isOpen && resolvedJob.isNotEmpty)
+                if (isInJob && repairJob.isNotEmpty) 'In $repairJob',
+                if (isResolved && resolvedJob.isNotEmpty)
                   'Resolved $resolvedJob',
-                if (!isOpen && resolvedAt.isNotEmpty) resolvedAt,
+                if (isResolved && resolvedAt.isNotEmpty) resolvedAt,
               ].join(' • '),
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -1448,43 +1470,66 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     .toList(),
               ),
             ],
-            if (isOpen && _canEditFindings) ...[
+            if (isOpen && _canManage) ...[
               const SizedBox(height: 4),
-              Row(
-                children: [
-                  Expanded(
-                    child: CheckboxListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: const Text(
-                        'Include on invoice',
-                        style: TextStyle(fontSize: 12.5),
-                      ),
-                      value: finding['include_on_invoice'] == true,
-                      onChanged: !_canManage || _busy
-                          ? null
-                          : (value) => _toggleFindingInvoice(
-                                finding,
-                                value == true,
-                              ),
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed:
-                        _busy ? null : () => _resolveFinding(finding),
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: const Text('Resolve'),
-                  ),
-                ],
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: const Text(
+                  'Repair on this job',
+                  style: TextStyle(fontSize: 12.5),
+                ),
+                subtitle: const Text(
+                  'It will be marked resolved when this job is completed.',
+                  style: TextStyle(fontSize: 11.5),
+                ),
+                value: false,
+                onChanged: _busy
+                    ? null
+                    : (value) {
+                        if (value == true) _addFindingToJob(finding);
+                      },
               ),
-            ] else if (!isOpen && _canManage) ...[
+            ] else if (inThisJob && _canManage) ...[
+              const SizedBox(height: 4),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: const Text(
+                  'Repair on this job',
+                  style: TextStyle(fontSize: 12.5),
+                ),
+                subtitle: const Text(
+                  'Checked — completing the job will resolve this finding.',
+                  style: TextStyle(fontSize: 11.5),
+                ),
+                value: true,
+                onChanged: _busy
+                    ? null
+                    : (value) {
+                        if (value == false) _removeFindingFromJob(finding);
+                      },
+              ),
+            ] else if (isInJob && !inThisJob) ...[
+              const SizedBox(height: 6),
+              Text(
+                repairJob.isEmpty
+                    ? 'Already assigned to another job'
+                    : 'Already assigned to $repairJob',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ] else if (isResolved && _canManage) ...[
               const SizedBox(height: 4),
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
-                  onPressed:
-                      _busy ? null : () => _reopenFinding(finding),
+                  onPressed: _busy ? null : () => _reopenFinding(finding),
                   icon: const Icon(Icons.replay_outlined),
                   label: const Text('Reopen'),
                 ),
@@ -1495,6 +1540,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         ),
       );
     }
+
+    final activeCount = open.length + inJob.length;
+    final inThisJobCount = inJob
+        .where((finding) =>
+            finding['repair_job_id']?.toString() == widget.jobId)
+        .length;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -1515,16 +1566,23 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         subtitle: Text(
-          open.isEmpty
-              ? 'No open findings'
-              : open.length == 1
-                  ? '1 open finding'
-                  : '${open.length} open findings',
+          activeCount == 0
+              ? 'No unresolved findings'
+              : <String>[
+                  if (open.isNotEmpty)
+                    open.length == 1
+                        ? '1 open'
+                        : '${open.length} open',
+                  if (inThisJobCount > 0)
+                    inThisJobCount == 1
+                        ? '1 in this job'
+                        : '$inThisJobCount in this job',
+                ].join(' • '),
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (open.isNotEmpty) ...[
+            if (activeCount > 0) ...[
               const Icon(
                 Icons.warning_amber_rounded,
                 color: Color(0xFFF4B400),
@@ -1532,7 +1590,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               ),
               const SizedBox(width: 3),
               Text(
-                '${open.length}',
+                '$activeCount',
                 style: const TextStyle(
                   color: Color(0xFFA56B00),
                   fontWeight: FontWeight.w900,
@@ -1555,7 +1613,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           ],
         ),
         children: [
-          if (open.isEmpty)
+          if (open.isEmpty && inJob.isEmpty)
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 4, 16, 14),
               child: Align(
@@ -1563,8 +1621,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 child: Text('No unresolved issues are recorded for this vehicle.'),
               ),
             )
-          else
+          else ...[
             ...open.map(findingTile),
+            ...inJob.map(findingTile),
+          ],
           if (resolved.isNotEmpty)
             ExpansionTile(
               initiallyExpanded: false,
