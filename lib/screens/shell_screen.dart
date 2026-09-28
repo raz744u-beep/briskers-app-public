@@ -198,7 +198,7 @@ class _ShellScreenState extends State<ShellScreen> {
             const NavigationDestination(
               icon: Icon(Icons.dashboard_outlined),
               selectedIcon: Icon(Icons.dashboard),
-              label: 'Today',
+              label: 'Dashboard',
             ),
             NavigationDestination(
               icon: _navIcon(Icons.people_outline, 'customers'),

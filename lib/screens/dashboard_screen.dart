@@ -5,10 +5,14 @@ import '../core/briskers_colors.dart';
 import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import '../widgets/job_compact_card.dart';
+import 'appointments/appointment_create_screen.dart';
 import 'customers/customer_detail_screen.dart';
 import 'documents_screen.dart';
+import 'expenses/expense_entry_screen.dart';
+import 'expenses_screen.dart';
 import 'jobs/job_detail_screen.dart';
 import 'jobs/job_document_screen.dart';
+import 'settings/expense_settings_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
@@ -39,8 +43,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _checkingInId;
   String? _busyJobId;
   bool _aiBusy = false;
-  bool _appointmentsExpanded = false;
   bool _activeJobsExpanded = false;
+  String? _expandedAction;
+  final ScrollController _dashboardScrollController = ScrollController();
+  final GlobalKey _jobsSectionKey = GlobalKey();
+  double? _jobsRestoreOffset;
   int _estimateCount = 0;
   int _invoiceCount = 0;
   DateTime _selectedDay = DateTime.now();
@@ -56,6 +63,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _dashboardScrollController.dispose();
+    super.dispose();
   }
 
   @override
@@ -841,6 +854,351 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await _load();
   }
 
+
+  Future<Map<String, dynamic>?> _pickDashboardCustomer(String title) async {
+    List<Map<String, dynamic>> rows;
+    try {
+      rows = await _api.customers(widget.businessId, limit: 50);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return null;
+    }
+    if (!mounted) return null;
+
+    final searchController = TextEditingController();
+    var results = List<Map<String, dynamic>>.from(rows);
+    var searching = false;
+
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          Future<void> search(String value) async {
+            setSheetState(() => searching = true);
+            try {
+              final found = await _api.customers(
+                widget.businessId,
+                search: value.trim().isEmpty ? null : value.trim(),
+                limit: 50,
+              );
+              if (sheetContext.mounted) {
+                setSheetState(() {
+                  results = found;
+                  searching = false;
+                });
+              }
+            } catch (_) {
+              if (sheetContext.mounted) {
+                setSheetState(() => searching = false);
+              }
+            }
+          }
+
+          return SafeArea(
+            top: false,
+            child: SizedBox(
+              height: MediaQuery.sizeOf(sheetContext).height * 0.72,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                    child: Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: TextField(
+                      controller: searchController,
+                      autofocus: true,
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: search,
+                      decoration: InputDecoration(
+                        labelText: 'Customer',
+                        hintText: 'Search by customer name',
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: IconButton(
+                          tooltip: 'Search',
+                          onPressed: () => search(searchController.text),
+                          icon: const Icon(Icons.arrow_forward),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (searching)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: LinearProgressIndicator(),
+                    ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: results.isEmpty
+                        ? const Center(child: Text('No customers found.'))
+                        : ListView.separated(
+                            itemCount: results.length,
+                            separatorBuilder: (_, _) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final customer = results[index];
+                              return ListTile(
+                                leading: const CircleAvatar(
+                                  child: Icon(Icons.person_outline),
+                                ),
+                                title: Text(
+                                  customer['display_name']?.toString() ?? '',
+                                ),
+                                subtitle: Text(
+                                  '${customer['vehicle_count'] ?? 0} vehicle(s)',
+                                ),
+                                onTap: () =>
+                                    Navigator.pop(sheetContext, customer),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    searchController.dispose();
+    return selected;
+  }
+
+  Future<void> _createDashboardDocument(String kind) async {
+    final customer = await _pickDashboardCustomer(
+      kind == 'estimate' ? 'New estimate' : 'New invoice',
+    );
+    if (customer == null || !mounted) return;
+
+    final customerId = customer['id']?.toString() ?? '';
+    if (customerId.isEmpty) return;
+    final vehicle = await _resolveAiVehicle(customerId);
+    if (!mounted) return;
+
+    try {
+      final documentId = kind == 'estimate'
+          ? await _api.createQuickEstimate(
+              widget.businessId,
+              customerId: customerId,
+              vehicleId: vehicle?['id']?.toString(),
+            )
+          : await _api.createQuickInvoice(
+              widget.businessId,
+              customerId: customerId,
+              vehicleId: vehicle?['id']?.toString(),
+            );
+      if (!mounted) return;
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => JobDocumentScreen(
+            businessId: widget.businessId,
+            documentId: documentId,
+            isOwner: widget.roleCode == 'owner',
+          ),
+        ),
+      );
+      await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _createDashboardAppointment() async {
+    final customer = await _pickDashboardCustomer('New appointment');
+    if (customer == null || !mounted) return;
+    final customerId = customer['id']?.toString() ?? '';
+    if (customerId.isEmpty) return;
+
+    try {
+      final detail = await _api.customerDetail(
+        widget.businessId,
+        customerId,
+      );
+      if (!mounted) return;
+      final changed = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AppointmentCreateScreen(
+            businessId: widget.businessId,
+            customerId: customerId,
+            customerName: customer['display_name']?.toString() ?? 'Customer',
+            vehicles: List<dynamic>.from(detail['vehicles'] ?? const []),
+          ),
+        ),
+      );
+      if (changed == true) {
+        await _load();
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _openExpenses() async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExpensesScreen(
+          businessId: widget.businessId,
+          roleCode: widget.roleCode,
+        ),
+      ),
+    );
+    await _load();
+  }
+
+  Future<void> _addGeneralExpense() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExpenseEntryScreen(
+          businessId: widget.businessId,
+          initialDirection: 'expense',
+        ),
+      ),
+    );
+    if (changed == true) await _load();
+  }
+
+  Future<void> _quickGeneralExpense() async {
+    try {
+      final data = await _api.transactionOptions(widget.businessId);
+      final quick = List<dynamic>.from(data['quick_templates'] ?? const [])
+          .map((raw) => Map<String, dynamic>.from(raw as Map))
+          .where((row) => row['direction']?.toString() == 'expense')
+          .toList();
+      if (!mounted) return;
+      if (quick.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No expense quick transactions are defined yet. Add them in Settings.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      final selected = await showModalBottomSheet<Map<String, dynamic>>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(
+                title: Text(
+                  'Quick general expense',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: Text('No job or invoice will be linked.'),
+              ),
+              ...quick.map(
+                (item) => ListTile(
+                  leading: const Icon(
+                    Icons.bolt,
+                    color: BriskersColors.expenses,
+                  ),
+                  title: Text(item['name']?.toString() ?? ''),
+                  subtitle: Text(
+                    <String>[
+                      if ((item['vendor']?.toString() ?? '').isNotEmpty)
+                        item['vendor'].toString(),
+                      item['category']?.toString() ?? '',
+                      item['account']?.toString() ?? '',
+                    ].where((value) => value.isNotEmpty).join(' • '),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, item),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (selected == null || !mounted) return;
+
+      final changed = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ExpenseEntryScreen(
+            businessId: widget.businessId,
+            initialDirection: 'expense',
+            quickTemplate: selected,
+          ),
+        ),
+      );
+      if (changed == true) await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _openRecurringTransactions() async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RecurringTransactionsScreen(
+          businessId: widget.businessId,
+        ),
+      ),
+    );
+    await _load();
+  }
+
+  void _toggleAction(String key) {
+    setState(() {
+      _expandedAction = _expandedAction == key ? null : key;
+    });
+  }
+
+  Future<void> _toggleJobs() async {
+    if (_activeJobsExpanded) {
+      final restore = _jobsRestoreOffset;
+      setState(() => _activeJobsExpanded = false);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      if (restore != null && _dashboardScrollController.hasClients) {
+        final target = restore.clamp(
+          0.0,
+          _dashboardScrollController.position.maxScrollExtent,
+        );
+        await _dashboardScrollController.animateTo(
+          target,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOut,
+        );
+      }
+      return;
+    }
+
+    _jobsRestoreOffset = _dashboardScrollController.hasClients
+        ? _dashboardScrollController.offset
+        : 0;
+    setState(() {
+      _expandedAction = null;
+      _activeJobsExpanded = true;
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    final contextForJobs = _jobsSectionKey.currentContext;
+    if (contextForJobs != null) {
+      await Scrollable.ensureVisible(
+        contextForJobs,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOut,
+        alignment: 0,
+      );
+    }
+  }
+
   Future<void> _openJob(String jobId) async {
     await Navigator.push<void>(
       context,
@@ -1005,6 +1363,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final _ = _askBriskers;
+
     if (_data == null && _error == null) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -1017,365 +1377,356 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _data?['active_jobs'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
 
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.all(14),
-        children: [
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: _showDashboardCalendar,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 4,
-                  vertical: 5,
+    Widget calendarHeader() {
+      return Material(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: _showDashboardCalendar,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 8),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.calendar_month_outlined,
+                  color: BriskersColors.today,
                 ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.calendar_month_outlined,
-                      color: BriskersColors.today,
-                    ),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      child: SizedBox(
-                        height: 38,
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            DateFormat('EEEE, MMMM d').format(_selectedDay),
-                            maxLines: 1,
-                            softWrap: false,
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineSmall
-                                ?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                        ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: SizedBox(
+                    height: 38,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        DateFormat('EEEE, MMMM d').format(_selectedDay),
+                        maxLines: 1,
+                        softWrap: false,
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                     ),
-                    if (!_sameDay(_selectedDay, DateTime.now()))
-                      TextButton(
-                        onPressed: () => _selectDashboardDay(DateTime.now()),
-                        child: const Text('Today'),
-                      ),
-                    const Icon(Icons.keyboard_arrow_down),
-                  ],
+                  ),
                 ),
-              ),
+                if (!_sameDay(_selectedDay, DateTime.now()))
+                  TextButton(
+                    onPressed: () => _selectDashboardDay(DateTime.now()),
+                    child: const Text('Today'),
+                  ),
+                const Icon(Icons.keyboard_arrow_down),
+              ],
             ),
           ),
-          const SizedBox(height: 14),
-          if (_canManage) ...[
-            Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              color: BriskersColors.jobs.withValues(alpha: 0.07),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: _aiBusy ? null : _askBriskers,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 20,
-                        backgroundColor:
-                            BriskersColors.jobs.withValues(alpha: 0.15),
-                        child: _aiBusy
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: BriskersColors.jobs,
-                                ),
-                              )
-                            : const Icon(
-                                Icons.auto_awesome,
-                                color: BriskersColors.jobs,
-                              ),
+        ),
+      );
+    }
+
+    Widget actionDrawer(String key) {
+      switch (key) {
+        case 'estimate':
+          return _DashboardActionDrawer(
+            color: BriskersColors.estimates,
+            actions: [
+              _DashboardDrawerAction(
+                icon: Icons.add,
+                label: 'Create new estimate',
+                onTap: () => _createDashboardDocument('estimate'),
+              ),
+              _DashboardDrawerAction(
+                icon: Icons.list_alt_outlined,
+                label: 'View estimates',
+                onTap: () => _openDocuments('estimate'),
+              ),
+            ],
+          );
+        case 'invoice':
+          return _DashboardActionDrawer(
+            color: BriskersColors.invoices,
+            actions: [
+              _DashboardDrawerAction(
+                icon: Icons.add,
+                label: 'Create new invoice',
+                onTap: () => _createDashboardDocument('invoice'),
+              ),
+              _DashboardDrawerAction(
+                icon: Icons.list_alt_outlined,
+                label: 'View invoices',
+                onTap: () => _openDocuments('invoice'),
+              ),
+            ],
+          );
+        case 'appointment':
+          return _DashboardActionDrawer(
+            color: BriskersColors.appointments,
+            actions: [
+              _DashboardDrawerAction(
+                icon: Icons.add,
+                label: 'New appointment',
+                onTap: _createDashboardAppointment,
+              ),
+              _DashboardDrawerAction(
+                icon: Icons.calendar_month_outlined,
+                label: 'View appointments',
+                onTap: () => widget.onAppointmentsTap?.call(),
+              ),
+            ],
+          );
+        default:
+          return _DashboardActionDrawer(
+            color: BriskersColors.expenses,
+            actions: [
+              _DashboardDrawerAction(
+                icon: Icons.add_card_outlined,
+                label: 'Add general expense',
+                onTap: _addGeneralExpense,
+              ),
+              _DashboardDrawerAction(
+                icon: Icons.bolt,
+                label: 'Quick general expense',
+                onTap: _quickGeneralExpense,
+              ),
+              _DashboardDrawerAction(
+                icon: Icons.receipt_long_outlined,
+                label: 'View transactions',
+                onTap: _openExpenses,
+              ),
+              _DashboardDrawerAction(
+                icon: Icons.event_repeat_outlined,
+                label: 'Recurring transactions',
+                onTap: _openRecurringTransactions,
+              ),
+            ],
+          );
+      }
+    }
+
+    return Column(
+      children: [
+        calendarHeader(),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
+              controller: _dashboardScrollController,
+              padding: const EdgeInsets.fromLTRB(14, 6, 14, 90),
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: _DashboardActionTile(
+                        label: 'Estimates',
+                        count: _estimateCount,
+                        icon: Icons.request_quote_outlined,
+                        color: BriskersColors.estimates,
+                        expanded: _expandedAction == 'estimate',
+                        onExpand: () => _toggleAction('estimate'),
                       ),
-                      const SizedBox(width: 11),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _DashboardActionTile(
+                        label: 'Invoices',
+                        count: _invoiceCount,
+                        icon: Icons.receipt_long_outlined,
+                        color: BriskersColors.invoices,
+                        expanded: _expandedAction == 'invoice',
+                        onExpand: () => _toggleAction('invoice'),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_expandedAction == 'estimate' ||
+                    _expandedAction == 'invoice') ...[
+                  const SizedBox(height: 8),
+                  actionDrawer(_expandedAction!),
+                ],
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _DashboardActionTile(
+                        label: 'Appointments',
+                        count: appointments.length,
+                        icon: Icons.calendar_month_outlined,
+                        color: BriskersColors.appointments,
+                        expanded: _expandedAction == 'appointment',
+                        onExpand: () => _toggleAction('appointment'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _DashboardActionTile(
+                        label: 'Expenses',
+                        icon: Icons.payments_outlined,
+                        color: BriskersColors.expenses,
+                        expanded: _expandedAction == 'expense',
+                        onExpand: () => _toggleAction('expense'),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_expandedAction == 'appointment' ||
+                    _expandedAction == 'expense') ...[
+                  const SizedBox(height: 8),
+                  actionDrawer(_expandedAction!),
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                Container(
+                  key: _jobsSectionKey,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: _toggleJobs,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 5),
+                        child: Row(
                           children: [
+                            const Icon(
+                              Icons.build_outlined,
+                              color: BriskersColors.jobs,
+                            ),
+                            const SizedBox(width: 7),
                             Text(
-                              'Ask Briskers',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
+                              'Active Jobs',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: BriskersColors.jobs,
+                                  ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '${activeJobs.length}',
+                              style: const TextStyle(
+                                color: BriskersColors.jobs,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
-                            Text(
-                              'Create invoices, estimates, appointments or jobs',
-                              style: TextStyle(fontSize: 12.5),
+                            const SizedBox(width: 4),
+                            Icon(
+                              _activeJobsExpanded
+                                  ? Icons.keyboard_arrow_up
+                                  : Icons.keyboard_arrow_down,
+                              color: BriskersColors.jobs,
                             ),
                           ],
                         ),
                       ),
-                      const Icon(Icons.chevron_right),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ),
-          ],
-          _DocumentShortcutRow(
-            label: 'Estimates',
-            count: _estimateCount,
-            icon: Icons.request_quote_outlined,
-            color: BriskersColors.estimates,
-            onTap: () => _openDocuments('estimate'),
-          ),
-          const SizedBox(height: 8),
-          _DocumentShortcutRow(
-            label: 'Invoices',
-            count: _invoiceCount,
-            icon: Icons.receipt_long_outlined,
-            color: BriskersColors.invoices,
-            onTap: () => _openDocuments('invoice'),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ],
-          const SizedBox(height: 8),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(10),
-              onTap: () => setState(
-                () => _appointmentsExpanded = !_appointmentsExpanded,
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.calendar_month_outlined,
-                      color: BriskersColors.appointments,
-                    ),
-                    const SizedBox(width: 7),
-                    Text(
-                      _sameDay(_selectedDay, DateTime.now())
-                          ? 'Appointments'
-                          : DateFormat('MMM d Appointments').format(_selectedDay),
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: BriskersColors.appointments,
-                          ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${appointments.length}',
-                      style: const TextStyle(
-                        color: BriskersColors.appointments,
-                        fontWeight: FontWeight.w700,
+                if (_activeJobsExpanded) ...[
+                  const SizedBox(height: 7),
+                  if (activeJobs.isEmpty)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text('No active jobs right now.'),
                       ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      _appointmentsExpanded
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                      color: BriskersColors.appointments,
-                    ),
-                  ],
-                ),
-              ),
+                    )
+                  else
+                    ...activeJobs.map(_activeJobCard),
+                ],
+              ],
             ),
           ),
-          if (_appointmentsExpanded) ...[
-            const SizedBox(height: 7),
-            if (appointments.isEmpty)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('No confirmed appointments for this day.'),
-                ),
-              )
-            else
-              ...appointments.map((item) {
-                final start =
-                    DateTime.tryParse(item['starts_at']?.toString() ?? '');
-                final time = start == null
-                    ? ''
-                    : DateFormat('h:mm a').format(start.toLocal());
-                final mechanic = item['mechanic']?.toString() ?? '';
-                final checking = _checkingInId == item['id']?.toString();
-
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 7),
-                  child: ListTile(
-                    dense: true,
-                    leading: CircleAvatar(
-                      radius: 19,
-                      backgroundColor:
-                          BriskersColors.appointments.withValues(alpha: 0.14),
-                      child: const Icon(
-                        Icons.event_outlined,
-                        color: BriskersColors.appointments,
-                        size: 21,
-                      ),
-                    ),
-                    title: Text(
-                      <String>[
-                        if (time.isNotEmpty) time,
-                        item['title']?.toString() ?? 'Appointment',
-                      ].join(' • '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    subtitle: Text(
-                      <String>[
-                        item['customer']?.toString() ?? '',
-                        if ((item['vehicle']?.toString() ?? '').isNotEmpty)
-                          item['vehicle'].toString(),
-                        if (mechanic.isNotEmpty) 'Planned: $mechanic',
-                      ].where((value) => value.isNotEmpty).join(' • '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: _canManage
-                        ? checking
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : IconButton(
-                                tooltip: 'Check in / Create job',
-                                onPressed: () => _checkIn(item),
-                                icon: const Icon(
-                                  Icons.login_outlined,
-                                  color: BriskersColors.appointments,
-                                ),
-                              )
-                        : null,
-                  ),
-                );
-              }),
-          ],
-          const SizedBox(height: 8),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(10),
-              onTap: () => setState(
-                () => _activeJobsExpanded = !_activeJobsExpanded,
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.build_outlined,
-                      color: BriskersColors.jobs,
-                    ),
-                    const SizedBox(width: 7),
-                    Text(
-                      'Active Jobs',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: BriskersColors.jobs,
-                          ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${activeJobs.length}',
-                      style: const TextStyle(
-                        color: BriskersColors.jobs,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      _activeJobsExpanded
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                      color: BriskersColors.jobs,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          if (_activeJobsExpanded) ...[
-            const SizedBox(height: 7),
-            if (activeJobs.isEmpty)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('No active jobs right now.'),
-                ),
-              )
-            else
-              ...activeJobs.map(_activeJobCard),
-          ],
-          const SizedBox(height: 80),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
-class _DocumentShortcutRow extends StatelessWidget {
-  const _DocumentShortcutRow({
+class _DashboardActionTile extends StatelessWidget {
+  const _DashboardActionTile({
     required this.label,
-    required this.count,
     required this.icon,
     required this.color,
-    required this.onTap,
+    required this.expanded,
+    required this.onExpand,
+    this.count,
   });
 
   final String label;
-  final int count;
   final IconData icon;
   final Color color;
-  final VoidCallback onTap;
+  final bool expanded;
+  final VoidCallback onExpand;
+  final int? count;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.transparent,
+      color: color.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 5),
-          child: Row(
-            children: [
-              Icon(icon, color: color),
-              const SizedBox(width: 7),
-              Text(
-                label,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: color,
-                    ),
-              ),
-              const Spacer(),
-              Text(
-                '$count',
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.w800,
+        borderRadius: BorderRadius.circular(16),
+        onTap: onExpand,
+        child: SizedBox(
+          height: 118,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 13, 10, 10),
+            child: Stack(
+              children: [
+                Align(
+                  alignment: Alignment.topLeft,
+                  child: Icon(icon, color: color, size: 38),
                 ),
-              ),
-              const SizedBox(width: 3),
-              Icon(Icons.chevron_right, color: color),
-            ],
+                Align(
+                  alignment: Alignment.topRight,
+                  child: Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: color,
+                    size: 26,
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.bottomLeft,
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      if (count != null) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          '$count',
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1383,3 +1734,50 @@ class _DocumentShortcutRow extends StatelessWidget {
   }
 }
 
+class _DashboardDrawerAction {
+  const _DashboardDrawerAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+}
+
+class _DashboardActionDrawer extends StatelessWidget {
+  const _DashboardActionDrawer({
+    required this.color,
+    required this.actions,
+  });
+
+  final Color color;
+  final List<_DashboardDrawerAction> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      color: color.withValues(alpha: 0.055),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          children: [
+            for (final action in actions)
+              ListTile(
+                dense: true,
+                leading: Icon(action.icon, color: color),
+                title: Text(
+                  action.label,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: action.onTap,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
