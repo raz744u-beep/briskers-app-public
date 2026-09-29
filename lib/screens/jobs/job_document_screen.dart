@@ -1177,23 +1177,61 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     if (save != true) return;
 
-    await _run(() async {
-      await _api.updateDocumentHeader(
-        widget.businessId,
-        widget.documentId,
-        expectedVersion: _version,
-        customerId: customerId,
-        vehicleId: vehicleId,
-        documentDate: date,
+    final originalCustomerId = _detail!['customer_id']?.toString() ?? '';
+    final originalVehicleId = _detail!['vehicle_id']?.toString();
+    final originalDate = DateTime.tryParse(
+      _detail!['document_date']?.toString() ?? '',
+    );
+    final originalMileage =
+        _detail!['odometer_in']?.toString().replaceAll(',', '').trim() ?? '';
+    final newMileage = mileageText.replaceAll(',', '').trim();
+
+    final headerChanged =
+        customerId != originalCustomerId ||
+        vehicleId != originalVehicleId ||
+        originalDate == null ||
+        DateUtils.dateOnly(originalDate) != DateUtils.dateOnly(date);
+
+    if (headerChanged) {
+      await _run(() async {
+        await _api.updateDocumentHeader(
+          widget.businessId,
+          widget.documentId,
+          expectedVersion: _version,
+          customerId: customerId,
+          vehicleId: vehicleId,
+          documentDate: date,
+        );
+      });
+
+      if (_detail == null ||
+          _detail!['customer_id']?.toString() != customerId ||
+          _detail!['vehicle_id']?.toString() != vehicleId) {
+        if (mounted) {
+          setState(() {
+            _error =
+                'The invoice customer/vehicle change did not persist. Please try again.';
+          });
+        }
+        return;
+      }
+    }
+
+    if (newMileage != originalMileage) {
+      await _run(() async {
+        await _api.updateDocumentMileage(
+          widget.businessId,
+          widget.documentId,
+          odometer: newMileage.isEmpty ? null : num.tryParse(newMileage),
+        );
+      });
+    }
+
+    if (mounted && _error == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invoice details updated.')),
       );
-      await _api.updateDocumentMileage(
-        widget.businessId,
-        widget.documentId,
-        odometer: mileageText.isEmpty
-            ? null
-            : num.tryParse(mileageText.replaceAll(',', '').trim()),
-      );
-    });
+    }
   }
 
   Future<void> _copyInvoice() async {
