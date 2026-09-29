@@ -533,8 +533,24 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           transaction['transaction_date']?.toString() ?? '';
                       final jobNumber =
                           transaction['job_number']?.toString().trim() ?? '';
+                      final jobTitle =
+                          transaction['job_title']?.toString().trim() ?? '';
+                      final customerName =
+                          transaction['job_customer_name']?.toString().trim() ?? '';
                       final documentNumber =
                           transaction['document_number']?.toString().trim() ?? '';
+                      final remarks =
+                          transaction['remarks']?.toString().trim() ?? '';
+                      final contextLine = <String>[
+                        if (customerName.isNotEmpty) customerName,
+                        if (jobNumber.isNotEmpty || jobTitle.isNotEmpty)
+                          <String>[
+                            if (jobNumber.isNotEmpty) jobNumber,
+                            if (jobTitle.isNotEmpty) jobTitle,
+                          ].join(' — '),
+                        if (documentNumber.isNotEmpty)
+                          'Invoice #$documentNumber',
+                      ].join(' • ');
                       final receiptCount = int.tryParse(
                             transaction['receipt_count']?.toString() ?? '',
                           ) ??
@@ -557,14 +573,24 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                             counterparty,
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
-                          subtitle: Text(
-                            <String>[
-                              if (category.isNotEmpty) category,
-                              if (date.isNotEmpty) date,
-                              if (jobNumber.isNotEmpty) 'Job $jobNumber',
-                              if (documentNumber.isNotEmpty)
-                                'Invoice #$documentNumber',
-                            ].join(' • '),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (contextLine.isNotEmpty)
+                                Text(
+                                  contextLine,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              if (remarks.isNotEmpty) Text(remarks),
+                              Text(
+                                <String>[
+                                  if (category.isNotEmpty) category,
+                                  if (date.isNotEmpty) date,
+                                ].join(' • '),
+                              ),
+                            ],
                           ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
