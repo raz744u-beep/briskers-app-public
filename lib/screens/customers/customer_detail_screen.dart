@@ -82,6 +82,74 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     await _load();
   }
 
+  Future<void> _editProblemFlag() async {
+    final customer = Map<String, dynamic>.from(
+      _data?['customer'] ?? const {},
+    );
+    bool flagged = customer['problem_flag'] == true;
+    final controller = TextEditingController(
+      text: customer['problem_flag_note']?.toString() ?? '',
+    );
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Problem customer'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Flag this customer'),
+                  value: flagged,
+                  onChanged: (value) =>
+                      setDialogState(() => flagged = value == true),
+                ),
+                if (flagged) ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: controller,
+                    minLines: 3,
+                    maxLines: 6,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Reason / note',
+                      hintText: 'Example: Non-paying customer',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (saved == true) {
+      await _api.setCustomerProblemFlag(
+        widget.businessId,
+        widget.customerId,
+        flagged: flagged,
+        note: controller.text.trim(),
+      );
+      await _load();
+    }
+    controller.dispose();
+  }
+
   Future<void> _addVehicle() async {
     final changed = await Navigator.push<bool>(
       context,
@@ -298,9 +366,21 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       appBar: AppBar(
         centerTitle: true,
         backgroundColor: BriskersColors.customers.withValues(alpha: 0.12),
-        title: Text(
-          '${customer['name'] ?? 'Customer'}',
-          style: const TextStyle(fontWeight: FontWeight.bold),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                '${customer['name'] ?? 'Customer'}',
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            if (customer['problem_flag'] == true) ...[
+              const SizedBox(width: 6),
+              const Icon(Icons.flag, color: Colors.red, size: 20),
+            ],
+          ],
         ),
       ),
       floatingActionButton: _data == null
@@ -326,9 +406,17 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                       leading: const CircleAvatar(
                         child: Icon(Icons.person_outline),
                       ),
-                      title: Text(
-                        '${customer['name'] ?? ''}',
-                        style: Theme.of(context).textTheme.titleLarge,
+                      title: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '${customer['name'] ?? ''}',
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                          ),
+                          if (customer['problem_flag'] == true)
+                            const Icon(Icons.flag, color: Colors.red),
+                        ],
                       ),
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -351,6 +439,41 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                       ),
                       trailing: const Icon(Icons.edit_outlined),
                       onTap: () => _editCustomer(customer),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Card(
+                    child: Column(
+                      children: [
+                        CheckboxListTile(
+                          title: const Text(
+                            'Problem customer',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: const Text(
+                            'Show a red flag beside this customer throughout Briskers.',
+                          ),
+                          value: customer['problem_flag'] == true,
+                          onChanged: (_) => _editProblemFlag(),
+                        ),
+                        if (customer['problem_flag'] == true)
+                          ListTile(
+                            leading: const Icon(
+                              Icons.flag,
+                              color: Colors.red,
+                            ),
+                            title: const Text('Flag reason / note'),
+                            subtitle: Text(
+                              (customer['problem_flag_note']?.toString() ?? '')
+                                      .trim()
+                                      .isEmpty
+                                  ? 'Tap to add a reason'
+                                  : customer['problem_flag_note'].toString(),
+                            ),
+                            trailing: const Icon(Icons.edit_outlined),
+                            onTap: _editProblemFlag,
+                          ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 18),
