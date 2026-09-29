@@ -1888,6 +1888,65 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     await _load();
   }
 
+  Widget _jobExpenseThumbnail(Map<String, dynamic> attachment) {
+    const size = 52.0;
+    final bucket = attachment['bucket']?.toString() ?? '';
+    final key = attachment['key']?.toString() ?? '';
+
+    if (bucket.isEmpty || key.isEmpty) {
+      return Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: BriskersColors.expenses.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(Icons.receipt_long_outlined),
+      );
+    }
+
+    return FutureBuilder<String>(
+      future: _api.signedAttachmentUrl(bucket, key),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return Container(
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: snapshot.hasError
+                ? const Icon(Icons.broken_image_outlined)
+                : const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+          );
+        }
+
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            snapshot.data!,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => Container(
+              width: size,
+              height: size,
+              alignment: Alignment.center,
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              child: const Icon(Icons.broken_image_outlined),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _profitabilityDrawer() {
     final data = _profitability;
     if (!_owner || data == null) {
@@ -2009,22 +2068,47 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               ),
               const SizedBox(height: 2),
               ...expenses.map((expense) {
-                final id = expense['id']?.toString() ?? '';
-                return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                  title: Text(
-                    expense['counterparty_name']?.toString() ??
-                        expense['category_name']?.toString() ??
-                        'Expense',
+                final id = expense['transaction_id']?.toString() ?? '';
+                final vendor = expense['vendor']?.toString().trim() ?? '';
+                final category = expense['category']?.toString().trim() ?? '';
+                final memo = expense['memo']?.toString().trim() ?? '';
+                final attachments =
+                    List<dynamic>.from(expense['attachments'] ?? const [])
+                        .map((raw) => Map<String, dynamic>.from(raw as Map))
+                        .toList();
+
+                return Card(
+                  margin: const EdgeInsets.only(top: 6),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+                    leading: attachments.isEmpty
+                        ? CircleAvatar(
+                            backgroundColor: BriskersColors.expenses
+                                .withValues(alpha: 0.10),
+                            child: const Icon(Icons.receipt_long_outlined),
+                          )
+                        : _jobExpenseThumbnail(attachments.first),
+                    title: Text(
+                      vendor.isEmpty ? 'Expense' : vendor,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    subtitle: Text(
+                      <String>[
+                        if (memo.isNotEmpty) memo,
+                        if (category.isNotEmpty) category,
+                        if (attachments.isNotEmpty)
+                          attachments.length == 1
+                              ? '1 receipt photo'
+                              : '${attachments.length} receipt photos',
+                      ].join('\n'),
+                    ),
+                    trailing: Text(
+                      _money(expense['amount']),
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    isThreeLine: memo.isNotEmpty || attachments.isNotEmpty,
+                    onTap: id.isEmpty ? null : () => _openExpense(id),
                   ),
-                  subtitle: Text(
-                    expense['category_name']?.toString() ?? '',
-                  ),
-                  trailing: Text(
-                    _money(expense['amount']),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  onTap: id.isEmpty ? null : () => _openExpense(id),
                 );
               }),
             ],
