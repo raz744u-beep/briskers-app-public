@@ -324,21 +324,37 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         color: color,
                       ),
                     ),
-                    title: Text(
-                      <String>[
-                        if (number.isNotEmpty)
-                          (_estimate
-                              ? (number.toUpperCase().startsWith('E-')
-                                  ? number
-                                  : 'E-$number')
-                              : (number.toUpperCase().startsWith('I-')
-                                  ? number
-                                  : 'I-$number')),
-                        if (customer.isNotEmpty) customer,
-                      ].join('  '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    title: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            <String>[
+                              if (number.isNotEmpty)
+                                (_estimate
+                                    ? (number.toUpperCase().startsWith('E-')
+                                        ? number
+                                        : 'E-$number')
+                                    : (number.toUpperCase().startsWith('I-')
+                                        ? number
+                                        : 'I-$number')),
+                              if (customer.isNotEmpty) customer,
+                            ].join('  '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        if (row['customer_problem_flag'] == true) ...[
+                          const SizedBox(width: 5),
+                          const Icon(
+                            Icons.flag,
+                            color: Colors.red,
+                            size: 18,
+                          ),
+                        ],
+                      ],
                     ),
                     subtitle: Text(
                       <String>[
