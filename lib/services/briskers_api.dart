@@ -912,6 +912,7 @@ class BriskersApi {
     String? counterpartyId,
     required String name,
     required bool active,
+    String? defaultCategoryId,
   }) async {
     final result = await supabase.rpc(
       'briskers_save_counterparty',
@@ -922,7 +923,16 @@ class BriskersApi {
         'p_active': active,
       },
     );
-    return result.toString();
+    final id = result.toString();
+    await supabase.rpc(
+      'briskers_set_counterparty_default_category',
+      params: {
+        'p_business_id': businessId,
+        'p_counterparty_id': id,
+        'p_category_id': defaultCategoryId,
+      },
+    );
+    return id;
   }
 
   Future<void> deleteCounterparty(
