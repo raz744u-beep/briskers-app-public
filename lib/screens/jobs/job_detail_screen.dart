@@ -42,7 +42,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   bool _loading = true;
   bool _busy = false;
-  String? _expandedSection;
   String? _error;
   VoidCallback? _modalRefresh;
 
@@ -1748,12 +1747,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     if (choice == 'quick_expense') await _addQuickJobExpense();
   }
 
-  void _toggleSection(String key) {
-    setState(() {
-      _expandedSection = _expandedSection == key ? null : key;
-    });
-  }
-
   Future<void> _openExpense(String transactionId) async {
     await Navigator.push<void>(
       context,
@@ -2250,12 +2243,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final unassigned = _job!['is_unassigned'] == true;
     final statusColor = colorFromHex(_job!['status_color']?.toString());
     final activeFindings = _findings.where((finding) => finding['status']?.toString() != 'resolved').length;
-    final margin = num.tryParse(_profitability?['margin_percent']?.toString() ?? '');
-    final prePhotos = _preInspection == null ? 0 : List<dynamic>.from(_preInspection!['photos'] ?? const []).length;
-    final preDate = _preInspection == null ? '' : _dateTime(_preInspection!['inspected_at']);
-    final revenue = _profitability?['revenue'];
-    final totalCost = _profitability?['total_cost'];
-    final profit = _profitability?['profit'];
 
     int? badge(int value) => value > 0 ? value : null;
     final complaintCount = complaint.isEmpty ? 0 : 1;
@@ -2503,111 +2490,6 @@ class _JobCategoryTile extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                   height: 1.12,
                 ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _JobProfitabilityTile extends StatelessWidget {
-  const _JobProfitabilityTile({
-    required this.expanded,
-    required this.margin,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  final bool expanded;
-  final num? margin;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    const color = BriskersColors.reports;
-    return Card(
-      margin: EdgeInsets.zero,
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(9, 8, 8, 8),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: color.withValues(alpha: 0.13),
-                child: const Icon(
-                  Icons.analytics_outlined,
-                  color: color,
-                  size: 19,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Flexible(
-                          child: Text(
-                            'Job Profitability',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        if (margin != null) ...[
-                          const SizedBox(width: 7),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.10),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              '${margin!.toStringAsFixed(1)}%',
-                              style: TextStyle(
-                                color: Colors.green.shade700,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 11.5,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        height: 1.1,
-                        color:
-                            Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(
-                expanded
-                    ? Icons.keyboard_arrow_up
-                    : Icons.keyboard_arrow_down,
-                size: 18,
               ),
             ],
           ),
