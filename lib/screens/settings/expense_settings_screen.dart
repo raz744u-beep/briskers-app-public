@@ -791,6 +791,7 @@ class CounterpartiesSettingsScreen extends StatefulWidget {
 class _CounterpartiesSettingsScreenState
     extends _SettingsState<CounterpartiesSettingsScreen> {
   List<Map<String, dynamic>>? rows;
+  List<Map<String, dynamic>> categories = const [];
   String query = '';
 
   @override
@@ -805,9 +806,19 @@ class _CounterpartiesSettingsScreenState
       final result = List<dynamic>.from(data['counterparties'] ?? const [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
+      final loadedCategories =
+          List<dynamic>.from(data['categories'] ?? const [])
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .where(
+                (e) =>
+                    e['normal_direction']?.toString() == 'expense' &&
+                    e['active'] != false,
+              )
+              .toList();
       if (!mounted) return;
       setState(() {
         rows = result;
+        categories = loadedCategories;
         error = null;
       });
     } catch (e) {
@@ -825,6 +836,7 @@ class _CounterpartiesSettingsScreenState
       builder: (_) => _CounterpartyDialog(
         businessId: widget.businessId,
         row: row,
+        categories: categories,
       ),
     );
     if (changed == true) await _load();
@@ -929,6 +941,9 @@ class _CounterpartiesSettingsScreenState
                         ),
                         subtitle: Text(
                           <String>[
+                            if ((row['default_category']?.toString() ?? '')
+                                .isNotEmpty)
+                              'Default: ${row['default_category']}',
                             '$count transaction(s)',
                             if (!active) 'Inactive',
                           ].join(' • '),
@@ -964,10 +979,12 @@ class _CounterpartiesSettingsScreenState
 class _CounterpartyDialog extends StatefulWidget {
   const _CounterpartyDialog({
     required this.businessId,
+    required this.categories,
     this.row,
   });
 
   final String businessId;
+  final List<Map<String, dynamic>> categories;
   final Map<String, dynamic>? row;
 
   @override
@@ -979,6 +996,7 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
 
   late final TextEditingController name;
   late bool active;
+  String? defaultCategoryId;
   bool saving = false;
   String? error;
 
@@ -987,6 +1005,7 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
     super.initState();
     name = TextEditingController(text: widget.row?['name']?.toString() ?? '');
     active = widget.row?['active'] != false;
+    defaultCategoryId = widget.row?['default_category_id']?.toString();
   }
 
   @override
@@ -1010,6 +1029,7 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
         counterpartyId: widget.row?['id']?.toString(),
         name: name.text.trim(),
         active: active,
+        defaultCategoryId: defaultCategoryId,
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -1034,6 +1054,28 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
             enabled: !saving,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(labelText: 'Name'),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String?>(
+            initialValue: defaultCategoryId,
+            decoration: const InputDecoration(
+              labelText: 'Default expense category',
+            ),
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('No default category'),
+              ),
+              ...widget.categories.map(
+                (category) => DropdownMenuItem<String?>(
+                  value: category['id']?.toString(),
+                  child: Text(category['name']?.toString() ?? ''),
+                ),
+              ),
+            ],
+            onChanged: saving
+                ? null
+                : (value) => setState(() => defaultCategoryId = value),
           ),
           if (widget.row != null)
             SwitchListTile(
