@@ -409,7 +409,19 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     final date = detail['date']?.toString() ?? '';
     final remarks = detail['remarks']?.toString() ?? '';
     final jobNumber = detail['job_number']?.toString().trim() ?? '';
+    final jobTitle = detail['job_title']?.toString().trim() ?? '';
+    final customerName =
+        detail['job_customer_name']?.toString().trim() ?? '';
     final documentNumber = detail['document_number']?.toString().trim() ?? '';
+    final contextLine = <String>[
+      if (customerName.isNotEmpty) customerName,
+      if (jobNumber.isNotEmpty || jobTitle.isNotEmpty)
+        <String>[
+          if (jobNumber.isNotEmpty) jobNumber,
+          if (jobTitle.isNotEmpty) jobTitle,
+        ].join(' — '),
+      if (documentNumber.isNotEmpty) 'Invoice #$documentNumber',
+    ].join(' • ');
     final recurring = detail['recurring_rule'];
     final color =
         income ? const Color(0xFF169B62) : BriskersColors.expenses;
@@ -491,6 +503,20 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
             ),
           ),
           const SizedBox(height: 12),
+          if (contextLine.isNotEmpty) ...[
+            Card(
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.link_outlined),
+                title: const Text(
+                  'Linked to',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(contextLine),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           _DetailRow(label: 'Category', value: category),
           _DetailRow(label: 'Account', value: account),
           _DetailRow(label: 'Date', value: date),
