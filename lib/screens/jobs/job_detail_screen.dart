@@ -323,19 +323,17 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
-  Future<void> _changeCustomerVehicle() async {
+  Future<void> _changeCustomer() async {
     if (!_canManage || _job == null || _busy) return;
     final customer = await _pickCustomer();
     if (customer == null || !mounted) return;
     final customerId = customer['id']?.toString() ?? '';
     if (customerId.isEmpty) return;
-
-    final vehicle = await _pickVehicleForCustomer(customerId);
-    if (vehicle == null) return;
+    if (customerId == _job!['customer_id']?.toString()) return;
 
     await _run(() => _updateCore(
           customerId: customerId,
-          vehicleId: vehicle['id']?.toString(),
+          vehicleId: _job!['vehicle_id']?.toString(),
           plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
           requestedWork: _job!['requested_work']?.toString() ?? '',
         ));
@@ -1143,7 +1141,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         ),
         Padding(padding: const EdgeInsets.fromLTRB(8, 4, 8, 4), child: Column(children: [
           Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-            Expanded(child: cell(icon: Icons.person_outline, color: statusColor, label: 'Customer', value: customerName.isEmpty ? 'Customer' : customerName, onTap: _canManage ? _changeCustomerVehicle : null)),
+            Expanded(child: cell(icon: Icons.person_outline, color: statusColor, label: 'Customer', value: customerName.isEmpty ? 'Customer' : customerName, onTap: _canManage ? _changeCustomer : null)),
             Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 3), color: statusColor.withValues(alpha: 0.20)),
             Expanded(child: cell(icon: Icons.directions_car_outlined, color: statusColor, label: 'Vehicle', value: vehicle.isEmpty ? 'No vehicle' : vehicle, subtitle: vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin', onTap: _canManage ? _changeVehicle : null)),
           ]),
