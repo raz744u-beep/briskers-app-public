@@ -399,6 +399,35 @@ class BriskersApi {
     );
   }
 
+  Future<Map<String, dynamic>?> jobPreInspection(String businessId, String jobId) async {
+    final result = await supabase.rpc('briskers_job_pre_inspection', params: {'p_business_id': businessId, 'p_job_id': jobId});
+    if (result == null) return null;
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<String> saveJobPreInspection(String businessId, String jobId, {String? notes, num? odometer}) async {
+    final result = await supabase.rpc('briskers_save_job_pre_inspection', params: {'p_business_id': businessId, 'p_job_id': jobId, 'p_notes': notes, 'p_odometer': odometer});
+    return result.toString();
+  }
+
+  Future<void> uploadJobPreInspectionPhoto(String businessId, String jobId, {required String filename, required String mimeType, required Uint8List bytes, String? note}) async {
+    final raw = await supabase.rpc('briskers_register_preinspection_photo', params: {'p_business_id': businessId, 'p_job_id': jobId, 'p_original_filename': filename, 'p_mime_type': mimeType, 'p_note': note});
+    final registration = Map<String, dynamic>.from(raw as Map);
+    final bucket = registration['bucket'].toString();
+    final key = registration['key'].toString();
+    final attachmentId = registration['attachment_id'].toString();
+    await supabase.storage.from(bucket).uploadBinary(key, bytes, fileOptions: FileOptions(contentType: mimeType, upsert: false));
+    await supabase.rpc('briskers_finalize_attachment', params: {'p_business_id': businessId, 'p_attachment_id': attachmentId, 'p_byte_size': bytes.length});
+  }
+
+  Future<void> updateJobPreInspectionPhotoNote(String businessId, String photoId, String note) async {
+    await supabase.rpc('briskers_update_preinspection_photo_note', params: {'p_business_id': businessId, 'p_photo_id': photoId, 'p_note': note});
+  }
+
+  Future<void> deleteJobPreInspectionPhoto(String businessId, String photoId) async {
+    await supabase.rpc('briskers_delete_preinspection_photo', params: {'p_business_id': businessId, 'p_photo_id': photoId});
+  }
+
   Future<String> signedAttachmentUrl(String bucket, String key) {
     return supabase.storage.from(bucket).createSignedUrl(key, 3600);
   }

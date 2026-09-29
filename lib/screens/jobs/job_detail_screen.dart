@@ -31,6 +31,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   Map<String, dynamic>? _job;
   Map<String, dynamic>? _profitability;
+  Map<String, dynamic>? _preInspection;
   List<Map<String, dynamic>> _employees = const [];
   List<Map<String, dynamic>> _statuses = const [];
   List<Map<String, dynamic>> _documents = const [];
@@ -75,6 +76,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       List<Map<String, dynamic>> documents = const [];
       List<Map<String, dynamic>> findings = const [];
       Map<String, dynamic>? profitability;
+      Map<String, dynamic>? preInspection;
 
       if (_canManage) {
         try {
@@ -106,6 +108,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         }
       }
 
+      try {
+        preInspection = await _api.jobPreInspection(widget.businessId, widget.jobId);
+      } catch (_) {
+        preInspection = null;
+      }
+
       final vehicleId = job['vehicle_id']?.toString();
       if (vehicleId != null && vehicleId.isNotEmpty) {
         try {
@@ -122,6 +130,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       setState(() {
         _job = job;
         _profitability = profitability;
+        _preInspection = preInspection;
         _employees = employees;
         _statuses = statuses;
         _documents = documents;
@@ -652,6 +661,70 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     return 'image/jpeg';
   }
 
+  Future<void> _editPreInspectionDetails() async {
+    if (_job == null || _busy) return;
+    final mileage = TextEditingController(text: _preInspection?['odometer']?.toString() ?? _job?['odometer_in']?.toString() ?? '');
+    final notes = TextEditingController(text: _preInspection?['notes']?.toString() ?? '');
+    final save = await showModalBottomSheet<bool>(context: context, showDragHandle: true, isScrollControlled: true, builder: (sheetContext) => Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, MediaQuery.viewInsetsOf(sheetContext).bottom + 16),
+      child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Align(alignment: Alignment.centerLeft, child: Text('Pre-inspection', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
+        const SizedBox(height: 12),
+        TextField(controller: mileage, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Arrival mileage')),
+        const SizedBox(height: 10),
+        TextField(controller: notes, minLines: 3, maxLines: 6, decoration: const InputDecoration(labelText: 'Inspection notes', hintText: 'Existing damage, warning lights, interior condition, etc.')),
+        const SizedBox(height: 12),
+        SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.pop(sheetContext, true), child: const Text('Save'))),
+      ])),
+    ));
+    if (save == true) {
+      await _run(() async { await _api.saveJobPreInspection(widget.businessId, widget.jobId, notes: notes.text.trim(), odometer: num.tryParse(mileage.text.trim())); });
+    }
+    mileage.dispose(); notes.dispose();
+  }
+
+  Future<void> _addPreInspectionPhotos() async {
+    if (_busy) return;
+    final source = await showModalBottomSheet<String>(context: context, showDragHandle: true, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      ListTile(leading: const Icon(Icons.photo_camera_outlined), title: const Text('Take photo'), onTap: () => Navigator.pop(sheetContext, 'camera')),
+      ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('Choose from gallery'), onTap: () => Navigator.pop(sheetContext, 'gallery')),
+    ])));
+    if (source == null) return;
+    final photos = <XFile>[];
+    if (source == 'camera') {
+      final p = await _picker.pickImage(source: ImageSource.camera, imageQuality: 88, maxWidth: 1920, maxHeight: 1920);
+      if (p != null) photos.add(p);
+    } else {
+      photos.addAll(await _picker.pickMultiImage(imageQuality: 88, maxWidth: 1920, maxHeight: 1920));
+    }
+    if (photos.isEmpty) return;
+    await _run(() async {
+      for (final photo in photos) {
+        await _api.uploadJobPreInspectionPhoto(widget.businessId, widget.jobId, filename: photo.name, mimeType: _imageMime(photo.name), bytes: await photo.readAsBytes());
+      }
+    });
+  }
+
+  Future<void> _editPreInspectionPhotoNote(Map<String, dynamic> photo) async {
+    final controller = TextEditingController(text: photo['note']?.toString() ?? '');
+    final save = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Photo note'),
+      content: TextField(controller: controller, autofocus: true, minLines: 2, maxLines: 5, decoration: const InputDecoration(hintText: 'Example: Scratch on left rear quarter panel')),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Save'))],
+    ));
+    if (save == true) await _run(() => _api.updateJobPreInspectionPhotoNote(widget.businessId, photo['id'].toString(), controller.text.trim()));
+    controller.dispose();
+  }
+
+  Future<void> _deletePreInspectionPhoto(Map<String, dynamic> photo) async {
+    final ok = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Delete photo?'),
+      content: const Text('Remove this photo from the pre-inspection?'),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Delete'))],
+    ));
+    if (ok == true) await _run(() => _api.deleteJobPreInspectionPhoto(widget.businessId, photo['id'].toString()));
+  }
+
   Future<void> _addFinding() async {
     if (!_canEditFindings || _job == null || _busy) return;
     if ((_job!['vehicle_id']?.toString() ?? '').isEmpty) {
@@ -884,17 +957,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     await _load();
   }
 
-  void _scrollFinancialActionsIntoView() {
-    Future<void>.delayed(const Duration(milliseconds: 280), () {
-      if (!mounted || !_scrollController.hasClients) return;
-
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 320),
-        curve: Curves.easeOutCubic,
-      );
-    });
-  }
 
   List<Map<String, dynamic>> _availableStatuses() {
     final current = _job?['status']?.toString();
@@ -934,7 +996,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           ),
           if (_canManage) ...[
             const SizedBox(width: 2),
-            Icon(Icons.chevron_right, color: color, size: 17),
+            Icon(Icons.keyboard_arrow_down, color: color, size: 17),
           ],
         ],
       ),
@@ -970,267 +1032,54 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     required String customerName,
     required String vehicle,
     required String vin,
-    required String title,
     required Map<String, dynamic>? assignment,
   }) {
-    final employeeName = assignment == null
-        ? 'Unassigned'
-        : assignment['employee_name']?.toString() ?? 'Assigned';
-    final employeePosition =
-        assignment?['position']?.toString() ?? 'Employee';
+    final employeeName = assignment == null ? 'Unassigned' : assignment['employee_name']?.toString() ?? 'Assigned';
+    final employeePosition = assignment?['position']?.toString() ?? 'Mechanic';
     final roleStyle = employeeRoleStyle(employeePosition);
     final statusColor = colorFromHex(_job?['status_color']?.toString());
-    final cardTint = Color.alphaBlend(
-      statusColor.withValues(alpha: 0.12),
-      const Color(0xFFFCFCFB),
-    );
+    final cardTint = Color.alphaBlend(statusColor.withValues(alpha: 0.12), const Color(0xFFFCFCFB));
 
-    Widget editableRow({
-      required IconData icon,
-      required Color color,
-      required String label,
-      required String value,
-      String? subtitle,
-      VoidCallback? onTap,
-    }) {
+    Widget cell({required IconData icon, required Color color, required String label, required String value, String? subtitle, VoidCallback? onTap}) {
       final enabled = onTap != null && !_busy;
       return InkWell(
         onTap: enabled ? onTap : null,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 17,
-                backgroundColor: color.withValues(alpha: 0.13),
-                child: Icon(icon, color: color, size: 21),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      value,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    if (subtitle != null && subtitle.isNotEmpty)
-                      Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          fontSize: 11.5,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              if (enabled)
-                const Icon(Icons.chevron_right, size: 22),
-            ],
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
+          child: Row(children: [
+            CircleAvatar(radius: 22, backgroundColor: color.withValues(alpha: 0.13), child: Icon(icon, color: color, size: 25)),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text(label, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14.5, fontWeight: FontWeight.w600)),
+              Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              if (subtitle != null && subtitle.isNotEmpty) Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12.5)),
+            ])),
+            if (enabled) const Icon(Icons.chevron_right, size: 23),
+          ]),
         ),
       );
     }
 
     return Container(
-      decoration: BoxDecoration(
-        color: cardTint,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: statusColor.withValues(alpha: 0.18)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: BoxDecoration(color: cardTint, borderRadius: BorderRadius.circular(18), border: Border.all(color: statusColor.withValues(alpha: 0.22)), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8, offset: const Offset(0, 3))]),
       clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: FractionallySizedBox(
-                  widthFactor: 0.72,
-                  heightFactor: 0.88,
-                  child: Opacity(
-                    opacity: 0.27,
-                    child: Image.asset(
-                      'assets/job_car_watermark.png',
-                      fit: BoxFit.contain,
-                      alignment: Alignment.centerRight,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 7, 12, 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                editableRow(
-                  icon: Icons.person_outline,
-                  color: statusColor,
-                  label: 'Customer',
-                  value: customerName.isEmpty ? 'Customer' : customerName,
-                  onTap: _canManage ? _changeCustomerVehicle : null,
-                ),
-                Divider(color: statusColor.withValues(alpha: 0.20)),
-                editableRow(
-                  icon: Icons.directions_car_outlined,
-                  color: statusColor,
-                  label: 'Vehicle',
-                  value: vehicle.isEmpty ? 'No vehicle' : vehicle,
-                  subtitle: vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin',
-                  onTap: _canManage ? _changeVehicle : null,
-                ),
-                Divider(color: statusColor.withValues(alpha: 0.20)),
-                if (title.isNotEmpty) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 3, 4, 5),
-                    child: Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 16.5,
-                        fontWeight: FontWeight.w700,
-                        height: 1.25,
-                      ),
-                    ),
-                  ),
-                ],
-                Row(
-                  children: [
-                    Expanded(
-                      child: InkWell(
-                        onTap: _canManage && !_busy ? _changeAssignment : null,
-                        borderRadius: BorderRadius.circular(12),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 5,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                roleStyle.icon,
-                                color: roleStyle.color,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 7),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      employeePosition,
-                                      style: TextStyle(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurfaceVariant,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                    Text(
-                                      employeeName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (_canManage)
-                                const Icon(Icons.chevron_right, size: 20),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    Container(
-                      width: 1,
-                      height: 42,
-                      margin: const EdgeInsets.symmetric(horizontal: 8),
-                      color: statusColor.withValues(alpha: 0.25),
-                    ),
-                    SizedBox(
-                      width: 125,
-                      child: InkWell(
-                        onTap: _canManage && !_busy ? _changePlannedHours : null,
-                        borderRadius: BorderRadius.circular(12),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 5,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.timer_outlined,
-                                color: statusColor,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 7),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Planned time',
-                                      style: TextStyle(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurfaceVariant,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                    Text(
-                                      '${_hours(_job!['planned_hours'])} hr',
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (_canManage)
-                                const Icon(Icons.chevron_right, size: 20),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+      child: Stack(children: [
+        Positioned.fill(child: IgnorePointer(child: Align(alignment: Alignment.centerRight, child: FractionallySizedBox(widthFactor: 0.72, heightFactor: 0.9, child: Opacity(opacity: 0.25, child: Image.asset('assets/job_car_watermark.png', fit: BoxFit.contain, alignment: Alignment.centerRight))))),
+        Padding(padding: const EdgeInsets.fromLTRB(10, 7, 10, 7), child: Column(children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Expanded(child: cell(icon: Icons.person_outline, color: statusColor, label: 'Customer', value: customerName.isEmpty ? 'Customer' : customerName, onTap: _canManage ? _changeCustomerVehicle : null)),
+            Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 7, horizontal: 5), color: statusColor.withValues(alpha: 0.20)),
+            Expanded(child: cell(icon: Icons.directions_car_outlined, color: statusColor, label: 'Vehicle', value: vehicle.isEmpty ? 'No vehicle' : vehicle, subtitle: vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin', onTap: _canManage ? _changeVehicle : null)),
+          ]),
+          Divider(height: 1, color: statusColor.withValues(alpha: 0.20)),
+          Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Expanded(child: cell(icon: roleStyle.icon, color: roleStyle.color, label: 'Mechanic', value: employeeName, onTap: _canManage ? _changeAssignment : null)),
+            Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 7, horizontal: 5), color: statusColor.withValues(alpha: 0.20)),
+            Expanded(child: cell(icon: Icons.timer_outlined, color: statusColor, label: 'Planned time', value: '${_hours(_job!['planned_hours'])} hr', onTap: _canManage ? _changePlannedHours : null)),
+          ]),
+        ])),
+      ]),
     );
   }
 
@@ -1615,6 +1464,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       items: [
         if (_canEditFindings)
           const PopupMenuItem(
+            value: 'inspection',
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.camera_alt_outlined),
+              title: Text('Pre-inspection'),
+            ),
+          ),
+        if (_canEditFindings)
+          const PopupMenuItem(
             value: 'finding',
             child: ListTile(
               dense: true,
@@ -1678,6 +1537,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       ],
     );
 
+    if (choice == 'inspection') { setState(() => _expandedSection = 'inspection'); if (_preInspection == null) await _editPreInspectionDetails(); }
     if (choice == 'finding') await _addFinding();
     if (choice == 'estimate') await _createEstimate();
     if (choice == 'invoice') await _createInvoice();
@@ -1938,6 +1798,63 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
+  Widget _preInspectionPhotoTile(Map<String, dynamic> photo) {
+    final bucket = photo['bucket']?.toString() ?? '';
+    final key = photo['key']?.toString() ?? '';
+    final note = photo['note']?.toString().trim() ?? '';
+    final captured = _dateTime(photo['captured_at']);
+    return Card(
+      margin: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
+        leading: SizedBox(width: 58, height: 58, child: ClipRRect(borderRadius: BorderRadius.circular(8), child: FutureBuilder<String>(
+          future: bucket.isEmpty || key.isEmpty ? Future<String>.value('') : _api.signedAttachmentUrl(bucket, key),
+          builder: (context, snapshot) {
+            final url = snapshot.data ?? '';
+            if (url.isEmpty) return const ColoredBox(color: Color(0x11000000), child: Icon(Icons.photo_outlined));
+            return Image.network(url, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined));
+          },
+        ))),
+        title: Text(note.isEmpty ? 'No photo note' : note, maxLines: 2, overflow: TextOverflow.ellipsis),
+        subtitle: captured.isEmpty ? null : Text(captured),
+        onTap: bucket.isEmpty || key.isEmpty ? null : () => _showFindingPhoto(photo),
+        trailing: PopupMenuButton<String>(onSelected: (value) { if (value == 'note') _editPreInspectionPhotoNote(photo); if (value == 'delete') _deletePreInspectionPhoto(photo); }, itemBuilder: (_) => const [
+          PopupMenuItem(value: 'note', child: Text('Edit note')),
+          PopupMenuItem(value: 'delete', child: Text('Delete photo')),
+        ]),
+      ),
+    );
+  }
+
+  Widget _preInspectionDrawer() {
+    final data = _preInspection;
+    final photos = data == null ? <Map<String, dynamic>>[] : List<dynamic>.from(data['photos'] ?? const []).map((x) => Map<String, dynamic>.from(x as Map)).toList();
+    final date = data == null ? '' : _dateTime(data['inspected_at']);
+    final notes = data?['notes']?.toString().trim() ?? '';
+    final odometer = data?['odometer']?.toString().trim() ?? '';
+    return _JobDrawerSurface(
+      color: const Color(0xFF6B4BC3),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (data == null) const Padding(padding: EdgeInsets.all(6), child: Text('No pre-inspection has been recorded for this job yet.')),
+          if (data != null) ...[
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: Text(<String>[if (date.isNotEmpty) date, if (odometer.isNotEmpty) 'Mileage $odometer'].join(' • '), style: const TextStyle(fontWeight: FontWeight.w700))),
+            if (notes.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(6, 8, 6, 2), child: Text(notes)),
+            if (photos.isEmpty) const Padding(padding: EdgeInsets.all(8), child: Text('No inspection photos yet.')),
+            ...photos.map(_preInspectionPhotoTile),
+          ],
+          const SizedBox(height: 6),
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(onPressed: _busy ? null : _editPreInspectionDetails, icon: Icon(data == null ? Icons.play_arrow : Icons.edit_outlined), label: Text(data == null ? 'Start inspection' : 'Edit details'))),
+            const SizedBox(width: 8),
+            Expanded(child: FilledButton.icon(onPressed: _busy ? null : _addPreInspectionPhotos, icon: const Icon(Icons.add_a_photo_outlined), label: const Text('Add photos'))),
+          ]),
+        ]),
+      ),
+    );
+  }
+
   Widget _drawerForSection(
     String key, {
     required String complaint,
@@ -1948,6 +1865,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     switch (key) {
       case 'complaint':
         return _complaintDrawer(complaint);
+      case 'inspection':
+        return _preInspectionDrawer();
       case 'findings':
         return _findingsDrawer();
       case 'work':
@@ -1964,36 +1883,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return Scaffold(
-        appBar: AppBar(
-          backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10),
-          title: const Text('Job'),
-        ),
-        body: const Center(child: CircularProgressIndicator()),
-      );
+      return Scaffold(appBar: AppBar(backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10), title: const Text('Job')), body: const Center(child: CircularProgressIndicator()));
     }
-
     if (_job == null) {
-      return Scaffold(
-        appBar: AppBar(
-          backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10),
-          title: const Text('Job'),
-        ),
-        body: Center(child: Text(_error ?? 'Job not found.')),
-      );
+      return Scaffold(appBar: AppBar(backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10), title: const Text('Job')), body: Center(child: Text(_error ?? 'Job not found.')));
     }
 
     final assignments = List<dynamic>.from(_job!['assignments'] ?? const []);
-    final assignment = assignments.isEmpty
-        ? null
-        : Map<String, dynamic>.from(assignments.first as Map);
-    final requests = List<dynamic>.from(
-      _job!['pending_requests'] ?? const [],
-    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-    final visits = List<dynamic>.from(_job!['visits'] ?? const [])
-        .map((raw) => Map<String, dynamic>.from(raw as Map))
-        .toList();
-
+    final assignment = assignments.isEmpty ? null : Map<String, dynamic>.from(assignments.first as Map);
+    final requests = List<dynamic>.from(_job!['pending_requests'] ?? const []).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    final visits = List<dynamic>.from(_job!['visits'] ?? const []).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
     final currentVisit = visits.isEmpty ? null : visits.first;
     final customerName = _job!['customer_name']?.toString().trim() ?? '';
     final vehicle = _job!['vehicle']?.toString().trim() ?? '';
@@ -2001,245 +1900,88 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final jobNumber = _job!['job_number']?.toString().trim() ?? '';
     final jobTitle = _job!['title']?.toString().trim() ?? '';
     final complaint = _job!['requested_work']?.toString().trim() ?? '';
-    final workSummary =
-        currentVisit?['work_summary']?.toString().trim() ?? '';
+    final workSummary = currentVisit?['work_summary']?.toString().trim() ?? '';
     final unassigned = _job!['is_unassigned'] == true;
     final statusColor = colorFromHex(_job!['status_color']?.toString());
+    final activeFindings = _findings.where((finding) => finding['status']?.toString() != 'resolved').length;
+    final margin = num.tryParse(_profitability?['margin_percent']?.toString() ?? '');
+    final prePhotos = _preInspection == null ? 0 : List<dynamic>.from(_preInspection!['photos'] ?? const []).length;
+    final preDate = _preInspection == null ? '' : _dateTime(_preInspection!['inspected_at']);
+    final revenue = _profitability?['revenue'];
+    final totalCost = _profitability?['total_cost'];
+    final profit = _profitability?['profit'];
 
-    final activeFindings = _findings
-        .where((finding) => finding['status']?.toString() != 'resolved')
-        .length;
-    final margin = num.tryParse(
-      _profitability?['margin_percent']?.toString() ?? '',
+    Widget tile(String key, String label, IconData icon, Color color, String subtitle) => _JobSectionTile(
+      label: label, icon: icon, color: color, subtitle: subtitle, expanded: _expandedSection == key, onTap: () => _toggleSection(key),
     );
-
-    Widget tile(
-      String key,
-      String label,
-      IconData icon,
-      Color color,
-      String subtitle,
-    ) {
-      return _JobSectionTile(
-        label: label,
-        icon: icon,
-        color: color,
-        subtitle: subtitle,
-        expanded: _expandedSection == key,
-        onTap: () => _toggleSection(key),
-      );
-    }
-
     Widget rowDrawer(String a, String b) {
-      final expanded =
-          _expandedSection == a || _expandedSection == b;
-      if (!expanded) return const SizedBox.shrink();
-      return Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: _drawerForSection(
-          _expandedSection!,
-          complaint: complaint,
-          workSummary: workSummary,
-          currentVisit: currentVisit,
-          visits: visits,
-        ),
-      );
+      if (_expandedSection != a && _expandedSection != b) return const SizedBox.shrink();
+      return Padding(padding: const EdgeInsets.only(top: 8), child: _drawerForSection(_expandedSection!, complaint: complaint, workSummary: workSummary, currentVisit: currentVisit, visits: visits));
     }
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: statusColor.withValues(alpha: 0.08),
-        centerTitle: false,
-        titleSpacing: 0,
-        title: Text(
-          jobNumber.isEmpty ? 'Job' : 'Job $jobNumber',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 21,
-          ),
-        ),
-        actions: [Center(child: _statusControl())],
+        backgroundColor: statusColor.withValues(alpha: 0.08), centerTitle: false, titleSpacing: 0,
+        title: Text(jobNumber.isEmpty ? 'Job' : 'Job $jobNumber', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22)),
+        actions: [
+          Center(child: _statusControl()),
+          PopupMenuButton<String>(tooltip: 'Job menu', onSelected: (value) { if (value == 'refresh') _load(); }, itemBuilder: (_) => const [PopupMenuItem(value: 'refresh', child: Text('Refresh'))]),
+        ],
       ),
-      floatingActionButton: (_canEditFindings || _canManage)
-          ? FloatingActionButton.extended(
-              onPressed: _busy ? null : _showNewMenu,
-              backgroundColor: BriskersColors.jobs,
-              foregroundColor: Colors.white,
-              icon: const Icon(Icons.add),
-              label: const Text('New'),
-            )
-          : null,
+      floatingActionButton: (_canEditFindings || _canManage) ? FloatingActionButton.extended(
+        onPressed: _busy ? null : _showNewMenu, backgroundColor: BriskersColors.jobs, foregroundColor: Colors.white, icon: const Icon(Icons.add), label: const Text('New'),
+      ) : null,
       body: RefreshIndicator(
         onRefresh: _load,
-        child: ListView(
-          controller: _scrollController,
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 110),
-          children: [
-            _summaryCard(
-              customerName: customerName,
-              vehicle: vehicle,
-              vin: vin,
-              title: jobTitle,
-              assignment: assignment,
-            ),
-            if (_mechanic && unassigned) ...[
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: _busy ? null : _requestJob,
-                icon: const Icon(Icons.pan_tool_alt_outlined),
-                label: const Text('Request this job'),
-              ),
-            ],
-            if (_canManage && requests.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Card(
-                child: ExpansionTile(
-                  leading: const Icon(Icons.notifications_active_outlined),
-                  title: Text(
-                    requests.length == 1
-                        ? '1 mechanic requested this job'
-                        : '${requests.length} mechanics requested this job',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  children: requests.map((request) {
-                    return ListTile(
-                      title: Text(
-                        request['employee_name']?.toString() ?? '',
-                      ),
-                      subtitle: Text(
-                        request['position']?.toString() ?? 'Mechanic',
-                      ),
-                      trailing: Wrap(
-                        children: [
-                          IconButton(
-                            tooltip: 'Deny',
-                            onPressed: _busy
-                                ? null
-                                : () => _decideRequest(request, false),
-                            icon: const Icon(Icons.close),
-                          ),
-                          IconButton(
-                            tooltip: 'Assign',
-                            onPressed: _busy
-                                ? null
-                                : () => _decideRequest(request, true),
-                            icon: const Icon(
-                              Icons.check_circle_outline,
-                              color: BriskersColors.jobs,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ],
+        child: ListView(controller: _scrollController, padding: const EdgeInsets.fromLTRB(12, 8, 12, 110), children: [
+          if (jobTitle.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(4, 2, 4, 10), child: Text(jobTitle, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, height: 1.15))),
+          _summaryCard(customerName: customerName, vehicle: vehicle, vin: vin, assignment: assignment),
+          if (_mechanic && unassigned) ...[
             const SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: tile(
-                    'complaint',
-                    'Customer Complaint',
-                    Icons.description_outlined,
-                    const Color(0xFF15988F),
-                    complaint.isEmpty
-                        ? 'Nothing entered'
-                        : complaint,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: tile(
-                    'findings',
-                    'Vehicle Findings',
-                    Icons.car_repair_outlined,
-                    Colors.deepOrange,
-                    activeFindings == 0
-                        ? 'No unresolved findings'
-                        : '$activeFindings unresolved',
-                  ),
-                ),
-              ],
-            ),
-            rowDrawer('complaint', 'findings'),
-            const SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: tile(
-                    'work',
-                    'Work Performed',
-                    Icons.build_outlined,
-                    BriskersColors.jobs,
-                    workSummary.isEmpty ? 'Not started' : workSummary,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: tile(
-                    'history',
-                    'Work History',
-                    Icons.history_outlined,
-                    const Color(0xFF6842C2),
-                    visits.isEmpty
-                        ? 'No visits yet'
-                        : visits.length == 1
-                            ? '1 shop visit'
-                            : '${visits.length} shop visits',
-                  ),
-                ),
-              ],
-            ),
-            rowDrawer('work', 'history'),
-            const SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: tile(
-                    'documents',
-                    'Estimate / Invoice',
-                    Icons.receipt_long_outlined,
-                    const Color(0xFFE5A400),
-                    _documents.isEmpty
-                        ? 'No documents linked'
-                        : '${_documents.length} document(s)',
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: tile(
-                    'profit',
-                    'Job Profitability',
-                    Icons.analytics_outlined,
-                    BriskersColors.reports,
-                    _profitability == null
-                        ? 'Not available'
-                        : <String>[
-                            'Profit ${_money(_profitability!['profit'])}',
-                            if (margin != null)
-                              '${margin.toStringAsFixed(1)}%',
-                          ].join(' • '),
-                  ),
-                ),
-              ],
-            ),
-            rowDrawer('documents', 'profit'),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
+            OutlinedButton.icon(onPressed: _busy ? null : _requestJob, icon: const Icon(Icons.pan_tool_alt_outlined), label: const Text('Request this job')),
           ],
-        ),
+          if (_canManage && requests.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Card(child: ExpansionTile(leading: const Icon(Icons.notifications_active_outlined), title: Text(requests.length == 1 ? '1 mechanic requested this job' : '${requests.length} mechanics requested this job', style: const TextStyle(fontWeight: FontWeight.w700)), children: requests.map((request) => ListTile(
+              title: Text(request['employee_name']?.toString() ?? ''), subtitle: Text(request['position']?.toString() ?? 'Mechanic'), trailing: Wrap(children: [
+                IconButton(tooltip: 'Deny', onPressed: _busy ? null : () => _decideRequest(request, false), icon: const Icon(Icons.close)),
+                IconButton(tooltip: 'Assign', onPressed: _busy ? null : () => _decideRequest(request, true), icon: const Icon(Icons.check_circle_outline, color: BriskersColors.jobs)),
+              ]),
+            )).toList())),
+          ],
+          const SizedBox(height: 10),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: tile('complaint', 'Customer Complaint', Icons.description_outlined, const Color(0xFF15988F), complaint.isEmpty ? 'Nothing entered' : complaint)),
+            const SizedBox(width: 10),
+            Expanded(child: tile('inspection', 'Pre-Inspection', Icons.search, const Color(0xFF6B4BC3), _preInspection == null ? 'Not completed' : (prePhotos == 0 ? (preDate.isEmpty ? 'Inspection started' : preDate) : '$prePhotos photo${prePhotos == 1 ? '' : 's'} • $preDate'))),
+          ]),
+          rowDrawer('complaint', 'inspection'),
+          const SizedBox(height: 10),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: tile('findings', 'Vehicle Findings', Icons.car_repair_outlined, Colors.deepOrange, activeFindings == 0 ? 'No unresolved findings' : '$activeFindings unresolved')), 
+            const SizedBox(width: 10),
+            Expanded(child: tile('work', 'Work Performed', Icons.build_outlined, const Color(0xFF15988F), workSummary.isEmpty ? 'Not started' : workSummary)),
+          ]),
+          rowDrawer('findings', 'work'),
+          const SizedBox(height: 10),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: tile('history', 'Work History', Icons.history_outlined, const Color(0xFF2585D8), visits.isEmpty ? 'No visits yet' : (visits.length == 1 ? '1 shop visit' : '${visits.length} shop visits'))),
+            const SizedBox(width: 10),
+            Expanded(child: tile('documents', 'Estimate / Invoice', Icons.receipt_long_outlined, const Color(0xFFE5A400), _documents.isEmpty ? 'No documents linked' : '${_documents.length} document(s)')),
+          ]),
+          rowDrawer('history', 'documents'),
+          if (_owner) ...[
+            const SizedBox(height: 10),
+            _JobProfitabilityTile(
+              expanded: _expandedSection == 'profit',
+              margin: margin,
+              subtitle: _profitability == null ? 'Not available' : 'Revenue ${_money(revenue)}  •  Cost ${_money(totalCost)}  •  Profit ${_money(profit)}',
+              onTap: () => _toggleSection('profit'),
+            ),
+            if (_expandedSection == 'profit') Padding(padding: const EdgeInsets.only(top: 8), child: _profitabilityDrawer()),
+          ],
+          if (_error != null) ...[const SizedBox(height: 12), Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))],
+        ]),
       ),
     );
   }
@@ -2248,15 +1990,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
 
 class _JobSectionTile extends StatelessWidget {
-  const _JobSectionTile({
-    required this.label,
-    required this.icon,
-    required this.color,
-    required this.subtitle,
-    required this.expanded,
-    required this.onTap,
-  });
-
+  const _JobSectionTile({required this.label, required this.icon, required this.color, required this.subtitle, required this.expanded, required this.onTap});
   final String label;
   final IconData icon;
   final Color color;
@@ -2266,59 +2000,68 @@ class _JobSectionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: color.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(16),
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         child: SizedBox(
-          height: 126,
+          height: 142,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(13, 12, 10, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 22,
-                      backgroundColor: color.withValues(alpha: 0.12),
-                      child: Icon(icon, color: color, size: 26),
-                    ),
-                    const Spacer(),
-                    Icon(
-                      expanded
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                      color: color,
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 15.5,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  subtitle,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    height: 1.2,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
+            padding: const EdgeInsets.fromLTRB(11, 12, 9, 11),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              CircleAvatar(radius: 23, backgroundColor: color.withValues(alpha: 0.13), child: Icon(icon, color: color, size: 27)),
+              const SizedBox(width: 10),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Expanded(child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, height: 1.12))),
+                  const SizedBox(width: 3),
+                  Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 23),
+                ]),
+                const SizedBox(height: 9),
+                Text(subtitle, maxLines: 4, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14.2, height: 1.28, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              ])),
+            ]),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _JobProfitabilityTile extends StatelessWidget {
+  const _JobProfitabilityTile({required this.expanded, required this.margin, required this.subtitle, required this.onTap});
+  final bool expanded;
+  final num? margin;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const color = BriskersColors.reports;
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+          child: Row(children: [
+            CircleAvatar(radius: 23, backgroundColor: color.withValues(alpha: 0.13), child: const Icon(Icons.analytics_outlined, color: color, size: 27)),
+            const SizedBox(width: 11),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Text('Job Profitability', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                if (margin != null) ...[
+                  const SizedBox(width: 10),
+                  Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(999)), child: Text('${margin!.toStringAsFixed(1)}%', style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.w900, fontSize: 14))),
+                ],
+              ]),
+              const SizedBox(height: 7),
+              Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14.5, height: 1.25, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ])),
+            Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 24),
+          ]),
         ),
       ),
     );
