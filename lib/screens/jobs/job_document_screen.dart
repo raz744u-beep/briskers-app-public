@@ -3358,7 +3358,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
       curve: Curves.easeOut,
       padding: EdgeInsets.only(bottom: viewInsets.bottom),
       child: FractionallySizedBox(
-        heightFactor: 0.80,
+        heightFactor: keyboardOpen ? 0.94 : 0.86,
         child: Material(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: const BorderRadius.vertical(
@@ -3403,6 +3403,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       TextField(
+                        scrollPadding: const EdgeInsets.only(bottom: 180),
                         controller: _name,
                         readOnly: widget.lockCatalogFields,
                         textCapitalization: TextCapitalization.words,
@@ -3420,6 +3421,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                       ),
                       const SizedBox(height: 12),
                       TextField(
+                        scrollPadding: const EdgeInsets.only(bottom: 180),
                         controller: _description,
                         minLines: 2,
                         maxLines: 5,
@@ -3437,6 +3439,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                           Expanded(
                             flex: 2,
                             child: TextField(
+                        scrollPadding: const EdgeInsets.only(bottom: 180),
                               controller: _quantity,
                               keyboardType:
                                   const TextInputType.numberWithOptions(
@@ -3452,6 +3455,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                           Expanded(
                             flex: 3,
                             child: TextField(
+                        scrollPadding: const EdgeInsets.only(bottom: 180),
                               controller: _price,
                               keyboardType:
                                   const TextInputType.numberWithOptions(
@@ -3469,6 +3473,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                       if (!widget.lockCatalogFields) ...[
                         const SizedBox(height: 12),
                         TextField(
+                        scrollPadding: const EdgeInsets.only(bottom: 180),
                           controller: _taxPercent,
                           keyboardType:
                               const TextInputType.numberWithOptions(decimal: true),
