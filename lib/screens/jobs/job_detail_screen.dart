@@ -327,14 +327,29 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     if (!_canManage || _job == null || _busy) return;
     final customer = await _pickCustomer();
     if (customer == null || !mounted) return;
+
     final customerId = customer['id']?.toString() ?? '';
     if (customerId.isEmpty) return;
     if (customerId == _job!['customer_id']?.toString()) return;
 
+    final detail = await _api.customerDetail(widget.businessId, customerId);
+    final vehicles = List<dynamic>.from(detail['vehicles'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+
+    Map<String, dynamic>? vehicle;
+    if (vehicles.length == 1) {
+      vehicle = vehicles.first;
+    } else if (vehicles.length > 1) {
+      vehicle = await _pickVehicleForCustomer(customerId);
+      if (vehicle == null) return;
+    }
+
     await _run(() => _updateCore(
           customerId: customerId,
-          vehicleId: _job!['vehicle_id']?.toString(),
-          plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
+          vehicleId: vehicle?['id']?.toString(),
+          plannedHours:
+              num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
           requestedWork: _job!['requested_work']?.toString() ?? '',
         ));
   }
@@ -669,7 +684,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         const Align(alignment: Alignment.centerLeft, child: Text('Pre-inspection', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
         const SizedBox(height: 12),
         TextField(controller: mileage, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Arrival mileage')),
-        const SizedBox(height: 7),
+        const SizedBox(height: 6),
         TextField(controller: notes, minLines: 3, maxLines: 6, decoration: const InputDecoration(labelText: 'Inspection notes', hintText: 'Existing damage, warning lights, interior condition, etc.')),
         const SizedBox(height: 12),
         SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.pop(sheetContext, true), child: const Text('Save'))),
@@ -759,7 +774,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
                     ),
                   ),
-                  const SizedBox(height: 7),
+                  const SizedBox(height: 6),
                   TextField(
                     controller: controller,
                     autofocus: true,
@@ -827,7 +842,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 7),
+                  const SizedBox(height: 6),
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
@@ -1016,7 +1031,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 jobStatusIcon(status['icon_key']?.toString()),
                 color: itemColor,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Text(status['name']?.toString() ?? ''),
             ],
           ),
@@ -1038,23 +1053,72 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final statusColor = colorFromHex(_job?['status_color']?.toString());
     final cardTint = Color.alphaBlend(statusColor.withValues(alpha: 0.12), const Color(0xFFFCFCFB));
 
-    Widget cell({required IconData icon, required Color color, required String label, required String value, String? subtitle, VoidCallback? onTap}) {
+    Widget cell({
+      required IconData icon,
+      required Color color,
+      required String label,
+      required String value,
+      String? subtitle,
+      VoidCallback? onTap,
+    }) {
       final enabled = onTap != null && !_busy;
       return InkWell(
         onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: Row(children: [
-            CircleAvatar(radius: 19, backgroundColor: color.withValues(alpha: 0.13), child: Icon(icon, color: color, size: 22)),
-            const SizedBox(width: 10),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text(label, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13.5, fontWeight: FontWeight.w600)),
-              Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
-              if (subtitle != null && subtitle.isNotEmpty) Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 11.8)),
-            ])),
-            if (enabled) const Icon(Icons.chevron_right, size: 20),
-          ]),
+          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: color.withValues(alpha: 0.13),
+                child: Icon(icon, color: color, size: 19),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        height: 1.05,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14.2,
+                        fontWeight: FontWeight.w700,
+                        height: 1.08,
+                      ),
+                    ),
+                    if (subtitle != null && subtitle.isNotEmpty)
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontSize: 10.8,
+                          height: 1.05,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (enabled) const Icon(Icons.chevron_right, size: 18),
+            ],
+          ),
         ),
       );
     }
@@ -1082,16 +1146,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
           ),
         ),
-        Padding(padding: const EdgeInsets.fromLTRB(9, 5, 9, 5), child: Column(children: [
+        Padding(padding: const EdgeInsets.fromLTRB(7, 3, 7, 3), child: Column(children: [
           Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
             Expanded(child: cell(icon: Icons.person_outline, color: statusColor, label: 'Customer', value: customerName.isEmpty ? 'Customer' : customerName, onTap: _canManage ? _changeCustomer : null)),
-            Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 5, horizontal: 4), color: statusColor.withValues(alpha: 0.20)),
+            Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 3, horizontal: 3), color: statusColor.withValues(alpha: 0.20)),
             Expanded(child: cell(icon: Icons.directions_car_outlined, color: statusColor, label: 'Vehicle', value: vehicle.isEmpty ? 'No vehicle' : vehicle, subtitle: vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin', onTap: _canManage ? _changeVehicle : null)),
           ]),
           Divider(height: 1, color: statusColor.withValues(alpha: 0.20)),
           Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
             Expanded(child: cell(icon: roleStyle.icon, color: roleStyle.color, label: 'Mechanic', value: employeeName, onTap: _canManage ? _changeAssignment : null)),
-            Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 5, horizontal: 4), color: statusColor.withValues(alpha: 0.20)),
+            Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 3, horizontal: 3), color: statusColor.withValues(alpha: 0.20)),
             Expanded(child: cell(icon: Icons.timer_outlined, color: statusColor, label: 'Planned time', value: '${_hours(_job!['planned_hours'])} hr', onTap: _canManage ? _changePlannedHours : null)),
           ]),
         ])),
@@ -1274,7 +1338,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               ],
             ),
             if (attachments.isNotEmpty) ...[
-              const SizedBox(height: 7),
+              const SizedBox(height: 6),
               Wrap(
                 spacing: 7,
                 runSpacing: 7,
@@ -1940,7 +2004,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       child: Scaffold(
       appBar: AppBar(
         backgroundColor: statusColor.withValues(alpha: 0.08), centerTitle: false, titleSpacing: 0,
-        title: Text(jobNumber.isEmpty ? 'Job' : 'Job $jobNumber', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 22)),
+        title: Text(jobNumber.isEmpty ? 'Job' : 'Job $jobNumber', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 20)),
         actions: [
           Center(child: _statusControl()),
           PopupMenuButton<String>(tooltip: 'Job menu', onSelected: (value) { if (value == 'refresh') _load(); }, itemBuilder: (_) => const [PopupMenuItem(value: 'refresh', child: Text('Refresh'))]),
@@ -1951,15 +2015,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       ) : null,
       body: RefreshIndicator(
         onRefresh: _load,
-        child: ListView(controller: _scrollController, padding: const EdgeInsets.fromLTRB(12, 7, 12, 78), children: [
-          if (jobTitle.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(4, 2, 4, 10), child: Text(jobTitle, style: const TextStyle(fontSize: 21.5, fontWeight: FontWeight.w800, height: 1.15))),
+        child: ListView(controller: _scrollController, padding: const EdgeInsets.fromLTRB(10, 5, 10, 74), children: [
+          if (jobTitle.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(3, 1, 3, 7), child: Text(jobTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, height: 1.08))),
           _summaryCard(customerName: customerName, vehicle: vehicle, vin: vin, assignment: assignment),
           if (_mechanic && unassigned) ...[
-            const SizedBox(height: 7),
+            const SizedBox(height: 6),
             OutlinedButton.icon(onPressed: _busy ? null : _requestJob, icon: const Icon(Icons.pan_tool_alt_outlined), label: const Text('Request this job')),
           ],
           if (_canManage && requests.isNotEmpty) ...[
-            const SizedBox(height: 7),
+            const SizedBox(height: 6),
             Card(child: ExpansionTile(leading: const Icon(Icons.notifications_active_outlined), title: Text(requests.length == 1 ? '1 mechanic requested this job' : '${requests.length} mechanics requested this job', style: const TextStyle(fontWeight: FontWeight.w700)), children: requests.map((request) => ListTile(
               title: Text(request['employee_name']?.toString() ?? ''), subtitle: Text(request['position']?.toString() ?? 'Mechanic'), trailing: Wrap(children: [
                 IconButton(tooltip: 'Deny', onPressed: _busy ? null : () => _decideRequest(request, false), icon: const Icon(Icons.close)),
@@ -1967,29 +2031,29 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               ]),
             )).toList())),
           ],
-          const SizedBox(height: 7),
+          const SizedBox(height: 6),
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Expanded(child: tile('complaint', 'Customer Complaint', Icons.description_outlined, const Color(0xFF15988F), complaint.isEmpty ? 'Nothing entered' : complaint)),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(child: tile('inspection', 'Pre-Inspection', Icons.search, const Color(0xFF6B4BC3), _preInspection == null ? 'Not completed' : (prePhotos == 0 ? (preDate.isEmpty ? 'Inspection started' : preDate) : '$prePhotos photo${prePhotos == 1 ? '' : 's'} • $preDate'))),
           ]),
           rowDrawer('complaint', 'inspection'),
-          const SizedBox(height: 7),
+          const SizedBox(height: 6),
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Expanded(child: tile('findings', 'Vehicle Findings', Icons.car_repair_outlined, Colors.deepOrange, activeFindings == 0 ? 'No unresolved findings' : '$activeFindings unresolved')), 
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(child: tile('work', 'Work Performed', Icons.build_outlined, const Color(0xFF15988F), workSummary.isEmpty ? 'Not started' : workSummary)),
           ]),
           rowDrawer('findings', 'work'),
-          const SizedBox(height: 7),
+          const SizedBox(height: 6),
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Expanded(child: tile('history', 'Work History', Icons.history_outlined, const Color(0xFF2585D8), visits.isEmpty ? 'No visits yet' : (visits.length == 1 ? '1 shop visit' : '${visits.length} shop visits'))),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(child: tile('documents', 'Estimate / Invoice', Icons.receipt_long_outlined, const Color(0xFFE5A400), _documents.isEmpty ? 'No documents linked' : '${_documents.length} document(s)')),
           ]),
           rowDrawer('history', 'documents'),
           if (_owner) ...[
-            const SizedBox(height: 7),
+            const SizedBox(height: 6),
             _JobProfitabilityTile(
               expanded: _expandedSection == 'profit',
               margin: margin,
@@ -2009,7 +2073,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
 
 class _JobSectionTile extends StatelessWidget {
-  const _JobSectionTile({required this.label, required this.icon, required this.color, required this.subtitle, required this.expanded, required this.onTap});
+  const _JobSectionTile({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.subtitle,
+    required this.expanded,
+    required this.onTap,
+  });
+
   final String label;
   final IconData icon;
   final Color color;
@@ -2025,59 +2097,63 @@ class _JobSectionTile extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-          height: 104,
+          height: 84,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(9, 9, 7, 8),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              CircleAvatar(
-                radius: 19,
-                backgroundColor: color.withValues(alpha: 0.13),
-                child: Icon(icon, color: color, size: 22),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      Expanded(
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            label,
-                            maxLines: 1,
-                            softWrap: false,
-                            style: const TextStyle(
-                              fontSize: 15.5,
-                              fontWeight: FontWeight.w800,
+            padding: const EdgeInsets.fromLTRB(8, 8, 6, 7),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: color.withValues(alpha: 0.13),
+                  child: Icon(icon, color: color, size: 19),
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                                height: 1.05,
+                              ),
                             ),
                           ),
+                          const SizedBox(width: 2),
+                          Icon(
+                            expanded
+                                ? Icons.keyboard_arrow_up
+                                : Icons.keyboard_arrow_down,
+                            size: 18,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.6,
+                          height: 1.16,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant,
                         ),
                       ),
-                      const SizedBox(width: 2),
-                      Icon(
-                        expanded
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
-                        size: 20,
-                      ),
-                    ]),
-                    const SizedBox(height: 6),
-                    Text(
-                      subtitle,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12.7,
-                        height: 1.18,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ]),
+              ],
+            ),
           ),
         ),
       ),
@@ -2086,7 +2162,13 @@ class _JobSectionTile extends StatelessWidget {
 }
 
 class _JobProfitabilityTile extends StatelessWidget {
-  const _JobProfitabilityTile({required this.expanded, required this.margin, required this.subtitle, required this.onTap});
+  const _JobProfitabilityTile({
+    required this.expanded,
+    required this.margin,
+    required this.subtitle,
+    required this.onTap,
+  });
+
   final bool expanded;
   final num? margin;
   final String subtitle;
@@ -2101,23 +2183,83 @@ class _JobProfitabilityTile extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 9, 9, 9),
-          child: Row(children: [
-            CircleAvatar(radius: 19, backgroundColor: color.withValues(alpha: 0.13), child: const Icon(Icons.analytics_outlined, color: color, size: 22)),
-            const SizedBox(width: 9),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                const Text('Job Profitability', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
-                if (margin != null) ...[
-                  const SizedBox(width: 10),
-                  Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(999)), child: Text('${margin!.toStringAsFixed(1)}%', style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.w900, fontSize: 12.5))),
-                ],
-              ]),
-              const SizedBox(height: 7),
-              Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.8, height: 1.18, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-            ])),
-            Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 20),
-          ]),
+          padding: const EdgeInsets.fromLTRB(9, 8, 8, 8),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: color.withValues(alpha: 0.13),
+                child: const Icon(
+                  Icons.analytics_outlined,
+                  color: color,
+                  size: 19,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Flexible(
+                          child: Text(
+                            'Job Profitability',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (margin != null) ...[
+                          const SizedBox(width: 7),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              '${margin!.toStringAsFixed(1)}%',
+                              style: TextStyle(
+                                color: Colors.green.shade700,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 11.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        height: 1.1,
+                        color:
+                            Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                expanded
+                    ? Icons.keyboard_arrow_up
+                    : Icons.keyboard_arrow_down,
+                size: 18,
+              ),
+            ],
+          ),
         ),
       ),
     );
