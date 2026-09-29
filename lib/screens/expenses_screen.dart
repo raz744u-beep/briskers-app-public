@@ -426,7 +426,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                   style: const TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.w900,
-                                    color: const Color(0xFFC62828),
+                                    color: Color(0xFFC62828),
                                   ),
                                 ),
                               ],
@@ -592,10 +592,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                             transaction['receipt_count']?.toString() ?? '',
                           ) ??
                           0;
-                      final color = incomeRow
-                          ? const Color(0xFF169B62)
-                          : BriskersColors.expenses;
-
                       final directionColor = incomeRow
                           ? const Color(0xFF169B62)
                           : const Color(0xFFC62828);
