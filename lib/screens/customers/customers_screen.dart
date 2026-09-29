@@ -143,8 +143,19 @@ class _CustomersScreenState extends State<CustomersScreen> {
                           '${customer['display_name'] ?? ''}',
                         ),
                         subtitle: contact.isEmpty ? null : Text(contact),
-                        trailing: Text(
-                          '${customer['vehicle_count'] ?? 0} cars',
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (customer['problem_flag'] == true) ...[
+                              const Icon(
+                                Icons.flag,
+                                color: Colors.red,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            Text('${customer['vehicle_count'] ?? 0} cars'),
+                          ],
                         ),
                         onTap: () => _openCustomer(customer),
                       );
