@@ -36,6 +36,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   List<Map<String, dynamic>> _statuses = const [];
   List<Map<String, dynamic>> _documents = const [];
   List<Map<String, dynamic>> _findings = const [];
+  List<Map<String, dynamic>> _jobExpenses = const [];
   final ImagePicker _picker = ImagePicker();
 
   final ScrollController _scrollController = ScrollController();
@@ -75,6 +76,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       List<Map<String, dynamic>> employees = const [];
       List<Map<String, dynamic>> documents = const [];
       List<Map<String, dynamic>> findings = const [];
+      List<Map<String, dynamic>> jobExpenses = const [];
       Map<String, dynamic>? profitability;
       Map<String, dynamic>? preInspection;
 
@@ -94,6 +96,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           );
         } catch (_) {
           documents = const [];
+        }
+
+        try {
+          final transactions = await _api.transactions(
+            widget.businessId,
+            limit: 1000,
+          );
+          jobExpenses = transactions
+              .where(
+                (row) =>
+                    row['direction']?.toString() == 'expense' &&
+                    row['job_id']?.toString() == widget.jobId,
+              )
+              .toList();
+        } catch (_) {
+          jobExpenses = const [];
         }
       }
 
@@ -135,6 +153,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         _statuses = statuses;
         _documents = documents;
         _findings = findings;
+        _jobExpenses = jobExpenses;
         _loading = false;
         _error = null;
       });
@@ -197,6 +216,59 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       requestedWork: requestedWork,
       plannedHours: plannedHours,
     );
+  }
+
+  Future<void> _changeJobTitle() async {
+    final job = _job;
+    if (job == null || !_canManage || _busy) return;
+
+    final controller = TextEditingController(
+      text: job['title']?.toString() ?? '',
+    );
+    final value = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit job name'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            labelText: 'Job name',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final title = controller.text.trim();
+              if (title.isNotEmpty) Navigator.pop(dialogContext, title);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null || value.isEmpty || !mounted) return;
+
+    await _run(() async {
+      await _api.updateJob(
+        widget.businessId,
+        widget.jobId,
+        customerId: job['customer_id'].toString(),
+        vehicleId: job['vehicle_id']?.toString(),
+        title: value,
+        requestedWork: job['requested_work']?.toString() ?? '',
+        plannedHours:
+            num.tryParse(job['planned_hours']?.toString() ?? '') ?? 0,
+      );
+    });
   }
 
   Future<Map<String, dynamic>?> _pickCustomer() async {
@@ -1352,16 +1424,28 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   height: 1,
                   color: statusColor.withValues(alpha: 0.20),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(6, 8, 6, 3),
-                  child: Text(
-                    jobTitle.isEmpty ? 'Job' : jobTitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      height: 1.08,
+                InkWell(
+                  onTap: _canManage && !_busy ? _changeJobTitle : null,
+                  borderRadius: BorderRadius.circular(10),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(6, 8, 4, 3),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            jobTitle.isEmpty ? 'Job' : jobTitle,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              height: 1.08,
+                            ),
+                          ),
+                        ),
+                        if (_canManage)
+                          const Icon(Icons.chevron_right, size: 20),
+                      ],
                     ),
                   ),
                 ),
@@ -1888,6 +1972,52 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     await _load();
   }
 
+  Future<void> _editJobExpense(String transactionId) async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExpenseEntryScreen(
+          businessId: widget.businessId,
+          editTransactionId: transactionId,
+        ),
+      ),
+    );
+    if (changed == true && mounted) await _load();
+  }
+
+  Future<void> _deleteJobExpense(String transactionId) async {
+    if (_busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete expense?'),
+        content: const Text(
+          'This expense will be removed from normal views and from this job.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _run(
+      () => _api.voidManualTransaction(
+        widget.businessId,
+        transactionId,
+      ),
+    );
+  }
+
   Widget _jobExpenseThumbnail(Map<String, dynamic> attachment) {
     const size = 52.0;
     final bucket = attachment['bucket']?.toString() ?? '';
@@ -1944,6 +2074,116 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _jobExpensesDrawer() {
+    if (_jobExpenses.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('No expenses are linked to this job yet.'),
+          ),
+          if (_canManage)
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _addJobExpense,
+              icon: const Icon(Icons.add_card_outlined),
+              label: const Text('Add expense'),
+            ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ..._jobExpenses.map((expense) {
+          final id = expense['id']?.toString() ?? '';
+          final vendor = expense['counterparty']?.toString().trim() ?? '';
+          final category = expense['category']?.toString().trim() ?? '';
+          final remarks = expense['remarks']?.toString().trim() ?? '';
+          final date = expense['transaction_date']?.toString().trim() ?? '';
+          final receiptCount =
+              int.tryParse(expense['receipt_count']?.toString() ?? '') ?? 0;
+
+          return Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor:
+                    const Color(0xFFC62828).withValues(alpha: 0.10),
+                child: const Icon(
+                  Icons.north_east,
+                  color: Color(0xFFC62828),
+                ),
+              ),
+              title: Text(
+                vendor.isEmpty ? 'Expense' : vendor,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              subtitle: Text(
+                <String>[
+                  if (remarks.isNotEmpty) remarks,
+                  if (category.isNotEmpty || date.isNotEmpty)
+                    <String>[
+                      if (category.isNotEmpty) category,
+                      if (date.isNotEmpty) date,
+                    ].join(' • '),
+                  if (receiptCount > 0)
+                    receiptCount == 1
+                        ? '1 receipt photo'
+                        : '$receiptCount receipt photos',
+                ].join('\n'),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '-${_money(expense['amount'])}',
+                    style: const TextStyle(
+                      color: Color(0xFFC62828),
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  if (_canManage)
+                    PopupMenuButton<String>(
+                      tooltip: 'Expense actions',
+                      onSelected: (value) async {
+                        if (value == 'edit') await _editJobExpense(id);
+                        if (value == 'delete') await _deleteJobExpense(id);
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(
+                          value: 'edit',
+                          child: Text('Edit expense'),
+                        ),
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: Text('Delete expense'),
+                        ),
+                      ],
+                    )
+                  else
+                    const Icon(Icons.chevron_right),
+                ],
+              ),
+              onTap: id.isEmpty ? null : () => _openExpense(id),
+            ),
+          );
+        }),
+        if (_canManage) ...[
+          const SizedBox(height: 6),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _addJobExpense,
+            icon: const Icon(Icons.add_card_outlined),
+            label: const Text('Add expense'),
+          ),
+        ],
+      ],
     );
   }
 
@@ -2352,6 +2592,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         return _workHistoryDrawer(visits);
       case 'documents':
         return _documentsDrawer();
+      case 'expenses':
+        return _jobExpensesDrawer();
       default:
         return _profitabilityDrawer();
     }
@@ -2371,6 +2613,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         return 'Work / Visit History';
       case 'documents':
         return 'Estimate / Invoice';
+      case 'expenses':
+        return 'Job Expenses';
       default:
         return 'Job Profitability';
     }
@@ -2390,6 +2634,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         return Icons.history_outlined;
       case 'documents':
         return Icons.receipt_long_outlined;
+      case 'expenses':
+        return Icons.payments_outlined;
       default:
         return Icons.analytics_outlined;
     }
@@ -2409,6 +2655,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         return const Color(0xFF2585D8);
       case 'documents':
         return const Color(0xFFE5A400);
+      case 'expenses':
+        return const Color(0xFFC62828);
       default:
         return BriskersColors.reports;
     }
@@ -2472,6 +2720,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             onPressed: _busy ? null : _addFinding,
                             icon: const Icon(Icons.add),
                             label: const Text('Add Finding'),
+                          ),
+                        if (key == 'expenses' && _canManage)
+                          IconButton(
+                            tooltip: 'Add expense',
+                            onPressed: _busy ? null : _addJobExpense,
+                            icon: const Icon(Icons.add_circle_outline),
                           ),
                         if (key == 'documents' && _canSeeFinancial)
                           PopupMenuButton<String>(
@@ -2717,6 +2971,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: categoryTile(
+                      'expenses',
+                      'Job Expenses',
+                      Icons.payments_outlined,
+                      const Color(0xFFC62828),
+                      badge(_jobExpenses.length),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: categoryTile(
                       'profit',
                       'Job Profitability',
                       Icons.analytics_outlined,
@@ -2724,8 +2988,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       null,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  const Expanded(child: SizedBox()),
                 ],
               ),
             ],
