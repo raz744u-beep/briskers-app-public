@@ -1065,7 +1065,25 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       decoration: BoxDecoration(color: cardTint, borderRadius: BorderRadius.circular(18), border: Border.all(color: statusColor.withValues(alpha: 0.22)), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8, offset: const Offset(0, 3))]),
       clipBehavior: Clip.antiAlias,
       child: Stack(children: [
-        Positioned.fill(child: IgnorePointer(child: Align(alignment: Alignment.centerRight, child: FractionallySizedBox(widthFactor: 0.72, heightFactor: 0.9, child: Opacity(opacity: 0.25, child: Image.asset('assets/job_car_watermark.png', fit: BoxFit.contain, alignment: Alignment.centerRight))))),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: FractionallySizedBox(
+                widthFactor: 0.72,
+                heightFactor: 0.9,
+                child: Opacity(
+                  opacity: 0.25,
+                  child: Image.asset(
+                    'assets/job_car_watermark.png',
+                    fit: BoxFit.contain,
+                    alignment: Alignment.centerRight,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
         Padding(padding: const EdgeInsets.fromLTRB(10, 7, 10, 7), child: Column(children: [
           Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(child: cell(icon: Icons.person_outline, color: statusColor, label: 'Customer', value: customerName.isEmpty ? 'Customer' : customerName, onTap: _canManage ? _changeCustomerVehicle : null)),
