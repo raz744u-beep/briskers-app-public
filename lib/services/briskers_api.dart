@@ -1637,6 +1637,27 @@ class BriskersApi {
     );
   }
 
+  Future<void> deleteVehicleFindingPhoto(
+    String businessId,
+    String findingId,
+    String attachmentId, {
+    required String bucket,
+    required String key,
+  }) async {
+    if (key.isNotEmpty) {
+      await supabase.storage.from(bucket).remove([key]);
+    }
+
+    await supabase.rpc(
+      'briskers_archive_finding_attachment',
+      params: {
+        'p_business_id': businessId,
+        'p_finding_id': findingId,
+        'p_attachment_id': attachmentId,
+      },
+    );
+  }
+
   Future<void> setVehicleFindingInvoiceFlag(
     String businessId,
     String findingId,
