@@ -90,6 +90,16 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     return DateTime.tryParse(raw?.toString() ?? '') ?? fallback ?? DateTime.now();
   }
 
+  String _categoryName(String? categoryId) {
+    if (categoryId == null) return 'Select a category';
+    for (final item in _categories) {
+      if (item['id']?.toString() == categoryId) {
+        return item['name']?.toString() ?? 'Select a category';
+      }
+    }
+    return 'Select a category';
+  }
+
   List<Map<String, dynamic>> get _orderedCategories {
     final rows = List<Map<String, dynamic>>.from(_categories);
     rows.sort((a, b) {
@@ -268,6 +278,169 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       setState(apply);
     } else {
       apply();
+    }
+  }
+
+  void _selectCounterparty(Map<String, dynamic> item) {
+    final id = item['id']?.toString();
+    final name = item['name']?.toString() ?? '';
+    final defaultCategoryId = item['default_category_id']?.toString();
+
+    setState(() {
+      _counterpartyId = (id ?? '').isEmpty ? null : id;
+      _counterpartyController.text = name;
+
+      // A newly selected payee starts with its saved default category.
+      // Editing the category afterward changes only this transaction.
+      if (_direction == 'expense' &&
+          (defaultCategoryId ?? '').isNotEmpty &&
+          _categories.any(
+            (category) => category['id']?.toString() == defaultCategoryId,
+          )) {
+        _categoryId = defaultCategoryId;
+      }
+    });
+  }
+
+  Future<void> _pickCounterparty() async {
+    FocusScope.of(context).unfocus();
+    final searchController = TextEditingController(
+      text: _counterpartyController.text,
+    );
+
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        String query = searchController.text.trim();
+
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final normalized = query.toLowerCase();
+            final matches = _counterparties
+                .where((item) {
+                  final name = item['name']?.toString() ?? '';
+                  return normalized.isEmpty ||
+                      name.toLowerCase().contains(normalized);
+                })
+                .take(100)
+                .toList();
+
+            final exactMatch = _counterparties.any(
+              (item) =>
+                  (item['name']?.toString() ?? '').trim().toLowerCase() ==
+                  normalized,
+            );
+
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+              ),
+              child: SizedBox(
+                height: MediaQuery.sizeOf(sheetContext).height * 0.72,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: TextField(
+                        controller: searchController,
+                        autofocus: true,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          labelText:
+                              _direction == 'income' ? 'Find payer' : 'Find payee',
+                          hintText: 'Search by name',
+                          prefixIcon: const Icon(Icons.search),
+                          border: const OutlineInputBorder(),
+                        ),
+                        onChanged: (value) =>
+                            setSheetState(() => query = value.trim()),
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView(
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        children: [
+                          if (query.isNotEmpty && !exactMatch)
+                            ListTile(
+                              leading: const Icon(Icons.add_circle_outline),
+                              title: Text('Use "$query"'),
+                              subtitle: const Text('New payee'),
+                              onTap: () => Navigator.pop(
+                                sheetContext,
+                                <String, dynamic>{
+                                  'id': null,
+                                  'name': query,
+                                  'default_category_id': null,
+                                },
+                              ),
+                            ),
+                          ...matches.map(
+                            (item) => ListTile(
+                              leading: const Icon(Icons.storefront_outlined),
+                              title: Text(
+                                item['name']?.toString() ?? '',
+                                style: const TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              onTap: () => Navigator.pop(sheetContext, item),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    searchController.dispose();
+    if (selected != null && mounted) _selectCounterparty(selected);
+  }
+
+  Future<void> _pickCategory() async {
+    FocusScope.of(context).unfocus();
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.70,
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            children: _orderedCategories
+                .map(
+                  (item) => ListTile(
+                    leading: item['id']?.toString() == _categoryId
+                        ? const Icon(Icons.check_circle)
+                        : const Icon(Icons.circle_outlined),
+                    title: Text(item['name']?.toString() ?? ''),
+                    onTap: () => Navigator.pop(
+                      sheetContext,
+                      item['id']?.toString(),
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+        ),
+      ),
+    );
+
+    if (selected != null && mounted) {
+      setState(() => _categoryId = selected);
     }
   }
 
@@ -535,11 +708,6 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final counterpartyNames = _counterparties
-        .map((item) => item['name']?.toString() ?? '')
-        .where((name) => name.isNotEmpty)
-        .toList();
-
     final title = _editing
         ? 'Edit transaction'
         : _copying
@@ -700,121 +868,57 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _categoryId,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Category',
-                    hintText: 'Select a category',
-                    border: OutlineInputBorder(),
+                InkWell(
+                  borderRadius: BorderRadius.circular(4),
+                  onTap: _saving ? null : _pickCounterparty,
+                  child: InputDecorator(
+                    decoration: InputDecoration(
+                      labelText: _direction == 'income' ? 'Payer' : 'Payee',
+                      hintText: _direction == 'income'
+                          ? 'Select a payer'
+                          : 'Select a payee',
+                      border: const OutlineInputBorder(),
+                      suffixIcon: const Icon(Icons.search),
+                    ),
+                    child: Text(
+                      _counterpartyController.text.trim().isEmpty
+                          ? (_direction == 'income'
+                              ? 'Select a payer'
+                              : 'Select a payee')
+                          : _counterpartyController.text.trim(),
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: _counterpartyController.text.trim().isEmpty
+                            ? Theme.of(context).hintColor
+                            : null,
+                      ),
+                    ),
                   ),
-                  items: _orderedCategories
-                      .map(
-                        (item) => DropdownMenuItem<String>(
-                          value: item['id']?.toString(),
-                          child: Text(
-                            item['name']?.toString() ?? '',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: _saving
-                      ? null
-                      : (value) {
-                          _counterpartyFocusNode.unfocus();
-                          setState(() => _categoryId = value);
-                        },
                 ),
                 const SizedBox(height: 12),
-                RawAutocomplete<String>(
-                  textEditingController: _counterpartyController,
-                  focusNode: _counterpartyFocusNode,
-                  optionsBuilder: (value) {
-                    final query = value.text.trim().toLowerCase();
-                    if (query.isEmpty) return counterpartyNames.take(8);
-                    return counterpartyNames
-                        .where(
-                          (name) => name.toLowerCase().contains(query),
-                        )
-                        .take(8);
-                  },
-                  onSelected: (value) {
-                    _counterpartyController.text = value;
-                    _counterpartyId = null;
-                    for (final item in _counterparties) {
-                      if (item['name']?.toString() == value) {
-                        _counterpartyId = item['id']?.toString();
-                        break;
-                      }
-                    }
-                    _counterpartyFocusNode.unfocus();
-                  },
-                  fieldViewBuilder: (
-                    context,
-                    controller,
-                    focusNode,
-                    onFieldSubmitted,
-                  ) {
-                    return TextField(
-                      controller: controller,
-                      focusNode: focusNode,
-                      textInputAction: TextInputAction.next,
-                      style: const TextStyle(
-                        fontSize: 18,
+                InkWell(
+                  borderRadius: BorderRadius.circular(4),
+                  onTap: _saving ? null : _pickCategory,
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'Category',
+                      hintText: 'Select a category',
+                      border: OutlineInputBorder(),
+                      suffixIcon: Icon(Icons.arrow_drop_down),
+                    ),
+                    child: Text(
+                      _categoryName(_categoryId),
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 17,
                         fontWeight: FontWeight.w700,
+                        color: _categoryId == null
+                            ? Theme.of(context).hintColor
+                            : null,
                       ),
-                      onSubmitted: (_) => focusNode.unfocus(),
-                      onTapOutside: (_) => focusNode.unfocus(),
-                      onChanged: (_) => _counterpartyId = null,
-                      decoration: InputDecoration(
-                        labelText: _direction == 'income' ? 'Payer' : 'Payee',
-                        hintText: 'Example: Worldpac, FedEx or Entergy',
-                        border: const OutlineInputBorder(),
-                      ),
-                    );
-                  },
-                  optionsViewBuilder: (
-                    context,
-                    onSelected,
-                    options,
-                  ) {
-                    final rows = options.toList();
-                    return Align(
-                      alignment: Alignment.topLeft,
-                      child: Material(
-                        elevation: 6,
-                        borderRadius: BorderRadius.circular(10),
-                        clipBehavior: Clip.antiAlias,
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(
-                            maxHeight: 280,
-                            maxWidth: 680,
-                            minWidth: 280,
-                          ),
-                          child: ListView.builder(
-                            padding: EdgeInsets.zero,
-                            shrinkWrap: true,
-                            itemCount: rows.length,
-                            itemBuilder: (context, index) {
-                              final option = rows[index];
-                              return ListTile(
-                                dense: true,
-                                title: Text(
-                                  option,
-                                  style: const TextStyle(
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                onTap: () => onSelected(option),
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                    );
-                  },
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
