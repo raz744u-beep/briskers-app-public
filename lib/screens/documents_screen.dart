@@ -326,8 +326,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     ),
                     title: Text(
                       <String>[
-                        _estimate ? 'Estimate' : 'Invoice',
-                        if (number.isNotEmpty) '#$number',
+                        if (number.isNotEmpty)
+                          (_estimate
+                              ? (number.toUpperCase().startsWith('E-')
+                                  ? number
+                                  : 'E-$number')
+                              : (number.toUpperCase().startsWith('I-')
+                                  ? number
+                                  : 'I-$number')),
                         if (customer.isNotEmpty) customer,
                       ].join('  '),
                       maxLines: 1,
