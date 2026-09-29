@@ -886,6 +886,123 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     });
   }
 
+  Future<void> _editFinding(Map<String, dynamic> finding) async {
+    if (!_canEditFindings || _busy) return;
+    final controller = TextEditingController(
+      text: finding['body']?.toString() ?? '',
+    );
+    final save = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Edit finding',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                minLines: 3,
+                maxLines: 7,
+                decoration: const InputDecoration(labelText: 'Finding'),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(sheetContext, true),
+                  child: const Text('Save'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    final body = controller.text.trim();
+    controller.dispose();
+    if (save != true || body.isEmpty) return;
+    await _run(() => _api.updateVehicleFinding(
+          widget.businessId,
+          finding['id'].toString(),
+          body: body,
+        ));
+  }
+
+  Future<void> _addPhotosToFinding(Map<String, dynamic> finding) async {
+    if (!_canEditFindings || _busy) return;
+    final source = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take photo'),
+              onTap: () => Navigator.pop(sheetContext, 'camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(sheetContext, 'gallery'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    final photos = <XFile>[];
+    if (source == 'camera') {
+      final photo = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 88,
+        maxWidth: 1920,
+        maxHeight: 1920,
+      );
+      if (photo != null) photos.add(photo);
+    } else {
+      photos.addAll(
+        await _picker.pickMultiImage(
+          imageQuality: 88,
+          maxWidth: 1920,
+          maxHeight: 1920,
+        ),
+      );
+    }
+    if (photos.isEmpty) return;
+
+    await _run(() async {
+      for (final photo in photos) {
+        await _api.uploadVehicleFindingPhoto(
+          widget.businessId,
+          finding['id'].toString(),
+          filename: photo.name,
+          mimeType: _imageMime(photo.name),
+          bytes: await photo.readAsBytes(),
+        );
+      }
+    });
+  }
+
   Future<void> _addFindingToJob(Map<String, dynamic> finding) async {
     await _run(() => _api.addVehicleFindingToJob(
           widget.businessId,
@@ -1444,17 +1561,28 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
-                if (_owner)
+                if (_canEditFindings)
                   PopupMenuButton<String>(
                     tooltip: 'Finding actions',
                     onSelected: (value) {
+                      if (value == 'edit') _editFinding(finding);
+                      if (value == 'photo') _addPhotosToFinding(finding);
                       if (value == 'delete') _deleteFinding(finding);
                     },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(
-                        value: 'delete',
-                        child: Text('Delete finding'),
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'edit',
+                        child: Text('Edit finding'),
                       ),
+                      const PopupMenuItem(
+                        value: 'photo',
+                        child: Text('Add photos'),
+                      ),
+                      if (_owner)
+                        const PopupMenuItem(
+                          value: 'delete',
+                          child: Text('Delete finding'),
+                        ),
                     ],
                   ),
               ],
@@ -1763,12 +1891,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Widget _profitabilityDrawer() {
     final data = _profitability;
     if (!_owner || data == null) {
-      return const _JobDrawerSurface(
-        color: BriskersColors.reports,
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('Profitability is not available.'),
-        ),
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text('Profitability is not available.'),
       );
     }
 
@@ -1780,20 +1905,50 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final directCost = value('direct_cost');
     final mechanicCost = value('mechanic_cost');
     final profit = value('profit');
+    final margin =
+        num.tryParse(data['margin_percent']?.toString() ?? '') ?? 0;
     final expenses = List<dynamic>.from(data['expenses'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
 
-    Widget amountRow(String label, num amount, {bool bold = false}) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+    Widget amountRow(
+      String label,
+      num amount, {
+      bool emphasized = false,
+    }) {
+      return Container(
+        margin: EdgeInsets.only(bottom: emphasized ? 12 : 2),
+        padding: EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: emphasized ? 16 : 11,
+        ),
+        decoration: emphasized
+            ? BoxDecoration(
+                color: Colors.green.withValues(alpha: 0.11),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: Colors.green.withValues(alpha: 0.28),
+                ),
+              )
+            : null,
         child: Row(
           children: [
-            Expanded(child: Text(label)),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: emphasized ? 18 : 16,
+                  fontWeight:
+                      emphasized ? FontWeight.w800 : FontWeight.w500,
+                ),
+              ),
+            ),
             Text(
               _money(amount),
               style: TextStyle(
-                fontWeight: bold ? FontWeight.w900 : FontWeight.w700,
+                fontSize: emphasized ? 22 : 17,
+                fontWeight: FontWeight.w900,
+                color: emphasized ? Colors.green.shade700 : null,
               ),
             ),
           ],
@@ -1801,49 +1956,91 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       );
     }
 
-    return _JobDrawerSurface(
-      color: BriskersColors.reports,
-      child: Column(
-        children: [
-          amountRow('Revenue before sales tax', revenue),
-          amountRow('Parts / direct expenses', directCost),
-          amountRow('Mechanic labor', mechanicCost),
-          const Divider(height: 1),
-          amountRow('Gross profit', profit, bold: true),
-          amountRow('Sales tax collected', salesTax),
-          if (expenses.isNotEmpty) ...[
-            const Divider(height: 1),
-            ...expenses.map((expense) {
-              final transactionId =
-                  expense['transaction_id']?.toString() ?? '';
-              return ListTile(
-                dense: true,
-                leading: const Icon(
-                  Icons.payments_outlined,
-                  color: BriskersColors.expenses,
+    return Card(
+      margin: EdgeInsets.zero,
+      color: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      elevation: 1,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 14, 12, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Job financial summary',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
-                title: Text(expense['vendor']?.toString() ?? 'Expense'),
-                subtitle: Text(
-                  <String>[
-                    expense['category']?.toString() ?? '',
-                    expense['date']?.toString() ?? '',
-                  ].where((x) => x.isNotEmpty).join(' • '),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '${margin.toStringAsFixed(1)}%',
+                    style: TextStyle(
+                      color: Colors.green.shade700,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                 ),
-                trailing: Text(
-                  _money(expense['amount']),
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                onTap: transactionId.isEmpty
-                    ? null
-                    : () => _openExpense(transactionId),
-              );
-            }),
+              ],
+            ),
+            const SizedBox(height: 8),
+            amountRow('Revenue before sales tax', revenue),
+            amountRow('Parts / direct expenses', directCost),
+            amountRow('Mechanic labor', mechanicCost),
+            const Divider(height: 18),
+            amountRow('Gross profit', profit, emphasized: true),
+            amountRow('Sales tax collected', salesTax),
+            if (expenses.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Job expenses',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 4),
+              ...expenses.map((expense) {
+                final id = expense['id']?.toString() ?? '';
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                  title: Text(
+                    expense['counterparty_name']?.toString() ??
+                        expense['category_name']?.toString() ??
+                        'Expense',
+                  ),
+                  subtitle: Text(
+                    expense['category_name']?.toString() ?? '',
+                  ),
+                  trailing: Text(
+                    _money(expense['amount']),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  onTap: id.isEmpty ? null : () => _openExpense(id),
+                );
+              }),
+            ],
+            if (_canManage) ...[
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _addJobExpense,
+                icon: const Icon(Icons.add_card_outlined),
+                label: const Text('Add expense'),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
-
 
   Widget _complaintDrawer(String complaint) {
     return _JobDrawerSurface(
@@ -2035,7 +2232,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           if (data == null) const Padding(padding: EdgeInsets.all(6), child: Text('No pre-inspection has been recorded for this job yet.')),
           if (data != null) ...[
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: Text(<String>[if (date.isNotEmpty) date, if (odometer.isNotEmpty) 'Mileage $odometer'].join(' • '), style: const TextStyle(fontWeight: FontWeight.w700))),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 5), child: Text(<String>[if (date.isNotEmpty) date, if (odometer.isNotEmpty) 'Mileage $odometer'].join(' • '), style: const TextStyle(fontWeight: FontWeight.w700))),
             if (notes.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(6, 8, 6, 2), child: Text(notes)),
             if (photos.isEmpty) const Padding(padding: EdgeInsets.all(8), child: Text('No inspection photos yet.')),
             ...photos.map(_preInspectionPhotoTile),
@@ -2186,6 +2383,31 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             ),
                           ),
                         ),
+                        if (key == 'findings' && _canEditFindings)
+                          TextButton.icon(
+                            onPressed: _busy ? null : _addFinding,
+                            icon: const Icon(Icons.add),
+                            label: const Text('Add Finding'),
+                          ),
+                        if (key == 'documents' && _canSeeFinancial)
+                          PopupMenuButton<String>(
+                            tooltip: 'Create document',
+                            onSelected: (value) async {
+                              if (value == 'estimate') await _createEstimate();
+                              if (value == 'invoice') await _createInvoice();
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'estimate',
+                                child: Text('New estimate'),
+                              ),
+                              PopupMenuItem(
+                                value: 'invoice',
+                                child: Text('New invoice'),
+                              ),
+                            ],
+                            icon: const Icon(Icons.add_circle_outline),
+                          ),
                         IconButton(
                           tooltip: 'Close',
                           onPressed: () => Navigator.pop(sheetContext),
@@ -2345,7 +2567,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             physics: const NeverScrollableScrollPhysics(),
             crossAxisSpacing: 10,
             mainAxisSpacing: 10,
-            childAspectRatio: 1.42,
+            childAspectRatio: 1.85,
             children: [
               categoryTile(
                 'inspection',
@@ -2447,9 +2669,9 @@ class _JobCategoryTile extends StatelessWidget {
                 clipBehavior: Clip.none,
                 children: [
                   CircleAvatar(
-                    radius: 27,
+                    radius: 22,
                     backgroundColor: color.withValues(alpha: 0.13),
-                    child: Icon(icon, color: color, size: 30),
+                    child: Icon(icon, color: color, size: 24),
                   ),
                   if (count != null && count! > 0)
                     Positioned(
@@ -2457,8 +2679,8 @@ class _JobCategoryTile extends StatelessWidget {
                       top: -7,
                       child: Container(
                         constraints: const BoxConstraints(
-                          minWidth: 24,
-                          minHeight: 24,
+                          minWidth: 20,
+                          minHeight: 20,
                         ),
                         padding: const EdgeInsets.symmetric(horizontal: 6),
                         alignment: Alignment.center,
@@ -2471,7 +2693,7 @@ class _JobCategoryTile extends StatelessWidget {
                           count.toString(),
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 12,
+                            fontSize: 10.5,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
@@ -2479,14 +2701,14 @@ class _JobCategoryTile extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 7),
               Text(
                 label,
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 15.5,
+                  fontSize: 14.5,
                   fontWeight: FontWeight.w800,
                   height: 1.12,
                 ),
