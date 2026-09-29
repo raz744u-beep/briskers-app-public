@@ -2016,6 +2016,21 @@ class BriskersApi {
     );
   }
 
+  Future<void> updateDocumentMileage(
+    String businessId,
+    String documentId, {
+    num? odometer,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_document_mileage',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_odometer': odometer,
+      },
+    );
+  }
+
   Future<void> updateDocumentLineV2(
     String businessId,
     String lineId, {

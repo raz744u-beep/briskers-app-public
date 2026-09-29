@@ -991,6 +991,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     var customerName = _detail!['customer_name']?.toString() ?? '';
     String? vehicleId = _detail!['vehicle_id']?.toString();
     var vehicleName = _detail!['vehicle']?.toString() ?? '';
+    var mileageText = _detail!['odometer_in']?.toString().trim() ?? '';
     var date = DateTime.tryParse(
           _detail!['document_date']?.toString() ?? '',
         ) ??
@@ -1042,6 +1043,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                           customer['display_name']?.toString() ?? '';
                       vehicleId = vehicle?['id']?.toString();
                       vehicleName = _vehicleLabel(vehicle);
+                      mileageText = vehicle?['mileage']?.toString().trim() ?? '';
                     });
                   },
                 ),
@@ -1061,7 +1063,69 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                           setSheetState(() {
                             vehicleId = vehicle['id']?.toString();
                             vehicleName = _vehicleLabel(vehicle);
+                            mileageText = vehicle['mileage']?.toString().trim() ?? '';
                           });
+                        },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.speed_outlined),
+                  title: const Text('Mileage'),
+                  subtitle: Text(
+                    mileageText.isEmpty
+                        ? 'Not entered'
+                        : '${_quantity(mileageText)} mi',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: vehicleId == null || vehicleId!.isEmpty
+                      ? null
+                      : () async {
+                          final controller = TextEditingController(
+                            text: mileageText,
+                          );
+                          final saveMileage = await showDialog<bool>(
+                            context: sheetContext,
+                            builder: (dialogContext) => AlertDialog(
+                              title: const Text('Mileage'),
+                              content: TextField(
+                                controller: controller,
+                                autofocus: true,
+                                keyboardType: const TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
+                                decoration: const InputDecoration(
+                                  labelText: 'Current mileage',
+                                  suffixText: 'mi',
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(dialogContext, false),
+                                  child: const Text('Cancel'),
+                                ),
+                                FilledButton(
+                                  onPressed: () =>
+                                      Navigator.pop(dialogContext, true),
+                                  child: const Text('Save'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (saveMileage == true) {
+                            final raw = controller.text
+                                .replaceAll(',', '')
+                                .trim();
+                            if (raw.isEmpty || num.tryParse(raw) != null) {
+                              setSheetState(() => mileageText = raw);
+                            } else if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Enter valid mileage.'),
+                                ),
+                              );
+                            }
+                          }
+                          controller.dispose();
                         },
                 ),
                 ListTile(
@@ -1113,14 +1177,23 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     if (save != true) return;
 
-    await _run(() => _api.updateDocumentHeader(
-          widget.businessId,
-          widget.documentId,
-          expectedVersion: _version,
-          customerId: customerId,
-          vehicleId: vehicleId,
-          documentDate: date,
-        ));
+    await _run(() async {
+      await _api.updateDocumentHeader(
+        widget.businessId,
+        widget.documentId,
+        expectedVersion: _version,
+        customerId: customerId,
+        vehicleId: vehicleId,
+        documentDate: date,
+      );
+      await _api.updateDocumentMileage(
+        widget.businessId,
+        widget.documentId,
+        odometer: mileageText.isEmpty
+            ? null
+            : num.tryParse(mileageText.replaceAll(',', '').trim()),
+      );
+    });
   }
 
   Future<void> _copyInvoice() async {
