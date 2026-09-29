@@ -1117,8 +1117,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                 .trim();
                             if (raw.isEmpty || num.tryParse(raw) != null) {
                               setSheetState(() => mileageText = raw);
-                            } else if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
+                            } else if (sheetContext.mounted) {
+                              ScaffoldMessenger.of(sheetContext).showSnackBar(
                                 const SnackBar(
                                   content: Text('Enter valid mileage.'),
                                 ),

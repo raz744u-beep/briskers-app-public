@@ -1830,7 +1830,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           builder: (context, snapshot) {
             final url = snapshot.data ?? '';
             if (url.isEmpty) return const ColoredBox(color: Color(0x11000000), child: Icon(Icons.photo_outlined));
-            return Image.network(url, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined));
+            return Image.network(url, fit: BoxFit.cover, errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined));
           },
         ))),
         title: Text(note.isEmpty ? 'No photo note' : note, maxLines: 2, overflow: TextOverflow.ellipsis),
