@@ -316,12 +316,21 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   }
 
   Future<void> _edit() async {
-    final changed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ExpenseEntryScreen(
-          businessId: widget.businessId,
-          editTransactionId: widget.transactionId,
+    final changed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (sheetContext) => FractionallySizedBox(
+        heightFactor: 0.94,
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(22),
+          ),
+          child: ExpenseEntryScreen(
+            businessId: widget.businessId,
+            editTransactionId: widget.transactionId,
+          ),
         ),
       ),
     );
@@ -591,6 +600,21 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
             ),
             const SizedBox(height: 12),
           ],
+          if (remarks.isNotEmpty) ...[
+            Text(
+              'Description / notes',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 6),
+            Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(remarks),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           _DetailRow(label: 'Category', value: category),
           _DetailRow(label: 'Account', value: account),
           _DetailRow(label: 'Date', value: date),
@@ -607,21 +631,6 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                   'next ${recurring['next_date']}',
               ].where((x) => x.isNotEmpty).join(' • '),
             ),
-          if (remarks.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(
-              'Description / notes',
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
-            const SizedBox(height: 6),
-            Card(
-              margin: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(remarks),
-              ),
-            ),
-          ],
           const SizedBox(height: 16),
           Row(
             children: [
