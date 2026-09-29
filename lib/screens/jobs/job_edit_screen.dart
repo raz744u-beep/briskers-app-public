@@ -215,10 +215,24 @@ class _JobEditScreenState extends State<JobEditScreen> {
                       .map(
                         (customer) => DropdownMenuItem<String>(
                           value: customer['id']?.toString(),
-                          child: Text(
-                            _customerName(customer),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _customerName(customer),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (customer['problem_flag'] == true) ...[
+                                const SizedBox(width: 5),
+                                const Icon(
+                                  Icons.flag,
+                                  color: Colors.red,
+                                  size: 17,
+                                ),
+                              ],
+                            ],
                           ),
                         ),
                       )
