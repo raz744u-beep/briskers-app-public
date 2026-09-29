@@ -1040,23 +1040,80 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final statusColor = colorFromHex(_job?['status_color']?.toString());
     final cardTint = Color.alphaBlend(statusColor.withValues(alpha: 0.12), const Color(0xFFFCFCFB));
 
-    Widget cell({required IconData icon, required Color color, required String label, required String value, String? subtitle, VoidCallback? onTap}) {
+    Widget cell({
+      required IconData icon,
+      required Color color,
+      required String label,
+      required String value,
+      String? subtitle,
+      VoidCallback? onTap,
+    }) {
       final enabled = onTap != null && !_busy;
       return InkWell(
         onTap: enabled ? onTap : null,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: Row(children: [
-            CircleAvatar(radius: 19, backgroundColor: color.withValues(alpha: 0.13), child: Icon(icon, color: color, size: 22)),
-            const SizedBox(width: 10),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text(label, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13.5, fontWeight: FontWeight.w600)),
-              Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
-              if (subtitle != null && subtitle.isNotEmpty) Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 11.8)),
-            ])),
-            if (enabled) const Icon(Icons.chevron_right, size: 20),
-          ]),
+          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 5),
+          child: Stack(
+            alignment: Alignment.centerLeft,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 17,
+                    backgroundColor: color.withValues(alpha: 0.13),
+                    child: Icon(icon, color: color, size: 20),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              fontSize: 12.8,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            value,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 14.2,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          if (subtitle != null && subtitle.isNotEmpty)
+                            Text(
+                              subtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                fontSize: 11.2,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (enabled)
+                const Positioned(
+                  right: 0,
+                  child: Icon(Icons.chevron_right, size: 19),
+                ),
+            ],
+          ),
         ),
       );
     }
@@ -1084,16 +1141,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
           ),
         ),
-        Padding(padding: const EdgeInsets.fromLTRB(9, 5, 9, 5), child: Column(children: [
+        Padding(padding: const EdgeInsets.fromLTRB(8, 4, 8, 4), child: Column(children: [
           Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
             Expanded(child: cell(icon: Icons.person_outline, color: statusColor, label: 'Customer', value: customerName.isEmpty ? 'Customer' : customerName, onTap: _canManage ? _changeCustomerVehicle : null)),
-            Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 5, horizontal: 4), color: statusColor.withValues(alpha: 0.20)),
+            Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 3), color: statusColor.withValues(alpha: 0.20)),
             Expanded(child: cell(icon: Icons.directions_car_outlined, color: statusColor, label: 'Vehicle', value: vehicle.isEmpty ? 'No vehicle' : vehicle, subtitle: vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin', onTap: _canManage ? _changeVehicle : null)),
           ]),
           Divider(height: 1, color: statusColor.withValues(alpha: 0.20)),
           Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
             Expanded(child: cell(icon: roleStyle.icon, color: roleStyle.color, label: 'Mechanic', value: employeeName, onTap: _canManage ? _changeAssignment : null)),
-            Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 5, horizontal: 4), color: statusColor.withValues(alpha: 0.20)),
+            Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 3), color: statusColor.withValues(alpha: 0.20)),
             Expanded(child: cell(icon: Icons.timer_outlined, color: statusColor, label: 'Planned time', value: '${_hours(_job!['planned_hours'])} hr', onTap: _canManage ? _changePlannedHours : null)),
           ]),
         ])),
@@ -2011,7 +2068,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
 
 class _JobSectionTile extends StatelessWidget {
-  const _JobSectionTile({required this.label, required this.icon, required this.color, required this.subtitle, required this.expanded, required this.onTap});
+  const _JobSectionTile({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.subtitle,
+    required this.expanded,
+    required this.onTap,
+  });
+
   final String label;
   final IconData icon;
   final Color color;
@@ -2027,59 +2092,66 @@ class _JobSectionTile extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-          height: 104,
+          height: 112,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(9, 9, 7, 8),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              CircleAvatar(
-                radius: 19,
-                backgroundColor: color.withValues(alpha: 0.13),
-                child: Icon(icon, color: color, size: 22),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
+            padding: const EdgeInsets.fromLTRB(9, 10, 8, 9),
+            child: Stack(
+              children: [
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(children: [
-                      Expanded(
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            label,
-                            maxLines: 1,
-                            softWrap: false,
-                            style: const TextStyle(
-                              fontSize: 15.5,
-                              fontWeight: FontWeight.w800,
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: color.withValues(alpha: 0.13),
+                      child: Icon(icon, color: color, size: 21),
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 18),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                softWrap: false,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
                             ),
-                          ),
+                            const SizedBox(height: 6),
+                            Text(
+                              subtitle,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12.8,
+                                height: 1.18,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      const SizedBox(width: 2),
-                      Icon(
-                        expanded
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
-                        size: 20,
-                      ),
-                    ]),
-                    const SizedBox(height: 6),
-                    Text(
-                      subtitle,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12.7,
-                        height: 1.18,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
                 ),
-              ),
-            ]),
+                Positioned(
+                  right: 0,
+                  top: -1,
+                  child: Icon(
+                    expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                    size: 20,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -2088,7 +2160,13 @@ class _JobSectionTile extends StatelessWidget {
 }
 
 class _JobProfitabilityTile extends StatelessWidget {
-  const _JobProfitabilityTile({required this.expanded, required this.margin, required this.subtitle, required this.onTap});
+  const _JobProfitabilityTile({
+    required this.expanded,
+    required this.margin,
+    required this.subtitle,
+    required this.onTap,
+  });
+
   final bool expanded;
   final num? margin;
   final String subtitle;
@@ -2103,23 +2181,67 @@ class _JobProfitabilityTile extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 9, 9, 9),
-          child: Row(children: [
-            CircleAvatar(radius: 19, backgroundColor: color.withValues(alpha: 0.13), child: const Icon(Icons.analytics_outlined, color: color, size: 22)),
-            const SizedBox(width: 9),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                const Text('Job Profitability', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
-                if (margin != null) ...[
-                  const SizedBox(width: 10),
-                  Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(999)), child: Text('${margin!.toStringAsFixed(1)}%', style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.w900, fontSize: 12.5))),
-                ],
-              ]),
-              const SizedBox(height: 7),
-              Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.8, height: 1.18, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-            ])),
-            Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 20),
-          ]),
+          padding: const EdgeInsets.fromLTRB(10, 9, 150, 9),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: color.withValues(alpha: 0.13),
+                child: const Icon(Icons.analytics_outlined, color: color, size: 21),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Flexible(
+                          child: Text(
+                            'Job Profitability',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        if (margin != null) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              '${margin!.toStringAsFixed(1)}%',
+                              style: TextStyle(
+                                color: Colors.green.shade700,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.8,
+                        height: 1.18,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 20),
+            ],
+          ),
         ),
       ),
     );
