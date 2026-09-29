@@ -1191,15 +1191,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         onTap: enabled ? onTap : null,
         borderRadius: BorderRadius.circular(14),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 6, 8),
+          padding: const EdgeInsets.fromLTRB(7, 5, 5, 5),
           child: Row(
             children: [
               CircleAvatar(
-                radius: 22,
+                radius: 18,
                 backgroundColor: color.withValues(alpha: 0.13),
-                child: Icon(icon, color: color, size: 25),
+                child: Icon(icon, color: color, size: 21),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 9),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1208,7 +1208,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       label,
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontSize: 14.5,
+                        fontSize: 12.8,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -1217,7 +1217,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 18,
+                        fontSize: 16,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
@@ -1228,13 +1228,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          fontSize: 13,
+                          fontSize: 11.5,
                         ),
                       ),
                   ],
                 ),
               ),
-              if (enabled) const Icon(Icons.chevron_right, size: 26),
+              if (enabled) const Icon(Icons.chevron_right, size: 22),
             ],
           ),
         ),
@@ -1253,11 +1253,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         onTap: enabled ? onTap : null,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
           child: Row(
             children: [
-              Icon(icon, color: color, size: 29),
-              const SizedBox(width: 10),
+              Icon(icon, color: color, size: 24),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1266,7 +1266,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       label,
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontSize: 14.5,
+                        fontSize: 12.8,
                       ),
                     ),
                     Text(
@@ -1274,14 +1274,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 16.5,
+                        fontSize: 14.5,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
                   ],
                 ),
               ),
-              if (enabled) const Icon(Icons.chevron_right, size: 23),
+              if (enabled) const Icon(Icons.chevron_right, size: 20),
             ],
           ),
         ),
@@ -1324,7 +1324,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+            padding: const EdgeInsets.fromLTRB(11, 7, 11, 7),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1353,19 +1353,19 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   color: statusColor.withValues(alpha: 0.20),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(7, 12, 7, 5),
+                  padding: const EdgeInsets.fromLTRB(6, 8, 6, 3),
                   child: Text(
                     jobTitle.isEmpty ? 'Job' : jobTitle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 20,
+                      fontSize: 17,
                       fontWeight: FontWeight.w800,
                       height: 1.08,
                     ),
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Row(
                   children: [
                     Expanded(
@@ -1379,7 +1379,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     ),
                     Container(
                       width: 1,
-                      height: 58,
+                      height: 48,
                       margin: const EdgeInsets.symmetric(horizontal: 7),
                       color: statusColor.withValues(alpha: 0.24),
                     ),
@@ -2007,7 +2007,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 'Job expenses',
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               ...expenses.map((expense) {
                 final id = expense['id']?.toString() ?? '';
                 return ListTile(
@@ -2200,7 +2200,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       margin: const EdgeInsets.fromLTRB(10, 6, 10, 6),
       child: ListTile(
         contentPadding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
-        leading: SizedBox(width: 58, height: 58, child: ClipRRect(borderRadius: BorderRadius.circular(8), child: FutureBuilder<String>(
+        leading: SizedBox(width: 58, height: 48, child: ClipRRect(borderRadius: BorderRadius.circular(8), child: FutureBuilder<String>(
           future: bucket.isEmpty || key.isEmpty ? Future<String>.value('') : _api.signedAttachmentUrl(bucket, key),
           builder: (context, snapshot) {
             final url = snapshot.data ?? '';
@@ -2373,7 +2373,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             size: 25,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 9),
                         Expanded(
                           child: Text(
                             _sectionTitle(key),
@@ -2561,62 +2561,88 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
           ],
           const SizedBox(height: 12),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 1.85,
+          Column(
             children: [
-              categoryTile(
-                'inspection',
-                'Pre-Inspection',
-                Icons.search,
-                const Color(0xFF6B4BC3),
-                badge(inspectionCount),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: categoryTile(
+                      'inspection',
+                      'Pre-Inspection',
+                      Icons.search,
+                      const Color(0xFF6B4BC3),
+                      badge(inspectionCount),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: categoryTile(
+                      'complaint',
+                      'Customer Complaint',
+                      Icons.description_outlined,
+                      BriskersColors.customers,
+                      badge(complaintCount),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: categoryTile(
+                      'findings',
+                      'Vehicle Findings',
+                      Icons.car_repair_outlined,
+                      Colors.deepOrange,
+                      badge(activeFindings),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: categoryTile(
+                      'work',
+                      'Work Performed',
+                      Icons.build_outlined,
+                      const Color(0xFF15988F),
+                      badge(workCount),
+                    ),
+                  ),
+                ],
               ),
-              categoryTile(
-                'complaint',
-                'Customer Complaint',
-                Icons.description_outlined,
-                BriskersColors.customers,
-                badge(complaintCount),
-              ),
-              categoryTile(
-                'findings',
-                'Vehicle Findings',
-                Icons.car_repair_outlined,
-                Colors.deepOrange,
-                badge(activeFindings),
-              ),
-              categoryTile(
-                'work',
-                'Work Performed',
-                Icons.build_outlined,
-                const Color(0xFF15988F),
-                badge(workCount),
-              ),
-              categoryTile(
-                'history',
-                'Work / Visit History',
-                Icons.history_outlined,
-                const Color(0xFF2585D8),
-                badge(visits.length),
-              ),
-              categoryTile(
-                'documents',
-                'Estimate / Invoice',
-                Icons.receipt_long_outlined,
-                const Color(0xFFE5A400),
-                badge(_documents.length),
-              ),
-              categoryTile(
-                'profit',
-                'Job Profitability',
-                Icons.analytics_outlined,
-                BriskersColors.reports,
-                null,
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: categoryTile(
+                      'history',
+                      'Work / Visit History',
+                      Icons.history_outlined,
+                      const Color(0xFF2585D8),
+                      badge(visits.length),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: categoryTile(
+                      'documents',
+                      'Estimate / Invoice',
+                      Icons.receipt_long_outlined,
+                      const Color(0xFFE5A400),
+                      badge(_documents.length),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: categoryTile(
+                      'profit',
+                      'Job Profitability',
+                      Icons.analytics_outlined,
+                      BriskersColors.reports,
+                      null,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(child: SizedBox()),
+                ],
               ),
             ],
           ),
@@ -2661,7 +2687,7 @@ class _JobCategoryTile extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 10, 10),
+          padding: const EdgeInsets.fromLTRB(5, 7, 5, 7),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -2669,20 +2695,20 @@ class _JobCategoryTile extends StatelessWidget {
                 clipBehavior: Clip.none,
                 children: [
                   CircleAvatar(
-                    radius: 22,
+                    radius: 17,
                     backgroundColor: color.withValues(alpha: 0.13),
-                    child: Icon(icon, color: color, size: 24),
+                    child: Icon(icon, color: color, size: 19),
                   ),
                   if (count != null && count! > 0)
                     Positioned(
-                      right: -7,
-                      top: -7,
+                      right: -6,
+                      top: -6,
                       child: Container(
                         constraints: const BoxConstraints(
-                          minWidth: 20,
-                          minHeight: 20,
+                          minWidth: 18,
+                          minHeight: 18,
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: Colors.red,
@@ -2693,7 +2719,7 @@ class _JobCategoryTile extends StatelessWidget {
                           count.toString(),
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 10.5,
+                            fontSize: 9.5,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
@@ -2701,14 +2727,14 @@ class _JobCategoryTile extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 7),
+              const SizedBox(height: 5),
               Text(
                 label,
                 textAlign: TextAlign.center,
-                maxLines: 2,
+                maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 14.5,
+                  fontSize: 11.2,
                   fontWeight: FontWeight.w800,
                   height: 1.12,
                 ),
