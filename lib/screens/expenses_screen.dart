@@ -426,7 +426,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                   style: const TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.w900,
-                                    color: BriskersColors.expenses,
+                                    color: const Color(0xFFC62828),
                                   ),
                                 ),
                               ],
@@ -439,57 +439,94 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                   const SizedBox(height: 10),
                   Card(
                     margin: EdgeInsets.zero,
-                    child: ListTile(
+                    child: ExpansionTile(
                       leading: const Icon(
                         Icons.event_repeat_outlined,
                         color: BriskersColors.expenses,
                       ),
                       title: const Text(
                         'Recurring transactions',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      subtitle: const Text(
-                        'View and edit only transactions set to repeat',
-                      ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () async {
-                        await Navigator.push<void>(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => RecurringTransactionsScreen(
-                              businessId: widget.businessId,
-                            ),
+                      childrenPadding:
+                          const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      children: [
+                        const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'View and edit only transactions set to repeat.',
                           ),
-                        );
-                        await _load();
-                      },
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () async {
+                              await Navigator.push<void>(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => RecurringTransactionsScreen(
+                                    businessId: widget.businessId,
+                                  ),
+                                ),
+                              );
+                              await _load();
+                            },
+                            icon: const Icon(Icons.open_in_new),
+                            label: const Text('Open recurring transactions'),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   if (_owner && Platform.isAndroid) ...[
                     const SizedBox(height: 10),
                     Card(
                       margin: EdgeInsets.zero,
-                      child: ListTile(
+                      child: ExpansionTile(
                         leading: const Icon(
                           Icons.photo_library_outlined,
                           color: BriskersColors.expenses,
                         ),
                         title: const Text(
                           'Import Expense IQ receipt photos',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
-                        subtitle: Text(
-                          _importing
-                              ? 'Importing $_importDone of $_importTotal...'
-                              : '/storage/emulated/0/ExpenseIQ/photos',
-                        ),
-                        trailing: _importing
-                            ? const SizedBox.square(
-                                dimension: 22,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.chevron_right),
-                        onTap: _importing ? null : _importExpenseIqReceipts,
+                        childrenPadding:
+                            const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              _importing
+                                  ? 'Importing $_importDone of $_importTotal...'
+                                  : '/storage/emulated/0/ExpenseIQ/photos',
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed:
+                                  _importing ? null : _importExpenseIqReceipts,
+                              icon: _importing
+                                  ? const SizedBox.square(
+                                      dimension: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.file_download_outlined),
+                              label: Text(
+                                _importing ? 'Importing...' : 'Import photos',
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -559,64 +596,118 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           ? const Color(0xFF169B62)
                           : BriskersColors.expenses;
 
+                      final directionColor = incomeRow
+                          ? const Color(0xFF169B62)
+                          : const Color(0xFFC62828);
+
                       return Card(
                         margin: const EdgeInsets.only(bottom: 8),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: color.withValues(alpha: 0.12),
-                            child: Icon(
-                              incomeRow ? Icons.south_west : Icons.north_east,
-                              color: color,
-                            ),
-                          ),
-                          title: Text(
-                            counterparty,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (contextLine.isNotEmpty)
-                                Text(
-                                  contextLine,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () => _openTransaction(transaction),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                CircleAvatar(
+                                  radius: 20,
+                                  backgroundColor:
+                                      directionColor.withValues(alpha: 0.10),
+                                  child: Icon(
+                                    incomeRow
+                                        ? Icons.south_west
+                                        : Icons.north_east,
+                                    color: directionColor,
+                                    size: 22,
                                   ),
                                 ),
-                              if (remarks.isNotEmpty) Text(remarks),
-                              Text(
-                                <String>[
-                                  if (category.isNotEmpty) category,
-                                  if (date.isNotEmpty) date,
-                                ].join(' • '),
-                              ),
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (receiptCount > 0) ...[
-                                const Icon(
-                                  Icons.photo_outlined,
-                                  size: 18,
-                                  color: BriskersColors.expenses,
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        counterparty,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 16.5,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      if (contextLine.isNotEmpty)
+                                        Text(
+                                          contextLine,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      Text(
+                                        remarks.isEmpty
+                                            ? <String>[
+                                                if (category.isNotEmpty)
+                                                  category,
+                                                if (date.isNotEmpty) date,
+                                              ].join(' • ')
+                                            : remarks,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                const SizedBox(width: 3),
-                                Text('$receiptCount'),
                                 const SizedBox(width: 8),
-                              ],
-                              Text(
-                                '${incomeRow ? '+' : '-'}${_money(transaction['amount'])}',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  color: color,
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      '${incomeRow ? '+' : '-'}${_money(transaction['amount'])}',
+                                      style: TextStyle(
+                                        fontSize: 17.5,
+                                        fontWeight: FontWeight.w900,
+                                        color: directionColor,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (receiptCount > 0) ...[
+                                          Icon(
+                                            Icons.photo_outlined,
+                                            size: 17,
+                                            color: directionColor,
+                                          ),
+                                          const SizedBox(width: 2),
+                                          Text(
+                                            '$receiptCount',
+                                            style: TextStyle(
+                                              color: directionColor,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                        ],
+                                        const Icon(
+                                          Icons.chevron_right,
+                                          size: 21,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                 ),
-                              ),
-                              const SizedBox(width: 4),
-                              const Icon(Icons.chevron_right),
-                            ],
+                              ],
+                            ),
                           ),
-                          onTap: () => _openTransaction(transaction),
                         ),
                       );
                     }),
