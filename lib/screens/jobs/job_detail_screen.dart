@@ -724,7 +724,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final visits = List<dynamic>.from(_job?['visits'] ?? const []);
     if (visits.isEmpty || _busy) return;
     final current = Map<String, dynamic>.from(visits.first as Map);
-    if (current['closed_at'] != null) return;
 
     final value = await _editTextSheet(
       title: 'Work performed',
@@ -1070,6 +1069,101 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           filename: photo.name,
           mimeType: _imageMime(photo.name),
           bytes: await photo.readAsBytes(),
+        );
+      }
+    });
+  }
+
+  Future<void> _deleteFindingPhoto(
+    Map<String, dynamic> finding,
+    Map<String, dynamic> attachment,
+  ) async {
+    if (!_canEditFindings || _busy) return;
+    final attachmentId = attachment['attachment_id']?.toString() ?? '';
+    if (attachmentId.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete photo?'),
+        content: const Text('Remove this picture from the finding?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await _run(
+      () => _api.deleteVehicleFindingPhoto(
+        widget.businessId,
+        finding['id'].toString(),
+        attachmentId,
+        bucket: attachment['bucket']?.toString() ?? 'briskers-private',
+        key: attachment['key']?.toString() ?? '',
+      ),
+    );
+  }
+
+  Future<void> _replaceFindingPhoto(
+    Map<String, dynamic> finding,
+    Map<String, dynamic> attachment,
+  ) async {
+    if (!_canEditFindings || _busy) return;
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take replacement photo'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose replacement from gallery'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    final photo = await _picker.pickImage(
+      source: source,
+      imageQuality: 88,
+      maxWidth: 1920,
+      maxHeight: 1920,
+    );
+    if (photo == null) return;
+
+    final attachmentId = attachment['attachment_id']?.toString() ?? '';
+    await _run(() async {
+      await _api.uploadVehicleFindingPhoto(
+        widget.businessId,
+        finding['id'].toString(),
+        filename: photo.name,
+        mimeType: _imageMime(photo.name),
+        bytes: await photo.readAsBytes(),
+      );
+      if (attachmentId.isNotEmpty) {
+        await _api.deleteVehicleFindingPhoto(
+          widget.businessId,
+          finding['id'].toString(),
+          attachmentId,
+          bucket: attachment['bucket']?.toString() ?? 'briskers-private',
+          key: attachment['key']?.toString() ?? '',
         );
       }
     });
@@ -1540,14 +1634,71 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
-  Widget _findingPhotoThumbnail(Map<String, dynamic> attachment) {
+  Widget _findingPhotoThumbnail(
+    Map<String, dynamic> finding,
+    Map<String, dynamic> attachment,
+  ) {
     final bucket = attachment['bucket']?.toString() ?? '';
     final key = attachment['key']?.toString() ?? '';
+
+    Widget controls(Widget image) => SizedBox(
+          width: 82,
+          height: 82,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              InkWell(
+                borderRadius: BorderRadius.circular(9),
+                onTap: bucket.isEmpty || key.isEmpty
+                    ? null
+                    : () => _showFindingPhoto(attachment),
+                child: image,
+              ),
+              if (_canEditFindings)
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Material(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(12),
+                    child: PopupMenuButton<String>(
+                      padding: EdgeInsets.zero,
+                      iconSize: 18,
+                      color: Theme.of(context).colorScheme.surface,
+                      tooltip: 'Photo actions',
+                      icon: const Icon(
+                        Icons.more_vert,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                      onSelected: (value) {
+                        if (value == 'replace') {
+                          _replaceFindingPhoto(finding, attachment);
+                        }
+                        if (value == 'delete') {
+                          _deleteFindingPhoto(finding, attachment);
+                        }
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(
+                          value: 'replace',
+                          child: Text('Replace photo'),
+                        ),
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: Text('Delete photo'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+
     if (bucket.isEmpty || key.isEmpty) {
-      return const SizedBox(
-        width: 72,
-        height: 72,
-        child: Center(
+      return controls(
+        const Center(
           child: Icon(
             Icons.broken_image_outlined,
             color: Colors.deepOrange,
@@ -1559,41 +1710,29 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     return FutureBuilder<String>(
       future: _api.signedAttachmentUrl(bucket, key),
       builder: (context, snapshot) {
-        final child = snapshot.hasData
-            ? ClipRRect(
-                borderRadius: BorderRadius.circular(9),
-                child: Image.network(
-                  snapshot.data!,
-                  width: 72,
-                  height: 72,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const SizedBox(
-                    width: 72,
-                    height: 72,
-                    child: Center(
-                      child: Icon(
-                        Icons.broken_image_outlined,
-                        color: Colors.deepOrange,
-                      ),
-                    ),
-                  ),
+        if (!snapshot.hasData) {
+          return controls(
+            const Center(
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        }
+        return controls(
+          ClipRRect(
+            borderRadius: BorderRadius.circular(9),
+            child: Image.network(
+              snapshot.data!,
+              width: 82,
+              height: 82,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => const Center(
+                child: Icon(
+                  Icons.broken_image_outlined,
+                  color: Colors.deepOrange,
                 ),
-              )
-            : const SizedBox(
-                width: 72,
-                height: 72,
-                child: Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              );
-
-        return InkWell(
-          borderRadius: BorderRadius.circular(9),
-          onTap: snapshot.hasData
-              ? () => _showFindingPhoto(attachment)
-              : null,
-          child: child,
+              ),
+            ),
+          ),
         );
       },
     );
@@ -1679,6 +1818,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 children: attachments
                     .map(
                       (raw) => _findingPhotoThumbnail(
+                        finding,
                         Map<String, dynamic>.from(raw as Map),
                       ),
                     )
@@ -2412,14 +2552,18 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   ? 'No work performed entered yet.'
                   : workSummary,
             ),
-            if (currentVisit != null && currentVisit['closed_at'] == null) ...[
+            if (currentVisit != null && (_canManage || _mechanic)) ...[
               const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
                   onPressed: _busy ? null : _editWorkSummary,
-                  icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Edit'),
+                  icon: Icon(
+                    workSummary.isEmpty
+                        ? Icons.add_circle_outline
+                        : Icons.edit_outlined,
+                  ),
+                  label: Text(workSummary.isEmpty ? 'Add' : 'Edit'),
                 ),
               ),
             ],
