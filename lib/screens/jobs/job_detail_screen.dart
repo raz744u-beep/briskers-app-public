@@ -1350,6 +1350,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       required String label,
       required String value,
       String? subtitle,
+      bool problemFlag = false,
       VoidCallback? onTap,
     }) {
       final enabled = onTap != null && !_busy;
@@ -1400,6 +1401,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   ],
                 ),
               ),
+              if (problemFlag) ...[
+                const SizedBox(width: 5),
+                const Icon(Icons.flag, color: Colors.red, size: 19),
+              ],
               if (enabled) const Icon(Icons.chevron_right, size: 22),
             ],
           ),
@@ -1499,6 +1504,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   color: statusColor,
                   label: 'Customer',
                   value: customerName.isEmpty ? 'Customer' : customerName,
+                  problemFlag: _job?['customer_problem_flag'] == true,
                   onTap: _canManage ? _changeCustomer : null,
                 ),
                 Divider(
