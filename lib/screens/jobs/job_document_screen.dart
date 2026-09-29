@@ -2102,6 +2102,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       VoidCallback? onTap,
       Color? valueColor,
       bool underline = false,
+      bool problemFlag = false,
     }) {
       final line = Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2124,6 +2125,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
             ),
           ),
+          if (problemFlag) ...[
+            const SizedBox(width: 5),
+            const Icon(Icons.flag, color: Colors.red, size: 19),
+          ],
           if (onTap != null) ...[
             const SizedBox(width: 4),
             Icon(
@@ -2160,6 +2165,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           customer.isEmpty ? 'Customer' : customer,
           bold: true,
           maxLines: 2,
+          problemFlag: _detail?['customer_problem_flag'] == true,
         ),
         if (phone.isNotEmpty) ...[
           const SizedBox(height: 8),
