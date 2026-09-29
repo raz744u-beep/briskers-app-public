@@ -122,8 +122,8 @@ class BriskersApi {
     );
     final flags = <String, Map<String, dynamic>>{
       for (final raw in List<dynamic>.from(flagsRaw ?? const []))
-        Map<String, dynamic>.from(raw as Map)['customer_id'].toString():
-            Map<String, dynamic>.from(raw as Map),
+        Map<String, dynamic>.from(raw)['customer_id'].toString():
+            Map<String, dynamic>.from(raw),
     };
     for (final row in rows) {
       final flag = flags[row['id']?.toString()];
