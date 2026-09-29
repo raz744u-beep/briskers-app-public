@@ -107,9 +107,47 @@ class BriskersApi {
         'p_offset': offset,
       },
     );
-    return (result as List<dynamic>)
+    final rows = (result as List<dynamic>)
         .map((row) => Map<String, dynamic>.from(row as Map))
         .toList();
+    if (rows.isEmpty) return rows;
+
+    final ids = rows.map((row) => row['id']?.toString()).whereType<String>().toList();
+    final flagsRaw = await supabase.rpc(
+      'briskers_customer_problem_flags',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_ids': ids,
+      },
+    );
+    final flags = <String, Map<String, dynamic>>{
+      for (final raw in List<dynamic>.from(flagsRaw ?? const []))
+        Map<String, dynamic>.from(raw as Map)['customer_id'].toString():
+            Map<String, dynamic>.from(raw as Map),
+    };
+    for (final row in rows) {
+      final flag = flags[row['id']?.toString()];
+      row['problem_flag'] = flag?['problem_flag'] == true;
+      row['problem_flag_note'] = flag?['problem_flag_note']?.toString() ?? '';
+    }
+    return rows;
+  }
+
+  Future<void> setCustomerProblemFlag(
+    String businessId,
+    String customerId, {
+    required bool flagged,
+    String? note,
+  }) async {
+    await supabase.rpc(
+      'briskers_set_customer_problem_flag',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_flagged': flagged,
+        'p_note': note,
+      },
+    );
   }
 
   Future<String> createCustomer(
