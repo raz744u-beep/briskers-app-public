@@ -44,6 +44,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   bool _busy = false;
   String? _expandedSection;
   String? _error;
+  VoidCallback? _modalRefresh;
 
   bool get _canManage =>
       widget.roleCode == 'owner' ||
@@ -138,6 +139,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         _loading = false;
         _error = null;
       });
+      _modalRefresh?.call();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -1045,15 +1047,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     required String customerName,
     required String vehicle,
     required String vin,
+    required String jobTitle,
     required Map<String, dynamic>? assignment,
   }) {
-    final employeeName = assignment == null ? 'Unassigned' : assignment['employee_name']?.toString() ?? 'Assigned';
-    final employeePosition = assignment?['position']?.toString() ?? 'Mechanic';
+    final employeeName = assignment == null
+        ? 'Unassigned'
+        : assignment['employee_name']?.toString() ?? 'Assigned';
+    final employeePosition =
+        assignment?['position']?.toString() ?? 'Mechanic';
     final roleStyle = employeeRoleStyle(employeePosition);
     final statusColor = colorFromHex(_job?['status_color']?.toString());
-    final cardTint = Color.alphaBlend(statusColor.withValues(alpha: 0.12), const Color(0xFFFCFCFB));
+    final cardTint = Color.alphaBlend(
+      statusColor.withValues(alpha: 0.12),
+      const Color(0xFFFCFCFB),
+    );
 
-    Widget cell({
+    Widget infoRow({
       required IconData icon,
       required Color color,
       required String label,
@@ -1064,42 +1073,36 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       final enabled = onTap != null && !_busy;
       return InkWell(
         onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(14),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+          padding: const EdgeInsets.fromLTRB(8, 8, 6, 8),
           child: Row(
             children: [
               CircleAvatar(
-                radius: 16,
+                radius: 22,
                 backgroundColor: color.withValues(alpha: 0.13),
-                child: Icon(icon, color: color, size: 19),
+                child: Icon(icon, color: color, size: 25),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
                       label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontSize: 13,
+                        fontSize: 14.5,
                         fontWeight: FontWeight.w600,
-                        height: 1.05,
                       ),
                     ),
-                    const SizedBox(height: 1),
                     Text(
                       value,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 14.2,
-                        fontWeight: FontWeight.w700,
-                        height: 1.08,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                     if (subtitle != null && subtitle.isNotEmpty)
@@ -1109,14 +1112,60 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          fontSize: 10.8,
-                          height: 1.05,
+                          fontSize: 13,
                         ),
                       ),
                   ],
                 ),
               ),
-              if (enabled) const Icon(Icons.chevron_right, size: 18),
+              if (enabled) const Icon(Icons.chevron_right, size: 26),
+            ],
+          ),
+        ),
+      );
+    }
+
+    Widget bottomCell({
+      required IconData icon,
+      required Color color,
+      required String label,
+      required String value,
+      VoidCallback? onTap,
+    }) {
+      final enabled = onTap != null && !_busy;
+      return InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+          child: Row(
+            children: [
+              Icon(icon, color: color, size: 29),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 14.5,
+                      ),
+                    ),
+                    Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (enabled) const Icon(Icons.chevron_right, size: 23),
             ],
           ),
         ),
@@ -1124,42 +1173,116 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
 
     return Container(
-      decoration: BoxDecoration(color: cardTint, borderRadius: BorderRadius.circular(18), border: Border.all(color: statusColor.withValues(alpha: 0.22)), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8, offset: const Offset(0, 3))]),
+      decoration: BoxDecoration(
+        color: cardTint,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: statusColor.withValues(alpha: 0.24)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
       clipBehavior: Clip.antiAlias,
-      child: Stack(children: [
-        Positioned.fill(
-          child: IgnorePointer(
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: FractionallySizedBox(
-                widthFactor: 0.72,
-                heightFactor: 0.9,
-                child: Opacity(
-                  opacity: 0.25,
-                  child: Image.asset(
-                    'assets/job_car_watermark.png',
-                    fit: BoxFit.contain,
-                    alignment: Alignment.centerRight,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FractionallySizedBox(
+                  widthFactor: 0.72,
+                  heightFactor: 0.82,
+                  child: Opacity(
+                    opacity: 0.18,
+                    child: Image.asset(
+                      'assets/job_car_watermark.png',
+                      fit: BoxFit.contain,
+                      alignment: Alignment.centerRight,
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
-        Padding(padding: const EdgeInsets.fromLTRB(7, 3, 7, 3), child: Column(children: [
-          Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-            Expanded(child: cell(icon: Icons.person_outline, color: statusColor, label: 'Customer', value: customerName.isEmpty ? 'Customer' : customerName, onTap: _canManage ? _changeCustomer : null)),
-            Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 3, horizontal: 3), color: statusColor.withValues(alpha: 0.20)),
-            Expanded(child: cell(icon: Icons.directions_car_outlined, color: statusColor, label: 'Vehicle', value: vehicle.isEmpty ? 'No vehicle' : vehicle, subtitle: vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin', onTap: _canManage ? _changeVehicle : null)),
-          ]),
-          Divider(height: 1, color: statusColor.withValues(alpha: 0.20)),
-          Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-            Expanded(child: cell(icon: roleStyle.icon, color: roleStyle.color, label: 'Mechanic', value: employeeName, onTap: _canManage ? _changeAssignment : null)),
-            Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 3, horizontal: 3), color: statusColor.withValues(alpha: 0.20)),
-            Expanded(child: cell(icon: Icons.timer_outlined, color: statusColor, label: 'Planned time', value: '${_hours(_job!['planned_hours'])} hr', onTap: _canManage ? _changePlannedHours : null)),
-          ]),
-        ])),
-      ]),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                infoRow(
+                  icon: Icons.person_outline,
+                  color: statusColor,
+                  label: 'Customer',
+                  value: customerName.isEmpty ? 'Customer' : customerName,
+                  onTap: _canManage ? _changeCustomer : null,
+                ),
+                Divider(
+                  height: 1,
+                  color: statusColor.withValues(alpha: 0.20),
+                ),
+                infoRow(
+                  icon: Icons.directions_car_outlined,
+                  color: statusColor,
+                  label: 'Vehicle',
+                  value: vehicle.isEmpty ? 'No vehicle' : vehicle,
+                  subtitle:
+                      vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin',
+                  onTap: _canManage ? _changeVehicle : null,
+                ),
+                Divider(
+                  height: 1,
+                  color: statusColor.withValues(alpha: 0.20),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(7, 12, 7, 5),
+                  child: Text(
+                    jobTitle.isEmpty ? 'Job' : jobTitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      height: 1.08,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: bottomCell(
+                        icon: roleStyle.icon,
+                        color: roleStyle.color,
+                        label: 'Mechanic',
+                        value: employeeName,
+                        onTap: _canManage ? _changeAssignment : null,
+                      ),
+                    ),
+                    Container(
+                      width: 1,
+                      height: 58,
+                      margin: const EdgeInsets.symmetric(horizontal: 7),
+                      color: statusColor.withValues(alpha: 0.24),
+                    ),
+                    Expanded(
+                      child: bottomCell(
+                        icon: Icons.timer_outlined,
+                        color: statusColor,
+                        label: 'Planned time',
+                        value: '${_hours(_job!['planned_hours'])} hr',
+                        onTap: _canManage ? _changePlannedHours : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1617,7 +1740,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       ],
     );
 
-    if (choice == 'inspection') { setState(() => _expandedSection = 'inspection'); if (_preInspection == null) await _editPreInspectionDetails(); }
+    if (choice == 'inspection') { if (_preInspection == null) await _editPreInspectionDetails(); if (mounted) await _openSectionModal('inspection'); }
     if (choice == 'finding') await _addFinding();
     if (choice == 'estimate') await _createEstimate();
     if (choice == 'invoice') await _createInvoice();
@@ -1960,6 +2083,149 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
+  String _sectionTitle(String key) {
+    switch (key) {
+      case 'inspection':
+        return 'Pre-Inspection';
+      case 'complaint':
+        return 'Customer Complaint';
+      case 'findings':
+        return 'Vehicle Findings';
+      case 'work':
+        return 'Work Performed';
+      case 'history':
+        return 'Work / Visit History';
+      case 'documents':
+        return 'Estimate / Invoice';
+      default:
+        return 'Job Profitability';
+    }
+  }
+
+  IconData _sectionIcon(String key) {
+    switch (key) {
+      case 'inspection':
+        return Icons.search;
+      case 'complaint':
+        return Icons.description_outlined;
+      case 'findings':
+        return Icons.car_repair_outlined;
+      case 'work':
+        return Icons.build_outlined;
+      case 'history':
+        return Icons.history_outlined;
+      case 'documents':
+        return Icons.receipt_long_outlined;
+      default:
+        return Icons.analytics_outlined;
+    }
+  }
+
+  Color _sectionColor(String key) {
+    switch (key) {
+      case 'inspection':
+        return const Color(0xFF6B4BC3);
+      case 'complaint':
+        return BriskersColors.customers;
+      case 'findings':
+        return Colors.deepOrange;
+      case 'work':
+        return const Color(0xFF15988F);
+      case 'history':
+        return const Color(0xFF2585D8);
+      case 'documents':
+        return const Color(0xFFE5A400);
+      default:
+        return BriskersColors.reports;
+    }
+  }
+
+  Future<void> _openSectionModal(String key) async {
+    if (_job == null) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: false,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            _modalRefresh = () {
+              if (mounted) setModalState(() {});
+            };
+
+            final visits = List<dynamic>.from(
+              _job?['visits'] ?? const [],
+            ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+            final currentVisit = visits.isEmpty ? null : visits.first;
+            final complaint =
+                _job?['requested_work']?.toString().trim() ?? '';
+            final workSummary =
+                currentVisit?['work_summary']?.toString().trim() ?? '';
+            final color = _sectionColor(key);
+
+            return FractionallySizedBox(
+              heightFactor: 0.94,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 12, 10, 10),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 22,
+                          backgroundColor: color.withValues(alpha: 0.13),
+                          child: Icon(
+                            _sectionIcon(key),
+                            color: color,
+                            size: 25,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _sectionTitle(key),
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.pop(sheetContext),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 96),
+                      child: _drawerForSection(
+                        key,
+                        complaint: complaint,
+                        workSummary: workSummary,
+                        currentVisit: currentVisit,
+                        visits: visits,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    _modalRefresh = null;
+    if (mounted) await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -1991,12 +2257,25 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final totalCost = _profitability?['total_cost'];
     final profit = _profitability?['profit'];
 
-    Widget tile(String key, String label, IconData icon, Color color, String subtitle) => _JobSectionTile(
-      label: label, icon: icon, color: color, subtitle: subtitle, expanded: _expandedSection == key, onTap: () => _toggleSection(key),
-    );
-    Widget rowDrawer(String a, String b) {
-      if (_expandedSection != a && _expandedSection != b) return const SizedBox.shrink();
-      return Padding(padding: const EdgeInsets.only(top: 8), child: _drawerForSection(_expandedSection!, complaint: complaint, workSummary: workSummary, currentVisit: currentVisit, visits: visits));
+    int? badge(int value) => value > 0 ? value : null;
+    final complaintCount = complaint.isEmpty ? 0 : 1;
+    final inspectionCount = _preInspection == null ? 0 : 1;
+    final workCount = workSummary.isEmpty ? 0 : 1;
+
+    Widget categoryTile(
+      String key,
+      String label,
+      IconData icon,
+      Color color,
+      int? count,
+    ) {
+      return _JobCategoryTile(
+        label: label,
+        icon: icon,
+        color: color,
+        count: count,
+        onTap: () => _openSectionModal(key),
+      );
     }
 
     return MediaQuery(
@@ -2011,58 +2290,136 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         ],
       ),
       floatingActionButton: (_canEditFindings || _canManage) ? FloatingActionButton.extended(
-        onPressed: _busy ? null : _showNewMenu, backgroundColor: BriskersColors.jobs, foregroundColor: Colors.white, icon: const Icon(Icons.add), label: const Text('New'),
+        onPressed: _busy ? null : _showNewMenu, backgroundColor: BriskersColors.jobs, foregroundColor: Colors.white, icon: const Icon(Icons.add), label: const Text('New', style: TextStyle(fontWeight: FontWeight.w800)),
       ) : null,
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(controller: _scrollController, padding: const EdgeInsets.fromLTRB(10, 5, 10, 74), children: [
-          if (jobTitle.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(3, 1, 3, 7), child: Text(jobTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, height: 1.08))),
-          _summaryCard(customerName: customerName, vehicle: vehicle, vin: vin, assignment: assignment),
+          _summaryCard(
+            customerName: customerName,
+            vehicle: vehicle,
+            vin: vin,
+            jobTitle: jobTitle,
+            assignment: assignment,
+          ),
           if (_mechanic && unassigned) ...[
-            const SizedBox(height: 6),
-            OutlinedButton.icon(onPressed: _busy ? null : _requestJob, icon: const Icon(Icons.pan_tool_alt_outlined), label: const Text('Request this job')),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _requestJob,
+              icon: const Icon(Icons.pan_tool_alt_outlined),
+              label: const Text('Request this job'),
+            ),
           ],
           if (_canManage && requests.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Card(child: ExpansionTile(leading: const Icon(Icons.notifications_active_outlined), title: Text(requests.length == 1 ? '1 mechanic requested this job' : '${requests.length} mechanics requested this job', style: const TextStyle(fontWeight: FontWeight.w700)), children: requests.map((request) => ListTile(
-              title: Text(request['employee_name']?.toString() ?? ''), subtitle: Text(request['position']?.toString() ?? 'Mechanic'), trailing: Wrap(children: [
-                IconButton(tooltip: 'Deny', onPressed: _busy ? null : () => _decideRequest(request, false), icon: const Icon(Icons.close)),
-                IconButton(tooltip: 'Assign', onPressed: _busy ? null : () => _decideRequest(request, true), icon: const Icon(Icons.check_circle_outline, color: BriskersColors.jobs)),
-              ]),
-            )).toList())),
-          ],
-          const SizedBox(height: 6),
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: tile('complaint', 'Customer Complaint', Icons.description_outlined, const Color(0xFF15988F), complaint.isEmpty ? 'Nothing entered' : complaint)),
-            const SizedBox(width: 8),
-            Expanded(child: tile('inspection', 'Pre-Inspection', Icons.search, const Color(0xFF6B4BC3), _preInspection == null ? 'Not completed' : (prePhotos == 0 ? (preDate.isEmpty ? 'Inspection started' : preDate) : '$prePhotos photo${prePhotos == 1 ? '' : 's'} • $preDate'))),
-          ]),
-          rowDrawer('complaint', 'inspection'),
-          const SizedBox(height: 6),
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: tile('findings', 'Vehicle Findings', Icons.car_repair_outlined, Colors.deepOrange, activeFindings == 0 ? 'No unresolved findings' : '$activeFindings unresolved')), 
-            const SizedBox(width: 8),
-            Expanded(child: tile('work', 'Work Performed', Icons.build_outlined, const Color(0xFF15988F), workSummary.isEmpty ? 'Not started' : workSummary)),
-          ]),
-          rowDrawer('findings', 'work'),
-          const SizedBox(height: 6),
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: tile('history', 'Work History', Icons.history_outlined, const Color(0xFF2585D8), visits.isEmpty ? 'No visits yet' : (visits.length == 1 ? '1 shop visit' : '${visits.length} shop visits'))),
-            const SizedBox(width: 8),
-            Expanded(child: tile('documents', 'Estimate / Invoice', Icons.receipt_long_outlined, const Color(0xFFE5A400), _documents.isEmpty ? 'No documents linked' : '${_documents.length} document(s)')),
-          ]),
-          rowDrawer('history', 'documents'),
-          if (_owner) ...[
-            const SizedBox(height: 6),
-            _JobProfitabilityTile(
-              expanded: _expandedSection == 'profit',
-              margin: margin,
-              subtitle: _profitability == null ? 'Not available' : 'Revenue ${_money(revenue)}  •  Cost ${_money(totalCost)}  •  Profit ${_money(profit)}',
-              onTap: () => _toggleSection('profit'),
+            const SizedBox(height: 8),
+            Card(
+              child: ExpansionTile(
+                leading: const Icon(Icons.notifications_active_outlined),
+                title: Text(
+                  requests.length == 1
+                      ? '1 mechanic requested this job'
+                      : '${requests.length} mechanics requested this job',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                children: requests.map((request) => ListTile(
+                  title: Text(request['employee_name']?.toString() ?? ''),
+                  subtitle: Text(
+                    request['position']?.toString() ?? 'Mechanic',
+                  ),
+                  trailing: Wrap(
+                    children: [
+                      IconButton(
+                        tooltip: 'Deny',
+                        onPressed: _busy
+                            ? null
+                            : () => _decideRequest(request, false),
+                        icon: const Icon(Icons.close),
+                      ),
+                      IconButton(
+                        tooltip: 'Assign',
+                        onPressed: _busy
+                            ? null
+                            : () => _decideRequest(request, true),
+                        icon: const Icon(
+                          Icons.check_circle_outline,
+                          color: BriskersColors.jobs,
+                        ),
+                      ),
+                    ],
+                  ),
+                )).toList(),
+              ),
             ),
-            if (_expandedSection == 'profit') Padding(padding: const EdgeInsets.only(top: 8), child: _profitabilityDrawer()),
           ],
-          if (_error != null) ...[const SizedBox(height: 12), Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))],
+          const SizedBox(height: 12),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: 1.42,
+            children: [
+              categoryTile(
+                'inspection',
+                'Pre-Inspection',
+                Icons.search,
+                const Color(0xFF6B4BC3),
+                badge(inspectionCount),
+              ),
+              categoryTile(
+                'complaint',
+                'Customer Complaint',
+                Icons.description_outlined,
+                BriskersColors.customers,
+                badge(complaintCount),
+              ),
+              categoryTile(
+                'findings',
+                'Vehicle Findings',
+                Icons.car_repair_outlined,
+                Colors.deepOrange,
+                badge(activeFindings),
+              ),
+              categoryTile(
+                'work',
+                'Work Performed',
+                Icons.build_outlined,
+                const Color(0xFF15988F),
+                badge(workCount),
+              ),
+              categoryTile(
+                'history',
+                'Work / Visit History',
+                Icons.history_outlined,
+                const Color(0xFF2585D8),
+                badge(visits.length),
+              ),
+              categoryTile(
+                'documents',
+                'Estimate / Invoice',
+                Icons.receipt_long_outlined,
+                const Color(0xFFE5A400),
+                badge(_documents.length),
+              ),
+              categoryTile(
+                'profit',
+                'Job Profitability',
+                Icons.analytics_outlined,
+                BriskersColors.reports,
+                null,
+              ),
+            ],
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+          ],
         ]),
       ),
       ),
@@ -2072,21 +2429,19 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 }
 
 
-class _JobSectionTile extends StatelessWidget {
-  const _JobSectionTile({
+class _JobCategoryTile extends StatelessWidget {
+  const _JobCategoryTile({
     required this.label,
     required this.icon,
     required this.color,
-    required this.subtitle,
-    required this.expanded,
+    required this.count,
     required this.onTap,
   });
 
   final String label;
   final IconData icon;
   final Color color;
-  final String subtitle;
-  final bool expanded;
+  final int? count;
   final VoidCallback onTap;
 
   @override
@@ -2096,64 +2451,60 @@ class _JobSectionTile extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        child: SizedBox(
-          height: 84,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 6, 7),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: color.withValues(alpha: 0.13),
-                  child: Icon(icon, color: color, size: 19),
-                ),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w700,
-                                height: 1.05,
-                              ),
-                            ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 10, 10),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  CircleAvatar(
+                    radius: 27,
+                    backgroundColor: color.withValues(alpha: 0.13),
+                    child: Icon(icon, color: color, size: 30),
+                  ),
+                  if (count != null && count! > 0)
+                    Positioned(
+                      right: -7,
+                      top: -7,
+                      child: Container(
+                        constraints: const BoxConstraints(
+                          minWidth: 24,
+                          minHeight: 24,
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        child: Text(
+                          count.toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
                           ),
-                          const SizedBox(width: 2),
-                          Icon(
-                            expanded
-                                ? Icons.keyboard_arrow_up
-                                : Icons.keyboard_arrow_down,
-                            size: 18,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        subtitle,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11.6,
-                          height: 1.16,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurfaceVariant,
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 15.5,
+                  fontWeight: FontWeight.w800,
+                  height: 1.12,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
