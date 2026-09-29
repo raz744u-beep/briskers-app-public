@@ -358,7 +358,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 leading: const CircleAvatar(
                   child: Icon(Icons.person_outline),
                 ),
-                title: Text(customer['display_name']?.toString() ?? ''),
+                title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  customer['display_name']?.toString() ?? '',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (customer['problem_flag'] == true)
+                                const Icon(
+                                  Icons.flag,
+                                  color: Colors.red,
+                                  size: 18,
+                                ),
+                            ],
+                          ),
                 subtitle: Text(
                   '${customer['vehicle_count'] ?? 0} vehicle(s)',
                 ),
