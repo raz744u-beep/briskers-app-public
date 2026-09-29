@@ -1085,13 +1085,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           ),
         ),
         Padding(padding: const EdgeInsets.fromLTRB(10, 7, 10, 7), child: Column(children: [
-          Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
             Expanded(child: cell(icon: Icons.person_outline, color: statusColor, label: 'Customer', value: customerName.isEmpty ? 'Customer' : customerName, onTap: _canManage ? _changeCustomerVehicle : null)),
             Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 7, horizontal: 5), color: statusColor.withValues(alpha: 0.20)),
             Expanded(child: cell(icon: Icons.directions_car_outlined, color: statusColor, label: 'Vehicle', value: vehicle.isEmpty ? 'No vehicle' : vehicle, subtitle: vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin', onTap: _canManage ? _changeVehicle : null)),
           ]),
           Divider(height: 1, color: statusColor.withValues(alpha: 0.20)),
-          Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
             Expanded(child: cell(icon: roleStyle.icon, color: roleStyle.color, label: 'Mechanic', value: employeeName, onTap: _canManage ? _changeAssignment : null)),
             Container(width: 1, margin: const EdgeInsets.symmetric(vertical: 7, horizontal: 5), color: statusColor.withValues(alpha: 0.20)),
             Expanded(child: cell(icon: Icons.timer_outlined, color: statusColor, label: 'Planned time', value: '${_hours(_job!['planned_hours'])} hr', onTap: _canManage ? _changePlannedHours : null)),
