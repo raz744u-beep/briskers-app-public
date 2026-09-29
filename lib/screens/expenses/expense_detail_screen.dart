@@ -130,6 +130,81 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     }
   }
 
+  Future<void> _replaceReceipt(
+    Map<String, dynamic> attachment,
+  ) async {
+    if (_uploading || _deletingAttachmentId != null) return;
+
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose replacement from gallery'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Take replacement photo'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    XFile? file;
+    if (source == ImageSource.gallery) {
+      file = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 92,
+      );
+    } else {
+      file = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 92,
+      );
+    }
+    if (file == null || !mounted) return;
+
+    setState(() {
+      _uploading = true;
+      _error = null;
+    });
+
+    try {
+      await _api.uploadExpensePhoto(
+        widget.businessId,
+        widget.transactionId,
+        filename: file.name,
+        mimeType: _mimeType(file.name),
+        bytes: await file.readAsBytes(),
+      );
+
+      final attachmentId = attachment['attachment_id']?.toString() ?? '';
+      if (attachmentId.isNotEmpty) {
+        await _api.deleteExpensePhoto(
+          widget.businessId,
+          widget.transactionId,
+          attachmentId,
+          bucket: attachment['bucket']?.toString() ?? 'briskers-private',
+          key: attachment['key']?.toString() ?? '',
+        );
+      }
+
+      await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
   Future<void> _openAttachment(Map<String, dynamic> attachment) async {
     try {
       final url = await _api.signedAttachmentUrl(
@@ -195,13 +270,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     final attachmentId = attachment['attachment_id']?.toString() ?? '';
     if (attachmentId.isEmpty || _deletingAttachmentId != null) return;
 
-    final filename = attachment['filename']?.toString() ?? 'this receipt photo';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete receipt photo?'),
-        content: Text(
-          'Delete "$filename"? The photo will be removed from this transaction.',
+        content: const Text(
+          'The photo will be removed from this transaction.',
         ),
         actions: [
           TextButton(
@@ -579,22 +653,29 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
             ...attachments.map(
               (attachment) => Card(
                 margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  leading: _receiptThumbnail(attachment),
-                  title: Text(
-                    attachment['filename']?.toString() ?? 'Receipt',
-                  ),
-                  subtitle: Text(
-                    attachment['mime_type']?.toString() ?? '',
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                  child: Row(
                     children: [
+                      InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => _openAttachment(attachment),
+                        child: _receiptThumbnail(attachment),
+                      ),
+                      const Spacer(),
                       IconButton(
                         tooltip: 'View receipt',
                         onPressed: () => _openAttachment(attachment),
                         icon: const Icon(Icons.zoom_in),
                       ),
+                      if (editable)
+                        IconButton(
+                          tooltip: 'Replace receipt photo',
+                          onPressed: _uploading
+                              ? null
+                              : () => _replaceReceipt(attachment),
+                          icon: const Icon(Icons.edit_outlined),
+                        ),
                       if (editable)
                         IconButton(
                           tooltip: 'Delete receipt photo',
@@ -615,7 +696,6 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                         ),
                     ],
                   ),
-                  onTap: () => _openAttachment(attachment),
                 ),
               ),
             ),
