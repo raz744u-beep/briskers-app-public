@@ -55,6 +55,18 @@ class JobCompactCard extends StatelessWidget {
     final requests =
         int.tryParse(job['pending_requests']?.toString() ?? '') ?? 0;
     final statusColor = colorFromHex(job['status_color']?.toString());
+    final paymentState = job['status']?.toString() == 'completed'
+        ? job['payment_state']?.toString()
+        : null;
+    final paymentLabel = switch (paymentState) {
+      'paid' => 'Paid',
+      'awaiting_clearance' => 'Awaiting clearance',
+      'awaiting_payment' => 'Awaiting payment',
+      _ => null,
+    };
+    final paymentColor = paymentState == 'paid'
+        ? const Color(0xFF169B62)
+        : const Color(0xFFE58A00);
 
     final vehicleFlex = (3 + (vehicle.length / 8).ceil()).clamp(3, 7).toInt();
     final employeeFlex =
@@ -142,6 +154,30 @@ class JobCompactCard extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (paymentLabel != null) ...[
+                        const SizedBox(width: 7),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: paymentColor.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: paymentColor.withValues(alpha: 0.45),
+                            ),
+                          ),
+                          child: Text(
+                            paymentLabel,
+                            style: TextStyle(
+                              color: paymentColor,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
                       if (findings > 0) ...[
                         const SizedBox(width: 7),
                         const Icon(
