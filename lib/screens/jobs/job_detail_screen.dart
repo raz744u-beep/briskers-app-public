@@ -10,6 +10,7 @@ import '../../core/employee_role_style.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/job_sync_service.dart';
+import '../../services/local_job_repository.dart';
 import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_work_findings_service.dart';
 import '../expenses/expense_detail_screen.dart';
@@ -39,6 +40,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   final OfflineWorkFindingsService _offlineWorkFindings =
       OfflineWorkFindingsService();
   final JobSyncService _jobSync = JobSyncService();
+  final LocalJobRepository _localJobs = LocalJobRepository();
 
   Map<String, dynamic>? _job;
   Map<String, dynamic>? _profitability;
@@ -54,6 +56,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   bool _loading = true;
   bool _busy = false;
+  bool _onlineReady = false;
+  bool _showingLocal = false;
   String? _error;
   VoidCallback? _modalRefresh;
 
@@ -63,19 +67,26 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     return raw[key] == true;
   }
 
-  bool get _canManage => _job == null
-      ? widget.roleCode == 'owner' ||
-          widget.roleCode == 'manager' ||
-          widget.roleCode == 'office'
-      : _jobCapability('manage_job');
+  bool get _canManage {
+    if (!_onlineReady) return false;
+    return _job == null
+        ? widget.roleCode == 'owner' ||
+            widget.roleCode == 'manager' ||
+            widget.roleCode == 'office'
+        : _jobCapability('manage_job');
+  }
 
-  bool get _canSeeFinancial => _job == null
-      ? widget.roleCode == 'owner' ||
-          widget.roleCode == 'manager' ||
-          widget.roleCode == 'office'
-      : _jobCapability('view_financial');
+  bool get _canSeeFinancial {
+    if (!_onlineReady) return false;
+    return _job == null
+        ? widget.roleCode == 'owner' ||
+            widget.roleCode == 'manager' ||
+            widget.roleCode == 'office'
+        : _jobCapability('view_financial');
+  }
 
-  bool get _canRequestJob => _jobCapability('request_job');
+  bool get _canRequestJob =>
+      _onlineReady && _jobCapability('request_job');
   bool get _canEditWork => _jobCapability('edit_work');
   bool get _canEditFindings => _jobCapability('edit_findings');
   bool get _canEditInspection => _jobCapability('edit_inspection');
@@ -94,6 +105,35 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _load() async {
+    var localShown = false;
+
+    try {
+      final snapshot = await _localJobs.jobDetail(
+        widget.businessId,
+        widget.jobId,
+      );
+      if (snapshot != null && mounted) {
+        localShown = true;
+        setState(() {
+          _job = snapshot.job;
+          _profitability = null;
+          _preInspection = snapshot.preInspection;
+          _employees = const [];
+          _statuses = snapshot.statuses;
+          _documents = const [];
+          _findings = snapshot.findings;
+          _jobExpenses = const [];
+          _loading = false;
+          _onlineReady = false;
+          _showingLocal = true;
+          _error = null;
+        });
+        _modalRefresh?.call();
+      }
+    } catch (_) {
+      // The online load below can still succeed without a local snapshot.
+    }
+
     try {
       final job = await _api.jobDetail(widget.businessId, widget.jobId);
       final statuses = await _api.jobStatuses(widget.businessId);
@@ -333,15 +373,42 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         _findings = findings;
         _jobExpenses = jobExpenses;
         _loading = false;
+        _onlineReady = true;
+        _showingLocal = false;
         _error = null;
       });
       _modalRefresh?.call();
+
+      unawaited(
+        _persistOnlineJobSnapshot(statuses),
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = error.toString();
+        _onlineReady = false;
+        if (localShown) {
+          _showingLocal = true;
+          _error = null;
+        } else {
+          _showingLocal = false;
+          _error = error.toString();
+        }
       });
+    }
+  }
+
+  Future<void> _persistOnlineJobSnapshot(
+    List<Map<String, dynamic>> statuses,
+  ) async {
+    try {
+      await _localJobs.replaceJobStatuses(
+        widget.businessId,
+        statuses,
+      );
+      await _jobSync.pull(widget.businessId);
+    } catch (_) {
+      // The online detail is already visible. Local persistence retries later.
     }
   }
 
@@ -2627,7 +2694,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 ),
                 if ((_canEditFindings && !conflict) ||
                     (finding['can_edit'] == true && !conflict) ||
-                    (_owner && serverReady))
+                    (_owner && _onlineReady && serverReady))
                   PopupMenuButton<String>(
                     tooltip: 'Finding actions',
                     onSelected: (value) {
@@ -2646,7 +2713,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                           value: 'photo',
                           child: Text('Add photos'),
                         ),
-                      if (_owner && serverReady)
+                      if (_owner && _onlineReady && serverReady)
                         const PopupMenuItem(
                           value: 'delete',
                           child: Text('Delete finding'),
@@ -4166,6 +4233,30 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(controller: _scrollController, padding: const EdgeInsets.fromLTRB(10, 5, 10, 74), children: [
+          if (_showingLocal)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 8,
+              ),
+              decoration: BoxDecoration(
+                color: BriskersColors.jobs.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.cloud_off_outlined, size: 18),
+                  SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      'Showing saved job data • offline-capable work can still be edited',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           _summaryCard(
             customerName: customerName,
             vehicle: vehicle,
@@ -4173,7 +4264,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             jobTitle: jobTitle,
             assignment: assignment,
           ),
-          if (_job?['status']?.toString() == 'completed') ...[
+          if (_onlineReady &&
+              _job?['status']?.toString() == 'completed') ...[
             const SizedBox(height: 8),
             _completedPaymentBanner(),
           ],
