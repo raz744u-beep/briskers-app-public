@@ -27,6 +27,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
   List<Map<String, dynamic>> _notes = const [];
   final List<XFile> _photos = [];
   bool _loading = true;
+  bool _canDeleteRecords = false;
   bool _saving = false;
   String? _error;
 
@@ -44,13 +45,19 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
 
   Future<void> _load() async {
     try {
-      final notes = await _api.customerNotes(
-        widget.businessId,
-        widget.customerId,
-      );
+      final results = await Future.wait<dynamic>([
+        _api.customerNotes(
+          widget.businessId,
+          widget.customerId,
+        ),
+        _api.myPermissions(widget.businessId),
+      ]);
+      final notes = List<Map<String, dynamic>>.from(results[0] as List);
+      final permissions = List<String>.from(results[1] as List);
       if (!mounted) return;
       setState(() {
         _notes = notes;
+        _canDeleteRecords = permissions.contains('records.delete');
         _loading = false;
         _error = null;
       });
@@ -143,7 +150,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
         await _load();
       }
     } catch (error) {
-      if (body.isEmpty && noteId != null) {
+      if (body.isEmpty && noteId != null && _canDeleteRecords) {
         try {
           await _api.deleteCustomerNote(widget.businessId, noteId);
         } catch (_) {
@@ -161,6 +168,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
       context: context,
       builder: (_) => _EditCustomerNoteDialog(
         initialText: note['body']?.toString() ?? '',
+        canDeleteExisting: _canDeleteRecords,
         attachments: List<Map<String, dynamic>>.from(
           List<dynamic>.from(note['attachments'] ?? const [])
               .map((raw) => Map<String, dynamic>.from(raw as Map)),
@@ -203,6 +211,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
   }
 
   Future<void> _deleteNote(Map<String, dynamic> note) async {
+    if (!_canDeleteRecords) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -388,6 +397,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
                         note: entry.value,
                         index: entry.key,
                         onEdit: () => _editNote(entry.value),
+                        canDelete: _canDeleteRecords,
                         onDelete: () => _deleteNote(entry.value),
                       ),
                     )
@@ -416,10 +426,12 @@ class _EditCustomerNoteDialog extends StatefulWidget {
   const _EditCustomerNoteDialog({
     required this.initialText,
     required this.attachments,
+    required this.canDeleteExisting,
   });
 
   final String initialText;
   final List<Map<String, dynamic>> attachments;
+  final bool canDeleteExisting;
 
   @override
   State<_EditCustomerNoteDialog> createState() =>
@@ -574,7 +586,9 @@ class _EditCustomerNoteDialogState
                           (attachment) => _EditableAttachmentThumbnail(
                             api: _api,
                             attachment: attachment,
-                            onRemove: () => _removeExisting(attachment),
+                            onRemove: widget.canDeleteExisting
+                                ? () => _removeExisting(attachment)
+                                : null,
                           ),
                         )
                         .toList(),
@@ -659,7 +673,7 @@ class _EditableAttachmentThumbnail extends StatefulWidget {
 
   final BriskersApi api;
   final Map<String, dynamic> attachment;
-  final VoidCallback onRemove;
+  final VoidCallback? onRemove;
 
   @override
   State<_EditableAttachmentThumbnail> createState() =>
@@ -717,26 +731,27 @@ class _EditableAttachmentThumbnailState
                   },
                 ),
               ),
-              Positioned(
-                right: -6,
-                top: -6,
-                child: Material(
-                  color: Theme.of(context).colorScheme.error,
-                  shape: const CircleBorder(),
-                  child: InkWell(
-                    customBorder: const CircleBorder(),
-                    onTap: widget.onRemove,
-                    child: const Padding(
-                      padding: EdgeInsets.all(5),
-                      child: Icon(
-                        Icons.close,
-                        size: 16,
-                        color: Colors.white,
+              if (widget.onRemove != null)
+                Positioned(
+                  right: -6,
+                  top: -6,
+                  child: Material(
+                    color: Theme.of(context).colorScheme.error,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: widget.onRemove,
+                      child: const Padding(
+                        padding: EdgeInsets.all(5),
+                        child: Icon(
+                          Icons.close,
+                          size: 16,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
             ],
           ),
           const SizedBox(height: 5),
@@ -757,12 +772,14 @@ class _NoteCard extends StatefulWidget {
     required this.note,
     required this.index,
     required this.onEdit,
+    required this.canDelete,
     required this.onDelete,
   });
 
   final Map<String, dynamic> note;
   final int index;
   final VoidCallback onEdit;
+  final bool canDelete;
   final VoidCallback onDelete;
 
   @override
@@ -906,8 +923,8 @@ class _NoteCardState extends State<_NoteCard> {
                                     if (value == 'edit') widget.onEdit();
                                     if (value == 'delete') widget.onDelete();
                                   },
-                                  itemBuilder: (context) => const [
-                                    PopupMenuItem(
+                                  itemBuilder: (context) => [
+                                    const PopupMenuItem(
                                       value: 'edit',
                                       child: ListTile(
                                         contentPadding: EdgeInsets.zero,
@@ -915,14 +932,15 @@ class _NoteCardState extends State<_NoteCard> {
                                         title: Text('Edit note'),
                                       ),
                                     ),
-                                    PopupMenuItem(
-                                      value: 'delete',
-                                      child: ListTile(
-                                        contentPadding: EdgeInsets.zero,
-                                        leading: Icon(Icons.delete_outline),
-                                        title: Text('Delete note'),
+                                    if (widget.canDelete)
+                                      const PopupMenuItem(
+                                        value: 'delete',
+                                        child: ListTile(
+                                          contentPadding: EdgeInsets.zero,
+                                          leading: Icon(Icons.delete_outline),
+                                          title: Text('Delete note'),
+                                        ),
                                       ),
-                                    ),
                                   ],
                                 ),
                               ],
