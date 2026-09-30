@@ -247,6 +247,138 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> customerVehicleCapabilities(
+    String businessId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_customer_vehicle_capabilities_v1',
+      params: {'p_business_id': businessId},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> syncCreateCustomerWrite(
+    String businessId, {
+    required String customerId,
+    required String operationId,
+    required String name,
+    String? email,
+    String? phone,
+    bool problemFlag = false,
+    String? problemFlagNote,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_create_customer_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_operation_id': operationId,
+        'p_name': name,
+        'p_email': email,
+        'p_phone': phone,
+        'p_problem_flag': problemFlag,
+        'p_problem_flag_note': problemFlagNote,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> syncUpdateCustomerWrite(
+    String businessId,
+    String customerId, {
+    required String operationId,
+    required int? expectedRowVersion,
+    required String name,
+    String? email,
+    String? phone,
+    required bool problemFlag,
+    String? problemFlagNote,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_update_customer_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_operation_id': operationId,
+        'p_expected_row_version': expectedRowVersion,
+        'p_name': name,
+        'p_email': email,
+        'p_phone': phone,
+        'p_problem_flag': problemFlag,
+        'p_problem_flag_note': problemFlagNote,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> syncCreateVehicleWrite(
+    String businessId,
+    String customerId, {
+    required String vehicleId,
+    required String operationId,
+    required String make,
+    required String model,
+    int? year,
+    String? vin,
+    String? licensePlate,
+    String? licenseState,
+    num? mileage,
+    String? color,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_create_vehicle_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_operation_id': operationId,
+        'p_make': make,
+        'p_model': model,
+        'p_year': year,
+        'p_vin': vin,
+        'p_license_plate': licensePlate,
+        'p_license_state': licenseState,
+        'p_mileage': mileage,
+        'p_color': color,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> syncUpdateVehicleWrite(
+    String businessId,
+    String vehicleId, {
+    required String operationId,
+    required int? expectedRowVersion,
+    required String make,
+    required String model,
+    int? year,
+    String? vin,
+    String? licensePlate,
+    String? licenseState,
+    num? mileage,
+    String? color,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_update_vehicle_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_vehicle_id': vehicleId,
+        'p_operation_id': operationId,
+        'p_expected_row_version': expectedRowVersion,
+        'p_make': make,
+        'p_model': model,
+        'p_year': year,
+        'p_vin': vin,
+        'p_license_plate': licensePlate,
+        'p_license_state': licenseState,
+        'p_mileage': mileage,
+        'p_color': color,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> aiCommand(
     String businessId,
     String command,
