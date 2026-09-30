@@ -68,6 +68,22 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> attentionCounts(
+    String businessId,
+    String day, {
+    DateTime? customersSince,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_attention_counts',
+      params: {
+        'p_business_id': businessId,
+        'p_day': day,
+        'p_customers_since': customersSince?.toUtc().toIso8601String(),
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<List<Map<String, dynamic>>> documents(
     String businessId, {
     required String kind,
