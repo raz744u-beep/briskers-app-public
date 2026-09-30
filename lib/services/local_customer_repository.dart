@@ -27,6 +27,25 @@ class LocalCustomerRepository {
         rows.first.read<int>('bootstrapped') == 1;
   }
 
+  Future<Map<String, dynamic>> capabilities(
+    String businessId,
+  ) async {
+    final rows = await _database.customSelect(
+      '''
+      SELECT metadata_json
+      FROM local_sync_states
+      WHERE business_id = ? AND scope = 'customers_vehicles'
+      LIMIT 1
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
+    if (rows.isEmpty) return <String, dynamic>{};
+    return _jsonMap(
+      rows.first.read<String>('metadata_json'),
+    );
+  }
+
   Future<int> customerTotal(String businessId) async {
     final row = await _database.customSelect(
       '''
@@ -94,6 +113,7 @@ class LocalCustomerRepository {
             'problem_flag_note':
                 row.readNullable<String>('problem_flag_note') ?? '',
             'vehicle_count': row.read<int>('vehicle_count'),
+            'sync_state': row.read<String>('sync_state'),
             '_local_snapshot': true,
           },
         )
@@ -159,6 +179,7 @@ class LocalCustomerRepository {
         'updated_at':
             _isoFromDb(row.data['server_updated_at']),
         'row_version': row.readNullable<int>('row_version'),
+        'sync_state': row.read<String>('sync_state'),
       },
       'contacts': contacts,
       'vehicles': vehicleRows
@@ -179,6 +200,7 @@ class LocalCustomerRepository {
                   _isoFromDb(vehicle.data['server_updated_at']),
               'row_version':
                   vehicle.readNullable<int>('row_version'),
+              'sync_state': vehicle.read<String>('sync_state'),
               'is_primary':
                   vehicle.read<int>('is_primary') == 1,
               '_local_snapshot': true,
