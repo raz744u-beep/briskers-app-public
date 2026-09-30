@@ -85,34 +85,25 @@ class OfflinePreInspectionService {
     Map<String, dynamic> server,
   ) async {
     final existing = await _inspectionRow(businessId, jobId);
-    if (existing != null) return;
+    if (existing != null &&
+        existing.read<String>('sync_state') != 'synced') {
+      return;
+    }
 
     final serverId = server['id']?.toString() ?? '';
     if (serverId.isEmpty) return;
 
     await _database.transaction(() async {
-      if (await _inspectionRow(businessId, jobId) != null) return;
+      final current = await _inspectionRow(businessId, jobId);
+      if (current != null &&
+          current.read<String>('sync_state') != 'synced') {
+        return;
+      }
 
-      await _database.customStatement(
-        '''
-        INSERT INTO local_pre_inspections (
-          id, business_id, job_id, vehicle_id, inspected_at,
-          odometer, notes, created_by, server_updated_at,
-          row_version, sync_state
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
-        ''',
-        [
-          serverId,
-          businessId,
-          jobId,
-          server['vehicle_id']?.toString(),
-          _unixNullable(_parseDate(server['inspected_at'])),
-          server['odometer'] as num?,
-          _nullIfBlank(server['notes']?.toString()),
-          server['created_by']?.toString(),
-          _unixNullable(_parseDate(server['updated_at'])),
-          int.tryParse(server['row_version']?.toString() ?? ''),
-        ],
+      await _reconcileInspection(
+        businessId,
+        jobId,
+        server,
       );
 
       final photos = List<dynamic>.from(
@@ -127,7 +118,7 @@ class OfflinePreInspectionService {
 
         await _database.customStatement(
           '''
-          INSERT OR REPLACE INTO local_pre_inspection_photos (
+          INSERT INTO local_pre_inspection_photos (
             id, business_id, inspection_id, attachment_id,
             local_file_path, storage_bucket, storage_key, filename,
             mime_type, byte_size, captured_at, note, created_by,
@@ -136,6 +127,21 @@ class OfflinePreInspectionService {
             ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, 'synced', NULL
           )
+          ON CONFLICT(id) DO UPDATE SET
+            inspection_id=excluded.inspection_id,
+            attachment_id=excluded.attachment_id,
+            storage_bucket=excluded.storage_bucket,
+            storage_key=excluded.storage_key,
+            filename=excluded.filename,
+            mime_type=excluded.mime_type,
+            byte_size=excluded.byte_size,
+            captured_at=excluded.captured_at,
+            note=excluded.note,
+            created_by=excluded.created_by,
+            can_edit_note=excluded.can_edit_note,
+            can_delete=excluded.can_delete,
+            upload_state='synced',
+            last_error=NULL
           ''',
           [
             photoId,
