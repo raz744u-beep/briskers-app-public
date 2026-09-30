@@ -582,6 +582,33 @@ class JobSyncService {
       ).getSingle();
 
       if (remaining.read<int>('count') == 0) {
+        final findingPhotoRows = await _database.customSelect(
+          '''
+          SELECT p.local_file_path
+          FROM local_finding_photos p
+          JOIN local_findings f
+            ON f.business_id = p.business_id
+           AND f.id = p.finding_id
+          WHERE f.business_id = ?
+            AND f.vehicle_id = ?
+            AND p.local_file_path IS NOT NULL
+            AND p.local_file_path <> ''
+          ''',
+          variables: [
+            Variable<String>(businessId),
+            Variable<String>(vehicleId),
+          ],
+        ).get();
+
+        localFiles.addAll(
+          findingPhotoRows
+              .map(
+                (row) =>
+                    row.readNullable<String>('local_file_path'),
+              )
+              .whereType<String>(),
+        );
+
         await _database.customStatement(
           '''
           DELETE FROM local_finding_photos
