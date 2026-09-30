@@ -104,6 +104,27 @@ class _ShellScreenState extends State<ShellScreen> {
     }
   }
 
+  String get _roleLabel {
+    switch (widget.roleCode) {
+      case 'owner':
+        return 'OWNER';
+      case 'manager':
+        return 'FOREMAN';
+      case 'office':
+        return 'SECRETARY';
+      case 'mechanic':
+        return 'MECHANIC';
+      case 'porter':
+        return 'PORTER';
+      case 'kiosk':
+        return 'CHECK-IN';
+      case 'customer':
+        return 'CUSTOMER';
+      default:
+        return widget.roleCode.toUpperCase();
+    }
+  }
+
   Widget _navIcon(
     IconData icon,
     String countKey,
@@ -176,7 +197,7 @@ class _ShellScreenState extends State<ShellScreen> {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    widget.roleCode.toUpperCase(),
+                    _roleLabel,
                     style: TextStyle(
                       color: activeColor,
                       fontWeight: FontWeight.w700,
