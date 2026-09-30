@@ -189,12 +189,15 @@ class CustomerVehicleSyncService {
         error: null,
       );
     } catch (error) {
-      await _writeSyncState(
-        businessId,
-        cursor: null,
-        bootstrapped: false,
-        error: error.toString(),
-      );
+      await _database.transaction(() async {
+        await _clearCache(businessId);
+        await _writeSyncState(
+          businessId,
+          cursor: null,
+          bootstrapped: false,
+          error: error.toString(),
+        );
+      });
       rethrow;
     }
   }
