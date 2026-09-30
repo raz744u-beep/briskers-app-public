@@ -45,6 +45,14 @@ class LocalJobs extends Table {
   TextColumn get statusIcon => text().nullable()();
   TextColumn get customerId => text().nullable()();
   TextColumn get customerName => text().nullable()();
+  BoolColumn get customerProblemFlag =>
+      boolean().withDefault(const Constant(false))();
+  TextColumn get customerProblemFlagNote => text().nullable()();
+  TextColumn get capabilitiesJson =>
+      text().withDefault(const Constant('{}'))();
+  IntColumn get pendingRequestCount =>
+      integer().withDefault(const Constant(0))();
+  TextColumn get paymentState => text().nullable()();
   TextColumn get vehicleId => text().nullable()();
   TextColumn get vehicleLabel => text().nullable()();
   TextColumn get vehicleVin => text().nullable()();
@@ -65,6 +73,18 @@ class LocalJobs extends Table {
 
   @override
   Set<Column<Object>> get primaryKey => {id};
+}
+
+class LocalJobStatuses extends Table {
+  TextColumn get businessId => text()();
+  TextColumn get code => text()();
+  TextColumn get name => text()();
+  TextColumn get colorHex => text().nullable()();
+  TextColumn get iconKey => text().nullable()();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {businessId, code};
 }
 
 class LocalJobAssignments extends Table {
@@ -199,6 +219,7 @@ class LocalFindings extends Table {
     LocalSyncStates,
     SyncOutbox,
     LocalJobs,
+    LocalJobStatuses,
     LocalJobAssignments,
     LocalJobVisits,
     LocalPreInspections,
@@ -221,7 +242,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -231,6 +252,29 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         onUpgrade: (migrator, from, to) async {
           if (from < 2) {
             await migrator.createTable(localFindingPhotos);
+          }
+          if (from < 3) {
+            await migrator.addColumn(
+              localJobs,
+              localJobs.customerProblemFlag,
+            );
+            await migrator.addColumn(
+              localJobs,
+              localJobs.customerProblemFlagNote,
+            );
+            await migrator.addColumn(
+              localJobs,
+              localJobs.capabilitiesJson,
+            );
+            await migrator.addColumn(
+              localJobs,
+              localJobs.pendingRequestCount,
+            );
+            await migrator.addColumn(
+              localJobs,
+              localJobs.paymentState,
+            );
+            await migrator.createTable(localJobStatuses);
           }
         },
       );
