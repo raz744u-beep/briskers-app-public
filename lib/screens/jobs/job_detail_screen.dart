@@ -11,6 +11,7 @@ import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/job_sync_service.dart';
 import '../../services/offline_preinspection_service.dart';
+import '../../services/offline_work_findings_service.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'job_document_screen.dart';
@@ -35,6 +36,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   static const _api = BriskersApi();
   final OfflinePreInspectionService _offlineInspection =
       OfflinePreInspectionService();
+  final OfflineWorkFindingsService _offlineWorkFindings =
+      OfflineWorkFindingsService();
   final JobSyncService _jobSync = JobSyncService();
 
   Map<String, dynamic>? _job;
@@ -156,6 +159,81 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       }
 
       try {
+        final serverCurrentVisit = await _api.currentVisitSync(
+          widget.businessId,
+          widget.jobId,
+        );
+        if (serverCurrentVisit != null) {
+          try {
+            await _offlineWorkFindings.seedCurrentVisitIfClean(
+              widget.businessId,
+              widget.jobId,
+              serverCurrentVisit,
+            );
+          } catch (_) {
+            // Keep the online job detail usable if local seeding fails.
+          }
+        }
+
+        final localCurrentVisit =
+            await _offlineWorkFindings.loadLocalCurrentVisit(
+          widget.businessId,
+          widget.jobId,
+        );
+
+        if (localCurrentVisit != null) {
+          final visits = List<dynamic>.from(
+            job['visits'] ?? const <dynamic>[],
+          ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+
+          final index = visits.indexWhere(
+            (visit) =>
+                visit['id']?.toString() ==
+                localCurrentVisit['id']?.toString(),
+          );
+
+          if (index >= 0) {
+            visits[index] = {
+              ...visits[index],
+              ...localCurrentVisit,
+            };
+          } else {
+            visits.insert(0, localCurrentVisit);
+          }
+          job['visits'] = visits;
+        }
+      } catch (_) {
+        try {
+          final localCurrentVisit =
+              await _offlineWorkFindings.loadLocalCurrentVisit(
+            widget.businessId,
+            widget.jobId,
+          );
+          if (localCurrentVisit != null) {
+            final visits = List<dynamic>.from(
+              job['visits'] ?? const <dynamic>[],
+            ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+            final index = visits.indexWhere(
+              (visit) =>
+                  visit['id']?.toString() ==
+                  localCurrentVisit['id']?.toString(),
+            );
+            if (index >= 0) {
+              visits[index] = {
+                ...visits[index],
+                ...localCurrentVisit,
+              };
+            } else {
+              visits.insert(0, localCurrentVisit);
+            }
+            job['visits'] = visits;
+          }
+        } catch (_) {
+          // Work Performed continues using the online job detail.
+        }
+      }
+
+      try {
         final serverPreInspection =
             await _api.jobPreInspection(widget.businessId, widget.jobId);
         if (serverPreInspection != null) {
@@ -210,13 +288,37 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
       final vehicleId = job['vehicle_id']?.toString();
       if (vehicleId != null && vehicleId.isNotEmpty) {
+        List<Map<String, dynamic>> serverFindings = const [];
         try {
-          findings = await _api.vehicleFindings(
+          serverFindings = await _api.vehicleFindingsSync(
             widget.businessId,
             vehicleId,
           );
+          try {
+            await _offlineWorkFindings.seedServerFindingsIfClean(
+              widget.businessId,
+              vehicleId,
+              serverFindings,
+            );
+          } catch (_) {
+            // Keep server findings visible if local seeding fails.
+          }
         } catch (_) {
-          findings = const [];
+          serverFindings = const [];
+        }
+
+        try {
+          final localFindings =
+              await _offlineWorkFindings.loadLocalFindings(
+            widget.businessId,
+            vehicleId,
+          );
+          findings = _mergeFindingLists(
+            serverFindings,
+            localFindings,
+          );
+        } catch (_) {
+          findings = serverFindings;
         }
       }
 
@@ -240,6 +342,121 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         _loading = false;
         _error = error.toString();
       });
+    }
+  }
+
+  List<Map<String, dynamic>> _mergeFindingLists(
+    List<Map<String, dynamic>> server,
+    List<Map<String, dynamic>> local,
+  ) {
+    final serverById = <String, Map<String, dynamic>>{
+      for (final finding in server)
+        if ((finding['id']?.toString() ?? '').isNotEmpty)
+          finding['id'].toString(): finding,
+    };
+
+    final merged = <Map<String, dynamic>>[];
+    final seen = <String>{};
+
+    for (final localFinding in local) {
+      final id = localFinding['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+      final serverFinding = serverById[id];
+      merged.add(
+        serverFinding == null
+            ? Map<String, dynamic>.from(localFinding)
+            : {
+                ...serverFinding,
+                ...localFinding,
+              },
+      );
+      seen.add(id);
+    }
+
+    for (final serverFinding in server) {
+      final id = serverFinding['id']?.toString() ?? '';
+      if (id.isEmpty || seen.contains(id)) continue;
+      merged.add(Map<String, dynamic>.from(serverFinding));
+    }
+
+    return merged;
+  }
+
+  Future<void> _refreshLocalWorkFindings() async {
+    final job = _job;
+    if (job == null) return;
+
+    try {
+      final localVisit =
+          await _offlineWorkFindings.loadLocalCurrentVisit(
+        widget.businessId,
+        widget.jobId,
+      );
+      if (localVisit != null && mounted) {
+        final visits = List<dynamic>.from(
+          job['visits'] ?? const <dynamic>[],
+        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        final index = visits.indexWhere(
+          (visit) =>
+              visit['id']?.toString() ==
+              localVisit['id']?.toString(),
+        );
+        if (index >= 0) {
+          visits[index] = {
+            ...visits[index],
+            ...localVisit,
+          };
+        } else {
+          visits.insert(0, localVisit);
+        }
+
+        setState(() {
+          _job = {
+            ...job,
+            'visits': visits,
+          };
+        });
+      }
+    } catch (_) {
+      // Keep the current Work Performed display if local refresh fails.
+    }
+
+    final vehicleId = job['vehicle_id']?.toString() ?? '';
+    if (vehicleId.isNotEmpty) {
+      try {
+        final localFindings =
+            await _offlineWorkFindings.loadLocalFindings(
+          widget.businessId,
+          vehicleId,
+        );
+        if (mounted) {
+          setState(() {
+            _findings = _mergeFindingLists(
+              _findings,
+              localFindings,
+            );
+          });
+        }
+      } catch (_) {
+        // Keep the current Finding list if local refresh fails.
+      }
+    }
+
+    _modalRefresh?.call();
+  }
+
+  Future<void> _flushWorkFindingsQueue() async {
+    try {
+      await _offlineWorkFindings.flush(widget.businessId);
+      try {
+        await _jobSync.pull(widget.businessId);
+      } catch (_) {
+        // The outbox is reconciled even if the follow-up pull must retry.
+      }
+    } catch (_) {
+      // Offline is expected. Work stays in the outbox for retry.
+    } finally {
+      await _refreshLocalWorkFindings();
     }
   }
 
