@@ -805,7 +805,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _deletePayment(Map<String, dynamic> payment) async {
-    if (_estimate || payment['state']?.toString() != 'pending') return;
+    if (!widget.isOwner ||
+        _estimate ||
+        payment['state']?.toString() != 'pending') {
+      return;
+    }
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1301,7 +1305,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _deleteOrVoidInvoice() async {
-    if (_estimate || _detail == null || _busy) return;
+    if (!widget.isOwner || _estimate || _detail == null || _busy) return;
 
     final finalizedPaid = _number(_detail!['paid_amount']);
     final pendingPaid = _number(_detail!['pending_payment']);
@@ -2579,8 +2583,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                       _deletePayment(payment);
                                     }
                                   },
-                                  itemBuilder: (_) => const [
-                                    PopupMenuItem(
+                                  itemBuilder: (_) => [
+                                    const PopupMenuItem(
                                       value: 'edit',
                                       child: ListTile(
                                         dense: true,
@@ -2589,15 +2593,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                         title: Text('Edit payment'),
                                       ),
                                     ),
-                                    PopupMenuItem(
-                                      value: 'remove',
-                                      child: ListTile(
-                                        dense: true,
-                                        contentPadding: EdgeInsets.zero,
-                                        leading: Icon(Icons.delete_outline),
-                                        title: Text('Remove payment'),
+                                    if (widget.isOwner)
+                                      const PopupMenuItem(
+                                        value: 'remove',
+                                        child: ListTile(
+                                          dense: true,
+                                          contentPadding: EdgeInsets.zero,
+                                          leading: Icon(Icons.delete_outline),
+                                          title: Text('Remove payment'),
+                                        ),
                                       ),
-                                    ),
                                   ],
                                 ),
                               ],
@@ -2934,7 +2939,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       title: Text('Create invoice'),
                     ),
                   ),
-                if (!_estimate)
+                if (!_estimate && widget.isOwner)
                   const PopupMenuItem(
                     value: 'delete',
                     child: ListTile(
