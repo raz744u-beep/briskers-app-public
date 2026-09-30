@@ -359,21 +359,6 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<int>(
-            initialValue: _durationMinutes,
-            decoration: const InputDecoration(labelText: 'Appointment length'),
-            items: const [
-              DropdownMenuItem(value: 30, child: Text('30 minutes')),
-              DropdownMenuItem(value: 60, child: Text('1 hour')),
-              DropdownMenuItem(value: 90, child: Text('1.5 hours')),
-              DropdownMenuItem(value: 120, child: Text('2 hours')),
-              DropdownMenuItem(value: 180, child: Text('3 hours')),
-            ],
-            onChanged: (value) {
-              if (value != null) setState(() => _durationMinutes = value);
-            },
-          ),
-          const SizedBox(height: 12),
           DropdownButtonFormField<String?>(
             initialValue: _employeeId,
             isExpanded: true,
