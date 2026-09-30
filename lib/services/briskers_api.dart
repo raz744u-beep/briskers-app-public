@@ -1592,6 +1592,21 @@ class BriskersApi {
     );
   }
 
+  Future<void> setAppointmentStatus(
+    String businessId,
+    String appointmentId,
+    String status,
+  ) async {
+    await supabase.rpc(
+      'briskers_set_appointment_status',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+        'p_status': status,
+      },
+    );
+  }
+
   Future<void> cancelAppointment(
     String businessId,
     String appointmentId,
