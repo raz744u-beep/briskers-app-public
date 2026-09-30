@@ -155,11 +155,11 @@ class _ShellScreenState extends State<ShellScreen> {
       appBar: AppBar(
         backgroundColor: activeColor.withValues(alpha: 0.08),
         titleSpacing: 10,
-        toolbarHeight: 72,
+        toolbarHeight: 78,
         title: BriskersPageTitle(
           title: pageTitles[_index],
-          logoHeight: 40,
-          logoWidth: 112,
+          logoHeight: 44,
+          logoWidth: 148,
         ),
         actions: [
           if (widget.roleCode.isNotEmpty)
