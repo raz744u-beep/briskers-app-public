@@ -159,6 +159,10 @@ jobs:
         working-directory: generated
         run: flutter pub get
 
+      - name: Generate local database code
+        working-directory: generated
+        run: dart run build_runner build --delete-conflicting-outputs
+
       - name: Analyze Dart
         working-directory: generated
         run: flutter analyze
