@@ -26,6 +26,21 @@ class LocalJobRepository {
 
   final BriskersLocalDatabase _database;
 
+  Future<bool> hasJobBootstrap(String businessId) async {
+    final rows = await _database.customSelect(
+      '''
+      SELECT bootstrapped
+      FROM local_sync_states
+      WHERE business_id = ? AND scope = 'jobs'
+      LIMIT 1
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
+    return rows.isNotEmpty &&
+        rows.first.read<int>('bootstrapped') == 1;
+  }
+
   Future<List<Map<String, dynamic>>> listJobs(
     String businessId,
   ) async {
