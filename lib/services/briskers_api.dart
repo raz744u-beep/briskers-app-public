@@ -108,6 +108,14 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<int> customerTotal(String businessId) async {
+    final result = await supabase.rpc(
+      'briskers_customer_total',
+      params: {'p_business_id': businessId},
+    );
+    return int.tryParse(result.toString()) ?? 0;
+  }
+
   Future<List<Map<String, dynamic>>> customers(
     String businessId, {
     String? search,
