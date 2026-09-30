@@ -415,7 +415,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     } else if (upper.contains('CHEVROLET') || upper.contains('CHEVY')) {
       mark = '✚';
     } else {
-      mark = clean.isEmpty ? 'CAR' : upper.substring(0, upper.length.clamp(1, 3));
+      mark = clean.isEmpty ? 'CAR' : upper.substring(0, upper.length > 3 ? 3 : upper.length);
     }
 
     return Container(
