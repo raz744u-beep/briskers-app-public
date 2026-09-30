@@ -578,6 +578,12 @@ class OfflinePreInspectionService {
       bytes: bytes,
     );
 
+    await _api.updateJobPreInspectionPhotoNote(
+      businessId,
+      photoId,
+      payload['note']?.toString() ?? '',
+    );
+
     await _database.transaction(() async {
       final inspection = await _inspectionRow(businessId, jobId);
       if (inspection == null) {
