@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
 import '../services/briskers_api.dart';
+import '../widgets/briskers_page_header.dart';
 import 'expenses/expense_detail_screen.dart';
 import 'expenses/expense_entry_screen.dart';
 import 'settings/expense_settings_screen.dart';
@@ -371,8 +372,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: BriskersColors.expenses.withValues(alpha: 0.10),
-        title: const Text('Expenses & income'),
+        toolbarHeight: 68,
+        backgroundColor: const Color(0xFFC62828).withValues(alpha: 0.08),
+        title: const BriskersPageTitle(
+          title: 'Expenses & income',
+          logoHeight: 40,
+        ),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _importing ? null : _showAddMenu,
