@@ -137,10 +137,14 @@ class JobSyncService {
 
     final vehicleId = _text(job['vehicle_id']);
 
+    final preserveInspection =
+        await _hasDirtyInspection(businessId, jobId);
+
     await _removeJobChildren(
       businessId,
       jobId,
       keepJob: true,
+      preserveInspection: preserveInspection,
     );
 
     final capabilities = job['capabilities'] is Map
@@ -297,7 +301,7 @@ class JobSyncService {
     }
 
     final rawInspection = bundle['pre_inspection'];
-    if (rawInspection is Map) {
+    if (!preserveInspection && rawInspection is Map) {
       final inspection = Map<String, dynamic>.from(rawInspection);
       final inspectionId = inspection['id']?.toString() ?? '';
       if (inspectionId.isNotEmpty) {
@@ -468,26 +472,65 @@ class JobSyncService {
     }
   }
 
+  Future<bool> _hasDirtyInspection(
+    String businessId,
+    String jobId,
+  ) async {
+    final row = await _database.customSelect(
+      '''
+      SELECT
+        EXISTS(
+          SELECT 1
+          FROM local_pre_inspections
+          WHERE business_id = ?
+            AND job_id = ?
+            AND sync_state IN ('pending','conflict')
+        )
+        OR EXISTS(
+          SELECT 1
+          FROM local_pre_inspection_photos p
+          JOIN local_pre_inspections i
+            ON i.id = p.inspection_id
+           AND i.business_id = p.business_id
+          WHERE i.business_id = ?
+            AND i.job_id = ?
+            AND p.upload_state <> 'synced'
+        ) AS dirty
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(jobId),
+        Variable<String>(businessId),
+        Variable<String>(jobId),
+      ],
+    ).getSingle();
+
+    return row.read<int>('dirty') == 1;
+  }
+
   Future<void> _removeJobChildren(
     String businessId,
     String jobId, {
     required bool keepJob,
+    bool preserveInspection = false,
   }) async {
-    await _database.customStatement(
-      '''
-      DELETE FROM local_pre_inspection_photos
-      WHERE business_id = ?
-        AND inspection_id IN (
-          SELECT id FROM local_pre_inspections
-          WHERE business_id = ? AND job_id = ?
-        )
-      ''',
-      [businessId, businessId, jobId],
-    );
-    await _database.customStatement(
-      'DELETE FROM local_pre_inspections WHERE business_id = ? AND job_id = ?',
-      [businessId, jobId],
-    );
+    if (!preserveInspection) {
+      await _database.customStatement(
+        '''
+        DELETE FROM local_pre_inspection_photos
+        WHERE business_id = ?
+          AND inspection_id IN (
+            SELECT id FROM local_pre_inspections
+            WHERE business_id = ? AND job_id = ?
+          )
+        ''',
+        [businessId, businessId, jobId],
+      );
+      await _database.customStatement(
+        'DELETE FROM local_pre_inspections WHERE business_id = ? AND job_id = ?',
+        [businessId, jobId],
+      );
+    }
     await _database.customStatement(
       'DELETE FROM local_job_visits WHERE business_id = ? AND job_id = ?',
       [businessId, jobId],
