@@ -47,8 +47,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final ScrollController _dashboardScrollController = ScrollController();
   final GlobalKey _jobsSectionKey = GlobalKey();
   double? _jobsRestoreOffset;
-  int _estimateCount = 0;
-  int _invoiceCount = 0;
+  int _estimateAttention = 0;
+  int _invoiceAttention = 0;
   DateTime _selectedDay = DateTime.now();
   DateTime _calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
   Set<String> _eventDays = <String>{};
@@ -98,8 +98,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _eventDays = (results[2] as List<DateTime>)
             .map((day) => DateFormat('yyyy-MM-dd').format(day))
             .toSet();
-        _estimateCount = (results[3] as List).length;
-        _invoiceCount = (results[4] as List).length;
+        final estimates =
+            List<Map<String, dynamic>>.from(results[3] as List);
+        final invoices =
+            List<Map<String, dynamic>>.from(results[4] as List);
+        _estimateAttention = estimates.where((row) {
+          final status = row['status']?.toString() ?? '';
+          return row['converted'] != true &&
+              !{'accepted', 'declined', 'expired', 'void'}.contains(status);
+        }).length;
+        _invoiceAttention = invoices.where((row) {
+          final status = row['display_status_code']?.toString() ?? '';
+          return status != 'paid' && status != 'void';
+        }).length;
         _error = null;
       });
     } catch (error) {
@@ -1492,7 +1503,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Expanded(
                       child: _DashboardActionTile(
                         label: 'Estimates',
-                        count: _estimateCount,
+                        attentionCount: _estimateAttention,
                         icon: Icons.request_quote_outlined,
                         color: BriskersColors.estimates,
                         expanded: _expandedAction == 'estimate',
@@ -1503,7 +1514,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Expanded(
                       child: _DashboardActionTile(
                         label: 'Invoices',
-                        count: _invoiceCount,
+                        attentionCount: _invoiceAttention,
                         icon: Icons.receipt_long_outlined,
                         color: BriskersColors.invoices,
                         expanded: _expandedAction == 'invoice',
@@ -1523,7 +1534,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Expanded(
                       child: _DashboardActionTile(
                         label: 'Appointments',
-                        count: appointments.length,
+                        attentionCount: appointments.length,
                         icon: Icons.calendar_month_outlined,
                         color: BriskersColors.appointments,
                         expanded: _expandedAction == 'appointment',
@@ -1632,7 +1643,7 @@ class _DashboardActionTile extends StatelessWidget {
     required this.color,
     required this.expanded,
     required this.onExpand,
-    this.count,
+    this.attentionCount,
   });
 
   final String label;
@@ -1640,7 +1651,7 @@ class _DashboardActionTile extends StatelessWidget {
   final Color color;
   final bool expanded;
   final VoidCallback onExpand;
-  final int? count;
+  final int? attentionCount;
 
   @override
   Widget build(BuildContext context) {
@@ -1686,14 +1697,16 @@ class _DashboardActionTile extends StatelessWidget {
                           ),
                         ),
                       ),
-                      if (count != null) ...[
-                        const SizedBox(width: 6),
-                        Text(
-                          '$count',
-                          style: TextStyle(
-                            color: color,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w900,
+                      if ((attentionCount ?? 0) > 0) ...[
+                        const SizedBox(width: 7),
+                        Badge(
+                          backgroundColor: const Color(0xFFC62828),
+                          textColor: Colors.white,
+                          label: Text(
+                            '$attentionCount',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
                       ],
@@ -1745,7 +1758,7 @@ class _DashboardActionDrawer extends StatelessWidget {
                 leading: Icon(action.icon, color: color),
                 title: Text(
                   action.label,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                  style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: action.onTap,
