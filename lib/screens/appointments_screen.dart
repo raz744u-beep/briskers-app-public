@@ -164,6 +164,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   }
 
   Future<void> _deleteAppointment(Map<String, dynamic> item) async {
+    if (widget.roleCode != 'owner') return;
     final ok = await _confirm(
       title: 'Delete appointment?',
       message:
@@ -240,7 +241,8 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final canEdit =
         {'confirmed', 'tentative'}.contains(status) && item['job_id'] == null;
     final canCancel = canEdit;
-    final canDelete = item['job_id'] == null &&
+    final canDelete = widget.roleCode == 'owner' &&
+        item['job_id'] == null &&
         item['request_id'] == null &&
         {'confirmed', 'tentative', 'cancelled', 'no_show'}.contains(status);
 
