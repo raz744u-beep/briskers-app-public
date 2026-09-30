@@ -21,6 +21,7 @@ void main() {
     expect(names, contains('local_vehicles'));
     expect(names, contains('local_customer_vehicles'));
     expect(names, contains('local_appointments'));
+    expect(names, contains('local_appointments'));
 
     await database.close();
   });
