@@ -1,0 +1,107 @@
+import 'package:drift/drift.dart';
+
+import '../local/briskers_local_database.dart';
+import '../local/local_database_provider.dart';
+
+class LocalAppointmentRepository {
+  LocalAppointmentRepository({
+    BriskersLocalDatabase? database,
+  }) : _database = database ?? localDatabase;
+
+  final BriskersLocalDatabase _database;
+
+  Future<bool> hasBootstrap(String businessId) async {
+    final rows = await _database.customSelect(
+      '''
+      SELECT bootstrapped
+      FROM local_sync_states
+      WHERE business_id = ? AND scope = 'appointments'
+      LIMIT 1
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
+    return rows.isNotEmpty &&
+        rows.first.read<int>('bootstrapped') == 1;
+  }
+
+  Future<List<Map<String, dynamic>>> appointments(
+    String businessId,
+  ) async {
+    final rows = await _database.customSelect(
+      '''
+      SELECT *
+      FROM local_appointments
+      WHERE business_id = ?
+      ORDER BY starts_at, id
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
+    return rows.map(_mapRow).toList();
+  }
+
+  Future<Map<String, dynamic>?> appointment(
+    String businessId,
+    String appointmentId,
+  ) async {
+    final rows = await _database.customSelect(
+      '''
+      SELECT *
+      FROM local_appointments
+      WHERE business_id = ? AND id = ?
+      LIMIT 1
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(appointmentId),
+      ],
+    ).get();
+
+    return rows.isEmpty ? null : _mapRow(rows.first);
+  }
+
+  Map<String, dynamic> _mapRow(QueryRow row) {
+    return <String, dynamic>{
+      'id': row.read<String>('id'),
+      'customer_id': row.read<String>('customer_id'),
+      'vehicle_id': row.readNullable<String>('vehicle_id'),
+      'employee_id': row.readNullable<String>('employee_id'),
+      'job_id': row.readNullable<String>('job_id'),
+      'request_id': row.readNullable<String>('request_id'),
+      'starts_at': _isoFromDb(row.data['starts_at']),
+      'ends_at': _isoFromDb(row.data['ends_at']),
+      'status': row.read<String>('status'),
+      'title': row.read<String>('title'),
+      'description': row.readNullable<String>('description'),
+      'customer': row.readNullable<String>('customer_name'),
+      'vehicle_year': row.readNullable<int>('vehicle_year'),
+      'vehicle_make': row.readNullable<String>('vehicle_make'),
+      'vehicle_model': row.readNullable<String>('vehicle_model'),
+      'vehicle': row.readNullable<String>('vehicle_label'),
+      'mechanic': row.readNullable<String>('mechanic_name'),
+      'can_check_in': row.read<int>('can_check_in') == 1,
+      'updated_at':
+          _isoFromDb(row.data['server_updated_at']),
+      'row_version': row.readNullable<int>('row_version'),
+      'sync_state': row.read<String>('sync_state'),
+      '_local_snapshot': true,
+    };
+  }
+
+  String? _isoFromDb(Object? value) {
+    if (value == null) return null;
+    if (value is DateTime) {
+      return value.toUtc().toIso8601String();
+    }
+    if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(
+        value * 1000,
+        isUtc: true,
+      ).toIso8601String();
+    }
+    return DateTime.tryParse(value.toString())
+        ?.toUtc()
+        .toIso8601String();
+  }
+}

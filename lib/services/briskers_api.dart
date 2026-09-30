@@ -247,6 +247,42 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> syncPullAppointments(
+    String businessId, {
+    int? afterCursor,
+    String? afterAppointmentId,
+    int limit = 250,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_pull_appointments_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_after_cursor': afterCursor,
+        'p_after_appointment_id': afterAppointmentId,
+        'p_limit': limit,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> syncCheckInAppointment(
+    String businessId,
+    String appointmentId, {
+    required String operationId,
+    required int? expectedRowVersion,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_check_in_appointment_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+        'p_operation_id': operationId,
+        'p_expected_row_version': expectedRowVersion,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> aiCommand(
     String businessId,
     String command,

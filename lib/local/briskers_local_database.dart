@@ -92,6 +92,36 @@ class LocalCustomerVehicles extends Table {
       {businessId, customerId, vehicleId};
 }
 
+class LocalAppointments extends Table {
+  TextColumn get id => text()();
+  TextColumn get businessId => text()();
+  TextColumn get customerId => text()();
+  TextColumn get vehicleId => text().nullable()();
+  TextColumn get employeeId => text().nullable()();
+  TextColumn get jobId => text().nullable()();
+  TextColumn get requestId => text().nullable()();
+  DateTimeColumn get startsAt => dateTime()();
+  DateTimeColumn get endsAt => dateTime()();
+  TextColumn get status => text()();
+  TextColumn get title => text()();
+  TextColumn get description => text().nullable()();
+  TextColumn get customerName => text().nullable()();
+  IntColumn get vehicleYear => integer().nullable()();
+  TextColumn get vehicleMake => text().nullable()();
+  TextColumn get vehicleModel => text().nullable()();
+  TextColumn get vehicleLabel => text().nullable()();
+  TextColumn get mechanicName => text().nullable()();
+  BoolColumn get canCheckIn =>
+      boolean().withDefault(const Constant(false))();
+  DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
+  IntColumn get rowVersion => integer().nullable()();
+  TextColumn get syncState =>
+      text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
 class LocalJobs extends Table {
   TextColumn get id => text()();
   TextColumn get businessId => text()();
@@ -281,6 +311,7 @@ class LocalFindings extends Table {
     LocalCustomers,
     LocalVehicles,
     LocalCustomerVehicles,
+    LocalAppointments,
     LocalJobs,
     LocalJobStatuses,
     LocalJobAssignments,
@@ -305,7 +336,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -343,6 +374,9 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
             await migrator.createTable(localCustomers);
             await migrator.createTable(localVehicles);
             await migrator.createTable(localCustomerVehicles);
+          }
+          if (from < 5) {
+            await migrator.createTable(localAppointments);
           }
         },
       );
