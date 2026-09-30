@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
@@ -441,6 +444,59 @@ class JobSyncService {
         ? null
         : rows.first.readNullable<String>('vehicle_id');
 
+    final photoRows = await _database.customSelect(
+      '''
+      SELECT p.local_file_path
+      FROM local_pre_inspection_photos p
+      JOIN local_pre_inspections i
+        ON i.business_id = p.business_id
+       AND i.id = p.inspection_id
+      WHERE i.business_id = ?
+        AND i.job_id = ?
+        AND p.local_file_path IS NOT NULL
+        AND p.local_file_path <> ''
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(jobId),
+      ],
+    ).get();
+
+    final localFiles = photoRows
+        .map((row) => row.readNullable<String>('local_file_path'))
+        .whereType<String>()
+        .toSet();
+
+    final outboxRows = await _database.customSelect(
+      '''
+      SELECT id, payload_json
+      FROM sync_outbox
+      WHERE business_id = ?
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
+    final revokedOutboxIds = <int>[];
+    for (final row in outboxRows) {
+      try {
+        final payload = Map<String, dynamic>.from(
+          jsonDecode(row.read<String>('payload_json')) as Map,
+        );
+        if (payload['job_id']?.toString() == jobId) {
+          revokedOutboxIds.add(row.read<int>('id'));
+        }
+      } catch (_) {
+        // Malformed unrelated queue entries are left for normal error handling.
+      }
+    }
+
+    for (final id in revokedOutboxIds) {
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id = ?',
+        [id],
+      );
+    }
+
     await _removeJobChildren(
       businessId,
       jobId,
@@ -468,6 +524,15 @@ class JobSyncService {
           ''',
           [businessId, vehicleId],
         );
+      }
+    }
+
+    for (final path in localFiles) {
+      try {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      } catch (_) {
+        // Database access is already revoked. File cleanup is best-effort.
       }
     }
   }
