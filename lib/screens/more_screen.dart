@@ -22,30 +22,32 @@ class MoreScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final owner = roleCode == 'owner';
-    final canOpenSettings = roleCode == 'owner' || roleCode == 'manager';
+    final canOpenExpenses = roleCode == 'owner' || roleCode == 'manager';
+    final canOpenSettings = owner;
 
     return ListView(
       children: [
-        ListTile(
-          leading: const Icon(
-            Icons.receipt_long,
-            color: BriskersColors.expenses,
-          ),
-          title: const Text('Expenses & income'),
-          subtitle: const Text('Expenses, receipts and job costs'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ExpensesScreen(
-                  businessId: businessId,
-                  roleCode: roleCode,
+        if (canOpenExpenses)
+          ListTile(
+            leading: const Icon(
+              Icons.receipt_long,
+              color: BriskersColors.expenses,
+            ),
+            title: const Text('Expenses & income'),
+            subtitle: const Text('Expenses, receipts and job costs'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ExpensesScreen(
+                    businessId: businessId,
+                    roleCode: roleCode,
+                  ),
                 ),
-              ),
-            );
-          },
-        ),
+              );
+            },
+          ),
         const ListTile(
           leading: Icon(Icons.calendar_month, color: BriskersColors.schedule),
           title: Text('Schedule'),
