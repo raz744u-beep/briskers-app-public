@@ -46,14 +46,28 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   String? _error;
   VoidCallback? _modalRefresh;
 
-  bool get _canManage =>
-      widget.roleCode == 'owner' ||
-      widget.roleCode == 'manager' ||
-      widget.roleCode == 'office';
+  bool _jobCapability(String key) {
+    final raw = _job?['capabilities'];
+    if (raw is! Map) return false;
+    return raw[key] == true;
+  }
 
-  bool get _canSeeFinancial => _canManage;
-  bool get _mechanic => widget.roleCode == 'mechanic';
-  bool get _canEditFindings => _canManage || _mechanic;
+  bool get _canManage => _job == null
+      ? widget.roleCode == 'owner' ||
+          widget.roleCode == 'manager' ||
+          widget.roleCode == 'office'
+      : _jobCapability('manage_job');
+
+  bool get _canSeeFinancial => _job == null
+      ? widget.roleCode == 'owner' ||
+          widget.roleCode == 'manager' ||
+          widget.roleCode == 'office'
+      : _jobCapability('view_financial');
+
+  bool get _canRequestJob => _jobCapability('request_job');
+  bool get _canEditWork => _jobCapability('edit_work');
+  bool get _canEditFindings => _jobCapability('edit_findings');
+  bool get _canEditInspection => _jobCapability('edit_inspection');
   bool get _owner => widget.roleCode == 'owner';
 
   @override
@@ -72,6 +86,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     try {
       final job = await _api.jobDetail(widget.businessId, widget.jobId);
       final statuses = await _api.jobStatuses(widget.businessId);
+      final rawCapabilities = job['capabilities'];
+      final capabilities = rawCapabilities is Map
+          ? Map<String, dynamic>.from(rawCapabilities)
+          : const <String, dynamic>{};
+      bool capability(String key) => capabilities[key] == true;
+      final canManage = capability('manage_job');
+      final canSeeFinancial = capability('view_financial');
 
       List<Map<String, dynamic>> employees = const [];
       List<Map<String, dynamic>> documents = const [];
@@ -80,7 +101,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       Map<String, dynamic>? profitability;
       Map<String, dynamic>? preInspection;
 
-      if (_canManage) {
+      if (canManage) {
         try {
           employees = await _api.assignableEmployees(widget.businessId);
         } catch (_) {
@@ -88,7 +109,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         }
       }
 
-      if (_canSeeFinancial) {
+      if (canSeeFinancial) {
         try {
           documents = await _api.jobDocuments(
             widget.businessId,
@@ -691,7 +712,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _requestJob() async {
-    if (!_mechanic) return;
+    if (!_canRequestJob) return;
     await _run(() async {
       await _api.requestJobAssignment(widget.businessId, widget.jobId);
       if (mounted) {
@@ -736,6 +757,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _editWorkSummary() async {
+    if (!_canEditWork) return;
     final visits = List<dynamic>.from(_job?['visits'] ?? const []);
     if (visits.isEmpty || _busy) return;
     final current = Map<String, dynamic>.from(visits.first as Map);
@@ -762,7 +784,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _editPreInspectionDetails() async {
-    if (_job == null || _busy) return;
+    if (_job == null || _busy || !_canEditInspection) return;
     final mileage = TextEditingController(text: _preInspection?['odometer']?.toString() ?? _job?['odometer_in']?.toString() ?? '');
     final notes = TextEditingController(text: _preInspection?['notes']?.toString() ?? '');
     final save = await showModalBottomSheet<bool>(context: context, showDragHandle: true, isScrollControlled: true, builder: (sheetContext) => Padding(
@@ -784,7 +806,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _addPreInspectionPhotos() async {
-    if (_busy) return;
+    if (_busy || !_canEditInspection) return;
     final source = await showModalBottomSheet<String>(context: context, showDragHandle: true, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
       ListTile(leading: const Icon(Icons.photo_camera_outlined), title: const Text('Take photo'), onTap: () => Navigator.pop(sheetContext, 'camera')),
       ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('Choose from gallery'), onTap: () => Navigator.pop(sheetContext, 'gallery')),
@@ -872,14 +894,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       hintText: 'Example: Oil leak visible around valve cover',
                     ),
                   ),
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Include on invoice notes'),
-                    value: includeOnInvoice,
-                    onChanged: (value) => setSheetState(
-                      () => includeOnInvoice = value == true,
+                  if (_canSeeFinancial)
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Include on invoice notes'),
+                      value: includeOnInvoice,
+                      onChanged: (value) => setSheetState(
+                        () => includeOnInvoice = value == true,
+                      ),
                     ),
-                  ),
                   if (photos.isNotEmpty)
                     Align(
                       alignment: Alignment.centerLeft,
@@ -973,7 +996,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _editFinding(Map<String, dynamic> finding) async {
-    if (!_canEditFindings || _busy) return;
+    if (finding['can_edit'] != true || _busy) return;
     final controller = TextEditingController(
       text: finding['body']?.toString() ?? '',
     );
@@ -1723,7 +1746,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     : () => _showFindingPhoto(attachment),
                 child: image,
               ),
-              if (_canEditFindings)
+              if (attachment['can_delete'] == true)
                 Positioned(
                   right: 0,
                   bottom: 0,
@@ -1853,7 +1876,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
-                if (_canEditFindings)
+                if (_canEditFindings || finding['can_edit'] == true || _owner)
                   PopupMenuButton<String>(
                     tooltip: 'Finding actions',
                     onSelected: (value) {
@@ -1862,14 +1885,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       if (value == 'delete') _deleteFinding(finding);
                     },
                     itemBuilder: (_) => [
-                      const PopupMenuItem(
-                        value: 'edit',
-                        child: Text('Edit finding'),
-                      ),
-                      const PopupMenuItem(
-                        value: 'photo',
-                        child: Text('Add photos'),
-                      ),
+                      if (finding['can_edit'] == true)
+                        const PopupMenuItem(
+                          value: 'edit',
+                          child: Text('Edit finding'),
+                        ),
+                      if (_canEditFindings)
+                        const PopupMenuItem(
+                          value: 'photo',
+                          child: Text('Add photos'),
+                        ),
                       if (_owner)
                         const PopupMenuItem(
                           value: 'delete',
@@ -2621,7 +2646,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   ? 'No work performed entered yet.'
                   : workSummary,
             ),
-            if (currentVisit != null && (_canManage || _mechanic)) ...[
+            if (currentVisit != null && _canEditWork) ...[
               const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerRight,
@@ -2748,10 +2773,26 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         title: Text(note.isEmpty ? 'No photo note' : note, maxLines: 2, overflow: TextOverflow.ellipsis),
         subtitle: captured.isEmpty ? null : Text(captured),
         onTap: bucket.isEmpty || key.isEmpty ? null : () => _showFindingPhoto(photo),
-        trailing: PopupMenuButton<String>(onSelected: (value) { if (value == 'note') _editPreInspectionPhotoNote(photo); if (value == 'delete') _deletePreInspectionPhoto(photo); }, itemBuilder: (_) => const [
-          PopupMenuItem(value: 'note', child: Text('Edit note')),
-          PopupMenuItem(value: 'delete', child: Text('Delete photo')),
-        ]),
+        trailing: (photo['can_edit_note'] == true || photo['can_delete'] == true)
+            ? PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'note') _editPreInspectionPhotoNote(photo);
+                  if (value == 'delete') _deletePreInspectionPhoto(photo);
+                },
+                itemBuilder: (_) => [
+                  if (photo['can_edit_note'] == true)
+                    const PopupMenuItem(
+                      value: 'note',
+                      child: Text('Edit note'),
+                    ),
+                  if (photo['can_delete'] == true)
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Delete photo'),
+                    ),
+                ],
+              )
+            : null,
       ),
     );
   }
@@ -2775,11 +2816,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ...photos.map(_preInspectionPhotoTile),
           ],
           const SizedBox(height: 6),
-          Row(children: [
-            Expanded(child: OutlinedButton.icon(onPressed: _busy ? null : _editPreInspectionDetails, icon: Icon(data == null ? Icons.play_arrow : Icons.edit_outlined), label: Text(data == null ? 'Start inspection' : 'Edit details'))),
-            const SizedBox(width: 8),
-            Expanded(child: FilledButton.icon(onPressed: _busy ? null : _addPreInspectionPhotos, icon: const Icon(Icons.add_a_photo_outlined), label: const Text('Add photos'))),
-          ]),
+          if (_canEditInspection)
+            Row(children: [
+              Expanded(child: OutlinedButton.icon(onPressed: _busy ? null : _editPreInspectionDetails, icon: Icon(data == null ? Icons.play_arrow : Icons.edit_outlined), label: Text(data == null ? 'Start inspection' : 'Edit details'))),
+              const SizedBox(width: 8),
+              Expanded(child: FilledButton.icon(onPressed: _busy ? null : _addPreInspectionPhotos, icon: const Icon(Icons.add_a_photo_outlined), label: const Text('Add photos'))),
+            ]),
         ]),
       ),
     );
@@ -3066,7 +3108,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             const SizedBox(height: 8),
             _completedPaymentBanner(),
           ],
-          if (_mechanic && unassigned) ...[
+          if (_canRequestJob && unassigned) ...[
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: _busy ? null : _requestJob,
