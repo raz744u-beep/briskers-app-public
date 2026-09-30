@@ -1,3 +1,5 @@
+import 'package:drift/drift.dart';
+
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
@@ -225,9 +227,9 @@ class JobSyncService {
         _text(primaryAssignment?['employee_name']),
         _text(primaryAssignment?['position']),
         isUnassigned ? 1 : 0,
-        _date(job['created_at'])?.toIso8601String(),
-        _date(job['completed_at'])?.toIso8601String(),
-        _date(job['updated_at'])?.toIso8601String(),
+        _unix(_date(job['created_at'])),
+        _unix(_date(job['completed_at'])),
+        _unix(_date(job['updated_at'])),
         _int(job['row_version']),
       ],
     );
@@ -254,8 +256,8 @@ class JobSyncService {
           employeeId,
           _text(assignment['employee_name']),
           _text(assignment['position']),
-          _date(assignment['assigned_at'])?.toIso8601String(),
-          _date(assignment['released_at'])?.toIso8601String(),
+          _unix(_date(assignment['assigned_at'])),
+          _unix(_date(assignment['released_at'])),
           _text(assignment['source']),
         ],
       );
@@ -286,9 +288,9 @@ class JobSyncService {
           _text(visit['reason']),
           _double(visit['planned_hours']) ?? 0,
           _text(visit['work_summary']),
-          _date(visit['opened_at'])?.toIso8601String(),
-          _date(visit['closed_at'])?.toIso8601String(),
-          _date(visit['updated_at'])?.toIso8601String(),
+          _unix(_date(visit['opened_at'])),
+          _unix(_date(visit['closed_at'])),
+          _unix(_date(visit['updated_at'])),
           _int(visit['row_version']),
         ],
       );
@@ -312,11 +314,11 @@ class JobSyncService {
             businessId,
             jobId,
             _text(inspection['vehicle_id']),
-            _date(inspection['inspected_at'])?.toIso8601String(),
+            _unix(_date(inspection['inspected_at'])),
             _double(inspection['odometer']),
             _text(inspection['notes']),
             _text(inspection['created_by']),
-            _date(inspection['updated_at'])?.toIso8601String(),
+            _unix(_date(inspection['updated_at'])),
             _int(inspection['row_version']),
           ],
         );
@@ -354,7 +356,7 @@ class JobSyncService {
               _text(photo['filename']),
               _text(photo['mime_type']),
               _int(photo['byte_size']),
-              _date(photo['captured_at'])?.toIso8601String(),
+              _unix(_date(photo['captured_at'])),
               _text(photo['note']),
               _text(photo['created_by']),
               photo['can_edit_note'] == true ? 1 : 0,
@@ -401,12 +403,12 @@ class JobSyncService {
             finding['body']?.toString() ?? '',
             finding['status']?.toString() ?? 'open',
             finding['include_on_invoice'] == true ? 1 : 0,
-            _date(finding['created_at'])?.toIso8601String(),
-            _date(finding['resolved_at'])?.toIso8601String(),
+            _unix(_date(finding['created_at'])),
+            _unix(_date(finding['resolved_at'])),
             _text(finding['created_by']),
             finding['can_edit'] == true ? 1 : 0,
             finding['can_delete'] == true ? 1 : 0,
-            _date(finding['updated_at'])?.toIso8601String(),
+            _unix(_date(finding['updated_at'])),
             _int(finding['row_version']),
           ],
         );
@@ -524,7 +526,7 @@ class JobSyncService {
         businessId,
         _scope,
         cursor,
-        DateTime.now().toUtc().toIso8601String(),
+        _unix(DateTime.now().toUtc()),
         error,
         bootstrapped ? 1 : 0,
       ],
@@ -544,4 +546,7 @@ class JobSyncService {
 
   DateTime? _date(Object? value) =>
       DateTime.tryParse(value?.toString() ?? '');
+
+  int? _unix(DateTime? value) =>
+      value == null ? null : value.toUtc().millisecondsSinceEpoch ~/ 1000;
 }
