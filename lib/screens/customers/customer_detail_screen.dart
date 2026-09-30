@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
+import '../../services/customer_vehicle_sync_service.dart';
+import '../../services/local_customer_repository.dart';
 import '../appointments/appointment_create_screen.dart';
 import '../jobs/job_create_screen.dart';
 import 'customer_account_section.dart';
@@ -30,8 +32,15 @@ class CustomerDetailScreen extends StatefulWidget {
 
 class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   static const _api = BriskersApi();
+  final CustomerVehicleSyncService _sync =
+      CustomerVehicleSyncService();
+  final LocalCustomerRepository _localCustomers =
+      LocalCustomerRepository();
+
   Map<String, dynamic>? _data;
   String? _error;
+  bool _onlineReady = false;
+  bool _showingLocal = false;
 
   @override
   void initState() {
@@ -40,23 +49,62 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _load() async {
+    var localShown = false;
+
     try {
-      final data = await _api.customerDetail(
+      final local = await _localCustomers.customerDetail(
         widget.businessId,
         widget.customerId,
       );
-      if (mounted) {
+      if (local != null && mounted) {
+        localShown = true;
         setState(() {
-          _data = data;
+          _data = local;
+          _showingLocal = true;
+          _onlineReady = false;
           _error = null;
         });
       }
+    } catch (_) {
+      // The online refresh below can still populate the local cache.
+    }
+
+    try {
+      await _sync.pull(widget.businessId);
+      final bootstrapped =
+          await _localCustomers.hasBootstrap(widget.businessId);
+      final local = await _localCustomers.customerDetail(
+        widget.businessId,
+        widget.customerId,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _data = local;
+        _onlineReady = bootstrapped && local != null;
+        _showingLocal = !_onlineReady && local != null;
+        _error = local == null
+            ? (bootstrapped
+                ? 'Customer not found.'
+                : 'Customer access is not available for this account.')
+            : null;
+      });
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (!mounted) return;
+      setState(() {
+        _onlineReady = false;
+        if (localShown) {
+          _showingLocal = true;
+          _error = null;
+        } else {
+          _error = error.toString();
+        }
+      });
     }
   }
 
   Future<void> _editCustomer(Map<String, dynamic> customer) async {
+    if (!_onlineReady) return;
     final saved = await Navigator.push<Map<String, dynamic>?>(
       context,
       MaterialPageRoute(
@@ -83,6 +131,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _editProblemFlag() async {
+    if (!_onlineReady) return;
     final customer = Map<String, dynamic>.from(
       _data?['customer'] ?? const {},
     );
@@ -151,6 +200,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _addVehicle() async {
+    if (!_onlineReady) return;
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -164,6 +214,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _editVehicle(Map<String, dynamic> vehicle) async {
+    if (!_onlineReady) return;
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -178,6 +229,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _scheduleAppointment() async {
+    if (!_onlineReady) return;
     final customer = Map<String, dynamic>.from(
       _data?['customer'] ?? const {},
     );
@@ -208,6 +260,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _createJob() async {
+    if (!_onlineReady) return;
     final customer = Map<String, dynamic>.from(
       _data?['customer'] ?? const {},
     );
@@ -255,6 +308,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _showQuickActions() async {
+    if (!_onlineReady) return;
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -383,7 +437,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           ],
         ),
       ),
-      floatingActionButton: _data == null
+      floatingActionButton: _data == null || !_onlineReady
           ? null
           : FloatingActionButton(
               onPressed: _showQuickActions,
@@ -401,6 +455,34 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  if (_showingLocal)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: BriskersColors.customers.withValues(
+                          alpha: 0.08,
+                        ),
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.cloud_off_outlined, size: 18),
+                          SizedBox(width: 7),
+                          Expanded(
+                            child: Text(
+                              'Showing saved customer and vehicle data • editing requires a connection',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   Card(
                     child: ListTile(
                       leading: const CircleAvatar(
@@ -433,12 +515,18 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                               padding: const EdgeInsets.only(top: 2),
                               child: Text('${customer['email']}'),
                             ),
-                          const SizedBox(height: 2),
-                          const Text('Tap to edit'),
+                          if (_onlineReady) ...[
+                            const SizedBox(height: 2),
+                            const Text('Tap to edit'),
+                          ],
                         ],
                       ),
-                      trailing: const Icon(Icons.edit_outlined),
-                      onTap: () => _editCustomer(customer),
+                      trailing: _onlineReady
+                          ? const Icon(Icons.edit_outlined)
+                          : null,
+                      onTap: _onlineReady
+                          ? () => _editCustomer(customer)
+                          : null,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -454,7 +542,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                             'Show a red flag beside this customer throughout Briskers.',
                           ),
                           value: customer['problem_flag'] == true,
-                          onChanged: (_) => _editProblemFlag(),
+                          onChanged:
+                              _onlineReady ? (_) => _editProblemFlag() : null,
                         ),
                         if (customer['problem_flag'] == true)
                           ListTile(
@@ -470,8 +559,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                                   ? 'Tap to add a reason'
                                   : customer['problem_flag_note'].toString(),
                             ),
-                            trailing: const Icon(Icons.edit_outlined),
-                            onTap: _editProblemFlag,
+                            trailing: _onlineReady
+                                ? const Icon(Icons.edit_outlined)
+                                : null,
+                            onTap:
+                                _onlineReady ? _editProblemFlag : null,
                           ),
                       ],
                     ),
@@ -481,34 +573,48 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     vehicles: vehicles,
                     onAdd: _addVehicle,
                     onEdit: _editVehicle,
+                    enabled: _onlineReady,
                   ),
-                  const SizedBox(height: 18),
-                  CustomerVehicleFindingsSection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
-                    vehicles: vehicles,
-                  ),
-                  const SizedBox(height: 18),
-                  CustomerNotesSection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
-                  ),
-                  const SizedBox(height: 18),
-                  CustomerAppointmentsSection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
-                  ),
-                  const SizedBox(height: 18),
-                  CustomerServiceHistorySection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
-                  ),
-                  const SizedBox(height: 18),
-                  CustomerAccountSection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
-                    onDeleted: () => Navigator.pop(context, true),
-                  ),
+                  if (_onlineReady) ...[
+                    const SizedBox(height: 18),
+                    CustomerVehicleFindingsSection(
+                      businessId: widget.businessId,
+                      customerId: widget.customerId,
+                      vehicles: vehicles,
+                    ),
+                    const SizedBox(height: 18),
+                    CustomerNotesSection(
+                      businessId: widget.businessId,
+                      customerId: widget.customerId,
+                    ),
+                    const SizedBox(height: 18),
+                    CustomerAppointmentsSection(
+                      businessId: widget.businessId,
+                      customerId: widget.customerId,
+                    ),
+                    const SizedBox(height: 18),
+                    CustomerServiceHistorySection(
+                      businessId: widget.businessId,
+                      customerId: widget.customerId,
+                    ),
+                    const SizedBox(height: 18),
+                    CustomerAccountSection(
+                      businessId: widget.businessId,
+                      customerId: widget.customerId,
+                      onDeleted: () =>
+                          Navigator.pop(context, true),
+                    ),
+                  ] else ...[
+                    const SizedBox(height: 18),
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text(
+                          'Customer notes, findings history, appointments, service history, and account actions are available when Briskers reconnects.',
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 96),
                 ],
               ),
