@@ -234,6 +234,11 @@ class AppointmentSyncService {
         );
       }
 
+      final jobId = appointment.readNullable<String>('job_id');
+      if (jobId != null && jobId.isNotEmpty) {
+        throw StateError('This appointment is already linked to a job.');
+      }
+
       final status = appointment.read<String>('status');
       if (status == 'cancelled' || status == 'no_show') {
         throw StateError('This appointment cannot be checked in.');
