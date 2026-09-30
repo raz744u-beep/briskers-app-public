@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core/supabase_config.dart';
 import '../services/briskers_api.dart';
+import '../services/appointment_sync_service.dart';
 import '../services/customer_vehicle_sync_service.dart';
 import '../services/job_sync_service.dart';
 import '../services/offline_preinspection_service.dart';
@@ -20,6 +21,8 @@ class BusinessGate extends StatefulWidget {
 class _BusinessGateState extends State<BusinessGate> {
   static const _api = BriskersApi();
   final JobSyncService _jobSync = JobSyncService();
+  final AppointmentSyncService _appointmentSync =
+      AppointmentSyncService();
   final CustomerVehicleSyncService _customerVehicleSync =
       CustomerVehicleSyncService();
   final OfflinePreInspectionService _offlineInspection =
@@ -78,9 +81,21 @@ class _BusinessGateState extends State<BusinessGate> {
     }
 
     try {
+      await _appointmentSync.flush(businessId);
+    } catch (_) {
+      // Queued check-ins stay local and retry on the next sync.
+    }
+
+    try {
       await _jobSync.pull(businessId);
     } catch (_) {
       // Existing online UI remains usable; the local pull retries later.
+    }
+
+    try {
+      await _appointmentSync.pull(businessId);
+    } catch (_) {
+      // The schedule keeps the previous local appointment snapshot.
     }
 
     try {
