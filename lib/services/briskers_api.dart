@@ -14,6 +14,16 @@ class BriskersApi {
         .toList();
   }
 
+  Future<List<String>> myPermissions(String businessId) async {
+    final result = await supabase.rpc(
+      'briskers_my_permissions',
+      params: {'p_business_id': businessId},
+    );
+    return List<dynamic>.from(result as List)
+        .map((value) => value.toString())
+        .toList();
+  }
+
   Future<Map<String, dynamic>> aiCommand(
     String businessId,
     String command,
