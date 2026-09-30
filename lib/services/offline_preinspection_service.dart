@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
-
 import 'package:drift/drift.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -590,11 +588,11 @@ class OfflinePreInspectionService {
         businessId,
         jobId,
         server['vehicle_id']?.toString(),
-        _unix(_parseDate(server['inspected_at'])),
+        _unixNullable(_parseDate(server['inspected_at'])),
         server['odometer'] as num?,
         _nullIfBlank(server['notes']?.toString()),
         server['created_by']?.toString(),
-        _unix(_parseDate(server['updated_at'])),
+        _unixNullable(_parseDate(server['updated_at'])),
         int.tryParse(server['row_version']?.toString() ?? ''),
       ],
     );
@@ -759,6 +757,9 @@ class OfflinePreInspectionService {
 
   int _unix(DateTime value) =>
       value.toUtc().millisecondsSinceEpoch ~/ 1000;
+
+  int? _unixNullable(DateTime? value) =>
+      value == null ? null : _unix(value);
 
   DateTime? _parseDate(Object? value) =>
       DateTime.tryParse(value?.toString() ?? '');
