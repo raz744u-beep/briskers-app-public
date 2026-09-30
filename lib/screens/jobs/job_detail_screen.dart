@@ -1116,7 +1116,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     Map<String, dynamic> finding,
     Map<String, dynamic> attachment,
   ) async {
-    if (!_canEditFindings || _busy) return;
+    if (!_owner || _busy) return;
     final attachmentId = attachment['attachment_id']?.toString() ?? '';
     if (attachmentId.isEmpty) return;
 
@@ -1154,7 +1154,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     Map<String, dynamic> finding,
     Map<String, dynamic> attachment,
   ) async {
-    if (!_canEditFindings || _busy) return;
+    if (!_owner || _busy) return;
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       showDragHandle: true,
