@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../core/supabase_config.dart';
 import '../services/briskers_api.dart';
+import '../services/job_sync_service.dart';
 import 'shell_screen.dart';
 
 class BusinessGate extends StatefulWidget {
@@ -13,6 +16,8 @@ class BusinessGate extends StatefulWidget {
 
 class _BusinessGateState extends State<BusinessGate> {
   static const _api = BriskersApi();
+  final JobSyncService _jobSync = JobSyncService();
+
   List<Map<String, dynamic>>? _businesses;
   String? _error;
 
@@ -30,6 +35,20 @@ class _BusinessGateState extends State<BusinessGate> {
           _businesses = businesses;
           _error = null;
         });
+      }
+
+      if (businesses.isNotEmpty) {
+        final business = businesses.first;
+        final businessId =
+            '${business['business_id'] ?? business['id'] ?? ''}';
+        if (businessId.isNotEmpty) {
+          unawaited(
+            _jobSync.pull(businessId).catchError((_) {
+              // Local sync is best-effort here. The existing online UI remains
+              // usable and the sync state records the failure for retry.
+            }),
+          );
+        }
       }
     } catch (error) {
       if (mounted) {
