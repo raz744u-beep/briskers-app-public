@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/briskers_colors.dart';
 import '../services/briskers_api.dart';
+import '../widgets/briskers_page_header.dart';
 import 'appointments_screen.dart';
 import 'customers/customers_screen.dart';
 import 'dashboard_screen.dart';
@@ -120,6 +121,7 @@ class _ShellScreenState extends State<ShellScreen> {
   @override
   Widget build(BuildContext context) {
     final activeColor = _sectionColors[_index];
+    const pageTitles = ['Dashboard', 'Customers', 'Appointments', 'Jobs', 'More'];
     final pages = [
       DashboardScreen(
         businessId: widget.businessId,
@@ -152,18 +154,11 @@ class _ShellScreenState extends State<ShellScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: activeColor.withValues(alpha: 0.08),
-        titleSpacing: 16,
-        title: SizedBox(
-          width: double.infinity,
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              _businessName,
-              maxLines: 1,
-              softWrap: false,
-            ),
-          ),
+        titleSpacing: 12,
+        toolbarHeight: 68,
+        title: BriskersPageTitle(
+          title: pageTitles[_index],
+          logoHeight: 42,
         ),
         actions: [
           if (widget.roleCode.isNotEmpty)
