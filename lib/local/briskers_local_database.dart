@@ -146,6 +146,28 @@ class LocalPreInspectionPhotos extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+class LocalFindingPhotos extends Table {
+  TextColumn get id => text()();
+  TextColumn get businessId => text()();
+  TextColumn get findingId => text()();
+  TextColumn get attachmentId => text()();
+  TextColumn get localFilePath => text().nullable()();
+  TextColumn get storageBucket => text().nullable()();
+  TextColumn get storageKey => text().nullable()();
+  TextColumn get filename => text().nullable()();
+  TextColumn get mimeType => text().nullable()();
+  IntColumn get byteSize => integer().nullable()();
+  DateTimeColumn get capturedAt => dateTime().nullable()();
+  BoolColumn get canDelete =>
+      boolean().withDefault(const Constant(false))();
+  TextColumn get uploadState =>
+      text().withDefault(const Constant('synced'))();
+  TextColumn get lastError => text().nullable()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
 class LocalFindings extends Table {
   TextColumn get id => text()();
   TextColumn get businessId => text()();
@@ -182,6 +204,7 @@ class LocalFindings extends Table {
     LocalPreInspections,
     LocalPreInspectionPhotos,
     LocalFindings,
+    LocalFindingPhotos,
   ],
 )
 class BriskersLocalDatabase extends _$BriskersLocalDatabase {
@@ -198,5 +221,17 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (migrator) async {
+          await migrator.createAll();
+        },
+        onUpgrade: (migrator, from, to) async {
+          if (from < 2) {
+            await migrator.createTable(localFindingPhotos);
+          }
+        },
+      );
 }
