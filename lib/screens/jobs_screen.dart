@@ -135,14 +135,7 @@ class _JobsScreenState extends State<JobsScreen> {
 
   List<Map<String, dynamic>> _availableStatusesFor(
     Map<String, dynamic> job,
-  ) {
-    if (job['status']?.toString() == 'completed') {
-      return _statuses
-          .where((status) => status['code']?.toString() == 'needs_recheck')
-          .toList();
-    }
-    return _statuses;
-  }
+  ) => _statuses;
 
   Widget _statusControl(Map<String, dynamic> job) {
     final color = colorFromHex(job['status_color']?.toString());
