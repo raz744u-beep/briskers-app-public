@@ -114,6 +114,71 @@ class _FakeCustomerVehicleApi extends BriskersApi {
   }
 }
 
+class _DirtyCustomerVehicleApi extends BriskersApi {
+  @override
+  Future<Map<String, dynamic>> customerVehicleCapabilities(
+    String businessId,
+  ) async {
+    return {
+      'customers_read': true,
+      'customers_create': true,
+      'customers_edit': true,
+      'vehicles_create': true,
+      'vehicles_edit': true,
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> syncPullCustomersVehicles(
+    String businessId, {
+    int? afterCursor,
+    String? afterCustomerId,
+    int limit = 250,
+  }) async {
+    expect(afterCursor, 10);
+    return {
+      'mode': 'incremental',
+      'revoke_all': false,
+      'next_cursor': 11,
+      'has_more': false,
+      'revoked_customer_ids': <dynamic>[],
+      'bundles': [
+        {
+          'customer': {
+            'id': 'customer-1',
+            'name': 'Server Name',
+            'display_name': 'Server Name',
+            'is_company': false,
+            'email': 'server@example.com',
+            'phone': '5045559999',
+            'list_email': 'server@example.com',
+            'list_phone': '5045559999',
+            'billing_address': <String, dynamic>{},
+            'taxable': true,
+            'problem_flag': false,
+            'problem_flag_note': '',
+            'updated_at': '2026-09-30T23:40:00Z',
+            'row_version': 4,
+          },
+          'contacts': <dynamic>[],
+          'vehicles': [
+            {
+              'id': 'vehicle-1',
+              'year': 2020,
+              'make': 'BMW',
+              'model': 'Server X5',
+              'mileage': 40000,
+              'updated_at': '2026-09-30T23:40:00Z',
+              'row_version': 3,
+              'is_primary': true,
+            },
+          ],
+        },
+      ],
+    };
+  }
+}
+
 void main() {
   test('customer vehicle sync bootstraps then revokes one customer', () async {
     final database = BriskersLocalDatabase(NativeDatabase.memory());
@@ -192,6 +257,104 @@ void main() {
       variables: [const Variable<String>('business-1')],
     ).getSingle();
     expect(vehicleRemaining.read<int>('count'), 0);
+
+    await database.close();
+  });
+
+  test('incremental pull preserves pending customer and vehicle edits',
+      () async {
+    final database = BriskersLocalDatabase(NativeDatabase.memory());
+
+    await database.customStatement(
+      '''
+      INSERT INTO local_sync_states (
+        business_id, scope, last_server_cursor,
+        metadata_json, bootstrapped
+      ) VALUES (?, 'customers_vehicles', 10, ?, 1)
+      ''',
+      [
+        'business-1',
+        '{"customers_read":true,"customers_create":true,"customers_edit":true,"vehicles_create":true,"vehicles_edit":true}',
+      ],
+    );
+    await database.customStatement(
+      '''
+      INSERT INTO local_customers (
+        id, business_id, display_name, email,
+        contacts_json, billing_address_json,
+        row_version, sync_state
+      ) VALUES (?, ?, ?, ?, '[]', '{}', 3, 'pending')
+      ''',
+      [
+        'customer-1',
+        'business-1',
+        'Offline Name',
+        'offline@example.com',
+      ],
+    );
+    await database.customStatement(
+      '''
+      INSERT INTO local_vehicles (
+        id, business_id, make, model, mileage,
+        row_version, sync_state
+      ) VALUES (?, ?, ?, ?, ?, 2, 'pending')
+      ''',
+      [
+        'vehicle-1',
+        'business-1',
+        'BMW',
+        'Offline X5',
+        50000,
+      ],
+    );
+    await database.customStatement(
+      '''
+      INSERT INTO local_customer_vehicles (
+        business_id, customer_id, vehicle_id, is_primary
+      ) VALUES (?, ?, ?, 1)
+      ''',
+      ['business-1', 'customer-1', 'vehicle-1'],
+    );
+
+    final sync = CustomerVehicleSyncService(
+      api: _DirtyCustomerVehicleApi(),
+      database: database,
+    );
+    await sync.pull('business-1');
+
+    final customer = await database.customSelect(
+      '''
+      SELECT display_name, email, row_version, sync_state
+      FROM local_customers
+      WHERE business_id = ? AND id = ?
+      ''',
+      variables: [
+        const Variable<String>('business-1'),
+        const Variable<String>('customer-1'),
+      ],
+    ).getSingle();
+
+    expect(customer.read<String>('display_name'), 'Offline Name');
+    expect(customer.read<String>('email'), 'offline@example.com');
+    expect(customer.read<int>('row_version'), 3);
+    expect(customer.read<String>('sync_state'), 'pending');
+
+    final vehicle = await database.customSelect(
+      '''
+      SELECT model, mileage, row_version, sync_state
+      FROM local_vehicles
+      WHERE business_id = ? AND id = ?
+      ''',
+      variables: [
+        const Variable<String>('business-1'),
+        const Variable<String>('vehicle-1'),
+      ],
+    ).getSingle();
+
+    expect(vehicle.read<String>('model'), 'Offline X5');
+    expect(vehicle.data['mileage'], 50000.0);
+    expect(vehicle.read<int>('row_version'), 2);
+    expect(vehicle.read<String>('sync_state'), 'pending');
 
     await database.close();
   });
