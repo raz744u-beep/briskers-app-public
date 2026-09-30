@@ -1547,6 +1547,77 @@ class BriskersApi {
     );
   }
 
+  Future<List<Map<String, dynamic>>> appointments(
+    String businessId, {
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_list_appointments',
+      params: {
+        'p_business_id': businessId,
+        'p_from': from?.toUtc().toIso8601String(),
+        'p_to': to?.toUtc().toIso8601String(),
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<void> updateAppointment(
+    String businessId,
+    String appointmentId, {
+    required String customerId,
+    String? vehicleId,
+    required String title,
+    String? description,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    String? employeeId,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_appointment',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_title': title,
+        'p_description': description,
+        'p_starts_at': startsAt.toUtc().toIso8601String(),
+        'p_ends_at': endsAt.toUtc().toIso8601String(),
+        'p_employee_id': employeeId,
+      },
+    );
+  }
+
+  Future<void> cancelAppointment(
+    String businessId,
+    String appointmentId,
+  ) async {
+    await supabase.rpc(
+      'briskers_cancel_appointment',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+      },
+    );
+  }
+
+  Future<void> deleteAppointment(
+    String businessId,
+    String appointmentId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_appointment',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+      },
+    );
+  }
+
   Future<String> createAppointment(
     String businessId, {
     required String customerId,
