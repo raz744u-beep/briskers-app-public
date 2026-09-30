@@ -36,6 +36,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   static const _api = BriskersApi();
+  static const _dashboardExpensesColor = Color(0xFFC62828);
 
   Map<String, dynamic>? _data;
   List<Map<String, dynamic>> _statuses = const [];
@@ -1461,7 +1462,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           );
         default:
           return _DashboardActionDrawer(
-            color: BriskersColors.expenses,
+            color: _dashboardExpensesColor,
             actions: [
               _DashboardDrawerAction(
                 icon: Icons.add_card_outlined,
@@ -1546,7 +1547,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: _DashboardActionTile(
                         label: 'Expenses',
                         icon: Icons.payments_outlined,
-                        color: BriskersColors.expenses,
+                        color: _dashboardExpensesColor,
                         expanded: _expandedAction == 'expense',
                         onExpand: () => _toggleAction('expense'),
                       ),
@@ -1747,7 +1748,7 @@ class _DashboardActionDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       margin: EdgeInsets.zero,
-      color: color.withValues(alpha: 0.055),
+      color: color.withValues(alpha: 0.10),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Column(
@@ -1758,7 +1759,10 @@ class _DashboardActionDrawer extends StatelessWidget {
                 leading: Icon(action.icon, color: color),
                 title: Text(
                   action.label,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: action.onTap,
