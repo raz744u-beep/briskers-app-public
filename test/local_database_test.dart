@@ -10,6 +10,13 @@ void main() {
         await database.customSelect('SELECT 1 AS ready').getSingle();
 
     expect(row.read<int>('ready'), 1);
+
+    final tables = await database.customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table'",
+    ).get();
+    final names = tables.map((row) => row.read<String>('name')).toSet();
+    expect(names, contains('local_finding_photos'));
+
     await database.close();
   });
 }
