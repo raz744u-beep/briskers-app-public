@@ -10,6 +10,8 @@ class LocalSyncStates extends Table {
   DateTimeColumn get lastPullAt => dateTime().nullable()();
   DateTimeColumn get lastPushAt => dateTime().nullable()();
   TextColumn get lastError => text().nullable()();
+  TextColumn get metadataJson =>
+      text().withDefault(const Constant('{}'))();
   BoolColumn get bootstrapped =>
       boolean().withDefault(const Constant(false))();
 
@@ -305,7 +307,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -343,6 +345,12 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
             await migrator.createTable(localCustomers);
             await migrator.createTable(localVehicles);
             await migrator.createTable(localCustomerVehicles);
+          }
+          if (from < 5) {
+            await migrator.addColumn(
+              localSyncStates,
+              localSyncStates.metadataJson,
+            );
           }
         },
       );
