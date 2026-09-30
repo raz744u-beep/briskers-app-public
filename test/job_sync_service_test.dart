@@ -99,6 +99,12 @@ void main() {
     );
     final staged = File('${temp.path}/queued.jpg');
     await staged.writeAsBytes([1, 2, 3], flush: true);
+    final syncedFindingPhoto =
+        File('${temp.path}/synced-finding.jpg');
+    await syncedFindingPhoto.writeAsBytes(
+      [4, 5, 6],
+      flush: true,
+    );
 
     await database.customStatement(
       '''
@@ -128,6 +134,41 @@ void main() {
         'local-photo',
         staged.path,
         'queued.jpg',
+        'image/jpeg',
+      ],
+    );
+
+    await database.customStatement(
+      '''
+      INSERT INTO local_findings (
+        id, business_id, vehicle_id, found_job_id,
+        body, status, include_on_invoice, created_at,
+        can_edit, can_delete, row_version, sync_state
+      ) VALUES (?, ?, ?, ?, ?, 'open', 0, ?, 1, 0, 1, 'synced')
+      ''',
+      [
+        'finding-1',
+        'business-1',
+        'vehicle-1',
+        'job-1',
+        'Finding',
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+      ],
+    );
+    await database.customStatement(
+      '''
+      INSERT INTO local_finding_photos (
+        id, business_id, finding_id, attachment_id,
+        local_file_path, filename, mime_type, upload_state
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'synced')
+      ''',
+      [
+        'finding-photo-1',
+        'business-1',
+        'finding-1',
+        'finding-photo-1',
+        syncedFindingPhoto.path,
+        'synced-finding.jpg',
         'image/jpeg',
       ],
     );
@@ -192,6 +233,7 @@ void main() {
     ).getSingle();
     expect(remainingInspection.read<int>('count'), 0);
     expect(await staged.exists(), isFalse);
+    expect(await syncedFindingPhoto.exists(), isFalse);
 
     final syncState = await database.customSelect(
       '''
