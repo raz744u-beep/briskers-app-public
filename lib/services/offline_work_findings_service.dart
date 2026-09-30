@@ -519,7 +519,21 @@ class OfflineWorkFindingsService {
 
     var pushedAny = false;
 
-    for (final row in rows) {
+    for (final queuedRow in rows) {
+      final freshRows = await _database.customSelect(
+        '''
+        SELECT *
+        FROM sync_outbox
+        WHERE id = ? AND state = 'pending'
+        LIMIT 1
+        ''',
+        variables: [
+          Variable<int>(queuedRow.read<int>('id')),
+        ],
+      ).get();
+      if (freshRows.isEmpty) continue;
+
+      final row = freshRows.first;
       final type = row.read<String>('entity_type');
       try {
         bool handled = true;
