@@ -6,6 +6,7 @@ import '../core/supabase_config.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
 import '../services/offline_preinspection_service.dart';
+import '../services/offline_work_findings_service.dart';
 import 'shell_screen.dart';
 
 class BusinessGate extends StatefulWidget {
@@ -20,6 +21,8 @@ class _BusinessGateState extends State<BusinessGate> {
   final JobSyncService _jobSync = JobSyncService();
   final OfflinePreInspectionService _offlineInspection =
       OfflinePreInspectionService();
+  final OfflineWorkFindingsService _offlineWorkFindings =
+      OfflineWorkFindingsService();
 
   List<Map<String, dynamic>>? _businesses;
   String? _error;
@@ -63,6 +66,12 @@ class _BusinessGateState extends State<BusinessGate> {
       await _offlineInspection.flush(businessId);
     } catch (_) {
       // Offline writes stay queued and retry the next time the app can sync.
+    }
+
+    try {
+      await _offlineWorkFindings.flush(businessId);
+    } catch (_) {
+      // Work and Finding edits stay queued and retry on the next sync.
     }
 
     try {

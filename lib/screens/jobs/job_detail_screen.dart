@@ -11,6 +11,7 @@ import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/job_sync_service.dart';
 import '../../services/offline_preinspection_service.dart';
+import '../../services/offline_work_findings_service.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'job_document_screen.dart';
@@ -35,6 +36,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   static const _api = BriskersApi();
   final OfflinePreInspectionService _offlineInspection =
       OfflinePreInspectionService();
+  final OfflineWorkFindingsService _offlineWorkFindings =
+      OfflineWorkFindingsService();
   final JobSyncService _jobSync = JobSyncService();
 
   Map<String, dynamic>? _job;
@@ -156,6 +159,81 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       }
 
       try {
+        final serverCurrentVisit = await _api.currentVisitSync(
+          widget.businessId,
+          widget.jobId,
+        );
+        if (serverCurrentVisit != null) {
+          try {
+            await _offlineWorkFindings.seedCurrentVisitIfClean(
+              widget.businessId,
+              widget.jobId,
+              serverCurrentVisit,
+            );
+          } catch (_) {
+            // Keep the online job detail usable if local seeding fails.
+          }
+        }
+
+        final localCurrentVisit =
+            await _offlineWorkFindings.loadLocalCurrentVisit(
+          widget.businessId,
+          widget.jobId,
+        );
+
+        if (localCurrentVisit != null) {
+          final visits = List<dynamic>.from(
+            job['visits'] ?? const <dynamic>[],
+          ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+
+          final index = visits.indexWhere(
+            (visit) =>
+                visit['id']?.toString() ==
+                localCurrentVisit['id']?.toString(),
+          );
+
+          if (index >= 0) {
+            visits[index] = {
+              ...visits[index],
+              ...localCurrentVisit,
+            };
+          } else {
+            visits.insert(0, localCurrentVisit);
+          }
+          job['visits'] = visits;
+        }
+      } catch (_) {
+        try {
+          final localCurrentVisit =
+              await _offlineWorkFindings.loadLocalCurrentVisit(
+            widget.businessId,
+            widget.jobId,
+          );
+          if (localCurrentVisit != null) {
+            final visits = List<dynamic>.from(
+              job['visits'] ?? const <dynamic>[],
+            ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+            final index = visits.indexWhere(
+              (visit) =>
+                  visit['id']?.toString() ==
+                  localCurrentVisit['id']?.toString(),
+            );
+            if (index >= 0) {
+              visits[index] = {
+                ...visits[index],
+                ...localCurrentVisit,
+              };
+            } else {
+              visits.insert(0, localCurrentVisit);
+            }
+            job['visits'] = visits;
+          }
+        } catch (_) {
+          // Work Performed continues using the online job detail.
+        }
+      }
+
+      try {
         final serverPreInspection =
             await _api.jobPreInspection(widget.businessId, widget.jobId);
         if (serverPreInspection != null) {
@@ -210,13 +288,37 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
       final vehicleId = job['vehicle_id']?.toString();
       if (vehicleId != null && vehicleId.isNotEmpty) {
+        List<Map<String, dynamic>> serverFindings = const [];
         try {
-          findings = await _api.vehicleFindings(
+          serverFindings = await _api.vehicleFindingsSync(
             widget.businessId,
             vehicleId,
           );
+          try {
+            await _offlineWorkFindings.seedServerFindingsIfClean(
+              widget.businessId,
+              vehicleId,
+              serverFindings,
+            );
+          } catch (_) {
+            // Keep server findings visible if local seeding fails.
+          }
         } catch (_) {
-          findings = const [];
+          serverFindings = const [];
+        }
+
+        try {
+          final localFindings =
+              await _offlineWorkFindings.loadLocalFindings(
+            widget.businessId,
+            vehicleId,
+          );
+          findings = _mergeFindingLists(
+            serverFindings,
+            localFindings,
+          );
+        } catch (_) {
+          findings = serverFindings;
         }
       }
 
@@ -240,6 +342,121 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         _loading = false;
         _error = error.toString();
       });
+    }
+  }
+
+  List<Map<String, dynamic>> _mergeFindingLists(
+    List<Map<String, dynamic>> server,
+    List<Map<String, dynamic>> local,
+  ) {
+    final serverById = <String, Map<String, dynamic>>{
+      for (final finding in server)
+        if ((finding['id']?.toString() ?? '').isNotEmpty)
+          finding['id'].toString(): finding,
+    };
+
+    final merged = <Map<String, dynamic>>[];
+    final seen = <String>{};
+
+    for (final localFinding in local) {
+      final id = localFinding['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+      final serverFinding = serverById[id];
+      merged.add(
+        serverFinding == null
+            ? Map<String, dynamic>.from(localFinding)
+            : {
+                ...serverFinding,
+                ...localFinding,
+              },
+      );
+      seen.add(id);
+    }
+
+    for (final serverFinding in server) {
+      final id = serverFinding['id']?.toString() ?? '';
+      if (id.isEmpty || seen.contains(id)) continue;
+      merged.add(Map<String, dynamic>.from(serverFinding));
+    }
+
+    return merged;
+  }
+
+  Future<void> _refreshLocalWorkFindings() async {
+    final job = _job;
+    if (job == null) return;
+
+    try {
+      final localVisit =
+          await _offlineWorkFindings.loadLocalCurrentVisit(
+        widget.businessId,
+        widget.jobId,
+      );
+      if (localVisit != null && mounted) {
+        final visits = List<dynamic>.from(
+          job['visits'] ?? const <dynamic>[],
+        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        final index = visits.indexWhere(
+          (visit) =>
+              visit['id']?.toString() ==
+              localVisit['id']?.toString(),
+        );
+        if (index >= 0) {
+          visits[index] = {
+            ...visits[index],
+            ...localVisit,
+          };
+        } else {
+          visits.insert(0, localVisit);
+        }
+
+        setState(() {
+          _job = {
+            ...job,
+            'visits': visits,
+          };
+        });
+      }
+    } catch (_) {
+      // Keep the current Work Performed display if local refresh fails.
+    }
+
+    final vehicleId = job['vehicle_id']?.toString() ?? '';
+    if (vehicleId.isNotEmpty) {
+      try {
+        final localFindings =
+            await _offlineWorkFindings.loadLocalFindings(
+          widget.businessId,
+          vehicleId,
+        );
+        if (mounted) {
+          setState(() {
+            _findings = _mergeFindingLists(
+              _findings,
+              localFindings,
+            );
+          });
+        }
+      } catch (_) {
+        // Keep the current Finding list if local refresh fails.
+      }
+    }
+
+    _modalRefresh?.call();
+  }
+
+  Future<void> _flushWorkFindingsQueue() async {
+    try {
+      await _offlineWorkFindings.flush(widget.businessId);
+      try {
+        await _jobSync.pull(widget.businessId);
+      } catch (_) {
+        // The outbox is reconciled even if the follow-up pull must retry.
+      }
+    } catch (_) {
+      // Offline is expected. Work stays in the outbox for retry.
+    } finally {
+      await _refreshLocalWorkFindings();
     }
   }
 
@@ -860,11 +1077,34 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
     if (value == null) return;
 
-    await _run(() => _api.updateCurrentVisitWorkSummary(
-          widget.businessId,
-          widget.jobId,
-          workSummary: value,
-        ));
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      await _offlineWorkFindings.saveLocalWorkSummary(
+        widget.businessId,
+        widget.jobId,
+        workSummary: value,
+      );
+      await _refreshLocalWorkFindings();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Work Performed saved on this device.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+      unawaited(_flushWorkFindingsQueue());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   String _imageMime(String name) {
@@ -1150,7 +1390,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   Future<void> _addFinding() async {
     if (!_canEditFindings || _job == null || _busy) return;
-    if ((_job!['vehicle_id']?.toString() ?? '').isEmpty) {
+    final vehicleId = _job!['vehicle_id']?.toString() ?? '';
+    if (vehicleId.isEmpty) {
       setState(() => _error = 'Select a vehicle before adding a finding.');
       return;
     }
@@ -1181,7 +1422,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       'Add vehicle finding',
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -1192,7 +1436,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     maxLines: 7,
                     decoration: const InputDecoration(
                       labelText: 'Finding',
-                      hintText: 'Example: Oil leak visible around valve cover',
+                      hintText:
+                          'Example: Oil leak visible around valve cover',
                     ),
                   ),
                   if (_canSeeFinancial)
@@ -1211,7 +1456,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         photos.length == 1
                             ? '1 photo selected'
                             : '${photos.length} photos selected',
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   const SizedBox(height: 6),
@@ -1226,10 +1473,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                               maxHeight: 1920,
                             );
                             if (picked.isNotEmpty) {
-                              setSheetState(() => photos.addAll(picked));
+                              setSheetState(
+                                () => photos.addAll(picked),
+                              );
                             }
                           },
-                          icon: const Icon(Icons.photo_library_outlined),
+                          icon:
+                              const Icon(Icons.photo_library_outlined),
                           label: const Text('Gallery'),
                         ),
                       ),
@@ -1247,7 +1497,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                               setSheetState(() => photos.add(photo));
                             }
                           },
-                          icon: const Icon(Icons.photo_camera_outlined),
+                          icon:
+                              const Icon(Icons.photo_camera_outlined),
                           label: const Text('Camera'),
                         ),
                       ),
@@ -1277,23 +1528,50 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     controller.dispose();
     if (save != true || body.isEmpty) return;
 
-    await _run(() async {
-      final findingId = await _api.createVehicleFinding(
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      final localFinding =
+          await _offlineWorkFindings.createLocalFinding(
         widget.businessId,
         widget.jobId,
+        vehicleId: vehicleId,
         body: body,
         includeOnInvoice: includeOnInvoice,
       );
+      final localFindingId = localFinding['id'].toString();
+
       for (final photo in photos) {
-        await _api.uploadVehicleFindingPhoto(
+        await _offlineWorkFindings.stageFindingPhoto(
           widget.businessId,
-          findingId,
+          widget.jobId,
+          localFindingId,
           filename: photo.name,
           mimeType: _imageMime(photo.name),
           bytes: await photo.readAsBytes(),
         );
       }
-    });
+
+      await _refreshLocalWorkFindings();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Finding saved on this device.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+      unawaited(_flushWorkFindingsQueue());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _editFinding(Map<String, dynamic> finding) async {
@@ -1321,7 +1599,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Edit finding',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -1330,13 +1611,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 autofocus: true,
                 minLines: 3,
                 maxLines: 7,
-                decoration: const InputDecoration(labelText: 'Finding'),
+                decoration:
+                    const InputDecoration(labelText: 'Finding'),
               ),
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: () => Navigator.pop(sheetContext, true),
+                  onPressed: () =>
+                      Navigator.pop(sheetContext, true),
                   child: const Text('Save'),
                 ),
               ),
@@ -1348,14 +1631,31 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final body = controller.text.trim();
     controller.dispose();
     if (save != true || body.isEmpty) return;
-    await _run(() => _api.updateVehicleFinding(
-          widget.businessId,
-          finding['id'].toString(),
-          body: body,
-        ));
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      await _offlineWorkFindings.updateLocalFinding(
+        widget.businessId,
+        widget.jobId,
+        finding['id'].toString(),
+        body: body,
+      );
+      await _refreshLocalWorkFindings();
+      unawaited(_flushWorkFindingsQueue());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
-  Future<void> _addPhotosToFinding(Map<String, dynamic> finding) async {
+  Future<void> _addPhotosToFinding(
+    Map<String, dynamic> finding,
+  ) async {
     if (!_canEditFindings || _busy) return;
     final source = await showModalBottomSheet<String>(
       context: context,
@@ -1367,12 +1667,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
               title: const Text('Take photo'),
-              onTap: () => Navigator.pop(sheetContext, 'camera'),
+              onTap: () =>
+                  Navigator.pop(sheetContext, 'camera'),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
               title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(sheetContext, 'gallery'),
+              onTap: () =>
+                  Navigator.pop(sheetContext, 'gallery'),
             ),
           ],
         ),
@@ -1400,17 +1702,44 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
     if (photos.isEmpty) return;
 
-    await _run(() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
       for (final photo in photos) {
-        await _api.uploadVehicleFindingPhoto(
+        await _offlineWorkFindings.stageFindingPhoto(
           widget.businessId,
+          widget.jobId,
           finding['id'].toString(),
           filename: photo.name,
           mimeType: _imageMime(photo.name),
           bytes: await photo.readAsBytes(),
         );
       }
-    });
+
+      await _refreshLocalWorkFindings();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              photos.length == 1
+                  ? 'Finding photo saved on this device.'
+                  : '${photos.length} Finding photos saved on this device.',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+
+      unawaited(_flushWorkFindingsQueue());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _deleteFindingPhoto(
@@ -1976,6 +2305,55 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Future<void> _showFindingPhoto(
     Map<String, dynamic> attachment,
   ) async {
+    final localPath =
+        attachment['local_file_path']?.toString() ?? '';
+    if (localPath.isNotEmpty) {
+      final file = File(localPath);
+      if (file.existsSync()) {
+        if (!mounted) return;
+        await showDialog<void>(
+          context: context,
+          barrierColor: Colors.black87,
+          builder: (dialogContext) => Dialog(
+            insetPadding: const EdgeInsets.all(12),
+            backgroundColor: Colors.black,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: InteractiveViewer(
+                    minScale: 1,
+                    maxScale: 5,
+                    child: Center(
+                      child: Image.file(
+                        file,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) => const Icon(
+                          Icons.broken_image_outlined,
+                          color: Colors.white70,
+                          size: 56,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: IconButton.filled(
+                    tooltip: 'Close photo',
+                    onPressed: () =>
+                        Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
     final bucket = attachment['bucket']?.toString() ?? '';
     final key = attachment['key']?.toString() ?? '';
     if (bucket.isEmpty || key.isEmpty) return;
@@ -1999,8 +2377,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     child: Image.network(
                       url,
                       fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) =>
-                          const Icon(
+                      errorBuilder: (_, _, _) => const Icon(
                         Icons.broken_image_outlined,
                         color: Colors.white70,
                         size: 56,
@@ -2014,7 +2391,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 right: 6,
                 child: IconButton.filled(
                   tooltip: 'Close photo',
-                  onPressed: () => Navigator.pop(dialogContext),
+                  onPressed: () =>
+                      Navigator.pop(dialogContext),
                   icon: const Icon(Icons.close),
                 ),
               ),
@@ -2033,6 +2411,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   ) {
     final bucket = attachment['bucket']?.toString() ?? '';
     final key = attachment['key']?.toString() ?? '';
+    final localPath =
+        attachment['local_file_path']?.toString() ?? '';
+    final localFile =
+        localPath.isEmpty ? null : File(localPath);
+    final hasLocal = localFile?.existsSync() == true;
+    final uploadState =
+        attachment['upload_state']?.toString() ?? 'synced';
+    final waiting = uploadState != 'synced';
 
     Widget controls(Widget image) => SizedBox(
           width: 82,
@@ -2042,11 +2428,31 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             children: [
               InkWell(
                 borderRadius: BorderRadius.circular(9),
-                onTap: bucket.isEmpty || key.isEmpty
-                    ? null
-                    : () => _showFindingPhoto(attachment),
+                onTap: hasLocal ||
+                        (bucket.isNotEmpty && key.isNotEmpty)
+                    ? () => _showFindingPhoto(attachment)
+                    : null,
                 child: image,
               ),
+              if (waiting)
+                const Positioned(
+                  left: 4,
+                  bottom: 4,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Padding(
+                      padding: EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.cloud_upload_outlined,
+                        color: Colors.white,
+                        size: 15,
+                      ),
+                    ),
+                  ),
+                ),
               if (attachment['can_delete'] == true)
                 Positioned(
                   right: 0,
@@ -2057,7 +2463,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     child: PopupMenuButton<String>(
                       padding: EdgeInsets.zero,
                       iconSize: 18,
-                      color: Theme.of(context).colorScheme.surface,
+                      color:
+                          Theme.of(context).colorScheme.surface,
                       tooltip: 'Photo actions',
                       icon: const Icon(
                         Icons.more_vert,
@@ -2066,10 +2473,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       ),
                       onSelected: (value) {
                         if (value == 'replace') {
-                          _replaceFindingPhoto(finding, attachment);
+                          _replaceFindingPhoto(
+                            finding,
+                            attachment,
+                          );
                         }
                         if (value == 'delete') {
-                          _deleteFindingPhoto(finding, attachment);
+                          _deleteFindingPhoto(
+                            finding,
+                            attachment,
+                          );
                         }
                       },
                       itemBuilder: (_) => const [
@@ -2089,11 +2502,31 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           ),
         );
 
+    if (hasLocal) {
+      return controls(
+        ClipRRect(
+          borderRadius: BorderRadius.circular(9),
+          child: Image.file(
+            localFile!,
+            width: 82,
+            height: 82,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => const Center(
+              child: Icon(
+                Icons.broken_image_outlined,
+                color: Colors.deepOrange,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     if (bucket.isEmpty || key.isEmpty) {
       return controls(
         const Center(
           child: Icon(
-            Icons.broken_image_outlined,
+            Icons.photo_outlined,
             color: Colors.deepOrange,
           ),
         ),
@@ -2147,7 +2580,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       final repairJobId = finding['repair_job_id']?.toString() ?? '';
       final repairJob = finding['repair_job_number']?.toString() ?? '';
       final inThisJob = status == 'in_job' && repairJobId == widget.jobId;
-      final attachments = List<dynamic>.from(finding['attachments'] ?? const []);
+      final attachments =
+          List<dynamic>.from(finding['attachments'] ?? const []);
+      final syncState =
+          finding['sync_state']?.toString() ?? 'synced';
+      final conflict = syncState == 'conflict';
+      final pendingPhotos = attachments.any(
+        (raw) =>
+            raw is Map &&
+            (raw['upload_state']?.toString() ?? 'synced') !=
+                'synced',
+      );
+      final waiting = syncState == 'pending' || pendingPhotos;
+      final findingId = finding['id']?.toString() ?? '';
+      final serverReady = !findingId.startsWith('local-finding-') &&
+          finding['row_version'] != null &&
+          !conflict;
 
       return Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
@@ -2177,7 +2625,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
-                if (_canEditFindings || finding['can_edit'] == true || _owner)
+                if ((_canEditFindings && !conflict) ||
+                    (finding['can_edit'] == true && !conflict) ||
+                    (_owner && serverReady))
                   PopupMenuButton<String>(
                     tooltip: 'Finding actions',
                     onSelected: (value) {
@@ -2186,17 +2636,17 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       if (value == 'delete') _deleteFinding(finding);
                     },
                     itemBuilder: (_) => [
-                      if (finding['can_edit'] == true)
+                      if (finding['can_edit'] == true && !conflict)
                         const PopupMenuItem(
                           value: 'edit',
                           child: Text('Edit finding'),
                         ),
-                      if (_canEditFindings)
+                      if (_canEditFindings && !conflict)
                         const PopupMenuItem(
                           value: 'photo',
                           child: Text('Add photos'),
                         ),
-                      if (_owner)
+                      if (_owner && serverReady)
                         const PopupMenuItem(
                           value: 'delete',
                           child: Text('Delete finding'),
@@ -2205,6 +2655,29 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   ),
               ],
             ),
+            if (conflict)
+              const Padding(
+                padding: EdgeInsets.only(top: 5),
+                child: Text(
+                  'Sync conflict • local Finding is preserved',
+                  style: TextStyle(
+                    color: Colors.orange,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              )
+            else if (waiting)
+              const Padding(
+                padding: EdgeInsets.only(top: 5),
+                child: Text(
+                  'Saved locally • waiting to sync',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
             if (attachments.isNotEmpty) ...[
               const SizedBox(height: 6),
               Wrap(
@@ -2220,7 +2693,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     .toList(),
               ),
             ],
-            if (status == 'open' && _canManage)
+            if (status == 'open' && _canManage && serverReady)
               CheckboxListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
@@ -2236,7 +2709,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         if (value == true) _addFindingToJob(finding);
                       },
               )
-            else if (inThisJob && _canManage)
+            else if (inThisJob && _canManage && serverReady)
               CheckboxListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
@@ -2258,7 +2731,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               )
-            else if (status == 'resolved' && _canManage)
+            else if (status == 'resolved' &&
+                _canManage &&
+                serverReady)
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
@@ -2935,6 +3410,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     String workSummary,
     Map<String, dynamic>? currentVisit,
   ) {
+    final syncState =
+        currentVisit?['sync_state']?.toString() ?? 'synced';
+    final waiting = syncState == 'pending';
+    final conflict = syncState == 'conflict';
+
     return _JobDrawerSurface(
       color: BriskersColors.jobs,
       child: Padding(
@@ -2942,6 +3422,61 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (conflict)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                    color:
+                        Colors.orange.withValues(alpha: 0.45),
+                  ),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, size: 18),
+                    SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        'Sync conflict • local Work Performed is preserved',
+                        style:
+                            TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else if (waiting)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color:
+                      BriskersColors.jobs.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.cloud_upload_outlined, size: 18),
+                    SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        'Saved locally • waiting to sync',
+                        style:
+                            TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Text(
               workSummary.isEmpty
                   ? 'No work performed entered yet.'
@@ -2952,13 +3487,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
-                  onPressed: _busy ? null : _editWorkSummary,
+                  onPressed:
+                      _busy || conflict ? null : _editWorkSummary,
                   icon: Icon(
                     workSummary.isEmpty
                         ? Icons.add_circle_outline
                         : Icons.edit_outlined,
                   ),
-                  label: Text(workSummary.isEmpty ? 'Add' : 'Edit'),
+                  label:
+                      Text(workSummary.isEmpty ? 'Add' : 'Edit'),
                 ),
               ),
             ],

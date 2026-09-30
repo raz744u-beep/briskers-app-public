@@ -116,6 +116,119 @@ class BriskersApi {
     );
   }
 
+  Future<Map<String, dynamic>?> currentVisitSync(
+    String businessId,
+    String jobId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_current_visit_sync_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+      },
+    );
+    if (result == null) return null;
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> vehicleFindingsSync(
+    String businessId,
+    String vehicleId, {
+    bool includeResolved = true,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_vehicle_findings_sync_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_vehicle_id': vehicleId,
+        'p_include_resolved': includeResolved,
+      },
+    );
+    return List<dynamic>.from(result as List)
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> syncSaveWorkSummary(
+    String businessId,
+    String jobId, {
+    required String operationId,
+    required int? expectedRowVersion,
+    required String workSummary,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_save_work_summary_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+        'p_operation_id': operationId,
+        'p_expected_row_version': expectedRowVersion,
+        'p_work_summary': workSummary,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> syncCreateFinding(
+    String businessId,
+    String jobId, {
+    required String operationId,
+    required String body,
+    bool includeOnInvoice = false,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_create_finding_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+        'p_operation_id': operationId,
+        'p_body': body,
+        'p_include_on_invoice': includeOnInvoice,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> syncUpdateFinding(
+    String businessId,
+    String findingId, {
+    required String operationId,
+    required int? expectedRowVersion,
+    required String body,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_update_finding_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_finding_id': findingId,
+        'p_operation_id': operationId,
+        'p_expected_row_version': expectedRowVersion,
+        'p_body': body,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> syncRegisterFindingPhoto(
+    String businessId,
+    String findingId, {
+    required String operationId,
+    required String filename,
+    required String mimeType,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_register_finding_photo_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_finding_id': findingId,
+        'p_operation_id': operationId,
+        'p_original_filename': filename,
+        'p_mime_type': mimeType,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> aiCommand(
     String businessId,
     String command,
