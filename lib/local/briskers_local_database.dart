@@ -1,0 +1,202 @@
+import 'package:drift/drift.dart';
+import 'package:drift_flutter/drift_flutter.dart';
+
+part 'briskers_local_database.g.dart';
+
+class LocalSyncStates extends Table {
+  TextColumn get businessId => text()();
+  TextColumn get scope => text()();
+  IntColumn get lastServerCursor => integer().nullable()();
+  DateTimeColumn get lastPullAt => dateTime().nullable()();
+  DateTimeColumn get lastPushAt => dateTime().nullable()();
+  TextColumn get lastError => text().nullable()();
+  BoolColumn get bootstrapped =>
+      boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {businessId, scope};
+}
+
+class SyncOutbox extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get businessId => text()();
+  TextColumn get entityType => text()();
+  TextColumn get entityId => text()();
+  TextColumn get operation => text()();
+  TextColumn get payloadJson => text()();
+  IntColumn get baseRowVersion => integer().nullable()();
+  TextColumn get state => text().withDefault(const Constant('pending'))();
+  IntColumn get attemptCount => integer().withDefault(const Constant(0))();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get lastAttemptAt => dateTime().nullable()();
+  TextColumn get lastError => text().nullable()();
+}
+
+class LocalJobs extends Table {
+  TextColumn get id => text()();
+  TextColumn get businessId => text()();
+  TextColumn get accessScope => text()();
+  TextColumn get jobNumber => text().nullable()();
+  TextColumn get title => text()();
+  TextColumn get requestedWork => text().nullable()();
+  TextColumn get status => text()();
+  TextColumn get statusName => text().nullable()();
+  TextColumn get statusColor => text().nullable()();
+  TextColumn get statusIcon => text().nullable()();
+  TextColumn get customerId => text().nullable()();
+  TextColumn get customerName => text().nullable()();
+  TextColumn get vehicleId => text().nullable()();
+  TextColumn get vehicleLabel => text().nullable()();
+  TextColumn get vehicleVin => text().nullable()();
+  TextColumn get vehiclePlate => text().nullable()();
+  RealColumn get plannedHours => real().withDefault(const Constant(0))();
+  RealColumn get odometerIn => real().nullable()();
+  TextColumn get assignedEmployeeId => text().nullable()();
+  TextColumn get assignedEmployeeName => text().nullable()();
+  TextColumn get assignedPosition => text().nullable()();
+  BoolColumn get isUnassigned =>
+      boolean().withDefault(const Constant(true))();
+  DateTimeColumn get createdAt => dateTime().nullable()();
+  DateTimeColumn get completedAt => dateTime().nullable()();
+  DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
+  IntColumn get rowVersion => integer().nullable()();
+  TextColumn get syncState =>
+      text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class LocalJobAssignments extends Table {
+  TextColumn get assignmentId => text()();
+  TextColumn get businessId => text()();
+  TextColumn get jobId => text()();
+  TextColumn get employeeId => text()();
+  TextColumn get employeeName => text().nullable()();
+  TextColumn get position => text().nullable()();
+  BoolColumn get active => boolean().withDefault(const Constant(true))();
+  DateTimeColumn get assignedAt => dateTime().nullable()();
+  DateTimeColumn get releasedAt => dateTime().nullable()();
+  TextColumn get source => text().nullable()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {assignmentId};
+}
+
+class LocalJobVisits extends Table {
+  TextColumn get id => text()();
+  TextColumn get businessId => text()();
+  TextColumn get jobId => text()();
+  IntColumn get visitNumber => integer()();
+  TextColumn get reason => text().nullable()();
+  RealColumn get plannedHours => real().withDefault(const Constant(0))();
+  TextColumn get workSummary => text().nullable()();
+  DateTimeColumn get openedAt => dateTime().nullable()();
+  DateTimeColumn get closedAt => dateTime().nullable()();
+  DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
+  IntColumn get rowVersion => integer().nullable()();
+  TextColumn get syncState =>
+      text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class LocalPreInspections extends Table {
+  TextColumn get id => text()();
+  TextColumn get businessId => text()();
+  TextColumn get jobId => text()();
+  TextColumn get vehicleId => text().nullable()();
+  DateTimeColumn get inspectedAt => dateTime().nullable()();
+  RealColumn get odometer => real().nullable()();
+  TextColumn get notes => text().nullable()();
+  TextColumn get createdBy => text().nullable()();
+  DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
+  IntColumn get rowVersion => integer().nullable()();
+  TextColumn get syncState =>
+      text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class LocalPreInspectionPhotos extends Table {
+  TextColumn get id => text()();
+  TextColumn get businessId => text()();
+  TextColumn get inspectionId => text()();
+  TextColumn get attachmentId => text()();
+  TextColumn get localFilePath => text().nullable()();
+  TextColumn get storageBucket => text().nullable()();
+  TextColumn get storageKey => text().nullable()();
+  TextColumn get filename => text().nullable()();
+  TextColumn get mimeType => text().nullable()();
+  IntColumn get byteSize => integer().nullable()();
+  DateTimeColumn get capturedAt => dateTime().nullable()();
+  TextColumn get note => text().nullable()();
+  TextColumn get createdBy => text().nullable()();
+  BoolColumn get canEditNote =>
+      boolean().withDefault(const Constant(false))();
+  BoolColumn get canDelete =>
+      boolean().withDefault(const Constant(false))();
+  TextColumn get uploadState =>
+      text().withDefault(const Constant('synced'))();
+  TextColumn get lastError => text().nullable()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class LocalFindings extends Table {
+  TextColumn get id => text()();
+  TextColumn get businessId => text()();
+  TextColumn get vehicleId => text().nullable()();
+  TextColumn get foundJobId => text().nullable()();
+  TextColumn get repairJobId => text().nullable()();
+  TextColumn get body => text()();
+  TextColumn get status => text()();
+  BoolColumn get includeOnInvoice =>
+      boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime().nullable()();
+  DateTimeColumn get resolvedAt => dateTime().nullable()();
+  TextColumn get createdBy => text().nullable()();
+  BoolColumn get canEdit =>
+      boolean().withDefault(const Constant(false))();
+  BoolColumn get canDelete =>
+      boolean().withDefault(const Constant(false))();
+  DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
+  IntColumn get rowVersion => integer().nullable()();
+  TextColumn get syncState =>
+      text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+@DriftDatabase(
+  tables: [
+    LocalSyncStates,
+    SyncOutbox,
+    LocalJobs,
+    LocalJobAssignments,
+    LocalJobVisits,
+    LocalPreInspections,
+    LocalPreInspectionPhotos,
+    LocalFindings,
+  ],
+)
+class BriskersLocalDatabase extends _$BriskersLocalDatabase {
+  BriskersLocalDatabase(super.e);
+
+  BriskersLocalDatabase.defaults()
+      : super(
+          driftDatabase(
+            name: 'briskers_local',
+            native: const DriftNativeOptions(
+              shareAcrossIsolates: true,
+            ),
+          ),
+        );
+
+  @override
+  int get schemaVersion => 1;
+}
