@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/formatters.dart';
-import '../../services/briskers_api.dart';
+import '../../services/customer_vehicle_sync_service.dart';
+import '../../services/local_customer_repository.dart';
 import 'customer_detail_screen.dart';
 import 'new_customer_screen.dart';
 
@@ -20,11 +21,16 @@ class CustomersScreen extends StatefulWidget {
 }
 
 class _CustomersScreenState extends State<CustomersScreen> {
-  static const _api = BriskersApi();
+  final CustomerVehicleSyncService _sync =
+      CustomerVehicleSyncService();
+  final LocalCustomerRepository _localCustomers =
+      LocalCustomerRepository();
   final _search = TextEditingController();
   List<Map<String, dynamic>>? _rows;
   int _totalCustomers = 0;
   String? _error;
+  bool _onlineReady = false;
+  bool _showingLocal = false;
 
   @override
   void initState() {
@@ -46,29 +52,79 @@ class _CustomersScreenState extends State<CustomersScreen> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool refreshOnline = true}) async {
+    final query = _search.text.trim();
+    var localAvailable = false;
+
     try {
-      final query = _search.text.trim();
       final results = await Future.wait<dynamic>([
-        _api.customers(
+        _localCustomers.customers(
           widget.businessId,
           search: query.isEmpty ? null : query,
         ),
-        _api.customerTotal(widget.businessId),
+        _localCustomers.customerTotal(widget.businessId),
+        _localCustomers.hasBootstrap(widget.businessId),
       ]);
-      if (mounted) {
+
+      final rows =
+          List<Map<String, dynamic>>.from(results[0] as List);
+      final total = results[1] as int;
+      final bootstrapped = results[2] == true;
+      localAvailable = bootstrapped || rows.isNotEmpty;
+
+      if (mounted && localAvailable) {
         setState(() {
-          _rows = List<Map<String, dynamic>>.from(results[0] as List);
-          _totalCustomers = results[1] as int;
+          _rows = rows;
+          _totalCustomers = total;
+          _showingLocal = !_onlineReady;
           _error = null;
         });
       }
+    } catch (_) {
+      // The online refresh below can still populate the local cache.
+    }
+
+    if (!refreshOnline) return;
+
+    try {
+      await _sync.pull(widget.businessId);
+      final bootstrapped =
+          await _localCustomers.hasBootstrap(widget.businessId);
+      final results = await Future.wait<dynamic>([
+        _localCustomers.customers(
+          widget.businessId,
+          search: query.isEmpty ? null : query,
+        ),
+        _localCustomers.customerTotal(widget.businessId),
+      ]);
+
+      if (!mounted) return;
+      setState(() {
+        _rows = List<Map<String, dynamic>>.from(
+          results[0] as List,
+        );
+        _totalCustomers = results[1] as int;
+        _onlineReady = bootstrapped;
+        _showingLocal = !bootstrapped;
+        _error = null;
+      });
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (!mounted) return;
+      setState(() {
+        _onlineReady = false;
+        if (localAvailable) {
+          _showingLocal = true;
+          _error = null;
+        } else {
+          _rows ??= const [];
+          _error = error.toString();
+        }
+      });
     }
   }
 
   Future<void> _add() async {
+    if (!_onlineReady) return;
     final created = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -125,18 +181,45 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   controller: _search,
                   hintText: 'Search customers',
                   leading: const Icon(Icons.search),
-                  onSubmitted: (_) => _load(),
+                  onSubmitted: (_) =>
+                      _load(refreshOnline: false),
                 ),
               ),
               const SizedBox(width: 8),
               IconButton.filled(
-                onPressed: _add,
+                onPressed: _onlineReady ? _add : null,
                 tooltip: 'Add customer',
                 icon: const Icon(Icons.person_add),
               ),
             ],
           ),
         ),
+        if (_showingLocal)
+          Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 8,
+            ),
+            decoration: BoxDecoration(
+              color: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.cloud_off_outlined, size: 18),
+                SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    'Showing saved customers • editing requires a connection',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+          ),
         if (_error != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),

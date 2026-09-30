@@ -8,9 +8,11 @@ class CustomerVehiclesSection extends StatelessWidget {
     required this.vehicles,
     required this.onAdd,
     required this.onEdit,
+    this.enabled = true,
   });
 
   final List<dynamic> vehicles;
+  final bool enabled;
   final VoidCallback onAdd;
   final ValueChanged<Map<String, dynamic>> onEdit;
 
@@ -59,7 +61,7 @@ class CustomerVehiclesSection extends StatelessWidget {
               ),
             ),
             TextButton.icon(
-              onPressed: onAdd,
+              onPressed: enabled ? onAdd : null,
               icon: const Icon(Icons.add, color: BriskersColors.vehicles),
               label: const Text('Vehicle'),
             ),
@@ -118,7 +120,8 @@ class CustomerVehiclesSection extends StatelessWidget {
                         Align(
                           alignment: Alignment.centerRight,
                           child: TextButton.icon(
-                            onPressed: () => onEdit(vehicle),
+                            onPressed:
+                                enabled ? () => onEdit(vehicle) : null,
                             icon: const Icon(
                               Icons.edit_outlined,
                               color: BriskersColors.vehicles,

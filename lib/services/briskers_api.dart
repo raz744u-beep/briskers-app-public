@@ -229,6 +229,24 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> syncPullCustomersVehicles(
+    String businessId, {
+    int? afterCursor,
+    String? afterCustomerId,
+    int limit = 250,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_pull_customers_vehicles_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_after_cursor': afterCursor,
+        'p_after_customer_id': afterCustomerId,
+        'p_limit': limit,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> aiCommand(
     String businessId,
     String command,
