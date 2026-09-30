@@ -26,6 +26,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
   Map<String, dynamic>? _detail;
   bool _loading = true;
+  bool _canDeleteRecords = false;
   bool _uploading = false;
   String? _deletingAttachmentId;
   bool _busy = false;
@@ -39,13 +40,19 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
   Future<void> _load() async {
     try {
-      final detail = await _api.transactionDetail(
-        widget.businessId,
-        widget.transactionId,
-      );
+      final results = await Future.wait<dynamic>([
+        _api.transactionDetail(
+          widget.businessId,
+          widget.transactionId,
+        ),
+        _api.myPermissions(widget.businessId),
+      ]);
+      final detail = Map<String, dynamic>.from(results[0] as Map);
+      final permissions = List<String>.from(results[1] as List);
       if (!mounted) return;
       setState(() {
         _detail = detail;
+        _canDeleteRecords = permissions.contains('records.delete');
         _loading = false;
         _error = null;
       });
@@ -133,7 +140,11 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   Future<void> _replaceReceipt(
     Map<String, dynamic> attachment,
   ) async {
-    if (_uploading || _deletingAttachmentId != null) return;
+    if (!_canDeleteRecords ||
+        _uploading ||
+        _deletingAttachmentId != null) {
+      return;
+    }
 
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
@@ -239,7 +250,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                   icon: const Icon(Icons.close),
                 ),
               ),
-              if (editable)
+              if (editable && _canDeleteRecords)
                 Positioned(
                   right: 4,
                   bottom: 4,
