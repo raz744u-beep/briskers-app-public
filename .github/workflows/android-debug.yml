@@ -3,7 +3,7 @@ name: Build Android debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, phase6-local-first-customers-vehicles]
 
 permissions:
   contents: read
