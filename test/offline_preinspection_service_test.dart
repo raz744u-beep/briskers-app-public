@@ -88,6 +88,13 @@ class _FakeApi extends BriskersApi {
   }
 
   @override
+  Future<void> updateJobPreInspectionPhotoNote(
+    String businessId,
+    String photoId,
+    String note,
+  ) async {}
+
+  @override
   Future<void> uploadRegisteredAttachment(
     String businessId, {
     required String bucket,
