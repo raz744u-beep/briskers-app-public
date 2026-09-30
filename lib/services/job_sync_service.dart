@@ -115,6 +115,7 @@ class JobSyncService {
     for (final table in const [
       'local_pre_inspection_photos',
       'local_pre_inspections',
+      'local_finding_photos',
       'local_job_visits',
       'local_job_assignments',
       'local_findings',
@@ -142,12 +143,18 @@ class JobSyncService {
 
     final preserveInspection =
         await _hasDirtyInspection(businessId, jobId);
+    final preserveWork =
+        await _hasDirtyWork(businessId, jobId);
+    final preserveFindings = vehicleId == null
+        ? false
+        : await _hasDirtyFindings(businessId, vehicleId);
 
     await _removeJobChildren(
       businessId,
       jobId,
       keepJob: true,
       preserveInspection: preserveInspection,
+      preserveWork: preserveWork,
     );
 
     final capabilities = job['capabilities'] is Map
@@ -273,6 +280,7 @@ class JobSyncService {
     final visits = List<dynamic>.from(
       job['visits'] ?? const <dynamic>[],
     );
+    if (!preserveWork) {
     for (final raw in visits) {
       if (raw is! Map) continue;
       final visit = Map<String, dynamic>.from(raw);
@@ -301,6 +309,7 @@ class JobSyncService {
           _int(visit['row_version']),
         ],
       );
+    }
     }
 
     final rawInspection = bundle['pre_inspection'];
@@ -374,7 +383,19 @@ class JobSyncService {
       }
     }
 
-    if (vehicleId != null) {
+    if (vehicleId != null && !preserveFindings) {
+      await _database.customStatement(
+        '''
+        DELETE FROM local_finding_photos
+        WHERE business_id = ?
+          AND finding_id IN (
+            SELECT id
+            FROM local_findings
+            WHERE business_id = ? AND vehicle_id = ?
+          )
+        ''',
+        [businessId, businessId, vehicleId],
+      );
       await _database.customStatement(
         '''
         DELETE FROM local_findings
@@ -419,6 +440,47 @@ class JobSyncService {
             _int(finding['row_version']),
           ],
         );
+
+        final attachments = List<dynamic>.from(
+          finding['attachments'] ?? const <dynamic>[],
+        );
+        for (final rawAttachment in attachments) {
+          if (rawAttachment is! Map) continue;
+          final attachment =
+              Map<String, dynamic>.from(rawAttachment);
+          final attachmentId =
+              attachment['attachment_id']?.toString() ?? '';
+          if (attachmentId.isEmpty) continue;
+
+          await _database.customStatement(
+            '''
+            INSERT OR REPLACE INTO local_finding_photos (
+              id, business_id, finding_id, attachment_id,
+              local_file_path, storage_bucket, storage_key, filename,
+              mime_type, byte_size, captured_at, can_delete,
+              upload_state, last_error
+            ) VALUES (
+              ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'synced', NULL
+            )
+            ''',
+            [
+              attachmentId,
+              businessId,
+              findingId,
+              attachmentId,
+              _text(attachment['bucket']),
+              _text(attachment['key']),
+              _text(attachment['filename']),
+              _text(attachment['mime_type']),
+              _int(attachment['byte_size']),
+              _unix(_date(
+                attachment['captured_at'] ??
+                    finding['created_at'],
+              )),
+              attachment['can_delete'] == true ? 1 : 0,
+            ],
+          );
+        }
       }
     }
   }
@@ -484,6 +546,9 @@ class JobSyncService {
         );
         if (payload['job_id']?.toString() == jobId) {
           revokedOutboxIds.add(row.read<int>('id'));
+          final localPath =
+              payload['local_file_path']?.toString() ?? '';
+          if (localPath.isNotEmpty) localFiles.add(localPath);
         }
       } catch (_) {
         // Malformed unrelated queue entries are left for normal error handling.
@@ -519,6 +584,18 @@ class JobSyncService {
       if (remaining.read<int>('count') == 0) {
         await _database.customStatement(
           '''
+          DELETE FROM local_finding_photos
+          WHERE business_id = ?
+            AND finding_id IN (
+              SELECT id
+              FROM local_findings
+              WHERE business_id = ? AND vehicle_id = ?
+            )
+          ''',
+          [businessId, businessId, vehicleId],
+        );
+        await _database.customStatement(
+          '''
           DELETE FROM local_findings
           WHERE business_id = ? AND vehicle_id = ?
           ''',
@@ -535,6 +612,65 @@ class JobSyncService {
         // Database access is already revoked. File cleanup is best-effort.
       }
     }
+  }
+
+  Future<bool> _hasDirtyWork(
+    String businessId,
+    String jobId,
+  ) async {
+    final row = await _database.customSelect(
+      '''
+      SELECT EXISTS(
+        SELECT 1
+        FROM local_job_visits
+        WHERE business_id = ?
+          AND job_id = ?
+          AND sync_state IN ('pending','conflict')
+      ) AS dirty
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(jobId),
+      ],
+    ).getSingle();
+
+    return row.read<int>('dirty') == 1;
+  }
+
+  Future<bool> _hasDirtyFindings(
+    String businessId,
+    String vehicleId,
+  ) async {
+    final row = await _database.customSelect(
+      '''
+      SELECT
+        EXISTS(
+          SELECT 1
+          FROM local_findings
+          WHERE business_id = ?
+            AND vehicle_id = ?
+            AND sync_state IN ('pending','conflict')
+        )
+        OR EXISTS(
+          SELECT 1
+          FROM local_finding_photos p
+          JOIN local_findings f
+            ON f.business_id = p.business_id
+           AND f.id = p.finding_id
+          WHERE f.business_id = ?
+            AND f.vehicle_id = ?
+            AND p.upload_state <> 'synced'
+        ) AS dirty
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(vehicleId),
+        Variable<String>(businessId),
+        Variable<String>(vehicleId),
+      ],
+    ).getSingle();
+
+    return row.read<int>('dirty') == 1;
   }
 
   Future<bool> _hasDirtyInspection(
@@ -578,6 +714,7 @@ class JobSyncService {
     String jobId, {
     required bool keepJob,
     bool preserveInspection = false,
+    bool preserveWork = false,
   }) async {
     if (!preserveInspection) {
       await _database.customStatement(
@@ -596,10 +733,12 @@ class JobSyncService {
         [businessId, jobId],
       );
     }
-    await _database.customStatement(
-      'DELETE FROM local_job_visits WHERE business_id = ? AND job_id = ?',
-      [businessId, jobId],
-    );
+    if (!preserveWork) {
+      await _database.customStatement(
+        'DELETE FROM local_job_visits WHERE business_id = ? AND job_id = ?',
+        [businessId, jobId],
+      );
+    }
     await _database.customStatement(
       'DELETE FROM local_job_assignments WHERE business_id = ? AND job_id = ?',
       [businessId, jobId],
