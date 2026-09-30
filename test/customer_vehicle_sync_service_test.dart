@@ -13,6 +13,19 @@ class _FakeCustomerVehicleApi extends BriskersApi {
   var calls = 0;
 
   @override
+  Future<Map<String, dynamic>> customerVehicleCapabilities(
+    String businessId,
+  ) async {
+    return {
+      'customers_read': !revokeAll,
+      'customers_create': !revokeAll,
+      'customers_edit': !revokeAll,
+      'vehicles_create': !revokeAll,
+      'vehicles_edit': !revokeAll,
+    };
+  }
+
+  @override
   Future<Map<String, dynamic>> syncPullCustomersVehicles(
     String businessId, {
     int? afterCursor,
@@ -220,6 +233,35 @@ void main() {
       ['business-1'],
     );
 
+    await database.customStatement(
+      '''
+      INSERT INTO sync_outbox (
+        business_id, entity_type, entity_id, operation,
+        payload_json, state, attempt_count, created_at
+      ) VALUES (?, 'customer_update', ?, 'update', '{}',
+                'pending', 0, ?)
+      ''',
+      [
+        'business-1',
+        'customer-1',
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+      ],
+    );
+    await database.customStatement(
+      '''
+      INSERT INTO sync_outbox (
+        business_id, entity_type, entity_id, operation,
+        payload_json, state, attempt_count, created_at
+      ) VALUES (?, 'vehicle_update', ?, 'update', '{}',
+                'pending', 0, ?)
+      ''',
+      [
+        'business-1',
+        'vehicle-1',
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+      ],
+    );
+
     final sync = CustomerVehicleSyncService(
       api: _FakeCustomerVehicleApi(revokeAll: true),
       database: database,
@@ -235,6 +277,11 @@ void main() {
     ).getSingle();
     expect(customers.read<int>('count'), 0);
     expect(vehicles.read<int>('count'), 0);
+
+    final outbox = await database.customSelect(
+      'SELECT COUNT(*) AS count FROM sync_outbox',
+    ).getSingle();
+    expect(outbox.read<int>('count'), 0);
 
     final state = await database.customSelect(
       '''
