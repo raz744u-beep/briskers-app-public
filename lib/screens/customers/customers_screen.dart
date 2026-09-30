@@ -76,7 +76,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
         setState(() {
           _rows = rows;
           _totalCustomers = total;
-          _showingLocal = true;
+          _showingLocal = !_onlineReady;
           _error = null;
         });
       }
