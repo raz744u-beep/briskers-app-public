@@ -240,7 +240,7 @@ class _JobsScreenState extends State<JobsScreen> {
               ),
               if (_rows != null)
                 Text(
-                  '${visible.length}',
+                  'Total ${_rows!.length}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         color: BriskersColors.jobs,
                         fontWeight: FontWeight.w700,
