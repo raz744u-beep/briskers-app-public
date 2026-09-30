@@ -24,6 +24,22 @@ class BriskersApi {
         .toList();
   }
 
+  Future<Map<String, dynamic>> syncPullOffice(
+    String businessId, {
+    int? afterCursor,
+    int limit = 500,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_pull_office_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_after_cursor': afterCursor,
+        'p_limit': limit,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> syncPullJobs(
     String businessId, {
     int? afterCursor,
