@@ -40,6 +40,82 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> syncSavePreInspection(
+    String businessId,
+    String jobId, {
+    required String operationId,
+    int? expectedRowVersion,
+    String? notes,
+    num? odometer,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_save_preinspection_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+        'p_operation_id': operationId,
+        'p_expected_row_version': expectedRowVersion,
+        'p_notes': notes,
+        'p_odometer': odometer,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> syncRegisterPreInspectionPhoto(
+    String businessId,
+    String jobId, {
+    required String operationId,
+    required String filename,
+    required String mimeType,
+    String? note,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_register_preinspection_photo_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+        'p_operation_id': operationId,
+        'p_original_filename': filename,
+        'p_mime_type': mimeType,
+        'p_note': note,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<void> uploadRegisteredAttachment(
+    String businessId, {
+    required String bucket,
+    required String key,
+    required String attachmentId,
+    required String mimeType,
+    required Uint8List bytes,
+  }) async {
+    try {
+      await supabase.storage.from(bucket).uploadBinary(
+        key,
+        bytes,
+        fileOptions: FileOptions(contentType: mimeType, upsert: false),
+      );
+    } on StorageException catch (error) {
+      final status = error.statusCode?.toString();
+      final message = error.message.toLowerCase();
+      final alreadyExists =
+          status == '409' || message.contains('already exists');
+      if (!alreadyExists) rethrow;
+    }
+
+    await supabase.rpc(
+      'briskers_finalize_attachment',
+      params: {
+        'p_business_id': businessId,
+        'p_attachment_id': attachmentId,
+        'p_byte_size': bytes.length,
+      },
+    );
+  }
+
   Future<Map<String, dynamic>> aiCommand(
     String businessId,
     String command,
