@@ -16,6 +16,7 @@ void main() {
     ).get();
     final names = tables.map((row) => row.read<String>('name')).toSet();
     expect(names, contains('local_finding_photos'));
+    expect(names, contains('local_job_statuses'));
 
     await database.close();
   });

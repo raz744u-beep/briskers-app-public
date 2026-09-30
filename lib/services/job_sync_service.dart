@@ -181,14 +181,17 @@ class JobSyncService {
       INSERT INTO local_jobs (
         id, business_id, access_scope, job_number, title, requested_work,
         status, status_name, status_color, status_icon,
-        customer_id, customer_name, vehicle_id, vehicle_label,
-        vehicle_vin, vehicle_plate, planned_hours, odometer_in,
+        customer_id, customer_name, customer_problem_flag,
+        customer_problem_flag_note, capabilities_json,
+        pending_request_count, payment_state,
+        vehicle_id, vehicle_label, vehicle_vin, vehicle_plate,
+        planned_hours, odometer_in,
         assigned_employee_id, assigned_employee_name, assigned_position,
         is_unassigned, created_at, completed_at, server_updated_at,
         row_version, sync_state
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, 'synced'
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced'
       )
       ON CONFLICT(id) DO UPDATE SET
         business_id=excluded.business_id,
@@ -202,6 +205,11 @@ class JobSyncService {
         status_icon=excluded.status_icon,
         customer_id=excluded.customer_id,
         customer_name=excluded.customer_name,
+        customer_problem_flag=excluded.customer_problem_flag,
+        customer_problem_flag_note=excluded.customer_problem_flag_note,
+        capabilities_json=excluded.capabilities_json,
+        pending_request_count=excluded.pending_request_count,
+        payment_state=coalesce(excluded.payment_state, local_jobs.payment_state),
         vehicle_id=excluded.vehicle_id,
         vehicle_label=excluded.vehicle_label,
         vehicle_vin=excluded.vehicle_vin,
@@ -231,6 +239,13 @@ class JobSyncService {
         _text(job['status_icon']),
         _text(job['customer_id']),
         _text(job['customer_name']),
+        job['customer_problem_flag'] == true ? 1 : 0,
+        _text(job['customer_problem_flag_note']),
+        jsonEncode(capabilities),
+        List<dynamic>.from(
+          job['pending_requests'] ?? const <dynamic>[],
+        ).length,
+        _text(job['payment_state']),
         vehicleId,
         _text(job['vehicle']),
         _text(job['vehicle_vin']),

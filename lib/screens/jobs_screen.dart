@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
+import '../services/job_sync_service.dart';
+import '../services/local_job_repository.dart';
 import '../widgets/job_compact_card.dart';
 import 'jobs/job_detail_screen.dart';
 
@@ -24,12 +28,16 @@ class JobsScreen extends StatefulWidget {
 
 class _JobsScreenState extends State<JobsScreen> {
   static const _api = BriskersApi();
+  final LocalJobRepository _localJobs = LocalJobRepository();
+  final JobSyncService _jobSync = JobSyncService();
 
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _statuses = const [];
   String? _selectedStatus;
   String? _error;
   String? _busyJobId;
+  bool _onlineReady = false;
+  bool _showingLocal = false;
 
   bool get _canManage =>
       widget.roleCode == 'owner' ||
@@ -51,23 +59,93 @@ class _JobsScreenState extends State<JobsScreen> {
   }
 
   Future<void> _load() async {
+    var localAvailable = false;
+
+    try {
+      final localResults = await Future.wait<dynamic>([
+        _localJobs.listJobs(widget.businessId),
+        _localJobs.jobStatuses(widget.businessId),
+        _localJobs.hasJobBootstrap(widget.businessId),
+      ]);
+
+      final localRows =
+          List<Map<String, dynamic>>.from(localResults[0] as List);
+      final localStatuses =
+          List<Map<String, dynamic>>.from(localResults[1] as List);
+      final bootstrapped = localResults[2] == true;
+
+      localAvailable = bootstrapped || localRows.isNotEmpty;
+
+      if (mounted && localAvailable) {
+        setState(() {
+          _rows = localRows;
+          _statuses = localStatuses;
+          _showingLocal = true;
+          _onlineReady = false;
+          _error = null;
+        });
+      }
+    } catch (_) {
+      // Online loading below can still succeed if the local cache is unavailable.
+    }
+
     try {
       final results = await Future.wait<dynamic>([
         _api.jobs(widget.businessId),
         _api.jobStatuses(widget.businessId),
       ]);
+      final onlineRows =
+          List<Map<String, dynamic>>.from(results[0] as List);
+      final onlineStatuses =
+          List<Map<String, dynamic>>.from(results[1] as List);
+
       if (!mounted) return;
       setState(() {
-        _rows = List<Map<String, dynamic>>.from(results[0] as List);
-        _statuses = List<Map<String, dynamic>>.from(results[1] as List);
+        _rows = onlineRows;
+        _statuses = onlineStatuses;
+        _showingLocal = false;
+        _onlineReady = true;
         _error = null;
       });
+
+      unawaited(
+        _persistOnlineSnapshot(
+          onlineRows,
+          onlineStatuses,
+        ),
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _rows = const [];
-        _error = error.toString();
+        _onlineReady = false;
+        if (localAvailable) {
+          _showingLocal = true;
+          _error = null;
+        } else {
+          _rows = const [];
+          _showingLocal = false;
+          _error = error.toString();
+        }
       });
+    }
+  }
+
+  Future<void> _persistOnlineSnapshot(
+    List<Map<String, dynamic>> jobs,
+    List<Map<String, dynamic>> statuses,
+  ) async {
+    try {
+      await _localJobs.replaceJobStatuses(
+        widget.businessId,
+        statuses,
+      );
+      await _jobSync.pull(widget.businessId);
+      await _localJobs.applyServerListDecorations(
+        widget.businessId,
+        jobs,
+      );
+    } catch (_) {
+      // The visible online screen is already current. Persistence retries later.
     }
   }
 
@@ -89,7 +167,11 @@ class _JobsScreenState extends State<JobsScreen> {
     Map<String, dynamic> job,
     String statusCode,
   ) async {
-    if (!_canManage || statusCode == job['status']?.toString()) return;
+    if (!_canManage ||
+        !_onlineReady ||
+        statusCode == job['status']?.toString()) {
+      return;
+    }
 
     setState(() => _busyJobId = job['id']?.toString());
     try {
@@ -177,7 +259,7 @@ class _JobsScreenState extends State<JobsScreen> {
                 ),
               ),
             ),
-          if (_canManage && !busy) ...[
+          if (_canManage && _onlineReady && !busy) ...[
             const SizedBox(width: 3),
             Icon(Icons.chevron_right, size: 15, color: color),
           ],
@@ -185,7 +267,7 @@ class _JobsScreenState extends State<JobsScreen> {
       ),
     );
 
-    if (!_canManage || busy) return child;
+    if (!_canManage || !_onlineReady || busy) return child;
 
     return PopupMenuButton<String>(
       tooltip: 'Change status',
@@ -343,6 +425,30 @@ class _JobsScreenState extends State<JobsScreen> {
               ),
             ),
           ),
+          if (_showingLocal)
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 8,
+              ),
+              decoration: BoxDecoration(
+                color: BriskersColors.jobs.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.cloud_off_outlined, size: 18),
+                  SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      'Showing saved jobs • online actions are temporarily disabled',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (_error != null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
