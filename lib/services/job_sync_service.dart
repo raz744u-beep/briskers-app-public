@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
@@ -137,10 +140,14 @@ class JobSyncService {
 
     final vehicleId = _text(job['vehicle_id']);
 
+    final preserveInspection =
+        await _hasDirtyInspection(businessId, jobId);
+
     await _removeJobChildren(
       businessId,
       jobId,
       keepJob: true,
+      preserveInspection: preserveInspection,
     );
 
     final capabilities = job['capabilities'] is Map
@@ -297,7 +304,7 @@ class JobSyncService {
     }
 
     final rawInspection = bundle['pre_inspection'];
-    if (rawInspection is Map) {
+    if (!preserveInspection && rawInspection is Map) {
       final inspection = Map<String, dynamic>.from(rawInspection);
       final inspectionId = inspection['id']?.toString() ?? '';
       if (inspectionId.isNotEmpty) {
@@ -437,6 +444,59 @@ class JobSyncService {
         ? null
         : rows.first.readNullable<String>('vehicle_id');
 
+    final photoRows = await _database.customSelect(
+      '''
+      SELECT p.local_file_path
+      FROM local_pre_inspection_photos p
+      JOIN local_pre_inspections i
+        ON i.business_id = p.business_id
+       AND i.id = p.inspection_id
+      WHERE i.business_id = ?
+        AND i.job_id = ?
+        AND p.local_file_path IS NOT NULL
+        AND p.local_file_path <> ''
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(jobId),
+      ],
+    ).get();
+
+    final localFiles = photoRows
+        .map((row) => row.readNullable<String>('local_file_path'))
+        .whereType<String>()
+        .toSet();
+
+    final outboxRows = await _database.customSelect(
+      '''
+      SELECT id, payload_json
+      FROM sync_outbox
+      WHERE business_id = ?
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
+    final revokedOutboxIds = <int>[];
+    for (final row in outboxRows) {
+      try {
+        final payload = Map<String, dynamic>.from(
+          jsonDecode(row.read<String>('payload_json')) as Map,
+        );
+        if (payload['job_id']?.toString() == jobId) {
+          revokedOutboxIds.add(row.read<int>('id'));
+        }
+      } catch (_) {
+        // Malformed unrelated queue entries are left for normal error handling.
+      }
+    }
+
+    for (final id in revokedOutboxIds) {
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id = ?',
+        [id],
+      );
+    }
+
     await _removeJobChildren(
       businessId,
       jobId,
@@ -466,28 +526,76 @@ class JobSyncService {
         );
       }
     }
+
+    for (final path in localFiles) {
+      try {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      } catch (_) {
+        // Database access is already revoked. File cleanup is best-effort.
+      }
+    }
+  }
+
+  Future<bool> _hasDirtyInspection(
+    String businessId,
+    String jobId,
+  ) async {
+    final row = await _database.customSelect(
+      '''
+      SELECT
+        EXISTS(
+          SELECT 1
+          FROM local_pre_inspections
+          WHERE business_id = ?
+            AND job_id = ?
+            AND sync_state IN ('pending','conflict')
+        )
+        OR EXISTS(
+          SELECT 1
+          FROM local_pre_inspection_photos p
+          JOIN local_pre_inspections i
+            ON i.id = p.inspection_id
+           AND i.business_id = p.business_id
+          WHERE i.business_id = ?
+            AND i.job_id = ?
+            AND p.upload_state <> 'synced'
+        ) AS dirty
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(jobId),
+        Variable<String>(businessId),
+        Variable<String>(jobId),
+      ],
+    ).getSingle();
+
+    return row.read<int>('dirty') == 1;
   }
 
   Future<void> _removeJobChildren(
     String businessId,
     String jobId, {
     required bool keepJob,
+    bool preserveInspection = false,
   }) async {
-    await _database.customStatement(
-      '''
-      DELETE FROM local_pre_inspection_photos
-      WHERE business_id = ?
-        AND inspection_id IN (
-          SELECT id FROM local_pre_inspections
-          WHERE business_id = ? AND job_id = ?
-        )
-      ''',
-      [businessId, businessId, jobId],
-    );
-    await _database.customStatement(
-      'DELETE FROM local_pre_inspections WHERE business_id = ? AND job_id = ?',
-      [businessId, jobId],
-    );
+    if (!preserveInspection) {
+      await _database.customStatement(
+        '''
+        DELETE FROM local_pre_inspection_photos
+        WHERE business_id = ?
+          AND inspection_id IN (
+            SELECT id FROM local_pre_inspections
+            WHERE business_id = ? AND job_id = ?
+          )
+        ''',
+        [businessId, businessId, jobId],
+      );
+      await _database.customStatement(
+        'DELETE FROM local_pre_inspections WHERE business_id = ? AND job_id = ?',
+        [businessId, jobId],
+      );
+    }
     await _database.customStatement(
       'DELETE FROM local_job_visits WHERE business_id = ? AND job_id = ?',
       [businessId, jobId],

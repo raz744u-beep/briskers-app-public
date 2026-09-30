@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -91,6 +94,76 @@ void main() {
     expect(afterBootstrap.single.read<String>('id'), 'job-1');
     expect(afterBootstrap.single.read<String>('access_scope'), 'available');
 
+    final temp = await Directory.systemTemp.createTemp(
+      'briskers-revoke-test-',
+    );
+    final staged = File('${temp.path}/queued.jpg');
+    await staged.writeAsBytes([1, 2, 3], flush: true);
+
+    await database.customStatement(
+      '''
+      INSERT INTO local_pre_inspections (
+        id, business_id, job_id, vehicle_id, notes, sync_state
+      ) VALUES (?, ?, ?, ?, ?, 'pending')
+      ''',
+      [
+        'local-inspection',
+        'business-1',
+        'job-1',
+        'vehicle-1',
+        'Unsent mechanic note',
+      ],
+    );
+    await database.customStatement(
+      '''
+      INSERT INTO local_pre_inspection_photos (
+        id, business_id, inspection_id, attachment_id,
+        local_file_path, filename, mime_type, upload_state
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+      ''',
+      [
+        'local-photo',
+        'business-1',
+        'local-inspection',
+        'local-photo',
+        staged.path,
+        'queued.jpg',
+        'image/jpeg',
+      ],
+    );
+
+    final createdAt =
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+    for (final entry in <Map<String, String>>[
+      {
+        'entity_type': 'preinspection',
+        'entity_id': 'job-1',
+        'operation': 'upsert',
+      },
+      {
+        'entity_type': 'preinspection_photo',
+        'entity_id': 'local-photo',
+        'operation': 'upload',
+      },
+    ]) {
+      await database.customStatement(
+        '''
+        INSERT INTO sync_outbox (
+          business_id, entity_type, entity_id, operation,
+          payload_json, state, attempt_count, created_at
+        ) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?)
+        ''',
+        [
+          'business-1',
+          entry['entity_type'],
+          entry['entity_id'],
+          entry['operation'],
+          jsonEncode({'job_id': 'job-1'}),
+          createdAt,
+        ],
+      );
+    }
+
     await sync.pull('business-1');
 
     final afterRevoke = await database.customSelect(
@@ -99,6 +172,26 @@ void main() {
     ).get();
 
     expect(afterRevoke, isEmpty);
+
+    final remainingOutbox = await database.customSelect(
+      'SELECT COUNT(*) AS count FROM sync_outbox WHERE business_id = ?',
+      variables: [const Variable<String>('business-1')],
+    ).getSingle();
+    expect(remainingOutbox.read<int>('count'), 0);
+
+    final remainingInspection = await database.customSelect(
+      '''
+      SELECT COUNT(*) AS count
+      FROM local_pre_inspections
+      WHERE business_id = ? AND job_id = ?
+      ''',
+      variables: [
+        const Variable<String>('business-1'),
+        const Variable<String>('job-1'),
+      ],
+    ).getSingle();
+    expect(remainingInspection.read<int>('count'), 0);
+    expect(await staged.exists(), isFalse);
 
     final syncState = await database.customSelect(
       '''
@@ -113,5 +206,8 @@ void main() {
     expect(syncState.read<int>('bootstrapped'), 1);
 
     await database.close();
+    if (await temp.exists()) {
+      await temp.delete(recursive: true);
+    }
   });
 }

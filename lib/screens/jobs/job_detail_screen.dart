@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
@@ -6,6 +9,8 @@ import '../../core/briskers_colors.dart';
 import '../../core/employee_role_style.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
+import '../../services/job_sync_service.dart';
+import '../../services/offline_preinspection_service.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'job_document_screen.dart';
@@ -28,6 +33,9 @@ class JobDetailScreen extends StatefulWidget {
 
 class _JobDetailScreenState extends State<JobDetailScreen> {
   static const _api = BriskersApi();
+  final OfflinePreInspectionService _offlineInspection =
+      OfflinePreInspectionService();
+  final JobSyncService _jobSync = JobSyncService();
 
   Map<String, dynamic>? _job;
   Map<String, dynamic>? _profitability;
@@ -148,9 +156,56 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       }
 
       try {
-        preInspection = await _api.jobPreInspection(widget.businessId, widget.jobId);
+        final serverPreInspection =
+            await _api.jobPreInspection(widget.businessId, widget.jobId);
+        if (serverPreInspection != null) {
+          try {
+            await _offlineInspection.seedServerInspectionIfMissing(
+              widget.businessId,
+              widget.jobId,
+              serverPreInspection,
+            );
+          } catch (_) {
+            // The online detail remains usable even if local seeding fails.
+          }
+        }
+
+        Map<String, dynamic>? localPreInspection;
+        try {
+          localPreInspection = await _offlineInspection.loadLocalInspection(
+            widget.businessId,
+            widget.jobId,
+          );
+        } catch (_) {
+          localPreInspection = null;
+        }
+
+        final localState =
+            localPreInspection?['sync_state']?.toString() ?? 'synced';
+        final localPhotos = List<dynamic>.from(
+          localPreInspection?['photos'] ?? const <dynamic>[],
+        );
+        final localPhotoDirty = localPhotos.any(
+          (raw) =>
+              raw is Map &&
+              (raw['upload_state']?.toString() ?? 'synced') != 'synced',
+        );
+        final localDirty = localState == 'pending' ||
+            localState == 'conflict' ||
+            localPhotoDirty;
+
+        preInspection = localDirty || serverPreInspection == null
+            ? localPreInspection
+            : serverPreInspection;
       } catch (_) {
-        preInspection = null;
+        try {
+          preInspection = await _offlineInspection.loadLocalInspection(
+            widget.businessId,
+            widget.jobId,
+          );
+        } catch (_) {
+          preInspection = null;
+        }
       }
 
       final vehicleId = job['vehicle_id']?.toString();
@@ -185,6 +240,42 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         _loading = false;
         _error = error.toString();
       });
+    }
+  }
+
+  void _applyLocalPreInspection(Map<String, dynamic> data) {
+    if (!mounted) return;
+    setState(() {
+      _preInspection = data;
+      _error = null;
+    });
+    _modalRefresh?.call();
+  }
+
+  Future<void> _refreshLocalPreInspection() async {
+    try {
+      final local = await _offlineInspection.loadLocalInspection(
+        widget.businessId,
+        widget.jobId,
+      );
+      if (local != null) _applyLocalPreInspection(local);
+    } catch (_) {
+      // Local refresh is best-effort; keep the current screen state.
+    }
+  }
+
+  Future<void> _flushPreInspectionQueue() async {
+    try {
+      await _offlineInspection.flush(widget.businessId);
+      try {
+        await _jobSync.pull(widget.businessId);
+      } catch (_) {
+        // The outbox is already reconciled. Pull will retry later.
+      }
+    } catch (_) {
+      // Offline is expected. The outbox keeps the work for retry.
+    } finally {
+      await _refreshLocalPreInspection();
     }
   }
 
@@ -785,57 +876,267 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   Future<void> _editPreInspectionDetails() async {
     if (_job == null || _busy || !_canEditInspection) return;
-    final mileage = TextEditingController(text: _preInspection?['odometer']?.toString() ?? _job?['odometer_in']?.toString() ?? '');
-    final notes = TextEditingController(text: _preInspection?['notes']?.toString() ?? '');
-    final save = await showModalBottomSheet<bool>(context: context, showDragHandle: true, isScrollControlled: true, builder: (sheetContext) => Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, MediaQuery.viewInsetsOf(sheetContext).bottom + 16),
-      child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Align(alignment: Alignment.centerLeft, child: Text('Pre-inspection', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
-        const SizedBox(height: 12),
-        TextField(controller: mileage, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Arrival mileage')),
-        const SizedBox(height: 6),
-        TextField(controller: notes, minLines: 3, maxLines: 6, decoration: const InputDecoration(labelText: 'Inspection notes', hintText: 'Existing damage, warning lights, interior condition, etc.')),
-        const SizedBox(height: 12),
-        SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.pop(sheetContext, true), child: const Text('Save'))),
-      ])),
-    ));
-    if (save == true) {
-      await _run(() async { await _api.saveJobPreInspection(widget.businessId, widget.jobId, notes: notes.text.trim(), odometer: num.tryParse(mileage.text.trim())); });
+
+    final mileage = TextEditingController(
+      text: _preInspection?['odometer']?.toString() ??
+          _job?['odometer_in']?.toString() ??
+          '',
+    );
+    final notes = TextEditingController(
+      text: _preInspection?['notes']?.toString() ?? '',
+    );
+
+    final save = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Pre-inspection',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: mileage,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration:
+                    const InputDecoration(labelText: 'Arrival mileage'),
+              ),
+              const SizedBox(height: 6),
+              TextField(
+                controller: notes,
+                minLines: 3,
+                maxLines: 6,
+                decoration: const InputDecoration(
+                  labelText: 'Inspection notes',
+                  hintText:
+                      'Existing damage, warning lights, interior condition, etc.',
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(sheetContext, true),
+                  child: const Text('Save'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final noteValue = notes.text.trim();
+    final odometerValue = num.tryParse(mileage.text.trim());
+    mileage.dispose();
+    notes.dispose();
+    if (save != true) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      final local = await _offlineInspection.saveLocalInspection(
+        widget.businessId,
+        widget.jobId,
+        vehicleId: _job?['vehicle_id']?.toString(),
+        notes: noteValue,
+        odometer: odometerValue,
+      );
+      _applyLocalPreInspection(local);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Pre-inspection saved on this device.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+      unawaited(_flushPreInspectionQueue());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
-    mileage.dispose(); notes.dispose();
   }
 
   Future<void> _addPreInspectionPhotos() async {
     if (_busy || !_canEditInspection) return;
-    final source = await showModalBottomSheet<String>(context: context, showDragHandle: true, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      ListTile(leading: const Icon(Icons.photo_camera_outlined), title: const Text('Take photo'), onTap: () => Navigator.pop(sheetContext, 'camera')),
-      ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('Choose from gallery'), onTap: () => Navigator.pop(sheetContext, 'gallery')),
-    ])));
+
+    final source = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take photo'),
+              onTap: () => Navigator.pop(sheetContext, 'camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(sheetContext, 'gallery'),
+            ),
+          ],
+        ),
+      ),
+    );
     if (source == null) return;
+
     final photos = <XFile>[];
     if (source == 'camera') {
-      final p = await _picker.pickImage(source: ImageSource.camera, imageQuality: 88, maxWidth: 1920, maxHeight: 1920);
-      if (p != null) photos.add(p);
+      final photo = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 88,
+        maxWidth: 1920,
+        maxHeight: 1920,
+      );
+      if (photo != null) photos.add(photo);
     } else {
-      photos.addAll(await _picker.pickMultiImage(imageQuality: 88, maxWidth: 1920, maxHeight: 1920));
+      photos.addAll(
+        await _picker.pickMultiImage(
+          imageQuality: 88,
+          maxWidth: 1920,
+          maxHeight: 1920,
+        ),
+      );
     }
     if (photos.isEmpty) return;
-    await _run(() async {
-      for (final photo in photos) {
-        await _api.uploadJobPreInspectionPhoto(widget.businessId, widget.jobId, filename: photo.name, mimeType: _imageMime(photo.name), bytes: await photo.readAsBytes());
-      }
+
+    setState(() {
+      _busy = true;
+      _error = null;
     });
+
+    try {
+      Map<String, dynamic>? local;
+      final fallbackOdometer = num.tryParse(
+        _preInspection?['odometer']?.toString() ??
+            _job?['odometer_in']?.toString() ??
+            '',
+      );
+
+      for (final photo in photos) {
+        local = await _offlineInspection.stagePhoto(
+          widget.businessId,
+          widget.jobId,
+          vehicleId: _job?['vehicle_id']?.toString(),
+          fallbackOdometer: fallbackOdometer,
+          filename: photo.name,
+          mimeType: _imageMime(photo.name),
+          bytes: await photo.readAsBytes(),
+        );
+      }
+
+      if (local != null) _applyLocalPreInspection(local);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              photos.length == 1
+                  ? 'Photo saved on this device.'
+                  : '${photos.length} photos saved on this device.',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+
+      unawaited(_flushPreInspectionQueue());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
-  Future<void> _editPreInspectionPhotoNote(Map<String, dynamic> photo) async {
-    final controller = TextEditingController(text: photo['note']?.toString() ?? '');
-    final save = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
-      title: const Text('Photo note'),
-      content: TextField(controller: controller, autofocus: true, minLines: 2, maxLines: 5, decoration: const InputDecoration(hintText: 'Example: Scratch on left rear quarter panel')),
-      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Save'))],
-    ));
-    if (save == true) await _run(() => _api.updateJobPreInspectionPhotoNote(widget.businessId, photo['id'].toString(), controller.text.trim()));
+  Future<void> _editPreInspectionPhotoNote(
+    Map<String, dynamic> photo,
+  ) async {
+    final controller = TextEditingController(
+      text: photo['note']?.toString() ?? '',
+    );
+    final save = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Photo note'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            hintText: 'Example: Scratch on left rear quarter panel',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    final note = controller.text.trim();
     controller.dispose();
+    if (save != true) return;
+
+    final pending = photo['upload_state']?.toString() == 'pending';
+    if (pending) {
+      try {
+        final local = await _offlineInspection.updatePendingPhotoNote(
+          widget.businessId,
+          widget.jobId,
+          photo['id'].toString(),
+          note,
+        );
+        _applyLocalPreInspection(local);
+        unawaited(_flushPreInspectionQueue());
+      } catch (error) {
+        if (mounted) setState(() => _error = error.toString());
+      }
+      return;
+    }
+
+    await _run(
+      () => _api.updateJobPreInspectionPhotoNote(
+        widget.businessId,
+        photo['id'].toString(),
+        note,
+      ),
+    );
   }
 
   Future<void> _deletePreInspectionPhoto(Map<String, dynamic> photo) async {
@@ -2753,76 +3054,307 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
+  Future<void> _showPreInspectionPhoto(
+    Map<String, dynamic> photo,
+  ) async {
+    final localPath = photo['local_file_path']?.toString() ?? '';
+    if (localPath.isNotEmpty) {
+      final file = File(localPath);
+      if (file.existsSync()) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => Dialog(
+            insetPadding: const EdgeInsets.all(12),
+            backgroundColor: Colors.black,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: InteractiveViewer(
+                    minScale: 1,
+                    maxScale: 5,
+                    child: Center(
+                      child: Image.file(
+                        file,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) => const Icon(
+                          Icons.broken_image_outlined,
+                          color: Colors.white70,
+                          size: 56,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: IconButton.filled(
+                    tooltip: 'Close photo',
+                    onPressed: () => Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
+    final bucket = photo['bucket']?.toString() ?? '';
+    final key = photo['key']?.toString() ?? '';
+    if (bucket.isNotEmpty && key.isNotEmpty) {
+      await _showFindingPhoto(photo);
+    }
+  }
+
   Widget _preInspectionPhotoTile(Map<String, dynamic> photo) {
     final bucket = photo['bucket']?.toString() ?? '';
     final key = photo['key']?.toString() ?? '';
+    final localPath = photo['local_file_path']?.toString() ?? '';
+    final localFile =
+        localPath.isEmpty ? null : File(localPath);
+    final hasLocal = localFile?.existsSync() == true;
     final note = photo['note']?.toString().trim() ?? '';
     final captured = _dateTime(photo['captured_at']);
+    final uploadState = photo['upload_state']?.toString() ?? 'synced';
+    final waiting = uploadState != 'synced';
+
+    Widget thumbnail() {
+      if (hasLocal) {
+        return Image.file(
+          localFile!,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) =>
+              const Icon(Icons.broken_image_outlined),
+        );
+      }
+
+      return FutureBuilder<String>(
+        future: bucket.isEmpty || key.isEmpty
+            ? Future<String>.value('')
+            : _api.signedAttachmentUrl(bucket, key),
+        builder: (context, snapshot) {
+          final url = snapshot.data ?? '';
+          if (url.isEmpty) {
+            return const ColoredBox(
+              color: Color(0x11000000),
+              child: Icon(Icons.photo_outlined),
+            );
+          }
+          return Image.network(
+            url,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) =>
+                const Icon(Icons.broken_image_outlined),
+          );
+        },
+      );
+    }
+
+    final subtitleParts = <String>[
+      if (captured.isNotEmpty) captured,
+      if (waiting) 'Saved locally • waiting to sync',
+    ];
+
     return Card(
       margin: const EdgeInsets.fromLTRB(10, 6, 10, 6),
       child: ListTile(
         contentPadding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
-        leading: SizedBox(width: 58, height: 48, child: ClipRRect(borderRadius: BorderRadius.circular(8), child: FutureBuilder<String>(
-          future: bucket.isEmpty || key.isEmpty ? Future<String>.value('') : _api.signedAttachmentUrl(bucket, key),
-          builder: (context, snapshot) {
-            final url = snapshot.data ?? '';
-            if (url.isEmpty) return const ColoredBox(color: Color(0x11000000), child: Icon(Icons.photo_outlined));
-            return Image.network(url, fit: BoxFit.cover, errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined));
-          },
-        ))),
-        title: Text(note.isEmpty ? 'No photo note' : note, maxLines: 2, overflow: TextOverflow.ellipsis),
-        subtitle: captured.isEmpty ? null : Text(captured),
-        onTap: bucket.isEmpty || key.isEmpty ? null : () => _showFindingPhoto(photo),
-        trailing: (photo['can_edit_note'] == true || photo['can_delete'] == true)
-            ? PopupMenuButton<String>(
-                onSelected: (value) {
-                  if (value == 'note') _editPreInspectionPhotoNote(photo);
-                  if (value == 'delete') _deletePreInspectionPhoto(photo);
-                },
-                itemBuilder: (_) => [
-                  if (photo['can_edit_note'] == true)
-                    const PopupMenuItem(
-                      value: 'note',
-                      child: Text('Edit note'),
-                    ),
-                  if (photo['can_delete'] == true)
-                    const PopupMenuItem(
-                      value: 'delete',
-                      child: Text('Delete photo'),
-                    ),
-                ],
-              )
+        leading: SizedBox(
+          width: 58,
+          height: 48,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: thumbnail(),
+          ),
+        ),
+        title: Text(
+          note.isEmpty ? 'No photo note' : note,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: subtitleParts.isEmpty
+            ? null
+            : Text(subtitleParts.join('\n')),
+        onTap: hasLocal || (bucket.isNotEmpty && key.isNotEmpty)
+            ? () => _showPreInspectionPhoto(photo)
             : null,
+        trailing:
+            (photo['can_edit_note'] == true || photo['can_delete'] == true)
+                ? PopupMenuButton<String>(
+                    onSelected: (value) {
+                      if (value == 'note') {
+                        _editPreInspectionPhotoNote(photo);
+                      }
+                      if (value == 'delete') {
+                        _deletePreInspectionPhoto(photo);
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      if (photo['can_edit_note'] == true)
+                        const PopupMenuItem(
+                          value: 'note',
+                          child: Text('Edit note'),
+                        ),
+                      if (photo['can_delete'] == true)
+                        const PopupMenuItem(
+                          value: 'delete',
+                          child: Text('Delete photo'),
+                        ),
+                    ],
+                  )
+                : null,
       ),
     );
   }
 
   Widget _preInspectionDrawer() {
     final data = _preInspection;
-    final photos = data == null ? <Map<String, dynamic>>[] : List<dynamic>.from(data['photos'] ?? const []).map((x) => Map<String, dynamic>.from(x as Map)).toList();
+    final photos = data == null
+        ? <Map<String, dynamic>>[]
+        : List<dynamic>.from(data['photos'] ?? const [])
+            .map((value) => Map<String, dynamic>.from(value as Map))
+            .toList();
     final date = data == null ? '' : _dateTime(data['inspected_at']);
     final notes = data?['notes']?.toString().trim() ?? '';
     final odometer = data?['odometer']?.toString().trim() ?? '';
+    final syncState = data?['sync_state']?.toString() ?? 'synced';
+    final waitingPhotos = photos
+        .where(
+          (photo) =>
+              (photo['upload_state']?.toString() ?? 'synced') != 'synced',
+        )
+        .length;
+    final waiting =
+        syncState == 'pending' || waitingPhotos > 0;
+    final conflict = syncState == 'conflict';
+
+    Widget syncNotice() {
+      if (conflict) {
+        return Container(
+          margin: const EdgeInsets.fromLTRB(6, 4, 6, 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.orange.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(
+              color: Colors.orange.withValues(alpha: 0.45),
+            ),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 18),
+              SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'Sync conflict • local changes are preserved',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+
+      if (waiting) {
+        return Container(
+          margin: const EdgeInsets.fromLTRB(6, 4, 6, 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF6B4BC3).withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.cloud_upload_outlined, size: 18),
+              SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'Saved locally • waiting to sync',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+
+      return const SizedBox.shrink();
+    }
+
     return _JobDrawerSurface(
       color: const Color(0xFF6B4BC3),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(10, 10, 10, 12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          if (data == null) const Padding(padding: EdgeInsets.all(6), child: Text('No pre-inspection has been recorded for this job yet.')),
-          if (data != null) ...[
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 5), child: Text(<String>[if (date.isNotEmpty) date, if (odometer.isNotEmpty) 'Mileage $odometer'].join(' • '), style: const TextStyle(fontWeight: FontWeight.w700))),
-            if (notes.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(6, 8, 6, 2), child: Text(notes)),
-            if (photos.isEmpty) const Padding(padding: EdgeInsets.all(8), child: Text('No inspection photos yet.')),
-            ...photos.map(_preInspectionPhotoTile),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (data == null)
+              const Padding(
+                padding: EdgeInsets.all(6),
+                child: Text(
+                  'No pre-inspection has been recorded for this job yet.',
+                ),
+              ),
+            if (data != null) ...[
+              syncNotice(),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 5),
+                child: Text(
+                  <String>[
+                    if (date.isNotEmpty) date,
+                    if (odometer.isNotEmpty) 'Mileage $odometer',
+                  ].join(' • '),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              if (notes.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(6, 8, 6, 2),
+                  child: Text(notes),
+                ),
+              if (photos.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: Text('No inspection photos yet.'),
+                ),
+              ...photos.map(_preInspectionPhotoTile),
+            ],
+            const SizedBox(height: 6),
+            if (_canEditInspection)
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed:
+                          _busy ? null : _editPreInspectionDetails,
+                      icon: Icon(
+                        data == null
+                            ? Icons.play_arrow
+                            : Icons.edit_outlined,
+                      ),
+                      label: Text(
+                        data == null
+                            ? 'Start inspection'
+                            : 'Edit details',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed:
+                          _busy ? null : _addPreInspectionPhotos,
+                      icon: const Icon(Icons.add_a_photo_outlined),
+                      label: const Text('Add photos'),
+                    ),
+                  ),
+                ],
+              ),
           ],
-          const SizedBox(height: 6),
-          if (_canEditInspection)
-            Row(children: [
-              Expanded(child: OutlinedButton.icon(onPressed: _busy ? null : _editPreInspectionDetails, icon: Icon(data == null ? Icons.play_arrow : Icons.edit_outlined), label: Text(data == null ? 'Start inspection' : 'Edit details'))),
-              const SizedBox(width: 8),
-              Expanded(child: FilledButton.icon(onPressed: _busy ? null : _addPreInspectionPhotos, icon: const Icon(Icons.add_a_photo_outlined), label: const Text('Add photos'))),
-            ]),
-        ]),
+        ),
       ),
     );
   }

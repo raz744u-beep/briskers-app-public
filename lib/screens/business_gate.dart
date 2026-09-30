@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../core/supabase_config.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
+import '../services/offline_preinspection_service.dart';
 import 'shell_screen.dart';
 
 class BusinessGate extends StatefulWidget {
@@ -17,6 +18,8 @@ class BusinessGate extends StatefulWidget {
 class _BusinessGateState extends State<BusinessGate> {
   static const _api = BriskersApi();
   final JobSyncService _jobSync = JobSyncService();
+  final OfflinePreInspectionService _offlineInspection =
+      OfflinePreInspectionService();
 
   List<Map<String, dynamic>>? _businesses;
   String? _error;
@@ -42,12 +45,7 @@ class _BusinessGateState extends State<BusinessGate> {
         final businessId =
             '${business['business_id'] ?? business['id'] ?? ''}';
         if (businessId.isNotEmpty) {
-          unawaited(
-            _jobSync.pull(businessId).catchError((_) {
-              // Local sync is best-effort here. The existing online UI remains
-              // usable and the sync state records the failure for retry.
-            }),
-          );
+          unawaited(_refreshLocalData(businessId));
         }
       }
     } catch (error) {
@@ -57,6 +55,20 @@ class _BusinessGateState extends State<BusinessGate> {
           _error = error.toString();
         });
       }
+    }
+  }
+
+  Future<void> _refreshLocalData(String businessId) async {
+    try {
+      await _offlineInspection.flush(businessId);
+    } catch (_) {
+      // Offline writes stay queued and retry the next time the app can sync.
+    }
+
+    try {
+      await _jobSync.pull(businessId);
+    } catch (_) {
+      // Existing online UI remains usable; the local pull retries later.
     }
   }
 
