@@ -180,6 +180,22 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     }
   }
 
+  Future<void> _setStatus(
+    Map<String, dynamic> item,
+    String status,
+  ) async {
+    try {
+      await _api.setAppointmentStatus(
+        widget.businessId,
+        item['id'].toString(),
+        status,
+      );
+      await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
   Future<void> _checkIn(Map<String, dynamic> item) async {
     if (!_canManage) return;
 
@@ -221,11 +237,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     if (!_canManage) return;
 
     final status = item['status']?.toString() ?? '';
-    final canEdit = status == 'confirmed' && item['job_id'] == null;
+    final canEdit =
+        {'confirmed', 'tentative'}.contains(status) && item['job_id'] == null;
     final canCancel = canEdit;
     final canDelete = item['job_id'] == null &&
         item['request_id'] == null &&
-        (status == 'confirmed' || status == 'cancelled');
+        {'confirmed', 'tentative', 'cancelled', 'no_show'}.contains(status);
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -307,13 +324,15 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   Color _statusColor(String status) {
     switch (status) {
+      case 'tentative':
+        return const Color(0xFFEF6C00);
       case 'cancelled':
       case 'no_show':
-        return Colors.red;
+        return const Color(0xFFC62828);
       case 'arrived':
-        return Colors.green;
+        return const Color(0xFF2E7D32);
       case 'finished':
-        return Colors.teal;
+        return const Color(0xFF00897B);
       default:
         return BriskersColors.appointments;
     }
@@ -321,6 +340,8 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   String _statusLabel(String status) {
     switch (status) {
+      case 'tentative':
+        return 'Tentative';
       case 'no_show':
         return 'No show';
       case 'arrived':
@@ -332,6 +353,117 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       default:
         return 'Confirmed';
     }
+  }
+
+  Widget _statusPill(Map<String, dynamic> item) {
+    final status = item['status']?.toString() ?? 'confirmed';
+    final color = _statusColor(status);
+    final locked = item['job_id'] != null || {'arrived', 'finished'}.contains(status);
+
+    final pill = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        _statusLabel(status),
+        style: TextStyle(
+          color: color,
+          fontSize: 13,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+
+    if (!_canManage || locked) return pill;
+
+    return PopupMenuButton<String>(
+      tooltip: 'Change appointment status',
+      onSelected: (value) => _setStatus(item, value),
+      itemBuilder: (_) => const [
+        PopupMenuItem(value: 'tentative', child: Text('Tentative')),
+        PopupMenuItem(value: 'confirmed', child: Text('Confirmed')),
+        PopupMenuItem(value: 'no_show', child: Text('No show')),
+        PopupMenuItem(value: 'cancelled', child: Text('Canceled')),
+      ],
+      child: pill,
+    );
+  }
+
+  Widget _makeBadge(String make) {
+    final clean = make.trim();
+    final upper = clean.toUpperCase();
+
+    String mark;
+    if (upper.contains('MERCEDES')) {
+      mark = '✦';
+    } else if (upper.contains('BMW')) {
+      mark = 'BMW';
+    } else if (upper.contains('VOLKSWAGEN') || upper == 'VW') {
+      mark = 'VW';
+    } else if (upper.contains('AUDI')) {
+      mark = '○○○○';
+    } else if (upper.contains('PORSCHE')) {
+      mark = 'P';
+    } else if (upper.contains('TOYOTA')) {
+      mark = 'T';
+    } else if (upper.contains('HONDA')) {
+      mark = 'H';
+    } else if (upper.contains('FORD')) {
+      mark = 'Ford';
+    } else if (upper.contains('CHEVROLET') || upper.contains('CHEVY')) {
+      mark = '✚';
+    } else {
+      mark = clean.isEmpty ? 'CAR' : upper.substring(0, upper.length.clamp(1, 3));
+    }
+
+    return Container(
+      width: 52,
+      height: 52,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F7FA),
+        shape: BoxShape.circle,
+        border: Border.all(color: const Color(0xFFD8DEE8)),
+      ),
+      child: Text(
+        mark,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: upper.contains('BMW')
+              ? const Color(0xFF1B4F9C)
+              : const Color(0xFF30343B),
+          fontSize: mark.length > 3 ? 10 : 14,
+          fontWeight: FontWeight.w900,
+          letterSpacing: mark == '○○○○' ? -2 : 0,
+        ),
+      ),
+    );
+  }
+
+  Widget _filterChip(String value, String label) {
+    final selected = _filter == value;
+    return ChoiceChip(
+      label: Text(
+        label,
+        maxLines: 1,
+        softWrap: false,
+      ),
+      selected: selected,
+      onSelected: (_) => setState(() => _filter = value),
+      labelStyle: TextStyle(
+        fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+        color: selected ? Colors.white : BriskersColors.appointments,
+      ),
+      selectedColor: BriskersColors.appointments,
+      backgroundColor: BriskersColors.appointments.withValues(alpha: 0.08),
+      side: BorderSide(
+        color: BriskersColors.appointments.withValues(alpha: 0.35),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      visualDensity: VisualDensity.compact,
+    );
   }
 
   @override
@@ -355,7 +487,15 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       ),
                 ),
               ),
-              if (_canManage)
+              Text(
+                'Total $total',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: BriskersColors.appointments,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              if (_canManage) ...[
+                const SizedBox(width: 8),
                 FilledButton.icon(
                   style: FilledButton.styleFrom(
                     backgroundColor: BriskersColors.appointments,
@@ -364,37 +504,30 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   icon: const Icon(Icons.add),
                   label: const Text('Add'),
                 ),
+              ],
             ],
-          ),
-          const SizedBox(height: 4),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              'Total $total',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: BriskersColors.appointments,
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
           ),
           const SizedBox(height: 10),
-          SegmentedButton<String>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(value: 'all', label: Text('All')),
-              ButtonSegment(value: 'today', label: Text('Today')),
-              ButtonSegment(value: 'upcoming', label: Text('Upcoming')),
-              ButtonSegment(value: 'past', label: Text('Past')),
-            ],
-            selected: {_filter},
-            onSelectionChanged: (value) =>
-                setState(() => _filter = value.first),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _filterChip('all', 'All'),
+                const SizedBox(width: 7),
+                _filterChip('today', 'Today'),
+                const SizedBox(width: 7),
+                _filterChip('upcoming', 'Upcoming'),
+                const SizedBox(width: 7),
+                _filterChip('past', 'Past'),
+              ],
+            ),
           ),
           if (_canManage && _pending > 0) ...[
             const SizedBox(height: 10),
             Card(
               color: BriskersColors.appointments.withValues(alpha: 0.07),
               child: ListTile(
+                dense: true,
                 leading: const Icon(
                   Icons.pending_actions,
                   color: BriskersColors.appointments,
@@ -405,7 +538,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   style: const TextStyle(
                     color: BriskersColors.appointments,
                     fontWeight: FontWeight.w800,
-                    fontSize: 20,
+                    fontSize: 18,
                   ),
                 ),
               ),
@@ -438,67 +571,111 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
               final start =
                   DateTime.tryParse(item['starts_at']?.toString() ?? '')
                       ?.toLocal();
-              final end = DateTime.tryParse(item['ends_at']?.toString() ?? '')
-                  ?.toLocal();
-              final status = item['status']?.toString() ?? 'confirmed';
-              final color = _statusColor(status);
+              final make = item['vehicle_make']?.toString() ?? '';
+              final year = item['vehicle_year']?.toString() ?? '';
+              final model = item['vehicle_model']?.toString() ?? '';
+              final vehicle = <String>[year, make, model]
+                  .where((value) => value.trim().isNotEmpty)
+                  .join(' ');
+              final service = item['title']?.toString() ?? '';
               final checking = _checkingInId == item['id']?.toString();
-              final time = start == null
-                  ? ''
-                  : end == null
-                      ? DateFormat('EEE, MMM d • h:mm a').format(start)
-                      : '${DateFormat('EEE, MMM d • h:mm a').format(start)}'
-                          ' – ${DateFormat('h:mm a').format(end)}';
 
               return Card(
                 margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
+                elevation: 0.8,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
                   onTap: _canManage ? () => _showOptions(item) : null,
-                  leading: CircleAvatar(
-                    backgroundColor: color.withValues(alpha: 0.12),
-                    child: Icon(Icons.calendar_month, color: color),
-                  ),
-                  title: Text(
-                    item['customer']?.toString() ?? 'Appointment',
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (time.isNotEmpty) Text(time),
-                      if ((item['vehicle']?.toString() ?? '').isNotEmpty)
-                        Text(item['vehicle'].toString()),
-                      if ((item['title']?.toString() ?? '').isNotEmpty)
-                        Text(item['title'].toString()),
-                      const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: color.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          _statusLabel(status),
-                          style: TextStyle(
-                            color: color,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        _makeBadge(make),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    start == null
+                                        ? '--'
+                                        : DateFormat('h:mm a').format(start),
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                      color: BriskersColors.appointments,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      item['customer']?.toString() ??
+                                          'Appointment',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (vehicle.isNotEmpty) ...[
+                                const SizedBox(height: 3),
+                                Text(
+                                  vehicle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 15.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                              if (service.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  service,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 14.5,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 8),
+                        if (checking)
+                          const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        else
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _statusPill(item),
+                              const SizedBox(height: 4),
+                              const Icon(
+                                Icons.chevron_right,
+                                size: 20,
+                                color: Color(0xFF8A94A3),
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
                   ),
-                  isThreeLine: true,
-                  trailing: checking
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.chevron_right),
                 ),
               );
             }),
