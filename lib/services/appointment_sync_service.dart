@@ -386,6 +386,7 @@ class AppointmentSyncService {
           await _applyBundle(
             businessId,
             Map<String, dynamic>.from(rawAppointment),
+            force: true,
           );
           await _database.customStatement(
             'DELETE FROM sync_outbox WHERE id = ?',
@@ -420,8 +421,9 @@ class AppointmentSyncService {
 
   Future<void> _applyBundle(
     String businessId,
-    Map<String, dynamic> appointment,
-  ) async {
+    Map<String, dynamic> appointment, {
+    bool force = false,
+  }) async {
     final id = appointment['id']?.toString() ?? '';
     if (id.isEmpty) return;
 
@@ -438,7 +440,7 @@ class AppointmentSyncService {
       ],
     ).get();
 
-    if (existing.isNotEmpty) {
+    if (!force && existing.isNotEmpty) {
       final state = existing.first.read<String>('sync_state');
       if (state == 'pending' || state == 'conflict') {
         return;
