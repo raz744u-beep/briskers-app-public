@@ -182,8 +182,17 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
         final localState =
             localPreInspection?['sync_state']?.toString() ?? 'synced';
-        final localDirty =
-            localState == 'pending' || localState == 'conflict';
+        final localPhotos = List<dynamic>.from(
+          localPreInspection?['photos'] ?? const <dynamic>[],
+        );
+        final localPhotoDirty = localPhotos.any(
+          (raw) =>
+              raw is Map &&
+              (raw['upload_state']?.toString() ?? 'synced') != 'synced',
+        );
+        final localDirty = localState == 'pending' ||
+            localState == 'conflict' ||
+            localPhotoDirty;
 
         preInspection = localDirty || serverPreInspection == null
             ? localPreInspection
