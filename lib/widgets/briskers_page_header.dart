@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 class BriskersLogo extends StatelessWidget {
   const BriskersLogo({
     super.key,
-    this.height = 34,
-    this.maxWidth = 96,
+    this.height = 44,
+    this.maxWidth = 148,
   });
 
   final double height;
@@ -29,8 +29,8 @@ class BriskersPageTitle extends StatelessWidget {
   const BriskersPageTitle({
     super.key,
     required this.title,
-    this.logoHeight = 34,
-    this.logoWidth = 96,
+    this.logoHeight = 44,
+    this.logoWidth = 148,
   });
 
   final String title;
@@ -45,7 +45,7 @@ class BriskersPageTitle extends StatelessWidget {
           height: logoHeight,
           maxWidth: logoWidth,
         ),
-        const SizedBox(width: 6),
+        const SizedBox(width: 8),
         Expanded(
           child: FittedBox(
             fit: BoxFit.scaleDown,
@@ -55,7 +55,7 @@ class BriskersPageTitle extends StatelessWidget {
               maxLines: 1,
               softWrap: false,
               style: const TextStyle(
-                fontSize: 20,
+                fontSize: 18,
                 fontWeight: FontWeight.w800,
               ),
             ),
