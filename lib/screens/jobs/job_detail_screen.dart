@@ -1332,6 +1332,62 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
+  String? _completedPaymentLabel() {
+    if (_job?['status']?.toString() != 'completed') return null;
+
+    final invoices = _documents
+        .where((row) => row['kind']?.toString() == 'invoice')
+        .toList();
+    if (invoices.isEmpty) return 'Invoice needed';
+
+    num total = 0;
+    num paid = 0;
+    num pending = 0;
+    for (final invoice in invoices) {
+      total += num.tryParse(invoice['total_amount']?.toString() ?? '') ?? 0;
+      paid += num.tryParse(invoice['paid_amount']?.toString() ?? '') ?? 0;
+      pending +=
+          num.tryParse(invoice['pending_payment']?.toString() ?? '') ?? 0;
+    }
+
+    if (total <= 0 || paid >= total - 0.005) return 'Paid';
+    if (pending > 0 && paid + pending >= total - 0.005) {
+      return 'Awaiting payment clearance';
+    }
+    return 'Awaiting payment';
+  }
+
+  Widget _completedPaymentBanner() {
+    final label = _completedPaymentLabel();
+    if (label == null) return const SizedBox.shrink();
+
+    final paid = label == 'Paid';
+    final invoiceNeeded = label == 'Invoice needed';
+    final color = paid
+        ? const Color(0xFF169B62)
+        : invoiceNeeded
+            ? const Color(0xFFC62828)
+            : const Color(0xFFE58A00);
+    final icon = paid
+        ? Icons.check_circle_outline
+        : invoiceNeeded
+            ? Icons.receipt_long_outlined
+            : Icons.hourglass_bottom_outlined;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      color: color.withValues(alpha: 0.08),
+      child: ListTile(
+        leading: Icon(icon, color: color),
+        title: const Text(
+          'Financial status',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text(label),
+      ),
+    );
+  }
+
   Widget _summaryCard({
     required String customerName,
     required String vehicle,
@@ -3006,6 +3062,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             jobTitle: jobTitle,
             assignment: assignment,
           ),
+          if (_job?['status']?.toString() == 'completed') ...[
+            const SizedBox(height: 8),
+            _completedPaymentBanner(),
+          ],
           if (_mechanic && unassigned) ...[
             const SizedBox(height: 8),
             OutlinedButton.icon(
