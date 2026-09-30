@@ -21,6 +21,14 @@ void main() {
     expect(names, contains('local_vehicles'));
     expect(names, contains('local_customer_vehicles'));
 
+    final syncColumns = await database.customSelect(
+      'PRAGMA table_info(local_sync_states)',
+    ).get();
+    final syncColumnNames = syncColumns
+        .map((row) => row.read<String>('name'))
+        .toSet();
+    expect(syncColumnNames, contains('metadata_json'));
+
     await database.close();
   });
 }
