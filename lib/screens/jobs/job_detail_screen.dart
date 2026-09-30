@@ -2580,7 +2580,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       final repairJobId = finding['repair_job_id']?.toString() ?? '';
       final repairJob = finding['repair_job_number']?.toString() ?? '';
       final inThisJob = status == 'in_job' && repairJobId == widget.jobId;
-      final attachments = List<dynamic>.from(finding['attachments'] ?? const []);
+      final attachments =
+          List<dynamic>.from(finding['attachments'] ?? const []);
+      final syncState =
+          finding['sync_state']?.toString() ?? 'synced';
+      final conflict = syncState == 'conflict';
+      final pendingPhotos = attachments.any(
+        (raw) =>
+            raw is Map &&
+            (raw['upload_state']?.toString() ?? 'synced') !=
+                'synced',
+      );
+      final waiting = syncState == 'pending' || pendingPhotos;
+      final findingId = finding['id']?.toString() ?? '';
+      final serverReady = !findingId.startsWith('local-finding-') &&
+          finding['row_version'] != null &&
+          !conflict;
 
       return Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
@@ -2610,7 +2625,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
-                if (_canEditFindings || finding['can_edit'] == true || _owner)
+                if ((_canEditFindings && !conflict) ||
+                    (finding['can_edit'] == true && !conflict) ||
+                    (_owner && serverReady))
                   PopupMenuButton<String>(
                     tooltip: 'Finding actions',
                     onSelected: (value) {
@@ -2619,17 +2636,17 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       if (value == 'delete') _deleteFinding(finding);
                     },
                     itemBuilder: (_) => [
-                      if (finding['can_edit'] == true)
+                      if (finding['can_edit'] == true && !conflict)
                         const PopupMenuItem(
                           value: 'edit',
                           child: Text('Edit finding'),
                         ),
-                      if (_canEditFindings)
+                      if (_canEditFindings && !conflict)
                         const PopupMenuItem(
                           value: 'photo',
                           child: Text('Add photos'),
                         ),
-                      if (_owner)
+                      if (_owner && serverReady)
                         const PopupMenuItem(
                           value: 'delete',
                           child: Text('Delete finding'),
@@ -2638,6 +2655,29 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   ),
               ],
             ),
+            if (conflict)
+              const Padding(
+                padding: EdgeInsets.only(top: 5),
+                child: Text(
+                  'Sync conflict • local Finding is preserved',
+                  style: TextStyle(
+                    color: Colors.orange,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              )
+            else if (waiting)
+              const Padding(
+                padding: EdgeInsets.only(top: 5),
+                child: Text(
+                  'Saved locally • waiting to sync',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
             if (attachments.isNotEmpty) ...[
               const SizedBox(height: 6),
               Wrap(
@@ -2653,7 +2693,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     .toList(),
               ),
             ],
-            if (status == 'open' && _canManage)
+            if (status == 'open' && _canManage && serverReady)
               CheckboxListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
@@ -2669,7 +2709,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         if (value == true) _addFindingToJob(finding);
                       },
               )
-            else if (inThisJob && _canManage)
+            else if (inThisJob && _canManage && serverReady)
               CheckboxListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
@@ -2691,7 +2731,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               )
-            else if (status == 'resolved' && _canManage)
+            else if (status == 'resolved' &&
+                _canManage &&
+                serverReady)
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
@@ -3368,6 +3410,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     String workSummary,
     Map<String, dynamic>? currentVisit,
   ) {
+    final syncState =
+        currentVisit?['sync_state']?.toString() ?? 'synced';
+    final waiting = syncState == 'pending';
+    final conflict = syncState == 'conflict';
+
     return _JobDrawerSurface(
       color: BriskersColors.jobs,
       child: Padding(
@@ -3375,6 +3422,61 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (conflict)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                    color:
+                        Colors.orange.withValues(alpha: 0.45),
+                  ),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, size: 18),
+                    SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        'Sync conflict • local Work Performed is preserved',
+                        style:
+                            TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else if (waiting)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color:
+                      BriskersColors.jobs.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.cloud_upload_outlined, size: 18),
+                    SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        'Saved locally • waiting to sync',
+                        style:
+                            TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Text(
               workSummary.isEmpty
                   ? 'No work performed entered yet.'
@@ -3385,13 +3487,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
-                  onPressed: _busy ? null : _editWorkSummary,
+                  onPressed:
+                      _busy || conflict ? null : _editWorkSummary,
                   icon: Icon(
                     workSummary.isEmpty
                         ? Icons.add_circle_outline
                         : Icons.edit_outlined,
                   ),
-                  label: Text(workSummary.isEmpty ? 'Add' : 'Edit'),
+                  label:
+                      Text(workSummary.isEmpty ? 'Add' : 'Edit'),
                 ),
               ),
             ],
