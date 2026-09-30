@@ -189,7 +189,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 ),
                 if (_rows != null)
                   Text(
-                    '${visible.length}',
+                    'Total ${_rows!.length}',
                     style: TextStyle(
                       color: accent,
                       fontWeight: FontWeight.w800,
