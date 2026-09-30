@@ -106,6 +106,7 @@ class LocalAppointments extends Table {
   TextColumn get title => text()();
   TextColumn get description => text().nullable()();
   TextColumn get customerName => text().nullable()();
+  TextColumn get customerPhoneNorm => text().nullable()();
   IntColumn get vehicleYear => integer().nullable()();
   TextColumn get vehicleMake => text().nullable()();
   TextColumn get vehicleModel => text().nullable()();
@@ -336,7 +337,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -377,6 +378,12 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
           }
           if (from < 5) {
             await migrator.createTable(localAppointments);
+          }
+          if (from < 6) {
+            await migrator.addColumn(
+              localAppointments,
+              localAppointments.customerPhoneNorm,
+            );
           }
         },
       );
