@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../widgets/briskers_page_header.dart';
 import 'catalog_settings_screen.dart';
 import 'employees_settings_screen.dart';
 import 'expense_settings_screen.dart';
@@ -28,7 +29,10 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(
+        toolbarHeight: 68,
+        title: const BriskersPageTitle(title: 'Settings', logoHeight: 40),
+      ),
       body: ListView(
         children: [
           ListTile(
