@@ -33,7 +33,7 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
   String? _vehicleId;
   String? _employeeId;
   DateTime _startsAt = _nextHour();
-  int _durationMinutes = 60;
+  final int _durationMinutes = 60;
   bool _loadingEmployees = true;
   bool _saving = false;
   String? _error;
