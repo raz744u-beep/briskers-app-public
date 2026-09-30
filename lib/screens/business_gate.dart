@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core/supabase_config.dart';
 import '../services/briskers_api.dart';
+import '../services/customer_vehicle_sync_service.dart';
 import '../services/job_sync_service.dart';
 import '../services/offline_preinspection_service.dart';
 import '../services/offline_work_findings_service.dart';
@@ -19,6 +20,8 @@ class BusinessGate extends StatefulWidget {
 class _BusinessGateState extends State<BusinessGate> {
   static const _api = BriskersApi();
   final JobSyncService _jobSync = JobSyncService();
+  final CustomerVehicleSyncService _customerVehicleSync =
+      CustomerVehicleSyncService();
   final OfflinePreInspectionService _offlineInspection =
       OfflinePreInspectionService();
   final OfflineWorkFindingsService _offlineWorkFindings =
@@ -78,6 +81,12 @@ class _BusinessGateState extends State<BusinessGate> {
       await _jobSync.pull(businessId);
     } catch (_) {
       // Existing online UI remains usable; the local pull retries later.
+    }
+
+    try {
+      await _customerVehicleSync.pull(businessId);
+    } catch (_) {
+      // Customer/vehicle browsing keeps the previous local snapshot.
     }
   }
 
