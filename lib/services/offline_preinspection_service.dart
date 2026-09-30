@@ -79,6 +79,85 @@ class OfflinePreInspectionService {
     };
   }
 
+  Future<void> seedServerInspectionIfMissing(
+    String businessId,
+    String jobId,
+    Map<String, dynamic> server,
+  ) async {
+    final existing = await _inspectionRow(businessId, jobId);
+    if (existing != null) return;
+
+    final serverId = server['id']?.toString() ?? '';
+    if (serverId.isEmpty) return;
+
+    await _database.transaction(() async {
+      if (await _inspectionRow(businessId, jobId) != null) return;
+
+      await _database.customStatement(
+        '''
+        INSERT INTO local_pre_inspections (
+          id, business_id, job_id, vehicle_id, inspected_at,
+          odometer, notes, created_by, server_updated_at,
+          row_version, sync_state
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+        ''',
+        [
+          serverId,
+          businessId,
+          jobId,
+          server['vehicle_id']?.toString(),
+          _unixNullable(_parseDate(server['inspected_at'])),
+          server['odometer'] as num?,
+          _nullIfBlank(server['notes']?.toString()),
+          server['created_by']?.toString(),
+          _unixNullable(_parseDate(server['updated_at'])),
+          int.tryParse(server['row_version']?.toString() ?? ''),
+        ],
+      );
+
+      final photos = List<dynamic>.from(
+        server['photos'] ?? const <dynamic>[],
+      );
+      for (final raw in photos) {
+        if (raw is! Map) continue;
+        final photo = Map<String, dynamic>.from(raw);
+        final photoId = photo['id']?.toString() ?? '';
+        final attachmentId = photo['attachment_id']?.toString() ?? '';
+        if (photoId.isEmpty || attachmentId.isEmpty) continue;
+
+        await _database.customStatement(
+          '''
+          INSERT OR REPLACE INTO local_pre_inspection_photos (
+            id, business_id, inspection_id, attachment_id,
+            local_file_path, storage_bucket, storage_key, filename,
+            mime_type, byte_size, captured_at, note, created_by,
+            can_edit_note, can_delete, upload_state, last_error
+          ) VALUES (
+            ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, 'synced', NULL
+          )
+          ''',
+          [
+            photoId,
+            businessId,
+            serverId,
+            attachmentId,
+            photo['bucket']?.toString(),
+            photo['key']?.toString(),
+            photo['filename']?.toString(),
+            photo['mime_type']?.toString(),
+            int.tryParse(photo['byte_size']?.toString() ?? ''),
+            _unixNullable(_parseDate(photo['captured_at'])),
+            _nullIfBlank(photo['note']?.toString()),
+            photo['created_by']?.toString(),
+            photo['can_edit_note'] == true ? 1 : 0,
+            photo['can_delete'] == true ? 1 : 0,
+          ],
+        );
+      }
+    });
+  }
+
   Future<Map<String, dynamic>> saveLocalInspection(
     String businessId,
     String jobId, {
