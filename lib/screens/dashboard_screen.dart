@@ -1499,6 +1499,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
               controller: _dashboardScrollController,
               padding: const EdgeInsets.fromLTRB(14, 6, 14, 90),
               children: [
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3F7FF),
+                    border: Border.all(color: const Color(0xFF005BCE), width: 1.5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'LOGO TEST',
+                        style: TextStyle(
+                          color: Color(0xFF005BCE),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        height: 72,
+                        width: double.infinity,
+                        color: Colors.white,
+                        alignment: Alignment.centerLeft,
+                        child: Image.asset(
+                          'assets/briskers_header_logo.png',
+                          height: 60,
+                          fit: BoxFit.contain,
+                          alignment: Alignment.centerLeft,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Text(
+                              'LOGO FAILED TO LOAD: $error',
+                              style: const TextStyle(
+                                color: Colors.red,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 Row(
                   children: [
                     Expanded(
