@@ -32,6 +32,86 @@ class SyncOutbox extends Table {
   TextColumn get lastError => text().nullable()();
 }
 
+class LocalCustomers extends Table {
+  TextColumn get id => text()();
+  TextColumn get businessId => text()();
+  TextColumn get displayName => text()();
+  BoolColumn get isCompany =>
+      boolean().withDefault(const Constant(false))();
+  TextColumn get email => text().nullable()();
+  TextColumn get phone => text().nullable()();
+  TextColumn get billingAddressJson =>
+      text().withDefault(const Constant('{}'))();
+  BoolColumn get taxable =>
+      boolean().withDefault(const Constant(true))();
+  BoolColumn get problemFlag =>
+      boolean().withDefault(const Constant(false))();
+  TextColumn get problemFlagNote => text().nullable()();
+  IntColumn get vehicleCount =>
+      integer().withDefault(const Constant(0))();
+  TextColumn get contactsJson =>
+      text().withDefault(const Constant('[]'))();
+  DateTimeColumn get createdAt => dateTime().nullable()();
+  DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
+  IntColumn get rowVersion => integer().nullable()();
+  TextColumn get syncState =>
+      text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class LocalVehicles extends Table {
+  TextColumn get id => text()();
+  TextColumn get businessId => text()();
+  IntColumn get year => integer().nullable()();
+  TextColumn get make => text().nullable()();
+  TextColumn get model => text().nullable()();
+  TextColumn get vin => text().nullable()();
+  TextColumn get licensePlate => text().nullable()();
+  TextColumn get licenseState => text().nullable()();
+  RealColumn get mileage => real().nullable()();
+  TextColumn get color => text().nullable()();
+  TextColumn get odometerUnit =>
+      text().withDefault(const Constant('mi'))();
+  DateTimeColumn get createdAt => dateTime().nullable()();
+  DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
+  IntColumn get rowVersion => integer().nullable()();
+  TextColumn get syncState =>
+      text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class LocalVehicleCustomers extends Table {
+  TextColumn get id => text()();
+  TextColumn get businessId => text()();
+  TextColumn get vehicleId => text()();
+  TextColumn get customerId => text()();
+  BoolColumn get isPrimary =>
+      boolean().withDefault(const Constant(true))();
+  TextColumn get validFrom => text().nullable()();
+  TextColumn get validUntil => text().nullable()();
+  DateTimeColumn get createdAt => dateTime().nullable()();
+  DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
+  IntColumn get rowVersion => integer().nullable()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class LocalOfficeAccessStates extends Table {
+  TextColumn get businessId => text()();
+  BoolColumn get customersAllowed =>
+      boolean().withDefault(const Constant(false))();
+  BoolColumn get vehiclesAllowed =>
+      boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {businessId};
+}
+
 class LocalJobs extends Table {
   TextColumn get id => text()();
   TextColumn get businessId => text()();
@@ -218,6 +298,10 @@ class LocalFindings extends Table {
   tables: [
     LocalSyncStates,
     SyncOutbox,
+    LocalCustomers,
+    LocalVehicles,
+    LocalVehicleCustomers,
+    LocalOfficeAccessStates,
     LocalJobs,
     LocalJobStatuses,
     LocalJobAssignments,
@@ -242,7 +326,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -275,6 +359,12 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
               localJobs.paymentState,
             );
             await migrator.createTable(localJobStatuses);
+          }
+          if (from < 4) {
+            await migrator.createTable(localCustomers);
+            await migrator.createTable(localVehicles);
+            await migrator.createTable(localVehicleCustomers);
+            await migrator.createTable(localOfficeAccessStates);
           }
         },
       );
