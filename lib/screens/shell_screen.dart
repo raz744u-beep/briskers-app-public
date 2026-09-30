@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/briskers_colors.dart';
 import '../services/briskers_api.dart';
@@ -54,15 +55,37 @@ class _ShellScreenState extends State<ShellScreen> {
     _refreshNavCounts();
   }
 
+  String get _customersViewedKey =>
+      'briskers_customers_viewed_${widget.businessId}';
+
   Future<void> _refreshNavCounts() async {
     try {
-      final counts = await _api.navCounts(
+      final prefs = await SharedPreferences.getInstance();
+      final rawSince = prefs.getString(_customersViewedKey);
+      final customersSince =
+          rawSince == null ? null : DateTime.tryParse(rawSince);
+      final counts = await _api.attentionCounts(
         widget.businessId,
         DateFormat('yyyy-MM-dd').format(DateTime.now()),
+        customersSince: customersSince,
       );
       if (!mounted) return;
       setState(() => _navCounts = counts);
     } catch (_) {}
+  }
+
+  Future<void> _markCustomersViewed() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _customersViewedKey,
+      DateTime.now().toUtc().toIso8601String(),
+    );
+    if (!mounted) return;
+    setState(() {
+      _navCounts = Map<String, dynamic>.from(_navCounts)
+        ..['customers'] = 0;
+    });
+    await _refreshNavCounts();
   }
 
   void _goTo(int index) {
@@ -73,7 +96,11 @@ class _ShellScreenState extends State<ShellScreen> {
       if (index == 1) _customersRefreshToken++;
       if (index == 3) _jobsRefreshToken++;
     });
-    _refreshNavCounts();
+    if (index == 1) {
+      _markCustomersViewed();
+    } else {
+      _refreshNavCounts();
+    }
   }
 
   Widget _navIcon(
