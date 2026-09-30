@@ -120,12 +120,25 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text(
-            'Appointments',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: BriskersColors.appointments,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Appointments',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: BriskersColors.appointments,
+                      ),
                 ),
+              ),
+              Text(
+                'Total ${appointments.length}',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: BriskersColors.appointments,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           if (_canManage)
