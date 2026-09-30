@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../core/briskers_colors.dart';
 import '../core/invoice_status_style.dart';
 import '../services/briskers_api.dart';
+import '../widgets/briskers_page_header.dart';
 import 'jobs/job_document_screen.dart';
 
 class DocumentsScreen extends StatefulWidget {
@@ -170,7 +171,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final accent = _estimate ? BriskersColors.estimates : BriskersColors.invoices;
 
     return Scaffold(
-      appBar: AppBar(title: Text(_title)),
+      appBar: AppBar(
+        toolbarHeight: 68,
+        title: BriskersPageTitle(title: _title, logoHeight: 40),
+      ),
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
