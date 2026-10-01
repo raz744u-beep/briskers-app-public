@@ -1120,6 +1120,40 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                     border: OutlineInputBorder(),
                   ),
                 ),
+                if (_receiptBaseAmount != null &&
+                    _receiptSurchargePercent > 0) ...[
+                  const SizedBox(height: 4),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      'Add ${_receiptSurchargePercent.toStringAsFixed(
+                        _receiptSurchargePercent ==
+                                _receiptSurchargePercent.roundToDouble()
+                            ? 0
+                            : 2,
+                      )}% surcharge',
+                    ),
+                    subtitle: Text(
+                      'Receipt amount \$${_receiptBaseAmount!.toStringAsFixed(2)}'
+                      ' • final \$${_amountController.text}',
+                    ),
+                    value: _applyReceiptSurcharge,
+                    onChanged: _saving
+                        ? null
+                        : (value) => setState(() {
+                              _applyReceiptSurcharge = value;
+                              _setAmountFromReceipt();
+                              if (_receiptExtraction != null) {
+                                _remarksController.text = _receiptNote(
+                                  _receiptExtraction!,
+                                  finalAmount: num.tryParse(
+                                    _amountController.text.trim(),
+                                  ),
+                                );
+                              }
+                            }),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 InkWell(
                   borderRadius: BorderRadius.circular(4),
@@ -1225,14 +1259,33 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                 ),
                 const SizedBox(height: 14),
                 OutlinedButton.icon(
-                  onPressed: _saving ? null : _addReceipts,
-                  icon: const Icon(Icons.add_a_photo_outlined),
+                  onPressed: _saving || _readingReceipt ? null : _addReceipts,
+                  icon: _readingReceipt
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.document_scanner_outlined),
                   label: Text(
-                    _receipts.isEmpty
-                        ? 'Add receipt photo'
-                        : '${_receipts.length} new receipt photo(s)',
+                    _readingReceipt
+                        ? 'Reading receipt...'
+                        : (_receipts.isEmpty
+                            ? 'Scan / add receipt'
+                            : '${_receipts.length} receipt photo(s)'),
                   ),
                 ),
+                if ((_receiptReadMessage ?? '').isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _receiptReadMessage!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
                 if (_receipts.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
