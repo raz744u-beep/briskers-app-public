@@ -229,7 +229,6 @@ const Map<String, Map<String, String>> _translations = {
     'paymentAmount': 'Amount',
     'paidInFull': 'Paid in full',
     'paidInFullPendingClose': 'Paid in full — Pending Close',
-    'remove': 'Remove',
     'addToInvoice': 'Add to Invoice',
     'addToEstimate': 'Add to Estimate',
     'translateEnglishNotice':
@@ -513,7 +512,6 @@ const Map<String, Map<String, String>> _translations = {
     'paymentAmount': 'Monto',
     'paidInFull': 'Pagado en su totalidad',
     'paidInFullPendingClose': 'Pagado en su totalidad — Pendiente de cierre',
-    'remove': 'Eliminar',
     'addToInvoice': 'Agregar a la factura',
     'addToEstimate': 'Agregar al presupuesto',
     'translateEnglishNotice':
