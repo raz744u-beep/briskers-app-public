@@ -6,6 +6,7 @@ import 'catalog_settings_screen.dart';
 import 'employees_settings_screen.dart';
 import 'expense_settings_screen.dart';
 import 'job_statuses_settings_screen.dart';
+import 'kiosk_checkin_settings_screen.dart';
 import 'invoice_statuses_settings_screen.dart';
 import 'item_categories_settings_screen.dart';
 import 'payment_methods_settings_screen.dart';
@@ -50,6 +51,28 @@ class SettingsScreen extends StatelessWidget {
                     businessId: businessId,
                     fallbackBusinessName: businessName,
                     onBusinessNameChanged: onBusinessNameChanged,
+                  ),
+                ),
+              );
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(
+              Icons.touch_app_outlined,
+              color: BriskersColors.schedule,
+            ),
+            title: const Text('Kiosk Check-In'),
+            subtitle: const Text(
+              'Customer disclaimer and public check-in settings',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => KioskCheckInSettingsScreen(
+                    businessId: businessId,
                   ),
                 ),
               );
