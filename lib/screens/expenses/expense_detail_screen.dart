@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
 import 'expense_entry_screen.dart';
+import 'expense_receipt_details_screen.dart';
 
 class ExpenseDetailScreen extends StatefulWidget {
   const ExpenseDetailScreen({
@@ -75,6 +76,19 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     if (lower.endsWith('.png')) return 'image/png';
     if (lower.endsWith('.webp')) return 'image/webp';
     return 'image/jpeg';
+  }
+
+  Future<void> _openReceiptDetails() async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExpenseReceiptDetailsScreen(
+          businessId: widget.businessId,
+          transactionId: widget.transactionId,
+        ),
+      ),
+    );
+    await _load();
   }
 
   Future<void> _addReceipt() async {
@@ -914,6 +928,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                   ),
                 ),
               ),
+              if (!income)
+                TextButton.icon(
+                  onPressed: _busy ? null : _openReceiptDetails,
+                  icon: const Icon(Icons.list_alt_outlined),
+                  label: const Text('Details'),
+                ),
               if (editable)
                 TextButton.icon(
                   onPressed: _uploading ? null : _addReceipt,
