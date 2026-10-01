@@ -163,17 +163,8 @@ class _BusinessGateState extends State<BusinessGate> {
     required String roleCode,
   }) async {
     if (roleCode == 'kiosk') {
-      try {
-        await _appointmentSync.flush(businessId);
-      } catch (_) {
-        // Queued check-ins remain local until the kiosk reconnects.
-      }
-
-      try {
-        await _appointmentSync.pull(businessId);
-      } catch (_) {
-        // The kiosk keeps its restricted local appointment cache.
-      }
+      // The dedicated kiosk screen owns appointment/check-in sync so there is
+      // only one local outbox/pull loop on the public terminal.
       return;
     }
     try {
