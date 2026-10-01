@@ -45,6 +45,33 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   String get _title => _estimate ? tr('estimates') : tr('invoices');
 
+  String _localizedStatusLabel(String status) {
+    switch (status) {
+      case 'Open':
+        return tr('invoiceOpen');
+      case 'Pending Close':
+        return tr('invoicePendingClose');
+      case 'Paid':
+        return tr('invoicePaid');
+      case 'Partial':
+        return tr('invoicePartial');
+      case 'Draft':
+        return tr('documentDraft');
+      case 'Issued':
+        return tr('documentIssued');
+      case 'Accepted':
+        return tr('documentAccepted');
+      case 'Declined':
+        return tr('documentDeclined');
+      case 'Expired':
+        return tr('documentExpired');
+      case 'Void':
+        return tr('documentVoid');
+      default:
+        return status;
+    }
+  }
+
   Map<String, dynamic>? _invoiceStyleByName(String status) {
     for (final item in _invoiceStyles) {
       if (item['name']?.toString() == status) return item;
@@ -341,7 +368,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   @override
   Widget build(BuildContext context) {
     final visible = _visibleRows;
-    final selectedLabel = _selectedStatus ?? tr('all');
+    final selectedLabel = _selectedStatus == null
+        ? tr('all')
+        : _localizedStatusLabel(_selectedStatus!);
     final accent = _estimate ? BriskersColors.estimates : BriskersColors.invoices;
 
     return Scaffold(
@@ -407,7 +436,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                             color: _statusColor(status),
                           ),
                           const SizedBox(width: 10),
-                          Expanded(child: Text(status)),
+                          Expanded(
+                            child: Text(_localizedStatusLabel(status)),
+                          ),
                           _menuCount(count),
                         ],
                       ),
@@ -481,6 +512,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             else
               ...visible.map((row) {
                 final status = row['display_status']?.toString() ?? '';
+                final statusLabel = _localizedStatusLabel(status);
                 final color = _statusColor(status);
                 final number = row['document_number']?.toString() ?? '';
                 final customer = row['customer_name']?.toString() ?? '';
@@ -537,7 +569,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     subtitle: Text(
                       <String>[
                         if (vehicle.isNotEmpty) vehicle,
-                        if (jobNumber.isNotEmpty) 'Job $jobNumber',
+                        if (jobNumber.isNotEmpty)
+                          '${tr('jobLabel')} $jobNumber',
                       ].join(' • '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -556,7 +589,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                               ),
                             ),
                             Text(
-                              status,
+                              statusLabel,
                               style: TextStyle(
                                 color: color,
                                 fontSize: 12,
