@@ -249,6 +249,33 @@ const Map<String, Map<String, String>> _translations = {
     'inspectionPhotos': 'Inspection photos',
     'appointmentCheckIn': 'Appointment check-in',
     'kioskWalkIn': 'Kiosk walk-in',
+    'aiReceiptSamples': 'AI receipt samples',
+    'aiReceiptSamplesSub':
+        'Upload real vendor receipts or invoices as layout references for AI extraction',
+    'trainingReferenceOnly': 'Training / reference only',
+    'trainingReferenceExplanation':
+        'These real receipts and invoices teach Briskers where a vendor usually prints invoice numbers, totals, surcharges, part numbers and line items.',
+    'noAccountingEffect': 'No accounting effect',
+    'noAccountingEffectExplanation':
+        'Training samples never create expenses, transactions, inventory, invoices or customer records.',
+    'addSample': 'Add sample',
+    'choosePayee': 'Choose payee',
+    'chooseSampleImages': 'Choose sample images',
+    'chooseMultipleSamples': 'You can select more than one image',
+    'takeSamplePhoto': 'Take sample photo',
+    'defaultSurcharge': 'default surcharge',
+    'trainingSampleAdded': 'Training sample added.',
+    'trainingSamplesAdded': 'training samples added.',
+    'removeTrainingSample': 'Remove training sample?',
+    'removeTrainingSampleQuestion':
+        'This removes the reference image from AI training for this vendor.',
+    'remove': 'Remove',
+    'cancel': 'Cancel',
+    'samples': 'samples',
+    'receiptSample': 'Receipt sample',
+    'usedAsLayoutReference': 'Used only as an AI layout reference',
+    'noTrainingSamples':
+        'No AI receipt samples yet. Add a vendor receipt or invoice to teach Briskers that layout.',
   },
   'es': {
     'dashboard': 'Panel',
@@ -425,5 +452,32 @@ const Map<String, Map<String, String>> _translations = {
     'inspectionPhotos': 'Fotos de inspección',
     'appointmentCheckIn': 'Registro de cita',
     'kioskWalkIn': 'Registro sin cita en kiosco',
+    'aiReceiptSamples': 'Muestras de recibos para IA',
+    'aiReceiptSamplesSub':
+        'Sube recibos o facturas reales de proveedores como referencia de diseño para la extracción con IA',
+    'trainingReferenceOnly': 'Solo entrenamiento / referencia',
+    'trainingReferenceExplanation':
+        'Estos recibos y facturas reales enseñan a Briskers dónde suele imprimir cada proveedor el número de factura, totales, recargos, números de pieza y artículos.',
+    'noAccountingEffect': 'Sin efecto contable',
+    'noAccountingEffectExplanation':
+        'Las muestras de entrenamiento nunca crean gastos, transacciones, inventario, facturas ni registros de clientes.',
+    'addSample': 'Agregar muestra',
+    'choosePayee': 'Elegir proveedor',
+    'chooseSampleImages': 'Elegir imágenes de muestra',
+    'chooseMultipleSamples': 'Puedes seleccionar más de una imagen',
+    'takeSamplePhoto': 'Tomar foto de muestra',
+    'defaultSurcharge': 'recargo predeterminado',
+    'trainingSampleAdded': 'Muestra de entrenamiento agregada.',
+    'trainingSamplesAdded': 'muestras de entrenamiento agregadas.',
+    'removeTrainingSample': '¿Eliminar muestra de entrenamiento?',
+    'removeTrainingSampleQuestion':
+        'Esto elimina la imagen de referencia del entrenamiento de IA para este proveedor.',
+    'remove': 'Eliminar',
+    'cancel': 'Cancelar',
+    'samples': 'muestras',
+    'receiptSample': 'Muestra de recibo',
+    'usedAsLayoutReference': 'Usada solo como referencia de diseño para la IA',
+    'noTrainingSamples':
+        'Todavía no hay muestras para IA. Agrega un recibo o factura de proveedor para enseñar ese formato a Briskers.',
   },
 };
