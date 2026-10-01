@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/briskers_i18n.dart';
 import '../core/supabase_config.dart';
 import 'expenses_screen.dart';
 import 'settings/settings_screen.dart';
@@ -33,8 +34,8 @@ class MoreScreen extends StatelessWidget {
               Icons.receipt_long,
               color: BriskersColors.expenses,
             ),
-            title: const Text('Expenses & income'),
-            subtitle: const Text('Expenses, receipts and job costs'),
+            title: Text(tr('expensesIncome')),
+            subtitle: Text(tr('expensesIncomeSub')),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(
@@ -48,23 +49,23 @@ class MoreScreen extends StatelessWidget {
               );
             },
           ),
-        const ListTile(
-          leading: Icon(Icons.calendar_month, color: BriskersColors.schedule),
-          title: Text('Schedule'),
-          subtitle: Text('Appointments are now available from the bottom bar'),
+        ListTile(
+          leading: const Icon(Icons.calendar_month, color: BriskersColors.schedule),
+          title: Text(tr('schedule')),
+          subtitle: Text(tr('appointments')),
         ),
         if (owner)
-          const ListTile(
-            leading: Icon(Icons.analytics, color: BriskersColors.reports),
-            title: Text('Reports & profitability'),
-            subtitle: Text('Owner only — coming in the next build'),
+          ListTile(
+            leading: const Icon(Icons.analytics, color: BriskersColors.reports),
+            title: Text(tr('reportsProfitability')),
+            subtitle: Text(tr('reportsProfitabilitySub')),
           ),
         if (canOpenSettings) ...[
           const Divider(),
           ListTile(
             leading: const Icon(Icons.settings, color: BriskersColors.settings),
-            title: const Text('Settings'),
-            subtitle: const Text('Shop information and app options'),
+            title: Text(tr('settings')),
+            subtitle: Text(tr('appOptions')),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(
@@ -84,7 +85,7 @@ class MoreScreen extends StatelessWidget {
         const Divider(),
         ListTile(
           leading: const Icon(Icons.logout),
-          title: const Text('Sign out'),
+          title: Text(tr('signOut')),
           onTap: () => supabase.auth.signOut(),
         ),
       ],
