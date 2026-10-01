@@ -257,8 +257,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       Expanded(
                         child: Text(
                           (_detail?['job_number']?.toString() ?? '').isEmpty
-                              ? 'Invoice expenses & credits'
-                              : 'Job & invoice expenses',
+                              ? tr('invoiceExpensesCredits')
+                              : tr('jobInvoiceExpenses'),
                           style: const TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w800,
@@ -271,86 +271,158 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                           await _addInvoiceExpense();
                         },
                         icon: const Icon(Icons.add_card_outlined),
-                        label: const Text('Add'),
+                        label: Text(tr('add')),
                       ),
                     ],
                   ),
                 ),
                 Expanded(
-                  child: ListView.separated(
-                          itemCount: expenses.length,
-                          separatorBuilder: (_, _) => const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            final expense = expenses[index];
-                            final id = expense['id']?.toString() ?? '';
-                            final vendor =
-                                expense['vendor']?.toString() ?? 'Expense';
-                            final category =
-                                expense['category']?.toString() ?? '';
-                            final date =
-                                expense['transaction_date']?.toString() ?? '';
-                            final scope =
-                                expense['scope']?.toString() ?? 'invoice';
-                            final jobNumber =
-                                expense['job_number']?.toString() ?? '';
-                            final scopeLabel = scope == 'invoice'
-                                ? 'Invoice-linked'
-                                : (jobNumber.isEmpty
-                                    ? 'Job expense'
-                                    : 'Job $jobNumber');
-                            final receiptCount = int.tryParse(
-                                  expense['receipt_count']?.toString() ?? '',
-                                ) ??
-                                0;
-                            final income =
-                                expense['direction']?.toString() == 'income';
-                            return ListTile(
-                              leading: CircleAvatar(
-                                child: Icon(
-                                  income ? Icons.south_west : Icons.north_east,
-                                ),
-                              ),
-                              title: Text(vendor),
-                              subtitle: Text(
-                                <String>[
-                                  scopeLabel,
-                                  if (category.isNotEmpty) category,
-                                  if (date.isNotEmpty) date,
-                                  if (receiptCount > 0)
-                                    '$receiptCount receipt photo(s)',
-                                ].join(' • '),
-                              ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    '${income ? '+' : '-'}${_money(expense['amount'])}',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w800,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 18),
+                    itemCount: expenses.length,
+                    itemBuilder: (context, index) {
+                      final expense = expenses[index];
+                      final id = expense['id']?.toString() ?? '';
+                      final vendor =
+                          expense['vendor']?.toString() ?? 'Expense';
+                      final category =
+                          expense['category']?.toString() ?? '';
+                      final date =
+                          expense['transaction_date']?.toString() ?? '';
+                      final scope =
+                          expense['scope']?.toString() ?? 'invoice';
+                      final jobNumber =
+                          expense['job_number']?.toString() ?? '';
+                      final scopeLabel = scope == 'invoice'
+                          ? tr('invoiceLinked')
+                          : (jobNumber.isEmpty
+                              ? tr('jobExpense')
+                              : '${tr('jobLabel')} $jobNumber');
+                      final receiptCount = int.tryParse(
+                            expense['receipt_count']?.toString() ?? '',
+                          ) ??
+                          0;
+                      final income =
+                          expense['direction']?.toString() == 'income';
+                      final directionColor = income
+                          ? const Color(0xFF169B62)
+                          : const Color(0xFFC62828);
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: id.isEmpty
+                              ? null
+                              : () async {
+                                  Navigator.pop(sheetContext);
+                                  await Navigator.push<void>(
+                                    this.context,
+                                    MaterialPageRoute(
+                                      builder: (_) => ExpenseDetailScreen(
+                                        businessId: widget.businessId,
+                                        transactionId: id,
+                                      ),
                                     ),
+                                  );
+                                  await _load();
+                                },
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                CircleAvatar(
+                                  radius: 20,
+                                  backgroundColor:
+                                      directionColor.withValues(alpha: 0.10),
+                                  child: Icon(
+                                    income
+                                        ? Icons.south_west
+                                        : Icons.north_east,
+                                    color: directionColor,
+                                    size: 22,
                                   ),
-                                  const SizedBox(width: 4),
-                                  const Icon(Icons.chevron_right),
-                                ],
-                              ),
-                              onTap: id.isEmpty
-                                  ? null
-                                  : () async {
-                                      Navigator.pop(sheetContext);
-                                      await Navigator.push<void>(
-                                        this.context,
-                                        MaterialPageRoute(
-                                          builder: (_) => ExpenseDetailScreen(
-                                            businessId: widget.businessId,
-                                            transactionId: id,
-                                          ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        vendor,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 16.5,
+                                          fontWeight: FontWeight.w800,
                                         ),
-                                      );
-                                      await _load();
-                                    },
-                            );
-                          },
+                                      ),
+                                      Text(
+                                        <String>[
+                                          scopeLabel,
+                                          if (category.isNotEmpty) category,
+                                          if (date.isNotEmpty) date,
+                                        ].join(' • '),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      '${income ? '+' : '-'}${_money(expense['amount'])}',
+                                      style: TextStyle(
+                                        fontSize: 17.5,
+                                        fontWeight: FontWeight.w900,
+                                        color: directionColor,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (receiptCount > 0) ...[
+                                          Icon(
+                                            Icons.photo_outlined,
+                                            size: 17,
+                                            color: directionColor,
+                                          ),
+                                          const SizedBox(width: 2),
+                                          Text(
+                                            '$receiptCount',
+                                            style: TextStyle(
+                                              color: directionColor,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                        ],
+                                        const Icon(
+                                          Icons.chevron_right,
+                                          size: 21,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
