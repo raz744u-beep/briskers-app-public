@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/briskers_i18n.dart';
 import '../services/briskers_api.dart';
 import '../widgets/briskers_page_header.dart';
 import 'expenses/expense_detail_screen.dart';
@@ -39,6 +40,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   String? _error;
 
   bool get _owner => widget.roleCode == 'owner';
+  bool get _allowRecurring =>
+      widget.roleCode == 'owner' || widget.roleCode == 'manager';
 
   @override
   void initState() {
@@ -90,6 +93,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           businessId: widget.businessId,
           initialDirection: direction,
           quickTemplate: quickTemplate,
+          allowRecurring: _allowRecurring,
         ),
       ),
     );
@@ -200,6 +204,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         builder: (_) => ExpenseDetailScreen(
           businessId: widget.businessId,
           transactionId: id,
+          allowRecurring: _allowRecurring,
         ),
       ),
     );
@@ -374,8 +379,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       appBar: AppBar(
         toolbarHeight: 68,
         backgroundColor: const Color(0xFFC62828).withValues(alpha: 0.08),
-        title: const BriskersPageTitle(
-          title: 'Expenses & income',
+        title: BriskersPageTitle(
+          title: tr('expensesIncome'),
           logoHeight: 40,
         ),
       ),
@@ -441,51 +446,53 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  Card(
-                    margin: EdgeInsets.zero,
-                    child: ExpansionTile(
-                      leading: const Icon(
-                        Icons.event_repeat_outlined,
-                        color: BriskersColors.expenses,
-                      ),
-                      title: const Text(
-                        'Recurring transactions',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      childrenPadding:
-                          const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                      children: [
-                        const Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'View and edit only transactions set to repeat.',
-                          ),
+                  if (_allowRecurring) ...[
+                    const SizedBox(height: 10),
+                    Card(
+                      margin: EdgeInsets.zero,
+                      child: ExpansionTile(
+                        leading: const Icon(
+                          Icons.event_repeat_outlined,
+                          color: BriskersColors.expenses,
                         ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            onPressed: () async {
-                              await Navigator.push<void>(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => RecurringTransactionsScreen(
-                                    businessId: widget.businessId,
+                        title: Text(
+                          tr('recurringTransactions'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        childrenPadding:
+                            const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        children: [
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'View and edit only transactions set to repeat.',
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                await Navigator.push<void>(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => RecurringTransactionsScreen(
+                                      businessId: widget.businessId,
+                                    ),
                                   ),
-                                ),
-                              );
-                              await _load();
-                            },
-                            icon: const Icon(Icons.open_in_new),
-                            label: const Text('Open recurring transactions'),
+                                );
+                                await _load();
+                              },
+                              icon: const Icon(Icons.open_in_new),
+                              label: Text(tr('recurringTransactions')),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
+                  ],
                   if (_owner && Platform.isAndroid) ...[
                     const SizedBox(height: 10),
                     Card(
@@ -537,10 +544,16 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                   ],
                   const SizedBox(height: 12),
                   SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'all', label: Text('All')),
-                      ButtonSegment(value: 'expense', label: Text('Expenses')),
-                      ButtonSegment(value: 'income', label: Text('Income')),
+                    segments: [
+                      ButtonSegment(value: 'all', label: Text(tr('all'))),
+                      ButtonSegment(
+                        value: 'expense',
+                        label: Text(tr('expenses')),
+                      ),
+                      const ButtonSegment(
+                        value: 'income',
+                        label: Text('Income'),
+                      ),
                     ],
                     selected: {_filter},
                     onSelectionChanged: (value) =>
