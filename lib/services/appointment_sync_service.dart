@@ -457,12 +457,12 @@ class AppointmentSyncService {
       INSERT INTO local_appointments (
         id, business_id, customer_id, vehicle_id, employee_id,
         job_id, request_id, starts_at, ends_at, status,
-        title, description, customer_name,
+        title, description, customer_name, customer_phone_norm,
         vehicle_year, vehicle_make, vehicle_model, vehicle_label,
         mechanic_name, can_check_in, server_updated_at,
         row_version, sync_state
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced'
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced'
       )
       ON CONFLICT(id) DO UPDATE SET
         customer_id=excluded.customer_id,
@@ -476,6 +476,7 @@ class AppointmentSyncService {
         title=excluded.title,
         description=excluded.description,
         customer_name=excluded.customer_name,
+        customer_phone_norm=excluded.customer_phone_norm,
         vehicle_year=excluded.vehicle_year,
         vehicle_make=excluded.vehicle_make,
         vehicle_model=excluded.vehicle_model,
@@ -500,6 +501,7 @@ class AppointmentSyncService {
         appointment['title']?.toString() ?? 'Appointment',
         _text(appointment['description']),
         _text(appointment['customer']),
+        _text(appointment['customer_phone_norm']),
         _int(appointment['vehicle_year']),
         _text(appointment['vehicle_make']),
         _text(appointment['vehicle_model']),

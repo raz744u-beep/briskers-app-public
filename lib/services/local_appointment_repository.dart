@@ -41,6 +41,36 @@ class LocalAppointmentRepository {
     return rows.map(_mapRow).toList();
   }
 
+  Future<List<Map<String, dynamic>>> appointmentsForPhone(
+    String businessId,
+    String phoneDigits,
+  ) async {
+    final normalized = phoneDigits.replaceAll(RegExp(r'\D'), '');
+    final lastTen = normalized.length > 10
+        ? normalized.substring(normalized.length - 10)
+        : normalized;
+    if (lastTen.length != 10) return const [];
+
+    final rows = await _database.customSelect(
+      '''
+      SELECT *
+      FROM local_appointments
+      WHERE business_id = ?
+        AND customer_phone_norm = ?
+        AND can_check_in = 1
+        AND job_id IS NULL
+        AND status NOT IN ('cancelled','no_show')
+      ORDER BY starts_at, id
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(lastTen),
+      ],
+    ).get();
+
+    return rows.map(_mapRow).toList();
+  }
+
   Future<Map<String, dynamic>?> appointment(
     String businessId,
     String appointmentId,

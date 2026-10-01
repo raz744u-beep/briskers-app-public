@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/supabase_config.dart';
 import '../services/briskers_api.dart';
@@ -9,6 +11,7 @@ import '../services/customer_vehicle_sync_service.dart';
 import '../services/job_sync_service.dart';
 import '../services/offline_preinspection_service.dart';
 import '../services/offline_work_findings_service.dart';
+import 'kiosk/kiosk_checkin_screen.dart';
 import 'shell_screen.dart';
 
 class BusinessGate extends StatefulWidget {
@@ -39,9 +42,89 @@ class _BusinessGateState extends State<BusinessGate> {
     _load();
   }
 
+  String? get _businessCacheKey {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null || userId.isEmpty) return null;
+    return 'briskers_business_context_$userId';
+  }
+
+  Future<Map<String, dynamic>?> _cachedBusiness() async {
+    final key = _businessCacheKey;
+    if (key == null) return null;
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(key);
+    if (raw == null || raw.isEmpty) return null;
+
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map
+          ? Map<String, dynamic>.from(decoded)
+          : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _saveCachedBusiness(
+    Map<String, dynamic>? business,
+  ) async {
+    final key = _businessCacheKey;
+    if (key == null) return;
+    final prefs = await SharedPreferences.getInstance();
+
+    if (business == null) {
+      await prefs.remove(key);
+      return;
+    }
+
+    await prefs.setString(
+      key,
+      jsonEncode({
+        'business_id':
+            '${business['business_id'] ?? business['id'] ?? ''}',
+        'business_name':
+            '${business['business_name'] ?? business['name'] ?? 'Briskers'}',
+        'role_code':
+            '${business['role_code'] ?? business['role'] ?? ''}',
+      }),
+    );
+  }
+
   Future<void> _load() async {
+    Map<String, dynamic>? cached;
+    try {
+      cached = await _cachedBusiness();
+      if (cached != null && mounted) {
+        setState(() {
+          _businesses = [cached!];
+          _error = null;
+        });
+
+        final businessId =
+            '${cached['business_id'] ?? cached['id'] ?? ''}';
+        final roleCode =
+            '${cached['role_code'] ?? cached['role'] ?? ''}';
+        if (businessId.isNotEmpty) {
+          unawaited(
+            _refreshLocalData(
+              businessId,
+              roleCode: roleCode,
+            ),
+          );
+        }
+      }
+    } catch (_) {
+      cached = null;
+    }
+
     try {
       final businesses = await _api.myBusinesses();
+      if (businesses.isNotEmpty) {
+        await _saveCachedBusiness(businesses.first);
+      } else {
+        await _saveCachedBusiness(null);
+      }
+
       if (mounted) {
         setState(() {
           _businesses = businesses;
@@ -53,12 +136,20 @@ class _BusinessGateState extends State<BusinessGate> {
         final business = businesses.first;
         final businessId =
             '${business['business_id'] ?? business['id'] ?? ''}';
+        final roleCode =
+            '${business['role_code'] ?? business['role'] ?? ''}';
         if (businessId.isNotEmpty) {
-          unawaited(_refreshLocalData(businessId));
+          unawaited(
+            _refreshLocalData(
+              businessId,
+              roleCode: roleCode,
+            ),
+          );
         }
       }
     } catch (error) {
-      if (mounted) {
+      if (!mounted) return;
+      if (cached == null) {
         setState(() {
           _businesses = const [];
           _error = error.toString();
@@ -67,7 +158,15 @@ class _BusinessGateState extends State<BusinessGate> {
     }
   }
 
-  Future<void> _refreshLocalData(String businessId) async {
+  Future<void> _refreshLocalData(
+    String businessId, {
+    required String roleCode,
+  }) async {
+    if (roleCode == 'kiosk') {
+      // The dedicated kiosk screen owns appointment/check-in sync so there is
+      // only one local outbox/pull loop on the public terminal.
+      return;
+    }
     try {
       await _offlineInspection.flush(businessId);
     } catch (_) {
@@ -142,10 +241,24 @@ class _BusinessGateState extends State<BusinessGate> {
     }
 
     final business = _businesses!.first;
+    final businessId =
+        '${business['business_id'] ?? business['id']}';
+    final businessName =
+        '${business['business_name'] ?? business['name'] ?? 'Briskers'}';
+    final roleCode =
+        '${business['role_code'] ?? business['role'] ?? ''}';
+
+    if (roleCode == 'kiosk') {
+      return KioskCheckInScreen(
+        businessId: businessId,
+        businessName: businessName,
+      );
+    }
+
     return ShellScreen(
-      businessId: '${business['business_id'] ?? business['id']}',
-      businessName: '${business['business_name'] ?? business['name'] ?? 'Briskers'}',
-      roleCode: '${business['role_code'] ?? business['role'] ?? ''}',
+      businessId: businessId,
+      businessName: businessName,
+      roleCode: roleCode,
     );
   }
 }
