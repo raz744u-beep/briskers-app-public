@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
 import '../../services/briskers_api.dart';
@@ -106,6 +107,80 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<Map<String, dynamic>?> _translateManualEntry(
+    Map<String, dynamic> input, {
+    bool translateName = true,
+    bool translateDescription = true,
+  }) async {
+    if (!BriskersLanguageController.instance.isSpanish) {
+      return input;
+    }
+
+    final keys = <String>[];
+    final texts = <String>[];
+
+    void addField(String key, bool enabled) {
+      if (!enabled) return;
+      final value = input[key]?.toString() ?? '';
+      keys.add(key);
+      texts.add(value);
+    }
+
+    addField('name', translateName);
+    addField('description', translateDescription);
+
+    if (texts.isEmpty) return input;
+
+    try {
+      final translated = await _api.translateManualDocumentText(
+        widget.businessId,
+        texts,
+      );
+      if (translated.length != texts.length) {
+        throw Exception('Translation result was incomplete.');
+      }
+
+      final result = Map<String, dynamic>.from(input);
+      for (var index = 0; index < keys.length; index++) {
+        final value = translated[index].trim();
+        result[keys[index]] = value.isEmpty ? null : value;
+      }
+      return result;
+    } catch (error) {
+      if (!mounted) return null;
+      setState(() {
+        _error =
+            'Could not translate the Spanish text to English. Please try again.\n$error';
+      });
+      return null;
+    }
+  }
+
+  Future<String?> _translateManualNote(String value) async {
+    if (!BriskersLanguageController.instance.isSpanish ||
+        value.trim().isEmpty) {
+      return value;
+    }
+
+    try {
+      final translated = await _api.translateManualDocumentText(
+        widget.businessId,
+        [value],
+      );
+      if (translated.isEmpty) {
+        throw Exception('Translation result was empty.');
+      }
+      return translated.first.trim();
+    } catch (error) {
+      if (!mounted) return null;
+      setState(() {
+        _error =
+            'Could not translate the Spanish note to English. Please try again.\n$error';
+      });
+      return null;
     }
   }
 
