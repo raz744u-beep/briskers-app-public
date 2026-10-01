@@ -510,25 +510,40 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   Widget _statusPill(Map<String, dynamic> item) {
     final status = item['status']?.toString() ?? 'confirmed';
     final color = _statusColor(status);
-    final locked = item['job_id'] != null || {'arrived', 'finished'}.contains(status);
+    final locked =
+        item['job_id'] != null || {'arrived', 'finished'}.contains(status);
+    final canChange = _canManage && _onlineReady && !locked;
 
     final pill = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.13),
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(
-        _statusLabel(status),
-        style: TextStyle(
-          color: color,
-          fontSize: 13,
-          fontWeight: FontWeight.w800,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            _statusLabel(status),
+            style: TextStyle(
+              color: color,
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          if (canChange) ...[
+            const SizedBox(width: 2),
+            Icon(
+              Icons.keyboard_arrow_down,
+              size: 17,
+              color: color,
+            ),
+          ],
+        ],
       ),
     );
 
-    if (!_canManage || !_onlineReady || locked) return pill;
+    if (!canChange) return pill;
 
     return PopupMenuButton<String>(
       tooltip: 'Change appointment status',
@@ -540,57 +555,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         PopupMenuItem(value: 'cancelled', child: Text('Canceled')),
       ],
       child: pill,
-    );
-  }
-
-  Widget _makeBadge(String make) {
-    final clean = make.trim();
-    final upper = clean.toUpperCase();
-
-    String mark;
-    if (upper.contains('MERCEDES')) {
-      mark = '✦';
-    } else if (upper.contains('BMW')) {
-      mark = 'BMW';
-    } else if (upper.contains('VOLKSWAGEN') || upper == 'VW') {
-      mark = 'VW';
-    } else if (upper.contains('AUDI')) {
-      mark = '○○○○';
-    } else if (upper.contains('PORSCHE')) {
-      mark = 'P';
-    } else if (upper.contains('TOYOTA')) {
-      mark = 'T';
-    } else if (upper.contains('HONDA')) {
-      mark = 'H';
-    } else if (upper.contains('FORD')) {
-      mark = 'Ford';
-    } else if (upper.contains('CHEVROLET') || upper.contains('CHEVY')) {
-      mark = '✚';
-    } else {
-      mark = clean.isEmpty ? 'CAR' : upper.substring(0, upper.length > 3 ? 3 : upper.length);
-    }
-
-    return Container(
-      width: 52,
-      height: 52,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF5F7FA),
-        shape: BoxShape.circle,
-        border: Border.all(color: const Color(0xFFD8DEE8)),
-      ),
-      child: Text(
-        mark,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: upper.contains('BMW')
-              ? const Color(0xFF1B4F9C)
-              : const Color(0xFF30343B),
-          fontSize: mark.length > 3 ? 10 : 14,
-          fontWeight: FontWeight.w900,
-          letterSpacing: mark == '○○○○' ? -2 : 0,
-        ),
-      ),
     );
   }
 
@@ -772,8 +736,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        _makeBadge(make),
-                        const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -842,18 +804,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         else
-                          Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _statusPill(item),
-                              const SizedBox(height: 4),
-                              const Icon(
-                                Icons.chevron_right,
-                                size: 20,
-                                color: Color(0xFF8A94A3),
-                              ),
-                            ],
-                          ),
+                          _statusPill(item),
                       ],
                     ),
                   ),
