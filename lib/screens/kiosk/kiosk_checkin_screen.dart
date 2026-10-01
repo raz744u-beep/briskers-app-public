@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/formatters.dart';
 import '../../services/appointment_sync_service.dart';
+import '../../services/kiosk_registration_service.dart';
 import '../../services/local_appointment_repository.dart';
 import '../../widgets/briskers_page_header.dart';
 
@@ -28,7 +29,17 @@ class _KioskCheckInScreenState
   final AppointmentSyncService _sync = AppointmentSyncService();
   final LocalAppointmentRepository _appointments =
       LocalAppointmentRepository();
+  final KioskRegistrationService _registrations =
+      KioskRegistrationService();
+
   final TextEditingController _phone = TextEditingController();
+  final TextEditingController _newName = TextEditingController();
+  final TextEditingController _newPhone = TextEditingController();
+  final TextEditingController _newEmail = TextEditingController();
+  final TextEditingController _vehicleYear = TextEditingController();
+  final TextEditingController _vehicleMake = TextEditingController();
+  final TextEditingController _vehicleModel = TextEditingController();
+  final TextEditingController _reason = TextEditingController();
 
   Timer? _privacyResetTimer;
   List<Map<String, dynamic>> _matches = const [];
@@ -37,6 +48,11 @@ class _KioskCheckInScreenState
   bool _online = false;
   bool _completed = false;
   bool _completedOnline = false;
+  bool _completedWalkIn = false;
+  bool _newCustomerMode = false;
+  bool _createOnlineAccount = false;
+  bool _acceptedDisclaimer = false;
+  Map<String, dynamic>? _disclaimer;
   String? _error;
 
   @override
@@ -49,18 +65,41 @@ class _KioskCheckInScreenState
   void dispose() {
     _privacyResetTimer?.cancel();
     _phone.dispose();
+    _newName.dispose();
+    _newPhone.dispose();
+    _newEmail.dispose();
+    _vehicleYear.dispose();
+    _vehicleMake.dispose();
+    _vehicleModel.dispose();
+    _reason.dispose();
     super.dispose();
   }
 
   Future<void> _refreshCache() async {
     try {
+      await _registrations.flush(widget.businessId);
+    } catch (_) {
+      // Pending walk-ins remain queued for the next reconnect.
+    }
+
+    try {
       await _sync.flush(widget.businessId);
       await _sync.pull(widget.businessId);
+      final disclaimer =
+          await _registrations.refreshSettings(widget.businessId);
       if (!mounted) return;
-      setState(() => _online = true);
+      setState(() {
+        _online = true;
+        _disclaimer = disclaimer;
+      });
     } catch (_) {
+      final disclaimer =
+          await _registrations.loadDisclaimer(widget.businessId);
       if (!mounted) return;
-      setState(() => _online = false);
+      setState(() {
+        _online = false;
+        _disclaimer = disclaimer;
+      });
     }
   }
 
@@ -196,11 +235,15 @@ class _KioskCheckInScreenState
     }
   }
 
-  void _showCompletion({required bool online}) {
+  void _showCompletion({
+    required bool online,
+    bool walkIn = false,
+  }) {
     _privacyResetTimer?.cancel();
     setState(() {
       _completed = true;
       _completedOnline = online;
+      _completedWalkIn = walkIn;
       _error = null;
     });
 
@@ -213,6 +256,13 @@ class _KioskCheckInScreenState
   void _reset() {
     _privacyResetTimer?.cancel();
     _phone.clear();
+    _newName.clear();
+    _newPhone.clear();
+    _newEmail.clear();
+    _vehicleYear.clear();
+    _vehicleMake.clear();
+    _vehicleModel.clear();
+    _reason.clear();
 
     if (!mounted) return;
     setState(() {
@@ -220,6 +270,10 @@ class _KioskCheckInScreenState
       _selected = null;
       _completed = false;
       _completedOnline = false;
+      _completedWalkIn = false;
+      _newCustomerMode = false;
+      _createOnlineAccount = false;
+      _acceptedDisclaimer = false;
       _error = null;
     });
   }
