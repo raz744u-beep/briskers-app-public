@@ -293,6 +293,112 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
     }
   }
 
+  Future<void> _createTestLogin() async {
+    final employeeId = widget.employeeId;
+    if (!widget.isOwner || employeeId == null || _appLoginBusy) return;
+
+    final email = _email.text.trim().toLowerCase();
+    if (email.isEmpty || !email.contains('@')) {
+      setState(() => _error = 'Enter a valid employee email first.');
+      return;
+    }
+    if (_appRoleCode == null) {
+      setState(
+        () => _error =
+            'This employee position does not have a staff app role.',
+      );
+      return;
+    }
+
+    final passwordController = TextEditingController();
+    bool obscure = true;
+
+    final password = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Create test login'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Set a temporary password for $email. '
+                'This test account will be immediately usable without '
+                'opening the email invitation.',
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: passwordController,
+                autofocus: true,
+                obscureText: obscure,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: InputDecoration(
+                  labelText: 'Temporary password',
+                  helperText: 'At least 8 characters',
+                  suffixIcon: IconButton(
+                    onPressed: () =>
+                        setDialogState(() => obscure = !obscure),
+                    icon: Icon(
+                      obscure
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = passwordController.text;
+                if (value.length < 8) return;
+                Navigator.pop(dialogContext, value);
+              },
+              child: const Text('Create test login'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    passwordController.dispose();
+    if (password == null || !mounted) return;
+
+    setState(() {
+      _appLoginBusy = true;
+      _error = null;
+    });
+
+    try {
+      await _api.createEmployeeTestLogin(
+        widget.businessId,
+        employeeId,
+        email: email,
+        password: password,
+      );
+      if (!mounted) return;
+
+      setState(() => _userLinked = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Test login ready. Use $email with the temporary password.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _appLoginBusy = false);
+    }
+  }
+
   String? _required(String? value) {
     if (value == null || value.trim().isEmpty) return 'Required';
     return null;
@@ -553,13 +659,24 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                         isThreeLine: !_userLinked && _appRoleCode != null,
                       ),
                     ),
-                    if (!_userLinked && _appRoleCode != null) ...[
+                    if (_appRoleCode != null) ...[
                       const SizedBox(height: 8),
+                      if (!_userLinked)
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed:
+                                _appLoginBusy ? null : _sendAppLoginInvite,
+                            icon: const Icon(Icons.mail_outline),
+                            label: const Text('Send app login invite'),
+                          ),
+                        ),
+                      if (!_userLinked) const SizedBox(height: 8),
                       SizedBox(
                         width: double.infinity,
-                        child: OutlinedButton.icon(
+                        child: FilledButton.tonalIcon(
                           onPressed:
-                              _appLoginBusy ? null : _sendAppLoginInvite,
+                              _appLoginBusy ? null : _createTestLogin,
                           icon: _appLoginBusy
                               ? const SizedBox.square(
                                   dimension: 18,
@@ -567,19 +684,20 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                                     strokeWidth: 2,
                                   ),
                                 )
-                              : const Icon(Icons.mail_outline),
+                              : const Icon(Icons.key_outlined),
                           label: Text(
-                            _appLoginBusy
-                                ? 'Creating login...'
-                                : 'Send app login invite',
+                            _userLinked
+                                ? 'Set / reset test password'
+                                : 'Create test login',
                           ),
                         ),
                       ),
                       const Padding(
                         padding: EdgeInsets.only(top: 6),
                         child: Text(
-                          'The employee will use the same Briskers app. '
-                          'Their permissions are based on their position.',
+                          'Test login is owner-only and bypasses the email '
+                          'invite so you can use a mock email during testing. '
+                          'Real employees should use the email invitation.',
                           style: TextStyle(fontSize: 12),
                         ),
                       ),
