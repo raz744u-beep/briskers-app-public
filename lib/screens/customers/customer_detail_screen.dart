@@ -13,6 +13,7 @@ import 'customer_notes_section.dart';
 import 'customer_service_history_section.dart';
 import 'customer_vehicles_section.dart';
 import 'customer_vehicle_findings_section.dart';
+import 'customer_warranty_history_section.dart';
 import 'edit_customer_screen.dart';
 import 'new_vehicle_screen.dart';
 
@@ -594,6 +595,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                     const SizedBox(height: 18),
                     CustomerServiceHistorySection(
+                      businessId: widget.businessId,
+                      customerId: widget.customerId,
+                    ),
+                    const SizedBox(height: 18),
+                    CustomerWarrantyHistorySection(
                       businessId: widget.businessId,
                       customerId: widget.customerId,
                     ),
