@@ -1487,6 +1487,19 @@ class BriskersApi {
     return result.toString();
   }
 
+  Future<void> deleteFinancialAccount(
+    String businessId,
+    String accountId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_financial_account',
+      params: {
+        'p_business_id': businessId,
+        'p_account_id': accountId,
+      },
+    );
+  }
+
   Future<String> saveExpenseCategory(
     String businessId, {
     String? categoryId,
