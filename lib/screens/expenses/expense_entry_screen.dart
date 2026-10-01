@@ -1107,9 +1107,63 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                           }),
                 ),
                 const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _saving || _readingReceipt ? null : _addReceipts,
+                  icon: _readingReceipt
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.document_scanner_outlined),
+                  label: Text(
+                    _readingReceipt
+                        ? tr('readingReceipt')
+                        : (_receipts.isEmpty
+                            ? tr('scanAddReceipt')
+                            : '${_receipts.length} receipt photo(s)'),
+                  ),
+                ),
+                if ((_receiptReadMessage ?? '').isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _receiptReadMessage!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                if (_receipts.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: _receipts
+                          .map(
+                            (file) => Chip(
+                              label: Text(
+                                file.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              onDeleted: _saving
+                                  ? null
+                                  : () => setState(
+                                        () => _receipts = _receipts
+                                            .where((item) => item.path != file.path)
+                                            .toList(),
+                                      ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: _amountController,
-                  autofocus: !_editing,
+                  autofocus: false,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   textInputAction: TextInputAction.next,
@@ -1260,60 +1314,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                     border: const OutlineInputBorder(),
                   ),
                 ),
-                const SizedBox(height: 14),
-                OutlinedButton.icon(
-                  onPressed: _saving || _readingReceipt ? null : _addReceipts,
-                  icon: _readingReceipt
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.document_scanner_outlined),
-                  label: Text(
-                    _readingReceipt
-                        ? tr('readingReceipt')
-                        : (_receipts.isEmpty
-                            ? tr('scanAddReceipt')
-                            : '${_receipts.length} receipt photo(s)'),
-                  ),
-                ),
-                if ((_receiptReadMessage ?? '').isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      _receiptReadMessage!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                if (_receipts.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: _receipts
-                          .map(
-                            (file) => Chip(
-                              label: Text(
-                                file.name,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              onDeleted: _saving
-                                  ? null
-                                  : () => setState(
-                                        () => _receipts = _receipts
-                                            .where((item) => item.path != file.path)
-                                            .toList(),
-                                      ),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ),
+
                 if (widget.allowRecurring && !_linked && !_copying) ...[
                   const SizedBox(height: 8),
                   SwitchListTile(
