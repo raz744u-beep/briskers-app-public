@@ -382,6 +382,33 @@ class BriskersApi {
     }
   }
 
+  Future<List<String>> translateManualDocumentText(
+    String businessId,
+    List<String> texts,
+  ) async {
+    try {
+      final result = await supabase.functions.invoke(
+        'manual-text-translate',
+        body: {
+          'business_id': businessId,
+          'texts': texts,
+        },
+      );
+      final data = Map<String, dynamic>.from(result.data as Map);
+      return List<dynamic>.from(data['translations'] ?? const [])
+          .map((value) => value.toString())
+          .toList();
+    } on FunctionException catch (error) {
+      final details = error.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception(
+        error.reasonPhrase ?? 'Could not translate document text.',
+      );
+    }
+  }
+
   Future<List<DateTime>> calendarEventDays(
     String businessId,
     DateTime month,
