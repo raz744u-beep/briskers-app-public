@@ -1018,7 +1018,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text(tr('removePayment') + '?'),
+        title: Text("${tr('removePayment')}?"),
         content: Text(
           'Remove the ${_money(payment['amount'])} '
           '${payment['payment_method_name'] ?? 'payment'} entry?',
