@@ -368,6 +368,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         title: 'Add item to invoice',
         saveLabel: 'Add to Invoice',
         lockCatalogFields: true,
+        clearNumericOnFirstTap: true,
       ),
     );
     if (result == null) return;
@@ -3235,6 +3236,8 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
   late final TextEditingController _taxPercent;
   String _lineKind = 'item';
   String? _error;
+  bool _quantityCleared = false;
+  bool _priceCleared = false;
 
   @override
   void initState() {
@@ -3326,6 +3329,11 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
               controller: _quantity,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
+              onTap: () {
+                if (_quantityCleared) return;
+                _quantity.clear();
+                _quantityCleared = true;
+              },
               decoration: const InputDecoration(labelText: 'Quantity'),
             ),
             const SizedBox(height: 10),
@@ -3333,6 +3341,11 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
               controller: _price,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
+              onTap: () {
+                if (_priceCleared) return;
+                _price.clear();
+                _priceCleared = true;
+              },
               decoration: const InputDecoration(
                 labelText: 'Unit price',
                 prefixText: '\$ ',
@@ -3378,12 +3391,14 @@ class _EditLineDialog extends StatefulWidget {
     this.title = 'Edit item',
     this.saveLabel = 'Save',
     this.lockCatalogFields = false,
+    this.clearNumericOnFirstTap = false,
   });
 
   final Map<String, dynamic> line;
   final String title;
   final String saveLabel;
   final bool lockCatalogFields;
+  final bool clearNumericOnFirstTap;
 
   @override
   State<_EditLineDialog> createState() => _EditLineDialogState();
@@ -3397,6 +3412,8 @@ class _EditLineDialogState extends State<_EditLineDialog> {
   late final TextEditingController _taxPercent;
   late String _lineKind;
   String? _error;
+  bool _quantityCleared = false;
+  bool _priceCleared = false;
 
   @override
   void initState() {
@@ -3554,12 +3571,21 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                           Expanded(
                             flex: 2,
                             child: TextField(
-                        scrollPadding: const EdgeInsets.only(bottom: 180),
+                              scrollPadding:
+                                  const EdgeInsets.only(bottom: 180),
                               controller: _quantity,
                               keyboardType:
                                   const TextInputType.numberWithOptions(
                                 decimal: true,
                               ),
+                              onTap: () {
+                                if (!widget.clearNumericOnFirstTap ||
+                                    _quantityCleared) {
+                                  return;
+                                }
+                                _quantity.clear();
+                                _quantityCleared = true;
+                              },
                               decoration: const InputDecoration(
                                 labelText: 'Qty',
                                 border: OutlineInputBorder(),
@@ -3570,12 +3596,21 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                           Expanded(
                             flex: 3,
                             child: TextField(
-                        scrollPadding: const EdgeInsets.only(bottom: 180),
+                              scrollPadding:
+                                  const EdgeInsets.only(bottom: 180),
                               controller: _price,
                               keyboardType:
                                   const TextInputType.numberWithOptions(
                                 decimal: true,
                               ),
+                              onTap: () {
+                                if (!widget.clearNumericOnFirstTap ||
+                                    _priceCleared) {
+                                  return;
+                                }
+                                _price.clear();
+                                _priceCleared = true;
+                              },
                               decoration: const InputDecoration(
                                 labelText: 'Price',
                                 prefixText: '\$ ',
