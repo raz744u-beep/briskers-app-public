@@ -416,15 +416,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                         controller: controller,
                         autofocus: true,
                         onChanged: filter,
-                        decoration: const InputDecoration(
-                          labelText: 'Search items',
-                          prefixIcon: Icon(Icons.search),
+                        decoration: InputDecoration(
+                          labelText: tr('searchItems'),
+                          prefixIcon: const Icon(Icons.search),
                         ),
                       ),
                     ),
                     Expanded(
                       child: filtered.isEmpty
-                          ? const Center(child: Text('No matching items.'))
+                          ? Center(child: Text(tr('noMatchingItems')))
                           : ListView.builder(
                               itemCount: filtered.length,
                               itemBuilder: (context, index) {
@@ -645,7 +645,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+            child: Text(tr('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
@@ -954,7 +954,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+            child: Text(tr('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
@@ -1250,7 +1250,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                 TextButton(
                                   onPressed: () =>
                                       Navigator.pop(dialogContext, false),
-                                  child: const Text('Cancel'),
+                                  child: Text(tr('cancel')),
                                 ),
                                 FilledButton(
                                   onPressed: () =>
@@ -1402,7 +1402,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
+              child: Text(tr('cancel')),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(dialogContext, true),
@@ -1491,7 +1491,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+            child: Text(tr('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
@@ -1557,7 +1557,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+            child: Text(tr('cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
@@ -3455,7 +3455,7 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Add custom line'),
+      title: Text(tr('addCustomLine')),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -3463,22 +3463,41 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
             TextField(
               controller: _name,
               autofocus: true,
-              decoration: const InputDecoration(labelText: 'Name'),
+              decoration: InputDecoration(
+                labelText: tr('item'),
+                helperText: BriskersLanguageController.instance.isSpanish
+                    ? tr('translateEnglishNotice')
+                    : null,
+              ),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _description,
-              decoration: const InputDecoration(labelText: 'Description'),
+              decoration: InputDecoration(
+                labelText: tr('description'),
+              ),
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               initialValue: _lineKind,
-              decoration: const InputDecoration(labelText: 'Type'),
-              items: const [
-                DropdownMenuItem(value: 'item', child: Text('Part / Item')),
-                DropdownMenuItem(value: 'labor', child: Text('Labor')),
-                DropdownMenuItem(value: 'supply', child: Text('Shop supply')),
-                DropdownMenuItem(value: 'other', child: Text('Other')),
+              decoration: InputDecoration(labelText: tr('type')),
+              items: [
+                DropdownMenuItem(
+                  value: 'item',
+                  child: Text(tr('partItem')),
+                ),
+                DropdownMenuItem(
+                  value: 'labor',
+                  child: Text(tr('labor')),
+                ),
+                DropdownMenuItem(
+                  value: 'supply',
+                  child: Text(tr('shopSupply')),
+                ),
+                DropdownMenuItem(
+                  value: 'other',
+                  child: Text(tr('other')),
+                ),
               ],
               onChanged: (value) {
                 if (value != null) setState(() => _lineKind = value);
@@ -3494,7 +3513,7 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
                 _quantity.clear();
                 _quantityCleared = true;
               },
-              decoration: const InputDecoration(labelText: 'Quantity'),
+              decoration: InputDecoration(labelText: tr('quantity')),
             ),
             const SizedBox(height: 10),
             TextField(
@@ -3506,8 +3525,8 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
                 _price.clear();
                 _priceCleared = true;
               },
-              decoration: const InputDecoration(
-                labelText: 'Unit price',
+              decoration: InputDecoration(
+                labelText: tr('price'),
                 prefixText: '\$ ',
               ),
             ),
@@ -3516,8 +3535,8 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
               controller: _taxPercent,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Tax',
+              decoration: InputDecoration(
+                labelText: tr('tax'),
                 suffixText: '%',
               ),
             ),
@@ -3534,11 +3553,11 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: Text(tr('cancel')),
         ),
         FilledButton(
           onPressed: _save,
-          child: const Text('Add'),
+          child: Text(tr('add')),
         ),
       ],
     );
@@ -3700,7 +3719,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                         readOnly: widget.lockCatalogFields,
                         textCapitalization: TextCapitalization.words,
                         decoration: InputDecoration(
-                          labelText: 'Item',
+                          labelText: tr('item'),
                           border: const OutlineInputBorder(),
                           filled: widget.lockCatalogFields,
                           fillColor: widget.lockCatalogFields
@@ -3718,10 +3737,13 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                         minLines: 2,
                         maxLines: 5,
                         textCapitalization: TextCapitalization.sentences,
-                        decoration: const InputDecoration(
-                          labelText: 'Description',
-                          hintText: 'Optional line description',
-                          border: OutlineInputBorder(),
+                        decoration: InputDecoration(
+                          labelText: tr('description'),
+                          helperText:
+                              BriskersLanguageController.instance.isSpanish
+                                  ? tr('translateEnglishNotice')
+                                  : null,
+                          border: const OutlineInputBorder(),
                           alignLabelWithHint: true,
                         ),
                       ),
@@ -3746,9 +3768,9 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                                 _quantity.clear();
                                 _quantityCleared = true;
                               },
-                              decoration: const InputDecoration(
-                                labelText: 'Qty',
-                                border: OutlineInputBorder(),
+                              decoration: InputDecoration(
+                                labelText: tr('qtyColumn'),
+                                border: const OutlineInputBorder(),
                               ),
                             ),
                           ),
@@ -3771,10 +3793,10 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                                 _price.clear();
                                 _priceCleared = true;
                               },
-                              decoration: const InputDecoration(
-                                labelText: 'Price',
+                              decoration: InputDecoration(
+                                labelText: tr('price'),
                                 prefixText: '\$ ',
-                                border: OutlineInputBorder(),
+                                border: const OutlineInputBorder(),
                               ),
                             ),
                           ),
@@ -3787,39 +3809,39 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                           controller: _taxPercent,
                           keyboardType:
                               const TextInputType.numberWithOptions(decimal: true),
-                          decoration: const InputDecoration(
-                            labelText: 'Tax',
+                          decoration: InputDecoration(
+                            labelText: tr('tax'),
                             suffixText: '%',
-                            border: OutlineInputBorder(),
+                            border: const OutlineInputBorder(),
                           ),
                         ),
                         const SizedBox(height: 12),
                         DropdownButtonFormField<String>(
                           initialValue: _lineKind,
-                          decoration: const InputDecoration(
-                            labelText: 'Type',
-                            border: OutlineInputBorder(),
+                          decoration: InputDecoration(
+                            labelText: tr('type'),
+                            border: const OutlineInputBorder(),
                           ),
-                          items: const [
+                          items: [
                             DropdownMenuItem(
                               value: 'item',
-                              child: Text('Part / Item'),
+                              child: Text(tr('partItem')),
                             ),
                             DropdownMenuItem(
                               value: 'labor',
-                              child: Text('Labor'),
+                              child: Text(tr('labor')),
                             ),
                             DropdownMenuItem(
                               value: 'supply',
-                              child: Text('Shop supply'),
+                              child: Text(tr('shopSupply')),
                             ),
                             DropdownMenuItem(
                               value: 'other',
-                              child: Text('Other'),
+                              child: Text(tr('other')),
                             ),
                             DropdownMenuItem(
                               value: 'shipping',
-                              child: Text('Shipping'),
+                              child: Text(tr('shipping')),
                             ),
                           ],
                           onChanged: (value) {
@@ -3850,7 +3872,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () => Navigator.pop(context),
-                        child: const Text('Cancel'),
+                        child: Text(tr('cancel')),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -4096,7 +4118,7 @@ class _DiscountDialogState extends State<_DiscountDialog> {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () => Navigator.pop(context),
-                        child: const Text('Cancel'),
+                        child: Text(tr('cancel')),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -4225,7 +4247,7 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: Text(tr('cancel')),
         ),
         FilledButton(
           onPressed: _save,
