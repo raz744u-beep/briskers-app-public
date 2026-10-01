@@ -4209,12 +4209,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       Color color,
       int? count,
     ) {
-      return _JobCategoryTile(
-        label: label,
-        icon: icon,
-        color: color,
-        count: count,
-        onTap: () => _openSectionModal(key),
+      return SizedBox(
+        height: 80,
+        child: _JobCategoryTile(
+          label: label,
+          icon: icon,
+          color: color,
+          count: count,
+          onTap: () => _openSectionModal(key),
+        ),
       );
     }
 
