@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/briskers_i18n.dart';
 import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
@@ -225,7 +226,7 @@ class _JobsScreenState extends State<JobsScreen> {
 
   Widget _statusControl(Map<String, dynamic> job) {
     final color = colorFromHex(job['status_color']?.toString());
-    final label = job['status_name']?.toString() ?? 'Status';
+    final label = jobStatusLabel(job['status']?.toString(), job['status_name']?.toString() ?? 'Status');
     final busy = _busyJobId == job['id']?.toString();
 
     final child = Container(
@@ -274,7 +275,7 @@ class _JobsScreenState extends State<JobsScreen> {
     if (!_canManage || !_onlineReady || busy) return child;
 
     return PopupMenuButton<String>(
-      tooltip: 'Change status',
+      tooltip: tr('changeStatus'),
       padding: EdgeInsets.zero,
       onSelected: (value) => _changeStatus(job, value),
       itemBuilder: (context) => _availableStatusesFor(job).map((status) {
@@ -288,7 +289,7 @@ class _JobsScreenState extends State<JobsScreen> {
                 color: itemColor,
               ),
               const SizedBox(width: 10),
-              Text(status['name']?.toString() ?? ''),
+              Text(jobStatusLabel(status['code']?.toString(), status['name']?.toString() ?? '')),
             ],
           ),
         );
@@ -317,7 +318,7 @@ class _JobsScreenState extends State<JobsScreen> {
             children: [
               Expanded(
                 child: Text(
-                  'Jobs',
+                  tr('jobs'),
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: BriskersColors.jobs,
@@ -326,7 +327,7 @@ class _JobsScreenState extends State<JobsScreen> {
               ),
               if (_rows != null)
                 Text(
-                  'Total ${_rows!.length}',
+                  '${tr('total')} ${_rows!.length}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         color: BriskersColors.jobs,
                         fontWeight: FontWeight.w700,
@@ -338,7 +339,7 @@ class _JobsScreenState extends State<JobsScreen> {
           Align(
             alignment: Alignment.centerLeft,
             child: PopupMenuButton<String>(
-              tooltip: 'Filter jobs',
+              tooltip: tr('filterJobs'),
               onSelected: (value) => setState(
                 () => _selectedStatus = value == '__all__' ? null : value,
               ),
@@ -349,7 +350,7 @@ class _JobsScreenState extends State<JobsScreen> {
                     children: [
                       const Icon(Icons.all_inclusive),
                       const SizedBox(width: 10),
-                      const Expanded(child: Text('All')),
+                      Expanded(child: Text(tr('all'))),
                       _menuCount(_rows?.length ?? 0, alwaysShow: true),
                     ],
                   ),
@@ -369,7 +370,7 @@ class _JobsScreenState extends State<JobsScreen> {
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: Text(status['name']?.toString() ?? ''),
+                          child: Text(jobStatusLabel(status['code']?.toString(), status['name']?.toString() ?? '')),
                         ),
                         _menuCount(count),
                       ],
@@ -391,8 +392,9 @@ class _JobsScreenState extends State<JobsScreen> {
                   final color = selected == null
                       ? BriskersColors.jobs
                       : colorFromHex(selected['color_hex']?.toString());
-                  final label =
-                      selected?['name']?.toString() ?? 'All';
+                  final label = selected == null
+                      ? tr('all')
+                      : jobStatusLabel(selected['code']?.toString(), selected['name']?.toString() ?? '');
 
                   return Container(
                     padding: const EdgeInsets.symmetric(
