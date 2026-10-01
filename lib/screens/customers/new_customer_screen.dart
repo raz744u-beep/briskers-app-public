@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
+import 'new_vehicle_screen.dart';
 
 class NewCustomerScreen extends StatefulWidget {
   const NewCustomerScreen({super.key, required this.businessId});
@@ -119,6 +120,18 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
         if (mounted) await _showCredentials(credentials);
       }
 
+      if (!mounted) return;
+
+      await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => NewVehicleScreen(
+            businessId: widget.businessId,
+            customerId: customerId,
+          ),
+        ),
+      );
+
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -186,7 +199,7 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
           const SizedBox(height: 16),
           FilledButton(
             onPressed: _busy ? null : _save,
-            child: Text(_busy ? 'Saving...' : 'Save customer'),
+            child: Text(_busy ? 'Saving...' : 'Save customer & add vehicle'),
           ),
         ],
       ),
