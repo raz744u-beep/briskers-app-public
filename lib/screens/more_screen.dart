@@ -24,7 +24,13 @@ class MoreScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final owner = roleCode == 'owner';
     final canOpenExpenses = roleCode == 'owner' || roleCode == 'manager';
-    final canOpenSettings = owner;
+    final canOpenSettings = <String>{
+      'owner',
+      'manager',
+      'office',
+      'mechanic',
+      'porter',
+    }.contains(roleCode);
 
     return ListView(
       children: [
