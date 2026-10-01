@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/invoice_status_style.dart';
+import '../core/briskers_i18n.dart';
 import '../services/briskers_api.dart';
 import '../widgets/briskers_page_header.dart';
 import 'jobs/job_document_screen.dart';
@@ -40,7 +41,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           .where((name) => name.isNotEmpty)
           .toList();
 
-  String get _title => _estimate ? 'Estimates' : 'Invoices';
+  String get _title => _estimate ? tr('estimates') : tr('invoices');
 
   Map<String, dynamic>? _invoiceStyleByName(String status) {
     for (final item in _invoiceStyles) {
@@ -167,7 +168,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   @override
   Widget build(BuildContext context) {
     final visible = _visibleRows;
-    final selectedLabel = _selectedStatus ?? 'All';
+    final selectedLabel = _selectedStatus ?? tr('all');
     final accent = _estimate ? BriskersColors.estimates : BriskersColors.invoices;
 
     return Scaffold(
@@ -193,7 +194,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 ),
                 if (_rows != null)
                   Text(
-                    'Total ${_rows!.length}',
+                    '${tr('total')} ${_rows!.length}',
                     style: TextStyle(
                       color: accent,
                       fontWeight: FontWeight.w800,
@@ -216,7 +217,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       children: [
                         const Icon(Icons.all_inclusive),
                         const SizedBox(width: 10),
-                        const Expanded(child: Text('All')),
+                        Expanded(child: Text(tr('all'))),
                         _menuCount(_rows?.length ?? 0, alwaysShow: true),
                       ],
                     ),
