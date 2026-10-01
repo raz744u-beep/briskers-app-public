@@ -570,6 +570,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (_busy ||
         !_canManageReceiptLinks ||
         _estimate ||
+        _detail?['status']?.toString() != 'issued' ||
         line['line_kind']?.toString() != 'item') {
       return;
     }
@@ -782,6 +783,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ),
             if (_canManageReceiptLinks &&
                 !_estimate &&
+                _detail?['status']?.toString() == 'issued' &&
                 line['line_kind']?.toString() == 'item') ...[
               const Divider(height: 1),
               ListTile(
@@ -2584,6 +2586,25 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                           ),
                         ),
                       ),
+                      if (_canManageReceiptLinks &&
+                          !_estimate &&
+                          _detail?['status']?.toString() == 'issued' &&
+                          line['line_kind']?.toString() == 'item')
+                        SizedBox(
+                          width: 40,
+                          height: 34,
+                          child: IconButton(
+                            tooltip: 'Purchase receipt',
+                            padding: EdgeInsets.zero,
+                            onPressed: _busy
+                                ? null
+                                : () => _showReceiptLinks(line),
+                            icon: const Icon(
+                              Icons.receipt_long_outlined,
+                              size: 20,
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
