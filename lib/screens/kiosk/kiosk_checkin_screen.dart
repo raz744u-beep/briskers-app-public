@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/formatters.dart';
+import '../../core/vehicle_options.dart';
 import '../../services/appointment_sync_service.dart';
 import '../../services/briskers_api.dart';
 import '../../services/kiosk_registration_service.dart';
@@ -60,6 +61,7 @@ class _KioskCheckInScreenState
   Map<String, dynamic>? _existingCustomer;
   List<Map<String, dynamic>> _existingVehicles = const [];
   String? _selectedExistingVehicleId;
+  String? _newVehicleMake;
   String? _error;
 
   @override
@@ -225,6 +227,7 @@ class _KioskCheckInScreenState
             _newEmail.text = 'existing-customer@briskers.local';
 
             String? selectedVehicleId;
+            String? selectedMake;
             if (vehicles.isNotEmpty) {
               final vehicle = vehicles.first;
               selectedVehicleId = vehicle['id']?.toString();
@@ -234,7 +237,11 @@ class _KioskCheckInScreenState
                   vehicle['make']?.toString() ?? '';
               _vehicleModel.text =
                   vehicle['model']?.toString() ?? '';
+              final make = vehicle['make']?.toString() ?? '';
+              selectedMake =
+                  vehicleMakes.contains(make) ? make : null;
             } else {
+              selectedVehicleId = '__different_vehicle__';
               _vehicleYear.clear();
               _vehicleMake.clear();
               _vehicleModel.clear();
@@ -245,6 +252,7 @@ class _KioskCheckInScreenState
               _existingCustomer = customer;
               _existingVehicles = vehicles;
               _selectedExistingVehicleId = selectedVehicleId;
+              _newVehicleMake = selectedMake;
               _newCustomerMode = true;
               _createOnlineAccount = false;
               _acceptedDisclaimer = false;
@@ -328,6 +336,7 @@ class _KioskCheckInScreenState
         _existingCustomer = null;
         _existingVehicles = const [];
         _selectedExistingVehicleId = null;
+        _newVehicleMake = null;
         _newCustomerMode = true;
         _createOnlineAccount = false;
         _acceptedDisclaimer = false;
@@ -363,7 +372,7 @@ class _KioskCheckInScreenState
     final phone = digitsOnly(_newPhone.text);
     final email = _newEmail.text.trim();
     final year = int.tryParse(_vehicleYear.text.trim());
-    final make = _vehicleMake.text.trim();
+    final make = (_newVehicleMake ?? _vehicleMake.text).trim();
     final model = _vehicleModel.text.trim();
     final reason = _reason.text.trim();
     final currentYear = DateTime.now().year;
@@ -553,6 +562,7 @@ class _KioskCheckInScreenState
       _existingCustomer = null;
       _existingVehicles = const [];
       _selectedExistingVehicleId = null;
+      _newVehicleMake = null;
       _createOnlineAccount = false;
       _acceptedDisclaimer = false;
       _error = null;
@@ -752,6 +762,8 @@ class _KioskCheckInScreenState
         disclaimer?['text']?.toString() ?? '';
     final existingCustomer = _existingCustomer;
     final isExistingCustomer = existingCustomer != null;
+    final enteringNewVehicle = !isExistingCustomer ||
+        _selectedExistingVehicleId == '__different_vehicle__';
 
     return _frame(
       SingleChildScrollView(
@@ -840,9 +852,10 @@ class _KioskCheckInScreenState
                   ),
             ),
             const SizedBox(height: 10),
-            if (isExistingCustomer && _existingVehicles.isNotEmpty) ...[
+            if (isExistingCustomer) ...[
               DropdownButtonFormField<String>(
                 initialValue: _selectedExistingVehicleId,
+                isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Your vehicle',
                   prefixIcon: Icon(Icons.directions_car_outlined),
@@ -873,7 +886,9 @@ class _KioskCheckInScreenState
                           _vehicleMake.clear();
                           _vehicleModel.clear();
                           setState(() {
-                            _selectedExistingVehicleId = null;
+                            _selectedExistingVehicleId =
+                                '__different_vehicle__';
+                            _newVehicleMake = null;
                           });
                           return;
                         }
@@ -888,50 +903,92 @@ class _KioskCheckInScreenState
                             vehicle['make']?.toString() ?? '';
                         _vehicleModel.text =
                             vehicle['model']?.toString() ?? '';
+                        final make =
+                            vehicle['make']?.toString() ?? '';
                         setState(() {
                           _selectedExistingVehicleId = value;
+                          _newVehicleMake = vehicleMakes.contains(make)
+                              ? make
+                              : null;
                         });
                       },
               ),
               const SizedBox(height: 12),
+              if (!enteringNewVehicle)
+                Card(
+                  child: ListTile(
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.directions_car_outlined),
+                    ),
+                    title: Text(
+                      <String>[
+                        _vehicleYear.text,
+                        _vehicleMake.text,
+                        _vehicleModel.text,
+                      ].where((part) => part.trim().isNotEmpty).join(' '),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                      ),
+                    ),
+                    subtitle: const Text('Saved vehicle'),
+                    trailing: const Icon(Icons.verified_outlined),
+                  ),
+                ),
             ],
-            Row(
-              children: [
-                SizedBox(
-                  width: 120,
-                  child: TextField(
-                    controller: _vehicleYear,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Year',
-                      border: OutlineInputBorder(),
+            if (enteringNewVehicle) ...[
+              Row(
+                children: [
+                  SizedBox(
+                    width: 120,
+                    child: TextField(
+                      controller: _vehicleYear,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Year',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: _vehicleMake,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                      labelText: 'Make',
-                      border: OutlineInputBorder(),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _newVehicleMake,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Make',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: vehicleMakes
+                          .map(
+                            (make) => DropdownMenuItem<String>(
+                              value: make,
+                              child: Text(make),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _busy
+                          ? null
+                          : (value) {
+                              setState(() {
+                                _newVehicleMake = value;
+                                _vehicleMake.text = value ?? '';
+                              });
+                            },
                     ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _vehicleModel,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Model',
+                  border: OutlineInputBorder(),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: _vehicleModel,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                      labelText: 'Model',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
             const SizedBox(height: 22),
             TextField(
               controller: _reason,
@@ -1068,6 +1125,7 @@ class _KioskCheckInScreenState
                         _existingCustomer = null;
                         _existingVehicles = const [];
                         _selectedExistingVehicleId = null;
+                        _newVehicleMake = null;
                         _acceptedDisclaimer = false;
                         _error = null;
                       });
