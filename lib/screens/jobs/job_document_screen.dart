@@ -1387,6 +1387,89 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     }
   }
 
+  Future<void> _deleteEstimate() async {
+    if (!widget.isOwner || !_estimate || _detail == null || _busy) return;
+
+    if (_converted) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Converted estimate'),
+          content: const Text(
+            'This estimate was converted to an invoice and is kept as part '
+            'of that invoice history, so it cannot be deleted.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final number = _detail!['document_number']?.toString().trim() ?? '';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete estimate?'),
+        content: Text(
+          number.isEmpty
+              ? 'This estimate will be permanently deleted.'
+              : 'Estimate #$number will be permanently deleted and its '
+                  'number can be reused.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Delete estimate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      setState(() {
+        _busy = true;
+        _error = null;
+      });
+
+      await _api.deleteEstimate(
+        widget.businessId,
+        widget.documentId,
+      );
+      if (mounted) Navigator.pop(context);
+    } catch (error) {
+      if (mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Estimate could not be deleted'),
+            content: Text(error.toString()),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   String _findingMime(String name) {
     final lower = name.toLowerCase();
     if (lower.endsWith('.png')) return 'image/png';
@@ -2867,7 +2950,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 if (value == 'findings') _showInvoiceFindings();
                 if (value == 'expenses') _showInvoiceExpenses();
                 if (value == 'add_expense') _addInvoiceExpense();
-                if (value == 'delete') _deleteOrVoidInvoice();
+                if (value == 'delete') {
+                  if (_estimate) {
+                    _deleteEstimate();
+                  } else {
+                    _deleteOrVoidInvoice();
+                  }
+                }
               },
               itemBuilder: (context) => [
                 if (!_readOnly)
@@ -2939,14 +3028,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       title: Text('Create invoice'),
                     ),
                   ),
-                if (!_estimate && widget.isOwner)
-                  const PopupMenuItem(
+                if (widget.isOwner && (!_estimate || !_converted))
+                  PopupMenuItem(
                     value: 'delete',
                     child: ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.delete_outline),
-                      title: Text('Delete invoice'),
+                      leading: const Icon(Icons.delete_outline),
+                      title: Text(
+                        _estimate ? 'Delete estimate' : 'Delete invoice',
+                      ),
                     ),
                   ),
               ],
