@@ -86,7 +86,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   bool get _canRequestJob =>
-      _onlineReady && _jobCapability('request_job');
+      _onlineReady &&
+      widget.roleCode == 'mechanic' &&
+      _jobCapability('request_job');
   bool get _canEditWork => _jobCapability('edit_work');
   bool get _canEditFindings => _jobCapability('edit_findings');
   bool get _canEditInspection => _jobCapability('edit_inspection');
