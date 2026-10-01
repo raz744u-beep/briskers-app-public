@@ -43,6 +43,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   List<Map<String, dynamic>> _counterparties = const [];
   List<Map<String, dynamic>> _quickTemplates = const [];
   List<XFile> _receipts = const [];
+  Map<String, dynamic>? _receiptExtraction;
 
   String _direction = 'expense';
   String? _accountId;
@@ -61,6 +62,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
 
   bool _loading = true;
   bool _saving = false;
+  bool _readingReceipt = false;
+  num? _receiptBaseAmount;
+  num _receiptSurchargePercent = 0;
+  bool _applyReceiptSurcharge = false;
+  String? _receiptReadMessage;
   String? _error;
 
   bool get _editing => widget.editTransactionId != null;
@@ -245,6 +251,216 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     }
   }
 
+  String _normalizePayee(String value) => value
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+
+  Map<String, dynamic>? _matchCounterparty(String vendorName) {
+    final normalized = _normalizePayee(vendorName);
+    if (normalized.isEmpty) return null;
+
+    for (final item in _counterparties) {
+      if (_normalizePayee(item['name']?.toString() ?? '') == normalized) {
+        return item;
+      }
+    }
+
+    if (normalized.length >= 4) {
+      for (final item in _counterparties) {
+        final candidate = _normalizePayee(item['name']?.toString() ?? '');
+        if (candidate.length >= 4 &&
+            (candidate.contains(normalized) || normalized.contains(candidate))) {
+          return item;
+        }
+      }
+    }
+    return null;
+  }
+
+  num _numValue(Object? value) =>
+      num.tryParse(value?.toString() ?? '') ?? 0;
+
+  void _setAmountFromReceipt() {
+    final base = _receiptBaseAmount;
+    if (base == null || base <= 0) return;
+    final factor = _applyReceiptSurcharge
+        ? 1 + (_receiptSurchargePercent / 100)
+        : 1;
+    final amount = num.parse((base * factor).toStringAsFixed(2));
+    _amountController.text = amount.toStringAsFixed(2);
+  }
+
+  String _receiptNote(
+    Map<String, dynamic> extraction, {
+    num? finalAmount,
+  }) {
+    final rawItems = extraction['items'];
+    final descriptions = <String>[];
+    if (rawItems is List) {
+      for (final raw in rawItems) {
+        if (raw is! Map) continue;
+        final description = raw['description']?.toString().trim() ?? '';
+        if (description.isNotEmpty && !descriptions.contains(description)) {
+          descriptions.add(description);
+        }
+        if (descriptions.length >= 10) break;
+      }
+    }
+
+    final vendor = extraction['vendor_name']?.toString().trim() ?? '';
+    final invoice =
+        extraction['vendor_invoice_number']?.toString().trim() ?? '';
+    final rawDate = extraction['receipt_date']?.toString().trim() ?? '';
+    String dateLabel = '';
+    final parsedDate = DateTime.tryParse(rawDate);
+    if (parsedDate != null) {
+      dateLabel =
+          '${parsedDate.month}/${parsedDate.day}/${parsedDate.year.toString().substring(2)}';
+    }
+    final visibleTotal = _numValue(extraction['receipt_total']);
+    final amount = finalAmount ?? (visibleTotal > 0 ? visibleTotal : null);
+
+    return <String>[
+      if (descriptions.isNotEmpty)
+        descriptions.join(', ')
+      else if (vendor.isNotEmpty)
+        vendor,
+      if (invoice.isNotEmpty) 'Inv. $invoice',
+      if (dateLabel.isNotEmpty) dateLabel,
+      if (amount != null && amount > 0) '\$${amount.toStringAsFixed(2)}',
+    ].join(' — ');
+  }
+
+  void _mergeReceiptNote(String summary) {
+    final clean = summary.trim();
+    if (clean.isEmpty) return;
+    final current = _remarksController.text.trim();
+    if (current.isEmpty) {
+      _remarksController.text = clean;
+    } else if (!current.contains(clean)) {
+      _remarksController.text = '$current\n$clean';
+    }
+  }
+
+  Future<void> _readReceipt(XFile file) async {
+    if (_readingReceipt) return;
+    setState(() {
+      _readingReceipt = true;
+      _receiptReadMessage = 'Reading receipt...';
+      _error = null;
+    });
+
+    try {
+      final bytes = await file.readAsBytes();
+      final result = await _api.parseReceiptImage(
+        widget.businessId,
+        bytes: bytes,
+        mimeType: _mimeType(file.name),
+      );
+      final rawExtraction = result['extraction'];
+      if (rawExtraction is! Map) {
+        throw Exception('The receipt reader returned no usable data.');
+      }
+      final extraction = Map<String, dynamic>.from(rawExtraction);
+      final vendorName = extraction['vendor_name']?.toString().trim() ?? '';
+      final matched =
+          vendorName.isEmpty ? null : _matchCounterparty(vendorName);
+
+      final visibleTotal = _numValue(extraction['receipt_total']);
+      final visibleSubtotal = _numValue(extraction['subtotal']);
+      final visibleSurcharge = _numValue(extraction['surcharge_percent']);
+      final visibleSurchargeAmount =
+          _numValue(extraction['surcharge_amount']);
+
+      num? baseAmount;
+      num surchargePercent = 0;
+      var applySurcharge = false;
+
+      if (visibleSurcharge > 0) {
+        surchargePercent = visibleSurcharge;
+        applySurcharge = true;
+        if (visibleSubtotal > 0) {
+          baseAmount = visibleSubtotal;
+        } else if (visibleTotal > 0) {
+          baseAmount = visibleTotal / (1 + visibleSurcharge / 100);
+        }
+      } else if (visibleSurchargeAmount > 0 && visibleTotal > 0) {
+        baseAmount = visibleSubtotal > 0
+            ? visibleSubtotal
+            : visibleTotal - visibleSurchargeAmount;
+        if (baseAmount > 0) {
+          surchargePercent = (visibleSurchargeAmount / baseAmount) * 100;
+          applySurcharge = true;
+        }
+      } else {
+        baseAmount = visibleTotal > 0
+            ? visibleTotal
+            : (visibleSubtotal > 0 ? visibleSubtotal : null);
+        if (matched != null) {
+          surchargePercent =
+              _numValue(matched['default_surcharge_percent']);
+          applySurcharge = surchargePercent > 0;
+        }
+      }
+
+      final receiptDate =
+          DateTime.tryParse(extraction['receipt_date']?.toString() ?? '');
+
+      if (!mounted) return;
+      setState(() {
+        _receiptExtraction = extraction;
+        _receiptBaseAmount = baseAmount;
+        _receiptSurchargePercent = surchargePercent;
+        _applyReceiptSurcharge = applySurcharge;
+
+        if (matched != null) {
+          final id = matched['id']?.toString();
+          _counterpartyId = (id ?? '').isEmpty ? null : id;
+          _counterpartyController.text =
+              matched['name']?.toString() ?? vendorName;
+          final defaultCategoryId =
+              matched['default_category_id']?.toString();
+          if (_direction == 'expense' &&
+              (defaultCategoryId ?? '').isNotEmpty &&
+              _categories.any(
+                (category) =>
+                    category['id']?.toString() == defaultCategoryId,
+              )) {
+            _categoryId = defaultCategoryId;
+          }
+        } else if (vendorName.isNotEmpty) {
+          _counterpartyId = null;
+          _counterpartyController.text = vendorName;
+        }
+
+        if (receiptDate != null) {
+          _date = receiptDate;
+        }
+
+        _setAmountFromReceipt();
+        final finalAmount =
+            num.tryParse(_amountController.text.trim());
+        _mergeReceiptNote(
+          _receiptNote(
+            extraction,
+            finalAmount: finalAmount,
+          ),
+        );
+        _receiptReadMessage =
+            'Receipt read — review the fields before saving.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _receiptReadMessage =
+            'Could not read this receipt automatically. You can still enter it manually.';
+        _error = error.toString();
+      });
+    } finally {
+      if (mounted) setState(() => _readingReceipt = false);
+    }
+  }
+
   void _applyQuickTemplate(
     Map<String, dynamic> item, {
     bool updateState = true,
@@ -266,6 +482,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           _counterparties.any((x) => x['id']?.toString() == vendor)) {
         _counterpartyId = vendor;
         _counterpartyController.text = item['vendor']?.toString() ?? '';
+        final selected = _counterparties.firstWhere(
+          (x) => x['id']?.toString() == vendor,
+        );
+        if (_receiptBaseAmount != null) {
+          _receiptSurchargePercent =
+              _numValue(selected['default_surcharge_percent']);
+          _applyReceiptSurcharge = _receiptSurchargePercent > 0;
+          _setAmountFromReceipt();
+        }
       } else {
         _counterpartyId = null;
         _counterpartyController.text = item['vendor']?.toString() ?? '';
@@ -298,6 +523,19 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             (category) => category['id']?.toString() == defaultCategoryId,
           )) {
         _categoryId = defaultCategoryId;
+      }
+
+      if (_receiptBaseAmount != null) {
+        _receiptSurchargePercent =
+            _numValue(item['default_surcharge_percent']);
+        _applyReceiptSurcharge = _receiptSurchargePercent > 0;
+        _setAmountFromReceipt();
+        if (_receiptExtraction != null) {
+          _remarksController.text = _receiptNote(
+            _receiptExtraction!,
+            finalAmount: num.tryParse(_amountController.text.trim()),
+          );
+        }
       }
     });
   }
@@ -375,6 +613,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                                   'id': null,
                                   'name': query,
                                   'default_category_id': null,
+                                  'default_surcharge_percent': 0,
                                 },
                               ),
                             ),
@@ -553,17 +792,23 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     if (source == null) return;
 
     if (source == ImageSource.gallery) {
-      final files = await _picker.pickMultiImage(imageQuality: 92);
+      final files = await _picker.pickMultiImage(
+        imageQuality: 82,
+        maxWidth: 2200,
+      );
       if (files.isNotEmpty && mounted) {
         setState(() => _receipts = [..._receipts, ...files]);
+        await _readReceipt(files.first);
       }
     } else {
       final file = await _picker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 92,
+        imageQuality: 82,
+        maxWidth: 2200,
       );
       if (file != null && mounted) {
         setState(() => _receipts = [..._receipts, file]);
+        await _readReceipt(file);
       }
     }
   }
@@ -657,6 +902,14 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           filename: receipt.name,
           mimeType: _mimeType(receipt.name),
           bytes: await receipt.readAsBytes(),
+        );
+      }
+
+      if (_receiptExtraction != null) {
+        await _api.applyExpenseReceiptExtraction(
+          widget.businessId,
+          transactionId,
+          _receiptExtraction!,
         );
       }
 
