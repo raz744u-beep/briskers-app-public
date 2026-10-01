@@ -157,14 +157,14 @@ class _CustomersScreenState extends State<CustomersScreen> {
             children: [
               Expanded(
                 child: Text(
-                  'Customers',
+                  tr('customers'),
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),
                 ),
               ),
               Text(
-                'Total $_totalCustomers',
+                '${tr('total')} $_totalCustomers',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -179,7 +179,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
               Expanded(
                 child: SearchBar(
                   controller: _search,
-                  hintText: 'Search customers',
+                  hintText: tr('searchCustomers'),
                   leading: const Icon(Icons.search),
                   onSubmitted: (_) =>
                       _load(refreshOnline: false),
@@ -188,7 +188,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
               const SizedBox(width: 8),
               IconButton.filled(
                 onPressed: _onlineReady ? _add : null,
-                tooltip: 'Add customer',
+                tooltip: tr('addCustomer'),
                 icon: const Icon(Icons.person_add),
               ),
             ],
@@ -207,14 +207,14 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   .surfaceContainerHighest,
               borderRadius: BorderRadius.circular(9),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(Icons.cloud_off_outlined, size: 18),
-                SizedBox(width: 7),
+                const Icon(Icons.cloud_off_outlined, size: 18),
+                const SizedBox(width: 7),
                 Expanded(
                   child: Text(
-                    'Showing saved customers • editing requires a connection',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                    tr('savedCustomersOffline'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
               ],
@@ -263,7 +263,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
                               ),
                               const SizedBox(width: 8),
                             ],
-                            Text('${customer['vehicle_count'] ?? 0} cars'),
+                            Text('${customer['vehicle_count'] ?? 0} ${tr('cars')}'),
                           ],
                         ),
                         onTap: () => _openCustomer(customer),
