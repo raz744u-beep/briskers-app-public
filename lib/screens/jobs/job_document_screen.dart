@@ -3006,13 +3006,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               },
               itemBuilder: (context) => [
                 if (!_readOnly)
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'edit',
                     child: ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.edit_outlined),
-                      title: Text('Edit document'),
+                      leading: const Icon(Icons.edit_outlined),
+                      title: Text(
+                        _estimate ? 'Edit estimate' : 'Edit invoice',
+                      ),
                     ),
                   ),
                 if (!_estimate)
