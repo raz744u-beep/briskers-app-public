@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/briskers_i18n.dart';
 import '../services/briskers_api.dart';
 import '../widgets/briskers_page_header.dart';
 import 'appointments_screen.dart';
@@ -104,26 +105,7 @@ class _ShellScreenState extends State<ShellScreen> {
     }
   }
 
-  String get _roleLabel {
-    switch (widget.roleCode) {
-      case 'owner':
-        return 'OWNER';
-      case 'manager':
-        return 'FOREMAN';
-      case 'office':
-        return 'SECRETARY';
-      case 'mechanic':
-        return 'MECHANIC';
-      case 'porter':
-        return 'PORTER';
-      case 'kiosk':
-        return 'CHECK-IN';
-      case 'customer':
-        return 'CUSTOMER';
-      default:
-        return widget.roleCode.toUpperCase();
-    }
-  }
+  String get _roleLabel => roleLabel(widget.roleCode);
 
   Widget _navIcon(
     IconData icon,
@@ -142,7 +124,7 @@ class _ShellScreenState extends State<ShellScreen> {
   @override
   Widget build(BuildContext context) {
     final activeColor = _sectionColors[_index];
-    const pageTitles = ['Dashboard', 'Customers', 'Appointments', 'Jobs', 'More'];
+    final pageTitles = [tr('dashboard'), tr('customers'), tr('appointments'), tr('jobs'), tr('more')];
     final pages = [
       DashboardScreen(
         businessId: widget.businessId,
@@ -244,7 +226,7 @@ class _ShellScreenState extends State<ShellScreen> {
             const NavigationDestination(
               icon: Icon(Icons.dashboard_outlined),
               selectedIcon: Icon(Icons.dashboard),
-              label: 'Dashboard',
+              label: tr('dashboard'),
             ),
             NavigationDestination(
               icon: _navIcon(Icons.people_outline, 'customers'),
@@ -252,7 +234,7 @@ class _ShellScreenState extends State<ShellScreen> {
                 Icons.people,
                 'customers',
               ),
-              label: 'Customers',
+              label: tr('customers'),
             ),
             NavigationDestination(
               icon: _navIcon(Icons.calendar_month_outlined, 'appointments'),
@@ -260,7 +242,7 @@ class _ShellScreenState extends State<ShellScreen> {
                 Icons.calendar_month,
                 'appointments',
               ),
-              label: 'Schedule',
+              label: tr('schedule'),
             ),
             NavigationDestination(
               icon: _navIcon(Icons.build_outlined, 'jobs'),
@@ -268,11 +250,11 @@ class _ShellScreenState extends State<ShellScreen> {
                 Icons.build,
                 'jobs',
               ),
-              label: 'Jobs',
+              label: tr('jobs'),
             ),
             const NavigationDestination(
               icon: Icon(Icons.more_horiz),
-              label: 'More',
+              label: tr('more'),
             ),
           ],
         ),
