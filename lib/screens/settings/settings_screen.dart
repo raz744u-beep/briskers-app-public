@@ -14,6 +14,7 @@ import 'language_settings_screen.dart';
 import 'local_sync_status_screen.dart';
 import 'item_categories_settings_screen.dart';
 import 'payment_methods_settings_screen.dart';
+import 'receipt_training_samples_screen.dart';
 import 'shop_info_settings_screen.dart';
 import 'tax_invoicing_settings_screen.dart';
 
@@ -245,6 +246,25 @@ class SettingsScreen extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (_) => TaxInvoicingSettingsScreen(
+                    businessId: businessId,
+                  ),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(
+              Icons.psychology_outlined,
+              color: BriskersColors.expenses,
+            ),
+            title: Text(tr('aiReceiptSamples')),
+            subtitle: Text(tr('aiReceiptSamplesSub')),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ReceiptTrainingSamplesScreen(
                     businessId: businessId,
                   ),
                 ),
