@@ -14,11 +14,13 @@ class DocumentsScreen extends StatefulWidget {
     required this.businessId,
     required this.kind,
     required this.isOwner,
+    this.canManageExpenses = false,
   });
 
   final String businessId;
   final String kind;
   final bool isOwner;
+  final bool canManageExpenses;
 
   @override
   State<DocumentsScreen> createState() => _DocumentsScreenState();
@@ -206,6 +208,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           businessId: widget.businessId,
           documentId: row['id'].toString(),
           isOwner: widget.isOwner,
+          canManageExpenses: widget.canManageExpenses,
         ),
       ),
     );
