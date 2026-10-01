@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+
+import 'core/briskers_i18n.dart';
 
 import 'screens/auth_gate.dart';
 
@@ -12,9 +15,21 @@ class BriskersApp extends StatelessWidget {
       brightness: Brightness.light,
     );
 
-    return MaterialApp(
+    return AnimatedBuilder(
+      animation: BriskersLanguageController.instance,
+      builder: (context, _) => MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Briskers',
+      locale: BriskersLanguageController.instance.locale,
+      supportedLocales: const [
+        Locale('en'),
+        Locale('es'),
+      ],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       builder: (context, child) {
         final media = MediaQuery.of(context);
         return MediaQuery(
@@ -47,6 +62,7 @@ class BriskersApp extends StatelessWidget {
         ),
       ),
       home: const AuthGate(),
+      ),
     );
   }
 }
