@@ -16,6 +16,7 @@ class ExpenseEntryScreen extends StatefulWidget {
     this.editTransactionId,
     this.copyTransactionId,
     this.quickTemplate,
+    this.allowRecurring = true,
   });
 
   final String businessId;
@@ -26,6 +27,7 @@ class ExpenseEntryScreen extends StatefulWidget {
   final String? editTransactionId;
   final String? copyTransactionId;
   final Map<String, dynamic>? quickTemplate;
+  final bool allowRecurring;
 
   @override
   State<ExpenseEntryScreen> createState() => _ExpenseEntryScreenState();
@@ -192,7 +194,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           } else {
             _date = _parseDate(detail['date']);
             final recurring = detail['recurring_rule'];
-            if (recurring is Map) {
+            if (widget.allowRecurring && recurring is Map) {
               final rule = Map<String, dynamic>.from(recurring);
               _recurringRuleId = rule['id']?.toString();
               _repeat = rule['is_repeating'] == true;
@@ -914,7 +916,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         );
       }
 
-      if (!_linked && !_copying) {
+      if (widget.allowRecurring && !_linked && !_copying) {
         if (_repeat) {
           var recurringVendorId = _counterpartyId;
           if (recurringVendorId == null && counterpartyName.isNotEmpty) {
@@ -1312,7 +1314,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                           .toList(),
                     ),
                   ),
-                if (!_linked && !_copying) ...[
+                if (widget.allowRecurring && !_linked && !_copying) ...[
                   const SizedBox(height: 8),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
