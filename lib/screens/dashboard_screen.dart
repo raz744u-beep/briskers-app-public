@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/briskers_i18n.dart';
 import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import '../widgets/job_compact_card.dart';
@@ -257,7 +258,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                       Expanded(
                         child: Text(
-                          DateFormat('MMMM yyyy').format(month),
+                          MaterialLocalizations.of(context).formatMonthYear(month),
                           textAlign: TextAlign.center,
                           style: const TextStyle(
                             fontSize: 19,
@@ -321,7 +322,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       TextButton(
                         onPressed: () =>
                             Navigator.pop(sheetContext, DateTime.now()),
-                        child: const Text('Today'),
+                        child: Text(tr('today')),
                       ),
                     ],
                   ),
@@ -1271,7 +1272,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _todayStatusControl(Map<String, dynamic> job) {
     final color = colorFromHex(job['status_color']?.toString());
-    final label = job['status_name']?.toString() ?? 'Status';
+    final label = jobStatusLabel(job['status']?.toString(), job['status_name']?.toString() ?? 'Status');
     final busy = _busyJobId == job['id']?.toString();
 
     final child = Container(
@@ -1321,7 +1322,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!_canManage || busy) return child;
 
     return PopupMenuButton<String>(
-      tooltip: 'Change status',
+      tooltip: tr('changeStatus'),
       padding: EdgeInsets.zero,
       onSelected: (value) => _changeJobStatus(job, value),
       itemBuilder: (context) => _statuses.map((status) {
@@ -1390,7 +1391,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        DateFormat('EEEE, MMMM d').format(_selectedDay),
+                        MaterialLocalizations.of(context).formatFullDate(_selectedDay),
                         maxLines: 1,
                         softWrap: false,
                         style: Theme.of(context)
@@ -1404,7 +1405,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 if (!_sameDay(_selectedDay, DateTime.now()))
                   TextButton(
                     onPressed: () => _selectDashboardDay(DateTime.now()),
-                    child: const Text('Today'),
+                    child: Text(tr('today')),
                   ),
                 const Icon(Icons.keyboard_arrow_down),
               ],
@@ -1422,12 +1423,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             actions: [
               _DashboardDrawerAction(
                 icon: Icons.add,
-                label: 'Create new estimate',
+                label: tr('createNewEstimate'),
                 onTap: () => _createDashboardDocument('estimate'),
               ),
               _DashboardDrawerAction(
                 icon: Icons.list_alt_outlined,
-                label: 'View estimates',
+                label: tr('viewEstimates'),
                 onTap: () => _openDocuments('estimate'),
               ),
             ],
@@ -1438,12 +1439,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             actions: [
               _DashboardDrawerAction(
                 icon: Icons.add,
-                label: 'Create new invoice',
+                label: tr('createNewInvoice'),
                 onTap: () => _createDashboardDocument('invoice'),
               ),
               _DashboardDrawerAction(
                 icon: Icons.list_alt_outlined,
-                label: 'View invoices',
+                label: tr('viewInvoices'),
                 onTap: () => _openDocuments('invoice'),
               ),
             ],
@@ -1454,12 +1455,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             actions: [
               _DashboardDrawerAction(
                 icon: Icons.add,
-                label: 'New appointment',
+                label: tr('newAppointment'),
                 onTap: _createDashboardAppointment,
               ),
               _DashboardDrawerAction(
                 icon: Icons.calendar_month_outlined,
-                label: 'View appointments',
+                label: tr('viewAppointments'),
                 onTap: () => widget.onAppointmentsTap?.call(),
               ),
             ],
@@ -1470,22 +1471,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
             actions: [
               _DashboardDrawerAction(
                 icon: Icons.add_card_outlined,
-                label: 'Add general expense',
+                label: tr('addGeneralExpense'),
                 onTap: _addGeneralExpense,
               ),
               _DashboardDrawerAction(
                 icon: Icons.bolt,
-                label: 'Quick general expense',
+                label: tr('quickGeneralExpense'),
                 onTap: _quickGeneralExpense,
               ),
               _DashboardDrawerAction(
                 icon: Icons.receipt_long_outlined,
-                label: 'View transactions',
+                label: tr('viewTransactions'),
                 onTap: _openExpenses,
               ),
               _DashboardDrawerAction(
                 icon: Icons.event_repeat_outlined,
-                label: 'Recurring transactions',
+                label: tr('recurringTransactions'),
                 onTap: _openRecurringTransactions,
               ),
             ],
@@ -1507,7 +1508,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   children: [
                     Expanded(
                       child: _DashboardActionTile(
-                        label: 'Estimates',
+                        label: tr('estimates'),
                         attentionCount: _estimateAttention,
                         icon: Icons.request_quote_outlined,
                         color: BriskersColors.estimates,
@@ -1518,7 +1519,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: _DashboardActionTile(
-                        label: 'Invoices',
+                        label: tr('invoices'),
                         attentionCount: _invoiceAttention,
                         icon: Icons.receipt_long_outlined,
                         color: BriskersColors.invoices,
@@ -1538,7 +1539,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   children: [
                     Expanded(
                       child: _DashboardActionTile(
-                        label: 'Appointments',
+                        label: tr('appointments'),
                         attentionCount: appointments.length,
                         icon: Icons.calendar_month_outlined,
                         color: BriskersColors.appointments,
@@ -1549,7 +1550,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: _DashboardActionTile(
-                        label: 'Expenses',
+                        label: tr('expenses'),
                         icon: Icons.payments_outlined,
                         color: _dashboardExpensesColor,
                         expanded: _expandedAction == 'expense',
@@ -1590,7 +1591,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                             const SizedBox(width: 7),
                             Text(
-                              'Active Jobs',
+                              tr('activeJobs'),
                               style: Theme.of(context)
                                   .textTheme
                                   .titleLarge
