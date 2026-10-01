@@ -136,12 +136,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         await showDialog<void>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: const Text('No linked expenses'),
-            content: const Text(
-              'There are no expenses or credits linked to this invoice yet. '
-              'Invoice items are sales lines; this section is for actual '
-              'business costs such as parts purchases, vendor receipts, or '
-              'other expenses assigned to this invoice.',
+            title: const Text('No related expenses'),
+            content: Text(
+              (_detail?['job_number']?.toString() ?? '').isEmpty
+                  ? 'There are no expenses or credits linked to this invoice yet.'
+                  : 'There are no expenses or credits linked to this invoice '
+                      'or its job yet.',
             ),
             actions: [
               TextButton(
@@ -175,10 +175,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
                   child: Row(
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          'Invoice expenses & credits',
-                          style: TextStyle(
+                          (_detail?['job_number']?.toString() ?? '').isEmpty
+                              ? 'Invoice expenses & credits'
+                              : 'Job & invoice expenses',
+                          style: const TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w800,
                           ),
@@ -208,6 +210,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                 expense['category']?.toString() ?? '';
                             final date =
                                 expense['transaction_date']?.toString() ?? '';
+                            final scope =
+                                expense['scope']?.toString() ?? 'invoice';
+                            final jobNumber =
+                                expense['job_number']?.toString() ?? '';
+                            final scopeLabel = scope == 'invoice'
+                                ? 'Invoice-linked'
+                                : (jobNumber.isEmpty
+                                    ? 'Job expense'
+                                    : 'Job $jobNumber');
                             final receiptCount = int.tryParse(
                                   expense['receipt_count']?.toString() ?? '',
                                 ) ??
@@ -223,6 +234,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                               title: Text(vendor),
                               subtitle: Text(
                                 <String>[
+                                  scopeLabel,
                                   if (category.isNotEmpty) category,
                                   if (date.isNotEmpty) date,
                                   if (receiptCount > 0)
