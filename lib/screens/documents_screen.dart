@@ -160,6 +160,124 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     await _load();
   }
 
+  Future<void> _deleteDocument(Map<String, dynamic> row) async {
+    if (!widget.isOwner) return;
+
+    final isEstimate = row['kind']?.toString() == 'estimate';
+    final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
+    final pending =
+        num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
+
+    if (!isEstimate && paid > 0) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Paid invoice'),
+          content: const Text(
+            'This invoice has finalized payment activity and cannot be '
+            'deleted. Use the correction/reversal workflow instead.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    if (!isEstimate && pending > 0) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Payments entered'),
+          content: const Text(
+            'Remove the entered payments first. Once there are no payments '
+            'on this invoice, it can be deleted.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final label = isEstimate ? 'estimate' : 'invoice';
+    final number = row['document_number']?.toString().trim() ?? '';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Delete $label?'),
+        content: Text(
+          number.isEmpty
+              ? 'This $label will be permanently deleted.'
+              : 'Delete $label #$number? This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: Text('Delete $label'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      if (isEstimate) {
+        await _api.deleteEstimate(
+          widget.businessId,
+          row['id'].toString(),
+        );
+      } else {
+        await _api.deleteDraftInvoice(
+          widget.businessId,
+          row['id'].toString(),
+        );
+      }
+
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${isEstimate ? 'Estimate' : 'Invoice'} deleted.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(
+            '${isEstimate ? 'Estimate' : 'Invoice'} could not be deleted',
+          ),
+          content: Text(error.toString()),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
   String _money(Object? raw) {
     final value = num.tryParse(raw?.toString() ?? '') ?? 0;
     return NumberFormat.currency(symbol: '\$').format(value);
@@ -369,22 +487,55 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          _money(row['total_amount']),
-                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              _money(row['total_amount']),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            Text(
+                              status,
+                              style: TextStyle(
+                                color: color,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
                         ),
-                        Text(
-                          status,
-                          style: TextStyle(
-                            color: color,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
+                        if (widget.isOwner) ...[
+                          const SizedBox(width: 4),
+                          PopupMenuButton<String>(
+                            tooltip: 'Document actions',
+                            onSelected: (value) {
+                              if (value == 'delete') {
+                                _deleteDocument(row);
+                              }
+                            },
+                            itemBuilder: (_) => [
+                              PopupMenuItem<String>(
+                                value: 'delete',
+                                child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: const Icon(Icons.delete_outline),
+                                  title: Text(
+                                    _estimate
+                                        ? 'Delete estimate'
+                                        : 'Delete invoice',
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
