@@ -11,6 +11,7 @@ import 'job_statuses_settings_screen.dart';
 import 'kiosk_checkin_settings_screen.dart';
 import 'invoice_statuses_settings_screen.dart';
 import 'language_settings_screen.dart';
+import 'local_sync_status_screen.dart';
 import 'item_categories_settings_screen.dart';
 import 'payment_methods_settings_screen.dart';
 import 'shop_info_settings_screen.dart';
@@ -49,6 +50,25 @@ class SettingsScreen extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (_) => const LanguageSettingsScreen(),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(
+              Icons.storage_outlined,
+              color: BriskersColors.settings,
+            ),
+            title: Text(tr('localDatabaseSync')),
+            subtitle: Text(tr('localDatabaseSyncSub')),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => LocalSyncStatusScreen(
+                    businessId: businessId,
+                  ),
                 ),
               );
             },
