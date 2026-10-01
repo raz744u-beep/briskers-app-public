@@ -39,11 +39,54 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
   String? _revealedSsn;
   bool _revealingSsn = false;
   bool _active = true;
+  bool _userLinked = false;
+  bool _appLoginBusy = false;
   bool _loading = true;
   bool _saving = false;
   String? _error;
 
   bool get _editing => widget.employeeId != null;
+
+  String get _positionName {
+    final id = _positionId;
+    if (id == null) return '';
+    for (final position in _positions) {
+      if (position['id']?.toString() == id) {
+        return position['name']?.toString() ?? '';
+      }
+    }
+    return '';
+  }
+
+  String? get _appRoleCode {
+    switch (_positionName.trim().toLowerCase()) {
+      case 'secretary':
+        return 'office';
+      case 'mechanic':
+        return 'mechanic';
+      case 'shop foreman':
+        return 'manager';
+      case 'porter':
+        return 'porter';
+      default:
+        return null;
+    }
+  }
+
+  String get _appRoleLabel {
+    switch (_appRoleCode) {
+      case 'office':
+        return 'Office / Secretary';
+      case 'mechanic':
+        return 'Mechanic';
+      case 'manager':
+        return 'Shop Foreman';
+      case 'porter':
+        return 'Porter';
+      default:
+        return 'Not available for this position';
+    }
+  }
 
   @override
   void initState() {
@@ -88,6 +131,7 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                 ? 'fixed_weekly'
                 : 'hourly';
         _ssnLast4 = employee['ssn_last4']?.toString();
+        _userLinked = employee['user_linked'] == true;
 
         final rate = _paymentType == 'hourly'
             ? employee['hourly_rate']
@@ -196,6 +240,56 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _revealingSsn = false);
+    }
+  }
+
+  Future<void> _sendAppLoginInvite() async {
+    final employeeId = widget.employeeId;
+    if (!widget.isOwner || employeeId == null || _appLoginBusy) return;
+
+    final email = _email.text.trim().toLowerCase();
+    if (email.isEmpty || !email.contains('@')) {
+      setState(() => _error = 'Enter a valid employee email first.');
+      return;
+    }
+    if (_appRoleCode == null) {
+      setState(
+        () => _error =
+            'This employee position does not have a staff app role.',
+      );
+      return;
+    }
+
+    setState(() {
+      _appLoginBusy = true;
+      _error = null;
+    });
+
+    try {
+      final result = await _api.inviteEmployeeAppLogin(
+        widget.businessId,
+        employeeId,
+        email: email,
+      );
+      if (!mounted) return;
+
+      setState(() => _userLinked = true);
+
+      final invited = result['invited'] == true;
+      final alreadyLinked = result['already_linked'] == true;
+      final message = alreadyLinked
+          ? 'App login is already linked.'
+          : invited
+              ? 'Login invite sent to $email.'
+              : 'Existing login linked to this employee.';
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _appLoginBusy = false);
     }
   }
 
@@ -422,6 +516,75 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                     value: _active,
                     onChanged: (value) => setState(() => _active = value),
                   ),
+                  if (_editing && widget.isOwner) ...[
+                    const SizedBox(height: 20),
+                    Text(
+                      'App login',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 10),
+                    Card(
+                      child: ListTile(
+                        leading: Icon(
+                          _userLinked
+                              ? Icons.verified_user_outlined
+                              : Icons.person_add_alt_1_outlined,
+                          color: _userLinked ? Colors.green : null,
+                        ),
+                        title: Text(
+                          _userLinked
+                              ? 'Login linked'
+                              : 'Create employee login',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        subtitle: Text(
+                          _userLinked
+                              ? 'This employee can sign in to Briskers. '
+                                  'App role: $_appRoleLabel.'
+                              : _appRoleCode == null
+                                  ? 'This position does not create a staff '
+                                      'login.'
+                                  : 'Email: '
+                                      '${_email.text.trim().isEmpty ? 'not set' : _email.text.trim()}'
+                                      '\nApp role: $_appRoleLabel',
+                        ),
+                        isThreeLine: !_userLinked && _appRoleCode != null,
+                      ),
+                    ),
+                    if (!_userLinked && _appRoleCode != null) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed:
+                              _appLoginBusy ? null : _sendAppLoginInvite,
+                          icon: _appLoginBusy
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.mail_outline),
+                          label: Text(
+                            _appLoginBusy
+                                ? 'Creating login...'
+                                : 'Send app login invite',
+                          ),
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.only(top: 6),
+                        child: Text(
+                          'The employee will use the same Briskers app. '
+                          'Their permissions are based on their position.',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ],
                   if (_error != null) ...[
                     const SizedBox(height: 8),
                     Text(
