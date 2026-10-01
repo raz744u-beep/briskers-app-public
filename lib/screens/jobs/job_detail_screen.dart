@@ -1985,6 +1985,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           businessId: widget.businessId,
           documentId: documentId,
           isOwner: _owner,
+          canManageExpenses: <String>{
+            'owner',
+            'manager',
+            'office',
+          }.contains(widget.roleCode),
         ),
       ),
     );
