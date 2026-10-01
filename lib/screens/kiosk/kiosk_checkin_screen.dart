@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/formatters.dart';
 import '../../services/appointment_sync_service.dart';
+import '../../services/briskers_api.dart';
 import '../../services/kiosk_registration_service.dart';
 import '../../services/local_appointment_repository.dart';
 import '../../widgets/briskers_page_header.dart';
@@ -28,6 +29,7 @@ class KioskCheckInScreen extends StatefulWidget {
 
 class _KioskCheckInScreenState
     extends State<KioskCheckInScreen> {
+  static const _api = BriskersApi();
   final AppointmentSyncService _sync = AppointmentSyncService();
   final LocalAppointmentRepository _appointments =
       LocalAppointmentRepository();
@@ -55,6 +57,9 @@ class _KioskCheckInScreenState
   bool _createOnlineAccount = false;
   bool _acceptedDisclaimer = false;
   Map<String, dynamic>? _disclaimer;
+  Map<String, dynamic>? _existingCustomer;
+  List<Map<String, dynamic>> _existingVehicles = const [];
+  String? _selectedExistingVehicleId;
   String? _error;
 
   @override
@@ -160,10 +165,103 @@ class _KioskCheckInScreenState
       if (!mounted) return;
 
       if (matches.isEmpty) {
+        try {
+          final lookup = await _api.kioskLookupCustomer(
+            widget.businessId,
+            digits,
+          );
+          _online = true;
+
+          final status = lookup['status']?.toString() ?? '';
+          if (status == 'conflict') {
+            setState(() {
+              _matches = const [];
+              _error =
+                  'We found more than one customer record with this phone number. Please see the front desk.';
+            });
+            return;
+          }
+
+          if (status == 'found') {
+            Map<String, dynamic>? disclaimer = _disclaimer;
+            disclaimer ??=
+                await _registrations.loadDisclaimer(widget.businessId);
+            if (disclaimer == null) {
+              try {
+                disclaimer = await _registrations.refreshSettings(
+                  widget.businessId,
+                );
+                _online = true;
+              } catch (_) {
+                _online = false;
+              }
+            }
+
+            if (disclaimer == null) {
+              setState(() {
+                _error =
+                    'Walk-in check-in is not available yet. Please see the front desk.';
+              });
+              return;
+            }
+
+            final rawCustomer = lookup['customer'];
+            final customer = rawCustomer is Map
+                ? Map<String, dynamic>.from(rawCustomer)
+                : <String, dynamic>{};
+            final vehicles = List<dynamic>.from(
+              lookup['vehicles'] ?? const <dynamic>[],
+            )
+                .whereType<Map>()
+                .map((item) => Map<String, dynamic>.from(item))
+                .toList();
+
+            _newName.text =
+                customer['name']?.toString() ?? 'Customer';
+            _newPhone.text = formatUsPhone(digits);
+            // Existing customers are matched by phone. This placeholder only
+            // satisfies the current walk-in RPC validation and is never saved
+            // over the customer's existing email.
+            _newEmail.text = 'existing-customer@briskers.local';
+
+            String? selectedVehicleId;
+            if (vehicles.isNotEmpty) {
+              final vehicle = vehicles.first;
+              selectedVehicleId = vehicle['id']?.toString();
+              _vehicleYear.text =
+                  vehicle['year']?.toString() ?? '';
+              _vehicleMake.text =
+                  vehicle['make']?.toString() ?? '';
+              _vehicleModel.text =
+                  vehicle['model']?.toString() ?? '';
+            } else {
+              _vehicleYear.clear();
+              _vehicleMake.clear();
+              _vehicleModel.clear();
+            }
+
+            setState(() {
+              _disclaimer = disclaimer;
+              _existingCustomer = customer;
+              _existingVehicles = vehicles;
+              _selectedExistingVehicleId = selectedVehicleId;
+              _newCustomerMode = true;
+              _createOnlineAccount = false;
+              _acceptedDisclaimer = false;
+              _matches = const [];
+              _selected = null;
+              _error = null;
+            });
+            return;
+          }
+        } catch (_) {
+          _online = false;
+        }
+
         setState(() {
           _matches = const [];
           _error =
-              'We could not find an appointment for that phone number today. If you are a new customer or walk-in, use the option below.';
+              'We could not find an existing customer or an appointment for that phone number. If this is your first visit, use New customer below.';
         });
         return;
       }
@@ -214,13 +312,24 @@ class _KioskCheckInScreenState
       }
 
       final digits = digitsOnly(_phone.text);
+      _newName.clear();
+      _newEmail.clear();
+      _vehicleYear.clear();
+      _vehicleMake.clear();
+      _vehicleModel.clear();
       if (digits.length == 10) {
         _newPhone.text = formatUsPhone(digits);
+      } else {
+        _newPhone.clear();
       }
 
       setState(() {
         _disclaimer = disclaimer;
+        _existingCustomer = null;
+        _existingVehicles = const [];
+        _selectedExistingVehicleId = null;
         _newCustomerMode = true;
+        _createOnlineAccount = false;
         _acceptedDisclaimer = false;
         _error = null;
       });
@@ -441,6 +550,9 @@ class _KioskCheckInScreenState
       _completedOnline = false;
       _completedWalkIn = false;
       _newCustomerMode = false;
+      _existingCustomer = null;
+      _existingVehicles = const [];
+      _selectedExistingVehicleId = null;
       _createOnlineAccount = false;
       _acceptedDisclaimer = false;
       _error = null;
@@ -533,7 +645,7 @@ class _KioskCheckInScreenState
           ),
           const SizedBox(height: 10),
           Text(
-            'Enter the phone number used for your appointment.',
+            'Enter your phone number to find your customer record or today’s appointment.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.titleLarge,
           ),
@@ -610,7 +722,7 @@ class _KioskCheckInScreenState
               onPressed: _busy ? null : _startNewCustomer,
               icon: const Icon(Icons.person_add_alt_1_outlined),
               label: const Text(
-                'New customer / Walk-in',
+                'New customer',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w800,
@@ -638,6 +750,8 @@ class _KioskCheckInScreenState
     final disclaimer = _disclaimer;
     final disclaimerText =
         disclaimer?['text']?.toString() ?? '';
+    final existingCustomer = _existingCustomer;
+    final isExistingCustomer = existingCustomer != null;
 
     return _frame(
       SingleChildScrollView(
@@ -650,51 +764,74 @@ class _KioskCheckInScreenState
             ),
             const SizedBox(height: 20),
             Text(
-              'New customer / Walk-in',
+              isExistingCustomer
+                  ? 'Walk-in Check-In'
+                  : 'New customer',
               style:
                   Theme.of(context).textTheme.headlineMedium?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),
             ),
             const SizedBox(height: 6),
-            const Text(
-              'Please enter the information below. The shop will complete VIN, plate and other vehicle details later.',
-              style: TextStyle(fontSize: 16),
+            Text(
+              isExistingCustomer
+                  ? 'No appointment today? No problem. Choose the vehicle you brought in and tell us what you need.'
+                  : 'Please enter the information below. The shop will complete VIN, plate and other vehicle details later.',
+              style: const TextStyle(fontSize: 16),
             ),
             const SizedBox(height: 20),
-            TextField(
-              controller: _newName,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Name',
-                prefixIcon: Icon(Icons.person_outline),
-                border: OutlineInputBorder(),
+            if (isExistingCustomer)
+              Card(
+                child: ListTile(
+                  leading: const CircleAvatar(
+                    child: Icon(Icons.person_outline),
+                  ),
+                  title: Text(
+                    existingCustomer['name']?.toString() ?? 'Customer',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 18,
+                    ),
+                  ),
+                  subtitle: const Text('Existing customer record found'),
+                  trailing: const Icon(Icons.verified_outlined),
+                ),
+              )
+            else ...[
+              TextField(
+                controller: _newName,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Name',
+                  prefixIcon: Icon(Icons.person_outline),
+                  border: OutlineInputBorder(),
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _newPhone,
-              keyboardType: TextInputType.phone,
-              inputFormatters: const [
-                UsPhoneTextInputFormatter(),
-              ],
-              decoration: const InputDecoration(
-                labelText: 'Phone number',
-                prefixIcon: Icon(Icons.phone_outlined),
-                border: OutlineInputBorder(),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _newPhone,
+                keyboardType: TextInputType.phone,
+                inputFormatters: const [
+                  UsPhoneTextInputFormatter(),
+                ],
+                decoration: const InputDecoration(
+                  labelText: 'Phone number',
+                  prefixIcon: Icon(Icons.phone_outlined),
+                  border: OutlineInputBorder(),
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _newEmail,
-              keyboardType: TextInputType.emailAddress,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'Email',
-                prefixIcon: Icon(Icons.email_outlined),
-                border: OutlineInputBorder(),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _newEmail,
+                keyboardType: TextInputType.emailAddress,
+                autocorrect: false,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  prefixIcon: Icon(Icons.email_outlined),
+                  border: OutlineInputBorder(),
+                ),
               ),
-            ),
+            ],
             const SizedBox(height: 22),
             Text(
               'Vehicle',
@@ -703,6 +840,61 @@ class _KioskCheckInScreenState
                   ),
             ),
             const SizedBox(height: 10),
+            if (isExistingCustomer && _existingVehicles.isNotEmpty) ...[
+              DropdownButtonFormField<String>(
+                initialValue: _selectedExistingVehicleId,
+                decoration: const InputDecoration(
+                  labelText: 'Your vehicle',
+                  prefixIcon: Icon(Icons.directions_car_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  ..._existingVehicles.map((vehicle) {
+                    final label = <String>[
+                      vehicle['year']?.toString() ?? '',
+                      vehicle['make']?.toString() ?? '',
+                      vehicle['model']?.toString() ?? '',
+                    ].where((part) => part.trim().isNotEmpty).join(' ');
+                    return DropdownMenuItem<String>(
+                      value: vehicle['id']?.toString(),
+                      child: Text(label.isEmpty ? 'Vehicle' : label),
+                    );
+                  }),
+                  const DropdownMenuItem<String>(
+                    value: '__different_vehicle__',
+                    child: Text('Different / new vehicle'),
+                  ),
+                ],
+                onChanged: _busy
+                    ? null
+                    : (value) {
+                        if (value == '__different_vehicle__') {
+                          _vehicleYear.clear();
+                          _vehicleMake.clear();
+                          _vehicleModel.clear();
+                          setState(() {
+                            _selectedExistingVehicleId = null;
+                          });
+                          return;
+                        }
+
+                        final vehicle = _existingVehicles.firstWhere(
+                          (item) => item['id']?.toString() == value,
+                          orElse: () => <String, dynamic>{},
+                        );
+                        _vehicleYear.text =
+                            vehicle['year']?.toString() ?? '';
+                        _vehicleMake.text =
+                            vehicle['make']?.toString() ?? '';
+                        _vehicleModel.text =
+                            vehicle['model']?.toString() ?? '';
+                        setState(() {
+                          _selectedExistingVehicleId = value;
+                        });
+                      },
+              ),
+              const SizedBox(height: 12),
+            ],
             Row(
               children: [
                 SizedBox(
@@ -756,24 +948,25 @@ class _KioskCheckInScreenState
               ),
             ),
             const SizedBox(height: 14),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _createOnlineAccount,
-              onChanged: _busy
-                  ? null
-                  : (value) {
-                      setState(
-                        () => _createOnlineAccount = value == true,
-                      );
-                    },
-              title: const Text(
-                'I would like a Briskers online account',
-                style: TextStyle(fontWeight: FontWeight.w700),
+            if (!isExistingCustomer)
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _createOnlineAccount,
+                onChanged: _busy
+                    ? null
+                    : (value) {
+                        setState(
+                          () => _createOnlineAccount = value == true,
+                        );
+                      },
+                title: const Text(
+                  'I would like a Briskers online account',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: const Text(
+                  'The shop will use your email to set up online account access.',
+                ),
               ),
-              subtitle: const Text(
-                'The shop will use your email to set up online account access.',
-              ),
-            ),
             const SizedBox(height: 16),
             Text(
               'Check-In Disclaimer',
@@ -872,6 +1065,9 @@ class _KioskCheckInScreenState
                   : () {
                       setState(() {
                         _newCustomerMode = false;
+                        _existingCustomer = null;
+                        _existingVehicles = const [];
+                        _selectedExistingVehicleId = null;
                         _acceptedDisclaimer = false;
                         _error = null;
                       });
