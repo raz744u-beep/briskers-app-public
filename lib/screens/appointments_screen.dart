@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/briskers_i18n.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
@@ -493,17 +494,17 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   String _statusLabel(String status) {
     switch (status) {
       case 'tentative':
-        return 'Tentative';
+        return tr('tentative');
       case 'no_show':
-        return 'No show';
+        return tr('noShow');
       case 'arrived':
-        return 'Checked in';
+        return tr('checkedIn');
       case 'finished':
-        return 'Finished';
+        return tr('finished');
       case 'cancelled':
-        return 'Canceled';
+        return tr('canceled');
       default:
-        return 'Confirmed';
+        return tr('confirmed');
     }
   }
 
@@ -546,13 +547,13 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     if (!canChange) return pill;
 
     return PopupMenuButton<String>(
-      tooltip: 'Change appointment status',
+      tooltip: tr('changeStatus'),
       onSelected: (value) => _setStatus(item, value),
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: 'tentative', child: Text('Tentative')),
-        PopupMenuItem(value: 'confirmed', child: Text('Confirmed')),
-        PopupMenuItem(value: 'no_show', child: Text('No show')),
-        PopupMenuItem(value: 'cancelled', child: Text('Canceled')),
+      itemBuilder: (_) => [
+        PopupMenuItem(value: 'tentative', child: Text(tr('tentative'))),
+        PopupMenuItem(value: 'confirmed', child: Text(tr('confirmed'))),
+        PopupMenuItem(value: 'no_show', child: Text(tr('noShow'))),
+        PopupMenuItem(value: 'cancelled', child: Text(tr('canceled'))),
       ],
       child: pill,
     );
@@ -596,7 +597,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
             children: [
               Expanded(
                 child: Text(
-                  'Appointments',
+                  tr('appointments'),
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                         color: BriskersColors.appointments,
@@ -604,7 +605,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 ),
               ),
               Text(
-                'Total $total',
+                '${tr('total')} $total',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: BriskersColors.appointments,
                       fontWeight: FontWeight.w700,
@@ -618,7 +619,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   ),
                   onPressed: _addAppointment,
                   icon: const Icon(Icons.add),
-                  label: const Text('Add'),
+                  label: Text(tr('add')),
                 ),
               ],
             ],
@@ -628,13 +629,13 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _filterChip('all', 'All'),
+                _filterChip('all', tr('all')),
                 const SizedBox(width: 7),
-                _filterChip('today', 'Today'),
+                _filterChip('today', tr('today')),
                 const SizedBox(width: 7),
-                _filterChip('upcoming', 'Upcoming'),
+                _filterChip('upcoming', tr('upcoming')),
                 const SizedBox(width: 7),
-                _filterChip('past', 'Past'),
+                _filterChip('past', tr('past')),
               ],
             ),
           ),
@@ -648,7 +649,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   Icons.pending_actions,
                   color: BriskersColors.appointments,
                 ),
-                title: const Text('Pending customer requests'),
+                title: Text(tr('pendingCustomerRequests')),
                 trailing: Text(
                   '$_pending',
                   style: const TextStyle(
@@ -673,14 +674,14 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 ),
                 borderRadius: BorderRadius.circular(9),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.cloud_off_outlined, size: 18),
-                  SizedBox(width: 7),
+                  const Icon(Icons.cloud_off_outlined, size: 18),
+                  const SizedBox(width: 7),
                   Expanded(
                     child: Text(
-                      'Showing saved appointments • check-in can be queued offline',
-                      style: TextStyle(fontWeight: FontWeight.w700),
+                      tr('savedAppointmentsOffline'),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ),
                 ],
@@ -703,10 +704,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
               ),
             )
           else if (visible.isEmpty)
-            const Card(
+            Card(
               child: Padding(
-                padding: EdgeInsets.all(20),
-                child: Text('No appointments in this view.'),
+                padding: const EdgeInsets.all(20),
+                child: Text(tr('noAppointments')),
               ),
             )
           else
