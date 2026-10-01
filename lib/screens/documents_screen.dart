@@ -117,12 +117,64 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
   }
 
+  int _estimateStatusRank(String status) {
+    switch (status) {
+      case 'Draft':
+        return 0;
+      case 'Issued':
+        return 1;
+      case 'Accepted':
+        return 2;
+      case 'Declined':
+        return 3;
+      case 'Expired':
+        return 4;
+      case 'Void':
+        return 5;
+      default:
+        return 6;
+    }
+  }
+
   List<Map<String, dynamic>> get _visibleRows {
-    final rows = _rows ?? const <Map<String, dynamic>>[];
-    if (_selectedStatus == null) return rows;
-    return rows
-        .where((row) => row['display_status']?.toString() == _selectedStatus)
-        .toList();
+    final rows = List<Map<String, dynamic>>.from(
+      _rows ?? const <Map<String, dynamic>>[],
+    );
+
+    final filtered = _selectedStatus == null
+        ? rows
+        : rows
+            .where(
+              (row) =>
+                  row['display_status']?.toString() == _selectedStatus,
+            )
+            .toList();
+
+    if (!_estimate || _selectedStatus != null) return filtered;
+
+    filtered.sort((a, b) {
+      final statusCompare = _estimateStatusRank(
+        a['display_status']?.toString() ?? '',
+      ).compareTo(
+        _estimateStatusRank(
+          b['display_status']?.toString() ?? '',
+        ),
+      );
+      if (statusCompare != 0) return statusCompare;
+
+      final aDate =
+          DateTime.tryParse(a['document_date']?.toString() ?? '');
+      final bDate =
+          DateTime.tryParse(b['document_date']?.toString() ?? '');
+      if (aDate != null && bDate != null) {
+        return bDate.compareTo(aDate);
+      }
+      if (aDate != null) return -1;
+      if (bDate != null) return 1;
+      return 0;
+    });
+
+    return filtered;
   }
 
   int _statusCount(String status) {
