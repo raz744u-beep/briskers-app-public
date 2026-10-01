@@ -206,8 +206,8 @@ class _AccountsSettingsScreenState
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete account?'),
         content: Text(
-          'Delete "' + (row['name']?.toString() ?? '') +
-              '"? This is only allowed for accounts with no transaction history.',
+          'Delete "${row['name']?.toString() ?? ''}"? '
+          'This is only allowed for accounts with no transaction history.',
         ),
         actions: [
           TextButton(
