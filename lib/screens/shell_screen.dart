@@ -163,6 +163,7 @@ class _ShellScreenState extends State<ShellScreen> {
         businessId: widget.businessId,
         roleCode: widget.roleCode,
         refreshToken: _jobsRefreshToken,
+        onJobsChanged: _refreshNavCounts,
       ),
       MoreScreen(
         businessId: widget.businessId,
