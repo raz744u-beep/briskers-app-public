@@ -293,6 +293,20 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> kioskLookupCustomer(
+    String businessId,
+    String phone,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_kiosk_lookup_customer_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_phone': phone,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> saveKioskDisclaimer(
     String businessId,
     String disclaimerText,
