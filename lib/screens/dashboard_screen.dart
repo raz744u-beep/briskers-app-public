@@ -22,6 +22,7 @@ class DashboardScreen extends StatefulWidget {
     this.refreshToken = 0,
     this.onCustomersTap,
     this.onAppointmentsTap,
+    this.onJobsChanged,
   });
 
   final String businessId;
@@ -29,6 +30,7 @@ class DashboardScreen extends StatefulWidget {
   final int refreshToken;
   final VoidCallback? onCustomersTap;
   final VoidCallback? onAppointmentsTap;
+  final VoidCallback? onJobsChanged;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -1239,6 +1241,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
     await _load();
+    widget.onJobsChanged?.call();
   }
 
 
@@ -1258,6 +1261,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         statusCode,
       );
       await _load();
+      widget.onJobsChanged?.call();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
