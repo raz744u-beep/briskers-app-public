@@ -1670,12 +1670,14 @@ class BriskersApi {
     String businessId, {
     required Uint8List bytes,
     required String mimeType,
+    String? vendorId,
   }) async {
     try {
       final result = await supabase.functions.invoke(
         'receipt-parse',
         body: {
           'business_id': businessId,
+          'vendor_id': vendorId,
           'mime_type': mimeType,
           'image_base64': base64Encode(bytes),
         },
@@ -1706,6 +1708,74 @@ class BriskersApi {
       },
     );
     return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> receiptTrainingSamples(
+    String businessId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_list_receipt_training_samples_v1',
+      params: {'p_business_id': businessId},
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<void> uploadReceiptTrainingSample(
+    String businessId, {
+    required String vendorId,
+    required String filename,
+    required String mimeType,
+    required Uint8List bytes,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_register_receipt_training_sample_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_vendor_id': vendorId,
+        'p_original_filename': filename,
+        'p_mime_type': mimeType,
+      },
+    );
+    final registration = Map<String, dynamic>.from(result as Map);
+    final bucket = registration['bucket'].toString();
+    final key = registration['key'].toString();
+    final attachmentId = registration['attachment_id'].toString();
+
+    await supabase.storage.from(bucket).uploadBinary(
+      key,
+      bytes,
+      fileOptions: FileOptions(contentType: mimeType, upsert: false),
+    );
+
+    await supabase.rpc(
+      'briskers_finalize_attachment',
+      params: {
+        'p_business_id': businessId,
+        'p_attachment_id': attachmentId,
+        'p_byte_size': bytes.length,
+      },
+    );
+  }
+
+  Future<void> deleteReceiptTrainingSample(
+    String businessId,
+    String sampleId, {
+    required String bucket,
+    required String key,
+  }) async {
+    if (key.isNotEmpty) {
+      await supabase.storage.from(bucket).remove([key]);
+    }
+
+    await supabase.rpc(
+      'briskers_delete_receipt_training_sample_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_sample_id': sampleId,
+      },
+    );
   }
 
   Future<void> deleteExpensePhoto(
