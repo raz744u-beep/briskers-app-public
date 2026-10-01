@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../widgets/briskers_page_header.dart';
+import '../kiosk/kiosk_checkin_screen.dart';
 import 'catalog_settings_screen.dart';
 import 'employees_settings_screen.dart';
 import 'expense_settings_screen.dart';
@@ -78,6 +79,30 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
+          if (roleCode == 'owner')
+            ListTile(
+              leading: const Icon(
+                Icons.play_circle_outline,
+                color: BriskersColors.schedule,
+              ),
+              title: const Text('Start Kiosk Mode (Test)'),
+              subtitle: const Text(
+                'Open customer check-in on this device without signing out',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => KioskCheckInScreen(
+                      businessId: businessId,
+                      businessName: businessName,
+                      allowExit: true,
+                    ),
+                  ),
+                );
+              },
+            ),
           const Divider(),
           ListTile(
             leading: const Icon(
