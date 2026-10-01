@@ -357,6 +357,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         widget.businessId,
         bytes: bytes,
         mimeType: _mimeType(file.name),
+        vendorId: _counterpartyId,
       );
       final rawExtraction = result['extraction'];
       if (rawExtraction is! Map) {
