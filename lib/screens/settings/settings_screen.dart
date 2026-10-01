@@ -74,9 +74,13 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
-          const Divider(),
-          ListTile(
-            leading: const Icon(Icons.storefront, color: BriskersColors.settings),
+          if (roleCode == 'owner') ...[
+            const Divider(),
+            ListTile(
+              leading: const Icon(
+                Icons.storefront,
+                color: BriskersColors.settings,
+              ),
             title: Text(tr('shopInformation')),
             subtitle: Text(tr('shopInformationSub')),
             trailing: const Icon(Icons.chevron_right),
@@ -113,8 +117,7 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
-          if (roleCode == 'owner')
-            ListTile(
+          ListTile(
               leading: const Icon(
                 Icons.play_circle_outline,
                 color: BriskersColors.schedule,
@@ -310,10 +313,14 @@ class SettingsScreen extends StatelessWidget {
             },
           ),
           ListTile(
-            leading: const Icon(Icons.notifications_outlined, color: BriskersColors.schedule),
+            leading: const Icon(
+              Icons.notifications_outlined,
+              color: BriskersColors.schedule,
+            ),
             title: Text(tr('notifications')),
             subtitle: Text(tr('notificationsSub')),
           ),
+          ],
         ],
       ),
     );
