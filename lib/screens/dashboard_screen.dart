@@ -880,6 +880,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           businessId: widget.businessId,
           kind: kind,
           isOwner: widget.roleCode == 'owner',
+          canManageExpenses: <String>{'owner', 'manager', 'office'}.contains(widget.roleCode),
         ),
       ),
     );
