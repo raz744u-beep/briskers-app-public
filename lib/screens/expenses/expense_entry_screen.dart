@@ -1117,7 +1117,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   decoration: InputDecoration(
                     labelText: tr('amount'),
                     prefixText: '\$',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 if (_receiptBaseAmount != null &&
@@ -1188,11 +1188,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   borderRadius: BorderRadius.circular(4),
                   onTap: _saving ? null : _pickCategory,
                   child: InputDecorator(
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: tr('category'),
                       hintText: tr('selectCategory'),
-                      border: OutlineInputBorder(),
-                      suffixIcon: Icon(Icons.arrow_drop_down),
+                      border: const OutlineInputBorder(),
+                      suffixIcon: const Icon(Icons.arrow_drop_down),
                     ),
                     child: Text(
                       _categoryName(_categoryId),
@@ -1254,7 +1254,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   textCapitalization: TextCapitalization.sentences,
                   decoration: InputDecoration(
                     labelText: tr('descriptionNotes'),
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 14),
