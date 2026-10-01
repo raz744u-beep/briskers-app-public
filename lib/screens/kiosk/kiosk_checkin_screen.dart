@@ -14,10 +14,12 @@ class KioskCheckInScreen extends StatefulWidget {
     super.key,
     required this.businessId,
     required this.businessName,
+    this.allowExit = false,
   });
 
   final String businessId;
   final String businessName;
+  final bool allowExit;
 
   @override
   State<KioskCheckInScreen> createState() =>
@@ -1231,7 +1233,7 @@ class _KioskCheckInScreenState
     }
 
     return PopScope(
-      canPop: false,
+      canPop: widget.allowExit,
       child: Scaffold(
         backgroundColor: const Color(0xFFF7F8FA),
         body: SafeArea(
@@ -1252,6 +1254,19 @@ class _KioskCheckInScreenState
                         ),
                       ),
                     ),
+                    if (widget.allowExit) ...[
+                      const Chip(
+                        label: Text('TEST MODE'),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close),
+                        label: const Text('Exit'),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     _statusChip(),
                   ],
                 ),
