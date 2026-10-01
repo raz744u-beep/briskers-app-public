@@ -35,6 +35,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Map<String, dynamic>? _detail;
   List<Map<String, dynamic>> _invoiceStyles = const [];
   num _defaultTaxRate = 0;
+  Set<String> _permissions = const {};
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -42,6 +43,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   bool get _estimate => _detail?['kind']?.toString() == 'estimate';
   bool get _converted => _detail?['converted'] == true;
   bool get _readOnly => _estimate && _converted;
+
+  bool get _canManageReceiptLinks =>
+      !_estimate &&
+      _detail?['status']?.toString() == 'issued' &&
+      _permissions.contains('invoices.edit') &&
+      _permissions.contains('expenses.read');
 
   Color get _accent =>
       _estimate ? BriskersColors.estimates : BriskersColors.jobs;
@@ -59,6 +66,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         widget.documentId,
       );
       final taxSettings = await _api.taxSettings(widget.businessId);
+      final permissions =
+          await _api.myPermissions(widget.businessId);
       List<Map<String, dynamic>> invoiceStyles = const [];
       if (detail['kind']?.toString() == 'invoice') {
         invoiceStyles = await _api.invoiceStatusStyles(widget.businessId);
@@ -67,6 +76,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       setState(() {
         _detail = detail;
         _invoiceStyles = invoiceStyles;
+        _permissions = permissions.toSet();
         _defaultTaxRate =
             num.tryParse(taxSettings['sales_tax_rate']?.toString() ?? '') ?? 0;
         _loading = false;
@@ -559,6 +569,230 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         ));
   }
 
+  Future<void> _openPurchaseReceipt(
+    Map<String, dynamic> attachment,
+  ) async {
+    try {
+      final url = await _api.signedAttachmentUrl(
+        attachment['bucket']?.toString() ?? 'briskers-private',
+        attachment['key']?.toString() ?? '',
+      );
+      if (!mounted) return;
+
+      await showDialog<void>(
+        context: context,
+        barrierColor: Colors.black87,
+        builder: (dialogContext) => Dialog(
+          insetPadding: const EdgeInsets.all(12),
+          backgroundColor: Colors.black,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 5,
+                  child: Center(
+                    child: Image.network(
+                      url,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) => const Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.white70,
+                        size: 56,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 6,
+                top: 6,
+                child: IconButton.filled(
+                  onPressed: () =>
+                      Navigator.pop(dialogContext),
+                  icon: const Icon(Icons.close),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _manageReceiptLinks(
+    Map<String, dynamic> line,
+  ) async {
+    if (!_canManageReceiptLinks || _busy) return;
+
+    List<Map<String, dynamic>> candidates;
+    try {
+      candidates = await _api.invoiceLineReceiptCandidates(
+        widget.businessId,
+        line['id'].toString(),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final rows = candidates
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+
+        return StatefulBuilder(
+          builder: (context, setSheetState) => SafeArea(
+            child: SizedBox(
+              height:
+                  MediaQuery.sizeOf(sheetContext).height * 0.72,
+              child: Column(
+                children: [
+                  Padding(
+                    padding:
+                        const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Purchase receipt for ${line['name'] ?? 'item'}',
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: rows.isEmpty
+                        ? const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(24),
+                              child: Text(
+                                'No structured receipt items are linked to this invoice or job yet. Open the related expense and enter its Receipt Details first.',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            itemCount: rows.length,
+                            separatorBuilder: (_, _) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final item = rows[index];
+                              final linked =
+                                  item['linked'] == true;
+                              final attachments =
+                                  List<dynamic>.from(
+                                item['attachments'] ??
+                                    const <dynamic>[],
+                              ).map(
+                                (raw) =>
+                                    Map<String, dynamic>.from(
+                                  raw as Map,
+                                ),
+                              ).toList();
+                              final vendor =
+                                  item['vendor']?.toString() ??
+                                      'Vendor';
+                              final vendorInvoice =
+                                  item['vendor_invoice_number']
+                                          ?.toString()
+                                          .trim() ??
+                                      '';
+                              final receiptDate =
+                                  item['receipt_date']
+                                          ?.toString()
+                                          .trim() ??
+                                      '';
+
+                              return ListTile(
+                                leading: Checkbox(
+                                  value: linked,
+                                  onChanged: (value) async {
+                                    try {
+                                      if (value == true) {
+                                        await _api
+                                            .linkInvoiceLineReceiptItem(
+                                          widget.businessId,
+                                          line['id'].toString(),
+                                          item['receipt_item_id']
+                                              .toString(),
+                                        );
+                                      } else {
+                                        await _api
+                                            .unlinkInvoiceLineReceiptItem(
+                                          widget.businessId,
+                                          line['id'].toString(),
+                                          item['receipt_item_id']
+                                              .toString(),
+                                        );
+                                      }
+                                      setSheetState(() {
+                                        item['linked'] =
+                                            value == true;
+                                      });
+                                    } catch (error) {
+                                      if (mounted) {
+                                        setState(
+                                          () => _error =
+                                              error.toString(),
+                                        );
+                                      }
+                                    }
+                                  },
+                                ),
+                                title: Text(
+                                  item['description']
+                                          ?.toString() ??
+                                      '',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  <String>[
+                                    vendor,
+                                    if (vendorInvoice.isNotEmpty)
+                                      'Vendor invoice $vendorInvoice',
+                                    if (receiptDate.isNotEmpty)
+                                      receiptDate,
+                                    if (attachments.isNotEmpty)
+                                      '${attachments.length} receipt photo(s)',
+                                  ].join(' • '),
+                                ),
+                                trailing: attachments.isEmpty
+                                    ? null
+                                    : IconButton(
+                                        tooltip: 'View receipt',
+                                        onPressed: () =>
+                                            _openPurchaseReceipt(
+                                          attachments.first,
+                                        ),
+                                        icon: const Icon(
+                                          Icons.receipt_long_outlined,
+                                        ),
+                                      ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _showLineActions(
     Map<String, dynamic> line, {
     required bool canMoveUp,
@@ -582,6 +816,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               title: const Text('Copy item'),
               onTap: () => Navigator.pop(sheetContext, 'copy'),
             ),
+            if (_canManageReceiptLinks &&
+                line['line_kind']?.toString() == 'item')
+              ListTile(
+                leading: const Icon(Icons.receipt_long_outlined),
+                title: const Text('Link purchase receipt'),
+                onTap: () =>
+                    Navigator.pop(sheetContext, 'receipt'),
+              ),
             ListTile(
               enabled: canMoveUp,
               leading: const Icon(Icons.arrow_upward),
@@ -612,6 +854,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (!mounted || action == null) return;
     if (action == 'edit') await _editLine(line);
     if (action == 'copy') await _copyLine(line);
+    if (action == 'receipt') await _manageReceiptLinks(line);
     if (action == 'up') await _moveLine(line, 'up');
     if (action == 'down') await _moveLine(line, 'down');
     if (action == 'delete') await _deleteLine(line);
