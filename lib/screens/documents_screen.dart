@@ -362,7 +362,133 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   String _money(Object? raw) {
     final value = num.tryParse(raw?.toString() ?? '') ?? 0;
-    return NumberFormat.currency(symbol: '\
+    return NumberFormat.currency(symbol: '\$').format(value);
+  }
+
+  Future<void> _showExpensesFromList(Map<String, dynamic> row) async {
+    try {
+      final expenses = await _api.documentExpenses(
+        widget.businessId,
+        row['id'].toString(),
+      );
+      if (!mounted) return;
+
+      if (expenses.isEmpty) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(tr('noRelatedExpenses')),
+            content: Text(
+              (row['job_number']?.toString() ?? '').isEmpty
+                  ? 'There are no expenses linked to this invoice.'
+                  : 'There are no expenses linked to this invoice or its job.',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (sheetContext) => SafeArea(
+          child: SizedBox(
+            height: MediaQuery.sizeOf(sheetContext).height * 0.68,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      tr('viewExpenses'),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: expenses.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final expense = expenses[index];
+                      final id = expense['id']?.toString() ?? '';
+                      final vendor =
+                          expense['vendor']?.toString() ?? 'Expense';
+                      final category =
+                          expense['category']?.toString() ?? '';
+                      final date =
+                          expense['transaction_date']?.toString() ?? '';
+                      final scope =
+                          expense['scope']?.toString() ?? 'invoice';
+                      final jobNumber =
+                          expense['job_number']?.toString() ?? '';
+                      final scopeLabel = scope == 'invoice'
+                          ? tr('invoiceLinked')
+                          : (jobNumber.isEmpty
+                              ? tr('jobExpense')
+                              : '${tr('jobLabel')} $jobNumber');
+                      final income =
+                          expense['direction']?.toString() == 'income';
+
+                      return ListTile(
+                        leading: CircleAvatar(
+                          child: Icon(
+                            income ? Icons.south_west : Icons.north_east,
+                          ),
+                        ),
+                        title: Text(vendor),
+                        subtitle: Text(
+                          <String>[
+                            scopeLabel,
+                            if (category.isNotEmpty) category,
+                            if (date.isNotEmpty) date,
+                          ].join(' • '),
+                        ),
+                        trailing: Text(
+                          '${income ? '+' : '-'}${_money(expense['amount'])}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        onTap: id.isEmpty
+                            ? null
+                            : () async {
+                                Navigator.pop(sheetContext);
+                                await Navigator.push<void>(
+                                  this.context,
+                                  MaterialPageRoute(
+                                    builder: (_) => ExpenseDetailScreen(
+                                      businessId: widget.businessId,
+                                      transactionId: id,
+                                    ),
+                                  ),
+                                );
+                                await _load();
+                              },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
   @override
   Widget build(BuildContext context) {
     final visible = _visibleRows;
@@ -566,7 +692,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       <String>[
                         if (vehicle.isNotEmpty) vehicle,
                         if (jobNumber.isNotEmpty)
-                          tr('jobLabel') + ' ' + jobNumber,
+                          '${tr('jobLabel')} $jobNumber',
                       ].join(' • '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -659,390 +785,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                             ),
                         ],
                       ),
-                    ),
-                  ),
-                );
-              }),
-          ],
-        ),
-      ),
-    );
-  }
-}
-).format(value);
-  }
-
-  Future<void> _showExpensesFromList(Map<String, dynamic> row) async {
-    try {
-      final expenses = await _api.documentExpenses(
-        widget.businessId,
-        row['id'].toString(),
-      );
-      if (!mounted) return;
-
-      if (expenses.isEmpty) {
-        await showDialog<void>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: Text(tr('noRelatedExpenses')),
-            content: Text(
-              (row['job_number']?.toString() ?? '').isEmpty
-                  ? 'There are no expenses linked to this invoice.'
-                  : 'There are no expenses linked to this invoice or its job.',
-            ),
-            actions: [
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-        return;
-      }
-
-      await showModalBottomSheet<void>(
-        context: context,
-        showDragHandle: true,
-        isScrollControlled: true,
-        builder: (sheetContext) => SafeArea(
-          child: SizedBox(
-            height: MediaQuery.sizeOf(sheetContext).height * 0.68,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      tr('viewExpenses'),
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: ListView.separated(
-                    itemCount: expenses.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final expense = expenses[index];
-                      final id = expense['id']?.toString() ?? '';
-                      final vendor = expense['vendor']?.toString() ?? 'Expense';
-                      final category = expense['category']?.toString() ?? '';
-                      final date = expense['transaction_date']?.toString() ?? '';
-                      final scope = expense['scope']?.toString() ?? 'invoice';
-                      final jobNumber = expense['job_number']?.toString() ?? '';
-                      final scopeLabel = scope == 'invoice'
-                          ? tr('invoiceLinked')
-                          : (jobNumber.isEmpty
-                              ? tr('jobExpense')
-                              : tr('jobLabel') + ' ' + jobNumber);
-                      final income = expense['direction']?.toString() == 'income';
-
-                      return ListTile(
-                        leading: CircleAvatar(
-                          child: Icon(
-                            income ? Icons.south_west : Icons.north_east,
-                          ),
-                        ),
-                        title: Text(vendor),
-                        subtitle: Text(
-                          <String>[
-                            scopeLabel,
-                            if (category.isNotEmpty) category,
-                            if (date.isNotEmpty) date,
-                          ].join(' • '),
-                        ),
-                        trailing: Text(
-                          (income ? '+' : '-') + _money(expense['amount']),
-                          style: const TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                        onTap: id.isEmpty
-                            ? null
-                            : () async {
-                                Navigator.pop(sheetContext);
-                                await Navigator.push<void>(
-                                  this.context,
-                                  MaterialPageRoute(
-                                    builder: (_) => ExpenseDetailScreen(
-                                      businessId: widget.businessId,
-                                      transactionId: id,
-                                    ),
-                                  ),
-                                );
-                                await _load();
-                              },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final visible = _visibleRows;
-    final selectedLabel = _selectedStatus ?? tr('all');
-    final accent = _estimate ? BriskersColors.estimates : BriskersColors.invoices;
-
-    return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 68,
-        title: BriskersPageTitle(title: _title, logoHeight: 40),
-      ),
-      body: RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 84),
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _title,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: accent,
-                        ),
-                  ),
-                ),
-                if (_rows != null)
-                  Text(
-                    '${tr('total')} ${_rows!.length}',
-                    style: TextStyle(
-                      color: accent,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: PopupMenuButton<String>(
-                tooltip: 'Filter $_title',
-                onSelected: (value) => setState(
-                  () => _selectedStatus = value == '__all__' ? null : value,
-                ),
-                itemBuilder: (_) => [
-                  PopupMenuItem<String>(
-                    value: '__all__',
-                    child: Row(
-                      children: [
-                        const Icon(Icons.all_inclusive),
-                        const SizedBox(width: 10),
-                        Expanded(child: Text(tr('all'))),
-                        _menuCount(_rows?.length ?? 0, alwaysShow: true),
-                      ],
-                    ),
-                  ),
-                  ..._statuses.map((status) {
-                    final count = _statusCount(status);
-                    return PopupMenuItem<String>(
-                      value: status,
-                      child: Row(
-                        children: [
-                          Icon(
-                            _statusIcon(status),
-                            size: 16,
-                            color: _statusColor(status),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(child: Text(status)),
-                          _menuCount(count),
-                        ],
-                      ),
-                    );
-                  }),
-                ],
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: (_selectedStatus == null
-                              ? accent
-                              : _statusColor(_selectedStatus!))
-                          .withValues(alpha: 0.50),
-                    ),
-                    color: (_selectedStatus == null
-                            ? accent
-                            : _statusColor(_selectedStatus!))
-                        .withValues(alpha: 0.08),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        selectedLabel,
-                        style: TextStyle(
-                          color: _selectedStatus == null
-                              ? accent
-                              : _statusColor(_selectedStatus!),
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(width: 3),
-                      Icon(
-                        Icons.chevron_right,
-                        size: 18,
-                        color: _selectedStatus == null
-                            ? accent
-                            : _statusColor(_selectedStatus!),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ),
-            const SizedBox(height: 10),
-            if (_rows == null)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: CircularProgressIndicator(),
-                ),
-              )
-            else if (visible.isEmpty)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Text('No ${_title.toLowerCase()} in this status.'),
-                ),
-              )
-            else
-              ...visible.map((row) {
-                final status = row['display_status']?.toString() ?? '';
-                final color = _statusColor(status);
-                final number = row['document_number']?.toString() ?? '';
-                final customer = row['customer_name']?.toString() ?? '';
-                final vehicle = row['vehicle']?.toString() ?? '';
-                final jobNumber = row['job_number']?.toString() ?? '';
-
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    onTap: () => _open(row),
-                    leading: CircleAvatar(
-                      backgroundColor: color.withValues(alpha: 0.12),
-                      child: Icon(
-                        _estimate
-                            ? Icons.request_quote_outlined
-                            : invoiceStatusIcon(
-                                row['status_icon']?.toString(),
-                              ),
-                        color: color,
-                      ),
-                    ),
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            <String>[
-                              if (number.isNotEmpty)
-                                (_estimate
-                                    ? (number.toUpperCase().startsWith('E-')
-                                        ? number
-                                        : 'E-$number')
-                                    : (number.toUpperCase().startsWith('I-')
-                                        ? number
-                                        : 'I-$number')),
-                              if (customer.isNotEmpty) customer,
-                            ].join('  '),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        if (row['customer_problem_flag'] == true) ...[
-                          const SizedBox(width: 5),
-                          const Icon(
-                            Icons.flag,
-                            color: Colors.red,
-                            size: 18,
-                          ),
-                        ],
-                      ],
-                    ),
-                    subtitle: Text(
-                      <String>[
-                        if (vehicle.isNotEmpty) vehicle,
-                        if (jobNumber.isNotEmpty) 'Job $jobNumber',
-                      ].join(' • '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              _money(row['total_amount']),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            Text(
-                              status,
-                              style: TextStyle(
-                                color: color,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (widget.isOwner) ...[
-                          const SizedBox(width: 4),
-                          PopupMenuButton<String>(
-                            tooltip: 'Document actions',
-                            onSelected: (value) {
-                              if (value == 'delete') {
-                                _deleteDocument(row);
-                              }
-                            },
-                            itemBuilder: (_) => [
-                              PopupMenuItem<String>(
-                                value: 'delete',
-                                child: ListTile(
-                                  dense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                  leading: const Icon(Icons.delete_outline),
-                                  title: Text(
-                                    _estimate
-                                        ? 'Delete estimate'
-                                        : 'Delete invoice',
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ],
                     ),
                   ),
                 );
