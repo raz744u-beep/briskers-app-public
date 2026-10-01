@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1663,6 +1664,48 @@ class BriskersApi {
         'p_byte_size': bytes.length,
       },
     );
+  }
+
+  Future<Map<String, dynamic>> parseReceiptImage(
+    String businessId, {
+    required Uint8List bytes,
+    required String mimeType,
+  }) async {
+    try {
+      final result = await supabase.functions.invoke(
+        'receipt-parse',
+        body: {
+          'business_id': businessId,
+          'mime_type': mimeType,
+          'image_base64': base64Encode(bytes),
+        },
+      );
+      return Map<String, dynamic>.from(result.data as Map);
+    } on FunctionException catch (error) {
+      final details = error.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception(
+        error.reasonPhrase ?? 'Could not read receipt.',
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> applyExpenseReceiptExtraction(
+    String businessId,
+    String transactionId,
+    Map<String, dynamic> extraction,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_apply_expense_receipt_extraction_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+        'p_extraction': extraction,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
   }
 
   Future<void> deleteExpensePhoto(
