@@ -554,8 +554,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       showDragHandle: true,
       builder: (_) => _EditLineDialog(
         line: line,
-        title: 'Edit invoice item',
-        saveLabel: 'Save Changes',
+        title: tr('editInvoiceItem'),
+        saveLabel: tr('saveChanges'),
         lockCatalogFields: line['item_id'] != null,
       ),
     );
@@ -652,7 +652,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
-            child: const Text('Remove'),
+            child: Text(tr('remove')),
           ),
         ],
       ),
@@ -885,8 +885,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       builder: (_) => _PaymentEntryDialog(
         methods: methods,
         initialAmount: remaining,
-        title: 'Add payment',
-        saveLabel: 'Add payment',
+        title: tr('addPayment'),
+        saveLabel: tr('addPayment'),
       ),
     );
     if (result == null) return;
@@ -920,8 +920,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         methods: methods,
         initialAmount: _number(payment['amount']),
         initialMethodId: payment['payment_method_id']?.toString(),
-        title: 'Edit payment',
-        saveLabel: 'Save changes',
+        title: tr('editPayment'),
+        saveLabel: tr('saveChanges'),
       ),
     );
     if (result == null) return;
@@ -946,7 +946,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Remove payment?'),
+        title: Text(tr('removePayment') + '?'),
         content: Text(
           'Remove the ${_money(payment['amount'])} '
           '${payment['payment_method_name'] ?? 'payment'} entry?',
@@ -2719,7 +2719,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
         children: [
           Text(
-            'Payment',
+            tr('paymentSection'),
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w800,
                 ),
@@ -2731,16 +2731,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  _AmountRow(label: 'Invoice total', value: _money(total)),
                   _AmountRow(
-                    label: 'Paid',
+                    label: tr('invoiceTotal'),
+                    value: _money(total),
+                  ),
+                  _AmountRow(
+                    label: tr('paid'),
                     value: _money(shownPaid),
                     valueColor:
                         shownPaid > 0 ? const Color(0xFF0C9A43) : null,
                   ),
                   const Divider(height: 18),
                   _AmountRow(
-                    label: 'Balance',
+                    label: tr('balance'),
                     value: _money(safeBalance),
                     bold: true,
                   ),
@@ -2753,7 +2756,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             children: [
               Expanded(
                 child: Text(
-                  'Payments',
+                  tr('payments'),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),
@@ -2777,7 +2780,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 color: const Color(0xFFF5F8F7),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Text('No payments entered yet.'),
+              child: Text(tr('noPaymentsYet')),
             )
           else
             Card(
@@ -2801,7 +2804,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                           ),
                           title: Text(
                             payment['payment_method_name']?.toString() ??
-                                'Payment',
+                                tr('paymentSection'),
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                           trailing: Row(
@@ -2816,7 +2819,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                               if (editable && !_busy) ...[
                                 const SizedBox(width: 4),
                                 PopupMenuButton<String>(
-                                  tooltip: 'Payment options',
+                                  tooltip: tr('paymentOptions'),
                                   onSelected: (value) {
                                     if (value == 'edit') _editPayment(payment);
                                     if (value == 'remove') {
@@ -2824,23 +2827,27 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                     }
                                   },
                                   itemBuilder: (_) => [
-                                    const PopupMenuItem(
+                                    PopupMenuItem(
                                       value: 'edit',
                                       child: ListTile(
                                         dense: true,
                                         contentPadding: EdgeInsets.zero,
-                                        leading: Icon(Icons.edit_outlined),
-                                        title: Text('Edit payment'),
+                                        leading: const Icon(
+                                          Icons.edit_outlined,
+                                        ),
+                                        title: Text(tr('editPayment')),
                                       ),
                                     ),
                                     if (widget.isOwner)
-                                      const PopupMenuItem(
+                                      PopupMenuItem(
                                         value: 'remove',
                                         child: ListTile(
                                           dense: true,
                                           contentPadding: EdgeInsets.zero,
-                                          leading: Icon(Icons.delete_outline),
-                                          title: Text('Remove payment'),
+                                          leading: const Icon(
+                                            Icons.delete_outline,
+                                          ),
+                                          title: Text(tr('removePayment')),
                                         ),
                                       ),
                                   ],
@@ -2864,7 +2871,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               child: FilledButton.icon(
                 onPressed: _busy ? null : _enterPayment,
                 icon: const Icon(Icons.add_card_outlined),
-                label: const Text('Add Payment'),
+                label: Text(tr('addPayment')),
               ),
             )
           else
@@ -2893,8 +2900,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   const SizedBox(width: 8),
                   Text(
                     pendingPaid > 0
-                        ? 'Paid in full — Pending Close'
-                        : 'Paid in full',
+                        ? tr('paidInFullPendingClose')
+                        : tr('paidInFull'),
                     style: TextStyle(
                       color: pendingPaid > 0
                           ? const Color(0xFFA45F00)
@@ -4214,15 +4221,17 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
             controller: _amount,
             autofocus: true,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Amount',
+            decoration: InputDecoration(
+              labelText: tr('paymentAmount'),
               prefixText: '\$ ',
             ),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: _methodId,
-            decoration: const InputDecoration(labelText: 'Payment method'),
+            decoration: InputDecoration(
+              labelText: tr('paymentMethod'),
+            ),
             items: widget.methods
                 .map(
                   (method) => DropdownMenuItem<String>(
