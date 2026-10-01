@@ -489,6 +489,30 @@ class BriskersApi {
         .toList();
   }
 
+  Future<Map<String, dynamic>> parseExpenseReceipt(
+    String businessId,
+    String transactionId,
+  ) async {
+    try {
+      final result = await supabase.functions.invoke(
+        'receipt-parse',
+        body: {
+          'business_id': businessId,
+          'transaction_id': transactionId,
+        },
+      );
+      return Map<String, dynamic>.from(result.data as Map);
+    } on FunctionException catch (error) {
+      final details = error.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception(
+        error.reasonPhrase ?? 'Receipt AI extraction failed.',
+      );
+    }
+  }
+
   Future<Map<String, dynamic>> aiCommand(
     String businessId,
     String command,
