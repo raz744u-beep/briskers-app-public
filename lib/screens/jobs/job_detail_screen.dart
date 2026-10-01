@@ -3045,6 +3045,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         builder: (_) => ExpenseDetailScreen(
           businessId: widget.businessId,
           transactionId: transactionId,
+          allowRecurring:
+              widget.roleCode == 'owner' || widget.roleCode == 'manager',
         ),
       ),
     );
@@ -3065,7 +3067,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _deleteJobExpense(String transactionId) async {
-    if (_busy) return;
+    if (_busy || !_owner) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -3235,15 +3237,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         if (value == 'edit') await _editJobExpense(id);
                         if (value == 'delete') await _deleteJobExpense(id);
                       },
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(
                           value: 'edit',
                           child: Text('Edit expense'),
                         ),
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Text('Delete expense'),
-                        ),
+                        if (_owner)
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Text('Delete expense'),
+                          ),
                       ],
                     )
                   else
