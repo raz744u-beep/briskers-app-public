@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
