@@ -1633,7 +1633,7 @@ class BriskersApi {
     String documentId,
   ) async {
     final result = await supabase.rpc(
-      'briskers_document_expenses',
+      'briskers_document_related_expenses_v1',
       params: {
         'p_business_id': businessId,
         'p_document_id': documentId,
