@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/briskers_i18n.dart';
 import '../../widgets/briskers_page_header.dart';
 import '../kiosk/kiosk_checkin_screen.dart';
 import 'catalog_settings_screen.dart';
@@ -9,6 +10,7 @@ import 'expense_settings_screen.dart';
 import 'job_statuses_settings_screen.dart';
 import 'kiosk_checkin_settings_screen.dart';
 import 'invoice_statuses_settings_screen.dart';
+import 'language_settings_screen.dart';
 import 'item_categories_settings_screen.dart';
 import 'payment_methods_settings_screen.dart';
 import 'shop_info_settings_screen.dart';
@@ -33,16 +35,29 @@ class SettingsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 68,
-        title: const BriskersPageTitle(title: 'Settings', logoHeight: 40),
+        title: BriskersPageTitle(title: tr('settings'), logoHeight: 40),
       ),
       body: ListView(
         children: [
           ListTile(
+            leading: const Icon(Icons.translate, color: BriskersColors.settings),
+            title: Text(tr('language')),
+            subtitle: Text(tr('languageSubtitle')),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const LanguageSettingsScreen(),
+                ),
+              );
+            },
+          ),
+          const Divider(),
+          ListTile(
             leading: const Icon(Icons.storefront, color: BriskersColors.settings),
-            title: const Text('Shop information'),
-            subtitle: const Text(
-              'Name, address, hours, phone, links and customer page',
-            ),
+            title: Text(tr('shopInformation')),
+            subtitle: Text(tr('shopInformationSub')),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(
@@ -63,10 +78,8 @@ class SettingsScreen extends StatelessWidget {
               Icons.touch_app_outlined,
               color: BriskersColors.schedule,
             ),
-            title: const Text('Kiosk Check-In'),
-            subtitle: const Text(
-              'Customer disclaimer and public check-in settings',
-            ),
+            title: Text(tr('kioskCheckIn')),
+            subtitle: Text(tr('kioskCheckInSub')),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(
@@ -85,10 +98,8 @@ class SettingsScreen extends StatelessWidget {
                 Icons.play_circle_outline,
                 color: BriskersColors.schedule,
               ),
-              title: const Text('Start Kiosk Mode (Test)'),
-              subtitle: const Text(
-                'Open customer check-in on this device without signing out',
-              ),
+              title: Text(tr('startKioskMode')),
+              subtitle: Text(tr('startKioskModeSub')),
               trailing: const Icon(Icons.chevron_right),
               onTap: () {
                 Navigator.push(
@@ -109,10 +120,8 @@ class SettingsScreen extends StatelessWidget {
               Icons.people_alt_outlined,
               color: BriskersColors.customers,
             ),
-            title: const Text('Employees'),
-            subtitle: const Text(
-              'Personal information, positions and pay settings',
-            ),
+            title: Text(tr('employees')),
+            subtitle: Text(tr('employeesSub')),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(
@@ -131,10 +140,8 @@ class SettingsScreen extends StatelessWidget {
               Icons.rule_folder_outlined,
               color: BriskersColors.jobs,
             ),
-            title: const Text('Job statuses'),
-            subtitle: const Text(
-              'Names, colors, icons and custom workflow statuses',
-            ),
+            title: Text(tr('jobStatuses')),
+            subtitle: Text(tr('jobStatusesSub')),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(
@@ -152,10 +159,8 @@ class SettingsScreen extends StatelessWidget {
               Icons.receipt_long_outlined,
               color: BriskersColors.invoices,
             ),
-            title: const Text('Invoice statuses'),
-            subtitle: const Text(
-              'Names, colors, icons and display order',
-            ),
+            title: Text(tr('invoiceStatuses')),
+            subtitle: Text(tr('invoiceStatusesSub')),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(
@@ -174,10 +179,8 @@ class SettingsScreen extends StatelessWidget {
               Icons.inventory_2_outlined,
               color: BriskersColors.invoices,
             ),
-            title: const Text('Items / Catalog'),
-            subtitle: const Text(
-              'Parts, labor, services, prices, taxability and categories',
-            ),
+            title: Text(tr('itemsCatalog')),
+            subtitle: Text(tr('itemsCatalogSub')),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(
@@ -195,10 +198,8 @@ class SettingsScreen extends StatelessWidget {
               Icons.category_outlined,
               color: BriskersColors.invoices,
             ),
-            title: const Text('Item Categories'),
-            subtitle: const Text(
-              'Edit the category list used by catalog items',
-            ),
+            title: Text(tr('itemCategories')),
+            subtitle: Text(tr('itemCategoriesSub')),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(
@@ -216,10 +217,8 @@ class SettingsScreen extends StatelessWidget {
               Icons.receipt_long_outlined,
               color: BriskersColors.jobs,
             ),
-            title: const Text('Taxes & Invoicing'),
-            subtitle: const Text(
-              'Default sales tax rate and invoice tax behavior',
-            ),
+            title: Text(tr('taxesInvoicing')),
+            subtitle: Text(tr('taxesInvoicingSub')),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(
@@ -237,10 +236,8 @@ class SettingsScreen extends StatelessWidget {
               Icons.account_balance_wallet_outlined,
               color: BriskersColors.expenses,
             ),
-            title: const Text('Transactions setup'),
-            subtitle: const Text(
-              'Accounts, categories, payees, quick and recurring transactions',
-            ),
+            title: Text(tr('transactionsSetup')),
+            subtitle: Text(tr('transactionsSetupSub')),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(
@@ -258,10 +255,8 @@ class SettingsScreen extends StatelessWidget {
               Icons.payments_outlined,
               color: BriskersColors.expenses,
             ),
-            title: const Text('Payment Methods'),
-            subtitle: const Text(
-              'Cash, cards, Zelle and other accepted methods',
-            ),
+            title: Text(tr('paymentMethods')),
+            subtitle: Text(tr('paymentMethodsSub')),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               Navigator.push(
@@ -274,10 +269,10 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
-          const ListTile(
-            leading: Icon(Icons.notifications_outlined, color: BriskersColors.schedule),
-            title: Text('Notifications'),
-            subtitle: Text('Customer and employee notification options — coming next'),
+          ListTile(
+            leading: const Icon(Icons.notifications_outlined, color: BriskersColors.schedule),
+            title: Text(tr('notifications')),
+            subtitle: Text(tr('notificationsSub')),
           ),
         ],
       ),
