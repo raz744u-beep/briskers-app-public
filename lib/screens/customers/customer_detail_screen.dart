@@ -10,6 +10,7 @@ import '../jobs/job_create_screen.dart';
 import 'customer_account_section.dart';
 import 'customer_appointments_section.dart';
 import 'customer_notes_section.dart';
+import 'customer_parts_warranty_section.dart';
 import 'customer_service_history_section.dart';
 import 'customer_vehicles_section.dart';
 import 'customer_vehicle_findings_section.dart';
@@ -596,6 +597,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     CustomerServiceHistorySection(
                       businessId: widget.businessId,
                       customerId: widget.customerId,
+                    ),
+                    const SizedBox(height: 18),
+                    CustomerPartsWarrantySection(
+                      businessId: widget.businessId,
+                      customerId: widget.customerId,
+                      vehicles: vehicles,
                     ),
                     const SizedBox(height: 18),
                     CustomerAccountSection(
