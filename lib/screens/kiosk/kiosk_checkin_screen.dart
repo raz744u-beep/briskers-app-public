@@ -1,10 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
-import '../../core/briskers_colors.dart';
 import '../../core/formatters.dart';
 import '../../services/appointment_sync_service.dart';
 import '../../services/local_appointment_repository.dart';
