@@ -489,19 +489,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       ),
     );
     if (result == null) return;
+    final translatedResult = await _translateManualEntry(
+      result,
+      translateName: false,
+    );
+    if (translatedResult == null) return;
 
     await _run(() async {
       await _api.addDocumentLine(
         widget.businessId,
         widget.documentId,
         expectedVersion: _version,
-        name: result['name'].toString(),
-        description: result['description']?.toString(),
+        name: translatedResult['name'].toString(),
+        description: translatedResult['description']?.toString(),
         itemId: selected['id']?.toString(),
-        quantity: result['quantity'] as num,
-        unitPrice: result['unit_price'] as num,
-        taxRate: result['tax_rate'] as num,
-        lineKind: result['line_kind'].toString(),
+        quantity: translatedResult['quantity'] as num,
+        unitPrice: translatedResult['unit_price'] as num,
+        taxRate: translatedResult['tax_rate'] as num,
+        lineKind: translatedResult['line_kind'].toString(),
       );
     });
   }
@@ -516,18 +521,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       ),
     );
     if (result == null) return;
+    final translatedResult = await _translateManualEntry(result);
+    if (translatedResult == null) return;
 
     await _run(() async {
       await _api.addDocumentLine(
         widget.businessId,
         widget.documentId,
         expectedVersion: _version,
-        name: result['name'].toString(),
-        description: result['description']?.toString(),
-        quantity: result['quantity'] as num,
-        unitPrice: result['unit_price'] as num,
-        taxRate: result['tax_rate'] as num,
-        lineKind: result['line_kind'].toString(),
+        name: translatedResult['name'].toString(),
+        description: translatedResult['description']?.toString(),
+        quantity: translatedResult['quantity'] as num,
+        unitPrice: translatedResult['unit_price'] as num,
+        taxRate: translatedResult['tax_rate'] as num,
+        lineKind: translatedResult['line_kind'].toString(),
       );
     });
   }
@@ -553,18 +560,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       ),
     );
     if (result == null) return;
+    final translatedResult = await _translateManualEntry(result);
+    if (translatedResult == null) return;
 
     await _run(() async {
       await _api.updateDocumentLineV2(
         widget.businessId,
         line['id'].toString(),
         expectedVersion: _version,
-        name: result['name'].toString(),
-        quantity: result['quantity'] as num,
-        unitPrice: result['unit_price'] as num,
-        taxRate: result['tax_rate'] as num,
-        description: result['description']?.toString(),
-        lineKind: result['line_kind'].toString(),
+        name: translatedResult['name'].toString(),
+        quantity: translatedResult['quantity'] as num,
+        unitPrice: translatedResult['unit_price'] as num,
+        taxRate: translatedResult['tax_rate'] as num,
+        description: translatedResult['description']?.toString(),
+        lineKind: translatedResult['line_kind'].toString(),
       );
     });
   }
@@ -580,17 +589,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       builder: (_) => const _DiscountDialog(),
     );
     if (result == null) return;
+    final translatedResult = await _translateManualEntry(result);
+    if (translatedResult == null) return;
 
     await _run(() async {
       await _api.addDocumentDiscount(
         widget.businessId,
         widget.documentId,
         expectedVersion: _version,
-        name: result['name'].toString(),
-        method: result['method'].toString(),
-        value: result['value'] as num,
-        timing: result['timing'].toString(),
-        description: result['description']?.toString(),
+        name: translatedResult['name'].toString(),
+        method: translatedResult['method'].toString(),
+        value: translatedResult['value'] as num,
+        timing: translatedResult['timing'].toString(),
+        description: translatedResult['description']?.toString(),
       );
     });
   }
@@ -604,17 +615,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       builder: (_) => _DiscountDialog(line: line),
     );
     if (result == null) return;
+    final translatedResult = await _translateManualEntry(result);
+    if (translatedResult == null) return;
 
     await _run(() async {
       await _api.updateDocumentDiscount(
         widget.businessId,
         line['id'].toString(),
         expectedVersion: _version,
-        name: result['name'].toString(),
-        method: result['method'].toString(),
-        value: result['value'] as num,
-        timing: result['timing'].toString(),
-        description: result['description']?.toString(),
+        name: translatedResult['name'].toString(),
+        method: translatedResult['method'].toString(),
+        value: translatedResult['value'] as num,
+        timing: translatedResult['timing'].toString(),
+        description: translatedResult['description']?.toString(),
       );
     });
   }
@@ -1918,11 +1931,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     controller.dispose();
 
     if (value == null) return;
+    final translatedValue = await _translateManualNote(value);
+    if (translatedValue == null) return;
+
     await _run(() => _api.updateDocumentNotes(
           widget.businessId,
           widget.documentId,
           expectedVersion: _version,
-          memo: value.isEmpty ? null : value,
+          memo: translatedValue.isEmpty ? null : translatedValue,
         ));
   }
 
