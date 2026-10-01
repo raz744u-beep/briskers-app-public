@@ -344,6 +344,151 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> expenseReceiptStructure(
+    String businessId,
+    String transactionId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_expense_receipt_structure_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> saveExpenseReceiptHeader(
+    String businessId,
+    String transactionId, {
+    String? vendorInvoiceNumber,
+    String? receiptDate,
+    num? receiptTotal,
+    String? itemSummary,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_expense_receipt_header_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+        'p_vendor_invoice_number': vendorInvoiceNumber,
+        'p_receipt_date': receiptDate,
+        'p_receipt_total': receiptTotal,
+        'p_item_summary': itemSummary,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> saveExpenseReceiptItem(
+    String businessId,
+    String transactionId, {
+    String? itemId,
+    int? expectedRowVersion,
+    required String description,
+    String? sku,
+    num? quantity,
+    num? unitPrice,
+    num? totalAmount,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_expense_receipt_item_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+        'p_item_id': itemId,
+        'p_expected_row_version': expectedRowVersion,
+        'p_description': description,
+        'p_sku': sku,
+        'p_quantity': quantity,
+        'p_unit_price': unitPrice,
+        'p_total_amount': totalAmount,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<void> deleteExpenseReceiptItem(
+    String businessId,
+    String transactionId,
+    String itemId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_expense_receipt_item_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+        'p_item_id': itemId,
+      },
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> invoiceLineReceiptCandidates(
+    String businessId,
+    String lineId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_invoice_line_receipt_candidates_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_line_id': lineId,
+      },
+    );
+    return List<dynamic>.from(result as List)
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+  }
+
+  Future<void> linkInvoiceLineReceiptItem(
+    String businessId,
+    String lineId,
+    String receiptItemId,
+  ) async {
+    await supabase.rpc(
+      'briskers_link_invoice_line_receipt_item_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_line_id': lineId,
+        'p_receipt_item_id': receiptItemId,
+      },
+    );
+  }
+
+  Future<void> unlinkInvoiceLineReceiptItem(
+    String businessId,
+    String lineId,
+    String receiptItemId,
+  ) async {
+    await supabase.rpc(
+      'briskers_unlink_invoice_line_receipt_item_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_line_id': lineId,
+        'p_receipt_item_id': receiptItemId,
+      },
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> customerPartsWarrantySearch(
+    String businessId,
+    String customerId,
+    String search, {
+    String? vehicleId,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_customer_parts_warranty_search_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_search': search,
+        'p_vehicle_id': vehicleId,
+      },
+    );
+    return List<dynamic>.from(result as List)
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+  }
+
   Future<Map<String, dynamic>> aiCommand(
     String businessId,
     String command,
