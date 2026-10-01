@@ -2833,6 +2833,19 @@ class BriskersApi {
     );
   }
 
+  Future<void> deleteEstimate(
+    String businessId,
+    String estimateId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_estimate',
+      params: {
+        'p_business_id': businessId,
+        'p_estimate_id': estimateId,
+      },
+    );
+  }
+
   Future<void> voidInvoice(
     String businessId,
     String invoiceId,
