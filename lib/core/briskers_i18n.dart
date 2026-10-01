@@ -207,6 +207,8 @@ const Map<String, Map<String, String>> _translations = {
     'saveTransaction': 'Save transaction',
     'saving': 'Saving...',
     'scheduledEvent': 'Scheduled event',
+    'addCustomer': 'Add customer',
+    'filterJobs': 'Filter jobs',
   },
   'es': {
     'dashboard': 'Panel',
@@ -341,5 +343,7 @@ const Map<String, Map<String, String>> _translations = {
     'saveTransaction': 'Guardar transacción',
     'saving': 'Guardando...',
     'scheduledEvent': 'Evento programado',
+    'addCustomer': 'Agregar cliente',
+    'filterJobs': 'Filtrar trabajos',
   },
 };
