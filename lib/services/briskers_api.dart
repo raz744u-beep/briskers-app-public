@@ -1319,6 +1319,7 @@ class BriskersApi {
     required String name,
     required bool active,
     String? defaultCategoryId,
+    num defaultSurchargePercent = 0,
   }) async {
     final result = await supabase.rpc(
       'briskers_save_counterparty',
@@ -1336,6 +1337,14 @@ class BriskersApi {
         'p_business_id': businessId,
         'p_counterparty_id': id,
         'p_category_id': defaultCategoryId,
+      },
+    );
+    await supabase.rpc(
+      'briskers_set_counterparty_surcharge',
+      params: {
+        'p_business_id': businessId,
+        'p_counterparty_id': id,
+        'p_percent': defaultSurchargePercent,
       },
     );
     return id;
