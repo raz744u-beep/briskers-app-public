@@ -37,6 +37,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   static const _api = BriskersApi();
   final _picker = ImagePicker();
   final _amountController = TextEditingController();
+  final _amountFocusNode = FocusNode();
   final _counterpartyController = TextEditingController();
   final _counterpartyFocusNode = FocusNode();
   final _remarksController = TextEditingController();
@@ -84,11 +85,16 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     _documentId = widget.documentId;
     _contextLabel = widget.contextLabel;
     _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      FocusManager.instance.primaryFocus?.unfocus();
+    });
   }
 
   @override
   void dispose() {
     _amountController.dispose();
+    _amountFocusNode.dispose();
     _counterpartyController.dispose();
     _counterpartyFocusNode.dispose();
     _remarksController.dispose();
@@ -1163,6 +1169,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: _amountController,
+                  focusNode: _amountFocusNode,
                   autofocus: false,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
