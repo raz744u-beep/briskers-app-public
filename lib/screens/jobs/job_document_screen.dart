@@ -18,11 +18,13 @@ class JobDocumentScreen extends StatefulWidget {
     required this.businessId,
     required this.documentId,
     required this.isOwner,
+    this.canManageExpenses = false,
   });
 
   final String businessId;
   final String documentId;
   final bool isOwner;
+  final bool canManageExpenses;
 
   @override
   State<JobDocumentScreen> createState() => _JobDocumentScreenState();
@@ -42,6 +44,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   bool get _estimate => _detail?['kind']?.toString() == 'estimate';
   bool get _converted => _detail?['converted'] == true;
   bool get _readOnly => _estimate && _converted;
+  bool get _canManageInvoiceExpenses =>
+      widget.isOwner || widget.canManageExpenses;
 
   Color get _accent =>
       _estimate ? BriskersColors.estimates : BriskersColors.jobs;
@@ -106,7 +110,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _addInvoiceExpense() async {
-    if (_estimate || !widget.isOwner || _detail == null) return;
+    if (_estimate || !_canManageInvoiceExpenses || _detail == null) return;
     final number = _detail!['document_number']?.toString().trim() ?? '';
     final jobId = _detail!['job_id']?.toString();
     final changed = await Navigator.push<bool>(
@@ -124,7 +128,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _showInvoiceExpenses() async {
-    if (_estimate || !widget.isOwner) return;
+    if (_estimate || !_canManageInvoiceExpenses) return;
     try {
       final expenses = await _api.documentExpenses(
         widget.businessId,
@@ -752,6 +756,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           businessId: widget.businessId,
           documentId: invoiceId!,
           isOwner: widget.isOwner,
+          canManageExpenses: widget.canManageExpenses,
         ),
       ),
     );
@@ -1338,6 +1343,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           businessId: widget.businessId,
           documentId: newId!,
           isOwner: widget.isOwner,
+          canManageExpenses: widget.canManageExpenses,
         ),
       ),
     );
@@ -2107,6 +2113,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           businessId: widget.businessId,
           documentId: invoiceId,
           isOwner: widget.isOwner,
+          canManageExpenses: widget.canManageExpenses,
         ),
       ),
     );
@@ -3028,7 +3035,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       title: Text('Vehicle findings'),
                     ),
                   ),
-                if (!_estimate && widget.isOwner)
+                if (!_estimate && _canManageInvoiceExpenses)
                   const PopupMenuItem(
                     value: 'expenses',
                     child: ListTile(
@@ -3038,7 +3045,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       title: Text('View expenses'),
                     ),
                   ),
-                if (!_estimate && widget.isOwner)
+                if (!_estimate && _canManageInvoiceExpenses)
                   const PopupMenuItem(
                     value: 'add_expense',
                     child: ListTile(
