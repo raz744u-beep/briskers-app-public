@@ -16,11 +16,13 @@ class JobsScreen extends StatefulWidget {
     required this.businessId,
     required this.roleCode,
     this.refreshToken = 0,
+    this.onJobsChanged,
   });
 
   final String businessId;
   final String roleCode;
   final int refreshToken;
+  final VoidCallback? onJobsChanged;
 
   @override
   State<JobsScreen> createState() => _JobsScreenState();
@@ -161,6 +163,7 @@ class _JobsScreenState extends State<JobsScreen> {
       ),
     );
     await _load();
+    widget.onJobsChanged?.call();
   }
 
   Future<void> _changeStatus(
@@ -181,6 +184,7 @@ class _JobsScreenState extends State<JobsScreen> {
         statusCode,
       );
       await _load();
+      widget.onJobsChanged?.call();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
