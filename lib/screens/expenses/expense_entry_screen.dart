@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/briskers_i18n.dart';
 import '../../services/briskers_api.dart';
 
 class ExpenseEntryScreen extends StatefulWidget {
@@ -446,8 +447,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             finalAmount: finalAmount,
           ),
         );
-        _receiptReadMessage =
-            'Receipt read — review the fields before saving.';
+        _receiptReadMessage = tr('receiptReadReview');
       });
     } catch (error) {
       if (!mounted) return;
@@ -588,8 +588,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                         textInputAction: TextInputAction.search,
                         decoration: InputDecoration(
                           labelText:
-                              _direction == 'income' ? 'Find payer' : 'Find payee',
-                          hintText: 'Search by name',
+                              _direction == 'income' ? tr('findPayer') : tr('findPayee'),
+                          hintText: tr('searchByName'),
                           prefixIcon: const Icon(Icons.search),
                           border: const OutlineInputBorder(),
                         ),
@@ -606,7 +606,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                             ListTile(
                               leading: const Icon(Icons.add_circle_outline),
                               title: Text('Use "$query"'),
-                              subtitle: const Text('New payee'),
+                              subtitle: Text(tr('newPayee')),
                               onTap: () => Navigator.pop(
                                 sheetContext,
                                 <String, dynamic>{
@@ -962,12 +962,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   @override
   Widget build(BuildContext context) {
     final title = _editing
-        ? 'Edit transaction'
+        ? tr('editTransaction')
         : _copying
-            ? 'Copy transaction'
+            ? tr('copyTransaction')
             : _direction == 'income'
-                ? 'Add income'
-                : 'Add expense';
+                ? tr('addIncome')
+                : tr('addExpense');
 
     return Scaffold(
       appBar: AppBar(
@@ -980,7 +980,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
               child: Tooltip(
                 message: _quickTemplates.isEmpty
                     ? 'No quick transactions are defined'
-                    : 'Quick transaction',
+                    : tr('quickTransaction'),
                 child: Material(
                   color: _quickTemplates.isEmpty
                       ? Colors.grey.shade200
@@ -1114,8 +1114,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
                   ),
-                  decoration: const InputDecoration(
-                    labelText: 'Amount',
+                  decoration: InputDecoration(
+                    labelText: tr('amount'),
                     prefixText: '\$',
                     border: OutlineInputBorder(),
                   ),
@@ -1160,10 +1160,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   onTap: _saving ? null : _pickCounterparty,
                   child: InputDecorator(
                     decoration: InputDecoration(
-                      labelText: _direction == 'income' ? 'Payer' : 'Payee',
+                      labelText: _direction == 'income' ? tr('payer') : tr('payee'),
                       hintText: _direction == 'income'
-                          ? 'Select a payer'
-                          : 'Select a payee',
+                          ? tr('selectPayer')
+                          : tr('selectPayee'),
                       border: const OutlineInputBorder(),
                       suffixIcon: const Icon(Icons.search),
                     ),
@@ -1189,8 +1189,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   onTap: _saving ? null : _pickCategory,
                   child: InputDecorator(
                     decoration: const InputDecoration(
-                      labelText: 'Category',
-                      hintText: 'Select a category',
+                      labelText: tr('category'),
+                      hintText: tr('selectCategory'),
                       border: OutlineInputBorder(),
                       suffixIcon: Icon(Icons.arrow_drop_down),
                     ),
@@ -1212,10 +1212,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   initialValue: _accountId,
                   isExpanded: true,
                   decoration: InputDecoration(
-                    labelText: _direction == 'income' ? 'Deposited to' : 'Paid from',
+                    labelText: _direction == 'income' ? tr('depositedTo') : tr('paidFrom'),
                     hintText: _direction == 'income'
-                        ? 'Select deposit account'
-                        : 'Select payment account',
+                        ? tr('selectDepositAccount')
+                        : tr('selectPaymentAccount'),
                     border: const OutlineInputBorder(),
                   ),
                   items: _accounts
@@ -1241,7 +1241,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                 ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 4),
                   leading: const Icon(Icons.calendar_today_outlined),
-                  title: const Text('Transaction date'),
+                  title: Text(tr('transactionDate')),
                   subtitle: Text('${_date.month}/${_date.day}/${_date.year}'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: _saving ? null : _pickDate,
@@ -1252,8 +1252,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   minLines: 2,
                   maxLines: 5,
                   textCapitalization: TextCapitalization.sentences,
-                  decoration: const InputDecoration(
-                    labelText: 'Description / notes',
+                  decoration: InputDecoration(
+                    labelText: tr('descriptionNotes'),
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -1269,9 +1269,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                       : const Icon(Icons.document_scanner_outlined),
                   label: Text(
                     _readingReceipt
-                        ? 'Reading receipt...'
+                        ? tr('readingReceipt')
                         : (_receipts.isEmpty
-                            ? 'Scan / add receipt'
+                            ? tr('scanAddReceipt')
                             : '${_receipts.length} receipt photo(s)'),
                   ),
                 ),
@@ -1315,7 +1315,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   const SizedBox(height: 8),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Repeat transaction'),
+                    title: Text(tr('repeatTransaction')),
                     subtitle: const Text(
                       'Repeating transactions also appear in the Recurring Transactions list.',
                     ),
@@ -1398,7 +1398,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.save_outlined),
-                  label: Text(_saving ? 'Saving...' : 'Save transaction'),
+                  label: Text(_saving ? tr('saving') : tr('saveTransaction')),
                 ),
               ],
             ),
