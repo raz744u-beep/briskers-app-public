@@ -58,6 +58,7 @@ class _FakeAppointmentApi extends BriskersApi {
             'title': 'Brake inspection',
             'description': 'Brake noise',
             'customer': 'Jane Customer',
+            'customer_phone_norm': '5045551234',
             'vehicle_year': 2020,
             'vehicle_make': 'BMW',
             'vehicle_model': 'X5',
@@ -105,6 +106,7 @@ class _FakeAppointmentApi extends BriskersApi {
           'title': 'Brake inspection',
           'description': 'Brake noise',
           'customer': 'Jane Customer',
+          'customer_phone_norm': '5045551234',
           'vehicle_year': 2020,
           'vehicle_make': 'BMW',
           'vehicle_model': 'X5',
@@ -159,8 +161,8 @@ void main() {
 
     final appt = await database.customSelect(
       '''
-      SELECT status, customer_name, vehicle_make,
-             row_version, can_check_in, sync_state
+      SELECT status, customer_name, customer_phone_norm,
+             vehicle_make, row_version, can_check_in, sync_state
       FROM local_appointments
       WHERE business_id = ? AND id = ?
       ''',
@@ -172,6 +174,10 @@ void main() {
 
     expect(appt.read<String>('status'), 'confirmed');
     expect(appt.read<String>('customer_name'), 'Jane Customer');
+    expect(
+      appt.read<String>('customer_phone_norm'),
+      '5045551234',
+    );
     expect(appt.read<String>('vehicle_make'), 'BMW');
     expect(appt.read<int>('row_version'), 3);
     expect(appt.read<int>('can_check_in'), 1);
