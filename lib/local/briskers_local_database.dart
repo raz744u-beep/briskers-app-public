@@ -123,6 +123,17 @@ class LocalAppointments extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+class LocalKioskSettings extends Table {
+  TextColumn get businessId => text()();
+  TextColumn get disclaimerId => text().nullable()();
+  IntColumn get disclaimerVersion => integer().nullable()();
+  TextColumn get disclaimerText => text().nullable()();
+  DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {businessId};
+}
+
 class LocalJobs extends Table {
   TextColumn get id => text()();
   TextColumn get businessId => text()();
@@ -313,6 +324,7 @@ class LocalFindings extends Table {
     LocalVehicles,
     LocalCustomerVehicles,
     LocalAppointments,
+    LocalKioskSettings,
     LocalJobs,
     LocalJobStatuses,
     LocalJobAssignments,
@@ -337,7 +349,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -384,6 +396,9 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
               localAppointments,
               localAppointments.customerPhoneNorm,
             );
+          }
+          if (from < 7) {
+            await migrator.createTable(localKioskSettings);
           }
         },
       );

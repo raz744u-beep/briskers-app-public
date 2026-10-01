@@ -283,6 +283,67 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> kioskSettings(
+    String businessId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_kiosk_settings_v1',
+      params: {'p_business_id': businessId},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> saveKioskDisclaimer(
+    String businessId,
+    String disclaimerText,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_save_kiosk_disclaimer_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_disclaimer_text': disclaimerText,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> kioskRegisterWalkIn(
+    String businessId, {
+    required String operationId,
+    required String name,
+    required String phone,
+    required String email,
+    required int vehicleYear,
+    required String vehicleMake,
+    required String vehicleModel,
+    required String reason,
+    required bool createOnlineAccount,
+    required String disclaimerId,
+    required int disclaimerVersion,
+    required DateTime acceptedAtDevice,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_kiosk_register_walkin_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_operation_id': operationId,
+        'p_name': name,
+        'p_phone': phone,
+        'p_email': email,
+        'p_vehicle_year': vehicleYear,
+        'p_vehicle_make': vehicleMake,
+        'p_vehicle_model': vehicleModel,
+        'p_reason': reason,
+        'p_create_online_account': createOnlineAccount,
+        'p_disclaimer_id': disclaimerId,
+        'p_disclaimer_version': disclaimerVersion,
+        'p_accepted_at_device':
+            acceptedAtDevice.toUtc().toIso8601String(),
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> aiCommand(
     String businessId,
     String command,

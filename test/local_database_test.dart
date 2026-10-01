@@ -21,6 +21,7 @@ void main() {
     expect(names, contains('local_vehicles'));
     expect(names, contains('local_customer_vehicles'));
     expect(names, contains('local_appointments'));
+    expect(names, contains('local_kiosk_settings'));
 
     final appointmentColumns = await database.customSelect(
       'PRAGMA table_info(local_appointments)',

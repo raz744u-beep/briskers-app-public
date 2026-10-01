@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/formatters.dart';
 import '../../services/appointment_sync_service.dart';
+import '../../services/kiosk_registration_service.dart';
 import '../../services/local_appointment_repository.dart';
 import '../../widgets/briskers_page_header.dart';
 
@@ -28,7 +29,17 @@ class _KioskCheckInScreenState
   final AppointmentSyncService _sync = AppointmentSyncService();
   final LocalAppointmentRepository _appointments =
       LocalAppointmentRepository();
+  final KioskRegistrationService _registrations =
+      KioskRegistrationService();
+
   final TextEditingController _phone = TextEditingController();
+  final TextEditingController _newName = TextEditingController();
+  final TextEditingController _newPhone = TextEditingController();
+  final TextEditingController _newEmail = TextEditingController();
+  final TextEditingController _vehicleYear = TextEditingController();
+  final TextEditingController _vehicleMake = TextEditingController();
+  final TextEditingController _vehicleModel = TextEditingController();
+  final TextEditingController _reason = TextEditingController();
 
   Timer? _privacyResetTimer;
   List<Map<String, dynamic>> _matches = const [];
@@ -37,6 +48,11 @@ class _KioskCheckInScreenState
   bool _online = false;
   bool _completed = false;
   bool _completedOnline = false;
+  bool _completedWalkIn = false;
+  bool _newCustomerMode = false;
+  bool _createOnlineAccount = false;
+  bool _acceptedDisclaimer = false;
+  Map<String, dynamic>? _disclaimer;
   String? _error;
 
   @override
@@ -49,18 +65,41 @@ class _KioskCheckInScreenState
   void dispose() {
     _privacyResetTimer?.cancel();
     _phone.dispose();
+    _newName.dispose();
+    _newPhone.dispose();
+    _newEmail.dispose();
+    _vehicleYear.dispose();
+    _vehicleMake.dispose();
+    _vehicleModel.dispose();
+    _reason.dispose();
     super.dispose();
   }
 
   Future<void> _refreshCache() async {
     try {
+      await _registrations.flush(widget.businessId);
+    } catch (_) {
+      // Pending walk-ins remain queued for the next reconnect.
+    }
+
+    try {
       await _sync.flush(widget.businessId);
       await _sync.pull(widget.businessId);
+      final disclaimer =
+          await _registrations.refreshSettings(widget.businessId);
       if (!mounted) return;
-      setState(() => _online = true);
+      setState(() {
+        _online = true;
+        _disclaimer = disclaimer;
+      });
     } catch (_) {
+      final disclaimer =
+          await _registrations.loadDisclaimer(widget.businessId);
       if (!mounted) return;
-      setState(() => _online = false);
+      setState(() {
+        _online = false;
+        _disclaimer = disclaimer;
+      });
     }
   }
 
@@ -122,7 +161,7 @@ class _KioskCheckInScreenState
         setState(() {
           _matches = const [];
           _error =
-              'We could not find a check-in appointment for that phone number today. Please see the front desk for help.';
+              'We could not find an appointment for that phone number today. If you are a new customer or walk-in, use the option below.';
         });
         return;
       }
@@ -131,6 +170,173 @@ class _KioskCheckInScreenState
         _matches = matches;
         _selected = matches.length == 1 ? matches.first : null;
         _error = null;
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  Future<void> _startNewCustomer() async {
+    if (_busy) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    Map<String, dynamic>? disclaimer = _disclaimer;
+
+    try {
+      disclaimer ??=
+          await _registrations.loadDisclaimer(widget.businessId);
+      if (disclaimer == null) {
+        try {
+          disclaimer =
+              await _registrations.refreshSettings(widget.businessId);
+          _online = true;
+        } catch (_) {
+          _online = false;
+        }
+      }
+
+      if (!mounted) return;
+
+      if (disclaimer == null) {
+        setState(() {
+          _error =
+              'New-customer registration is not available yet. Please see the front desk.';
+        });
+        return;
+      }
+
+      final digits = digitsOnly(_phone.text);
+      if (digits.length == 10) {
+        _newPhone.text = formatUsPhone(digits);
+      }
+
+      setState(() {
+        _disclaimer = disclaimer;
+        _newCustomerMode = true;
+        _acceptedDisclaimer = false;
+        _error = null;
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  bool _validEmail(String value) {
+    final text = value.trim();
+    final at = text.indexOf('@');
+    final dot = text.lastIndexOf('.');
+    return at > 0 && dot > at + 1 && dot < text.length - 1;
+  }
+
+  Future<void> _submitWalkIn() async {
+    if (_busy) return;
+
+    final disclaimer = _disclaimer;
+    if (disclaimer == null) {
+      setState(() {
+        _error =
+            'The customer disclaimer is not available. Please see the front desk.';
+      });
+      return;
+    }
+
+    final name = _newName.text.trim();
+    final phone = digitsOnly(_newPhone.text);
+    final email = _newEmail.text.trim();
+    final year = int.tryParse(_vehicleYear.text.trim());
+    final make = _vehicleMake.text.trim();
+    final model = _vehicleModel.text.trim();
+    final reason = _reason.text.trim();
+    final currentYear = DateTime.now().year;
+
+    String? validationError;
+    if (name.isEmpty) {
+      validationError = 'Please enter your name.';
+    } else if (phone.length != 10) {
+      validationError = 'Please enter a 10-digit phone number.';
+    } else if (!_validEmail(email)) {
+      validationError = 'Please enter a valid email address.';
+    } else if (year == null ||
+        year < 1900 ||
+        year > currentYear + 1) {
+      validationError = 'Please enter a valid vehicle year.';
+    } else if (make.isEmpty) {
+      validationError = 'Please enter the vehicle make.';
+    } else if (model.isEmpty) {
+      validationError = 'Please enter the vehicle model.';
+    } else if (reason.isEmpty) {
+      validationError = 'Please enter the reason for your visit.';
+    } else if (!_acceptedDisclaimer) {
+      validationError =
+          'Please read and agree to the check-in disclaimer.';
+    }
+
+    if (validationError != null) {
+      setState(() => _error = validationError);
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      final acceptedAt = DateTime.now().toUtc();
+      final operationId = await _registrations.queueWalkIn(
+        widget.businessId,
+        name: name,
+        phone: phone,
+        email: email,
+        vehicleYear: year!,
+        vehicleMake: make,
+        vehicleModel: model,
+        reason: reason,
+        createOnlineAccount: _createOnlineAccount,
+        disclaimerId: disclaimer['id'].toString(),
+        disclaimerVersion: int.parse(
+          disclaimer['version'].toString(),
+        ),
+        disclaimerText: disclaimer['text'].toString(),
+        acceptedAtDevice: acceptedAt,
+      );
+
+      Map<String, dynamic>? result;
+      try {
+        final results =
+            await _registrations.flush(widget.businessId);
+        result = results[operationId];
+        _online = true;
+      } catch (_) {
+        _online = false;
+      }
+
+      if (!mounted) return;
+
+      if (result?['status']?.toString() == 'conflict') {
+        setState(() {
+          _error =
+              'We found more than one customer record with this phone number. Please see the front desk so we can finish your check-in.';
+        });
+        return;
+      }
+
+      _showCompletion(
+        online: result?['status']?.toString() == 'applied',
+        walkIn: true,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString().replaceFirst('Bad state: ', '');
       });
     } finally {
       if (mounted) {
@@ -196,11 +402,15 @@ class _KioskCheckInScreenState
     }
   }
 
-  void _showCompletion({required bool online}) {
+  void _showCompletion({
+    required bool online,
+    bool walkIn = false,
+  }) {
     _privacyResetTimer?.cancel();
     setState(() {
       _completed = true;
       _completedOnline = online;
+      _completedWalkIn = walkIn;
       _error = null;
     });
 
@@ -213,6 +423,13 @@ class _KioskCheckInScreenState
   void _reset() {
     _privacyResetTimer?.cancel();
     _phone.clear();
+    _newName.clear();
+    _newPhone.clear();
+    _newEmail.clear();
+    _vehicleYear.clear();
+    _vehicleMake.clear();
+    _vehicleModel.clear();
+    _reason.clear();
 
     if (!mounted) return;
     setState(() {
@@ -220,6 +437,10 @@ class _KioskCheckInScreenState
       _selected = null;
       _completed = false;
       _completedOnline = false;
+      _completedWalkIn = false;
+      _newCustomerMode = false;
+      _createOnlineAccount = false;
+      _acceptedDisclaimer = false;
       _error = null;
     });
   }
@@ -360,6 +581,41 @@ class _KioskCheckInScreenState
               ),
             ),
           ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              const Expanded(child: Divider()),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'OR',
+                  style: TextStyle(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const Expanded(child: Divider()),
+            ],
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            height: 54,
+            child: OutlinedButton.icon(
+              onPressed: _busy ? null : _startNewCustomer,
+              icon: const Icon(Icons.person_add_alt_1_outlined),
+              label: const Text(
+                'New customer / Walk-in',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
           if (_error != null) ...[
             const SizedBox(height: 18),
             _errorCard(),
@@ -372,6 +628,258 @@ class _KioskCheckInScreenState
                 ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _newCustomerPage() {
+    final disclaimer = _disclaimer;
+    final disclaimerText =
+        disclaimer?['text']?.toString() ?? '';
+
+    return _frame(
+      SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const BriskersLogo(
+              height: 60,
+              maxWidth: 220,
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'New customer / Walk-in',
+              style:
+                  Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Please enter the information below. The shop will complete VIN, plate and other vehicle details later.',
+              style: TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _newName,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                prefixIcon: Icon(Icons.person_outline),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _newPhone,
+              keyboardType: TextInputType.phone,
+              inputFormatters: const [
+                UsPhoneTextInputFormatter(),
+              ],
+              decoration: const InputDecoration(
+                labelText: 'Phone number',
+                prefixIcon: Icon(Icons.phone_outlined),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _newEmail,
+              keyboardType: TextInputType.emailAddress,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                prefixIcon: Icon(Icons.email_outlined),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 22),
+            Text(
+              'Vehicle',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                SizedBox(
+                  width: 120,
+                  child: TextField(
+                    controller: _vehicleYear,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Year',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _vehicleMake,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Make',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _vehicleModel,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Model',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 22),
+            TextField(
+              controller: _reason,
+              textCapitalization: TextCapitalization.sentences,
+              minLines: 4,
+              maxLines: 7,
+              decoration: const InputDecoration(
+                labelText: 'Reason for visit',
+                hintText:
+                    'Tell us what the vehicle is doing or what service you need.',
+                alignLabelWithHint: true,
+                prefixIcon: Icon(Icons.build_outlined),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 14),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _createOnlineAccount,
+              onChanged: _busy
+                  ? null
+                  : (value) {
+                      setState(
+                        () => _createOnlineAccount = value == true,
+                      );
+                    },
+              title: const Text(
+                'I would like a Briskers online account',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: const Text(
+                'The shop will use your email to set up online account access.',
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Check-In Disclaimer',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+            ),
+            if (disclaimer != null) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 4, bottom: 8),
+                child: Text(
+                  'Version ${disclaimer['version']}',
+                  style: TextStyle(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant,
+                  ),
+                ),
+              ),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 220),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: SingleChildScrollView(
+                  child: Text(
+                    disclaimerText,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _acceptedDisclaimer,
+                onChanged: _busy
+                    ? null
+                    : (value) {
+                        setState(
+                          () => _acceptedDisclaimer = value == true,
+                        );
+                      },
+                title: const Text(
+                  'I have read and agree to the check-in disclaimer',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                controlAffinity:
+                    ListTileControlAffinity.leading,
+              ),
+            ] else
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'New-customer registration is temporarily unavailable. Please see the front desk.',
+                  ),
+                ),
+              ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              _errorCard(),
+            ],
+            const SizedBox(height: 18),
+            SizedBox(
+              height: 58,
+              child: FilledButton.icon(
+                onPressed:
+                    _busy || disclaimer == null ? null : _submitWalkIn,
+                icon: _busy
+                    ? const SizedBox.square(
+                        dimension: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                        ),
+                      )
+                    : const Icon(Icons.check_circle_outline),
+                label: const Text(
+                  'Submit & Check In',
+                  style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _busy
+                  ? null
+                  : () {
+                      setState(() {
+                        _newCustomerMode = false;
+                        _acceptedDisclaimer = false;
+                        _error = null;
+                      });
+                    },
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back'),
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
       ),
     );
   }
@@ -597,7 +1105,9 @@ class _KioskCheckInScreenState
           ),
           const SizedBox(height: 24),
           Text(
-            'You’re checked in!',
+            _completedWalkIn
+                ? 'Registration complete!'
+                : 'You’re checked in!',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.displaySmall?.copyWith(
                   fontWeight: FontWeight.w900,
@@ -605,9 +1115,13 @@ class _KioskCheckInScreenState
           ),
           const SizedBox(height: 14),
           Text(
-            _completedOnline
-                ? 'The shop has received your check-in.'
-                : 'Your check-in is safely saved on this device and will be sent to the shop automatically when the connection returns.',
+            _completedWalkIn
+                ? (_completedOnline
+                    ? 'The shop has received your information and created your visit.'
+                    : 'Your information is safely saved on this device and will be sent to the shop automatically when the connection returns.')
+                : (_completedOnline
+                    ? 'The shop has received your check-in.'
+                    : 'Your check-in is safely saved on this device and will be sent to the shop automatically when the connection returns.'),
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.titleLarge,
           ),
@@ -708,6 +1222,8 @@ class _KioskCheckInScreenState
     Widget body;
     if (_completed) {
       body = _completionPage();
+    } else if (_newCustomerMode) {
+      body = _newCustomerPage();
     } else if (_matches.isNotEmpty || _selected != null) {
       body = _matchesPage();
     } else {
