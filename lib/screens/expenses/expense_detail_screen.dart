@@ -25,8 +25,10 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   final _picker = ImagePicker();
 
   Map<String, dynamic>? _detail;
+  Map<String, dynamic>? _receiptStructure;
   bool _loading = true;
   bool _canDeleteRecords = false;
+  bool _canEditReceipt = false;
   bool _uploading = false;
   String? _deletingAttachmentId;
   bool _busy = false;
@@ -49,10 +51,25 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       ]);
       final detail = Map<String, dynamic>.from(results[0] as Map);
       final permissions = List<String>.from(results[1] as List);
+
+      Map<String, dynamic>? receiptStructure;
+      if (detail['direction']?.toString() != 'income') {
+        try {
+          receiptStructure = await _api.expenseReceiptStructure(
+            widget.businessId,
+            widget.transactionId,
+          );
+        } catch (_) {
+          receiptStructure = null;
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _detail = detail;
+        _receiptStructure = receiptStructure;
         _canDeleteRecords = permissions.contains('records.delete');
+        _canEditReceipt = permissions.contains('expenses.create');
         _loading = false;
         _error = null;
       });
@@ -672,6 +689,1630 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     if (value == 'edit') await _edit();
     if (value == 'copy') await _copy();
     if (value == 'delete') await _delete();
+  }
+
+  Future<void> _editReceiptHeader() async {
+    if (!_canEditReceipt || _busy) return;
+
+    final receipt = _receiptStructure ?? const <String, dynamic>{};
+    final invoiceNumber = TextEditingController(
+      text: receipt['vendor_invoice_number']?.toString() ?? '',
+    );
+    final total = TextEditingController(
+      text: receipt['receipt_total']?.toString() ??
+          receipt['transaction_total']?.toString() ??
+          '',
+    );
+    var receiptDate = DateTime.tryParse(
+      receipt['receipt_date']?.toString() ??
+          receipt['transaction_date']?.toString() ??
+          '',
+    );
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            0,
+            16,
+            MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Receipt details',
+                  style: TextStyle(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: invoiceNumber,
+                decoration: const InputDecoration(
+                  labelText: 'Vendor invoice / receipt number',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.calendar_month_outlined),
+                title: const Text('Receipt date'),
+                subtitle: Text(
+                  receiptDate == null
+                      ? 'Not set'
+                      : DateFormat('MMM d, yyyy').format(receiptDate!),
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: sheetContext,
+                    initialDate: receiptDate ?? DateTime.now(),
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime.now().add(
+                      const Duration(days: 366),
+                    ),
+                  );
+                  if (picked != null) {
+                    setSheetState(() => receiptDate = picked);
+                  }
+                },
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: total,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Receipt total',
+                  prefixText: '\Map<String, dynamic> attachment) {
+    const size = 52.0;
+    final bucket = attachment['bucket']?.toString() ?? '';
+    final key = attachment['key']?.toString() ?? '';
+
+    if (bucket.isEmpty || key.isEmpty) {
+      return Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: BriskersColors.expenses.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(Icons.broken_image_outlined),
+      );
+    }
+
+    return FutureBuilder<String>(
+      future: _api.signedAttachmentUrl(bucket, key),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return Container(
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: snapshot.hasError
+                ? const Icon(Icons.broken_image_outlined)
+                : const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+          );
+        }
+
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            snapshot.data!,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => Container(
+              width: size,
+              height: size,
+              alignment: Alignment.center,
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              child: const Icon(Icons.broken_image_outlined),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Transaction')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final detail = _detail;
+    if (detail == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Transaction')),
+        body: Center(child: Text(_error ?? 'Transaction not found.')),
+      );
+    }
+
+    final income = detail['direction']?.toString() == 'income';
+    final editable = detail['editable'] == true;
+    final deletable = detail['deletable'] == true;
+    final attachments = List<dynamic>.from(detail['attachments'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+    final counterparty = detail['counterparty']?.toString() ??
+        (income ? 'Income' : 'Expense');
+    final category = detail['category']?.toString() ?? '';
+    final account = detail['account']?.toString() ?? '';
+    final date = detail['date']?.toString() ?? '';
+    final remarks = detail['remarks']?.toString() ?? '';
+    final jobNumber = detail['job_number']?.toString().trim() ?? '';
+    final jobTitle = detail['job_title']?.toString().trim() ?? '';
+    final customerName =
+        detail['job_customer_name']?.toString().trim() ?? '';
+    final documentNumber = detail['document_number']?.toString().trim() ?? '';
+    final contextLine = <String>[
+      if (customerName.isNotEmpty) customerName,
+      if (jobNumber.isNotEmpty || jobTitle.isNotEmpty)
+        <String>[
+          if (jobNumber.isNotEmpty) jobNumber,
+          if (jobTitle.isNotEmpty) jobTitle,
+        ].join(' — '),
+      if (documentNumber.isNotEmpty) 'Invoice #$documentNumber',
+    ].join(' • ');
+    final recurring = detail['recurring_rule'];
+    final color =
+        income ? const Color(0xFF169B62) : BriskersColors.expenses;
+
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: color.withValues(alpha: 0.10),
+        title: Text(income ? 'Income' : 'Expense'),
+        actions: [
+          if (editable)
+            PopupMenuButton<String>(
+              onSelected: _handleMenu,
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('Edit transaction'),
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'copy',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.copy_outlined),
+                    title: Text('Copy transaction'),
+                  ),
+                ),
+                if (deletable)
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.delete_outline),
+                      title: Text('Delete transaction'),
+                    ),
+                  ),
+              ],
+            ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        children: [
+          Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor: color.withValues(alpha: 0.12),
+                    child: Icon(
+                      income ? Icons.south_west : Icons.north_east,
+                      color: color,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      counterparty,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${income ? '+' : '-'}${_money(detail['amount'])}',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (contextLine.isNotEmpty) ...[
+            Card(
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.link_outlined),
+                title: const Text(
+                  'Linked to',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(contextLine),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (remarks.isNotEmpty) ...[
+            Text(
+              'Description / notes',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 6),
+            Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(remarks),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          _DetailRow(label: 'Category', value: category),
+          _DetailRow(label: 'Account', value: account),
+          _DetailRow(label: 'Date', value: date),
+          if (jobNumber.isNotEmpty)
+            _DetailRow(label: 'Job', value: jobNumber),
+          if (documentNumber.isNotEmpty)
+            _DetailRow(label: 'Invoice', value: documentNumber),
+          if (recurring is Map)
+            _DetailRow(
+              label: 'Repeating',
+              value: <String>[
+                recurring['frequency']?.toString() ?? '',
+                if ((recurring['next_date']?.toString() ?? '').isNotEmpty)
+                  'next ${recurring['next_date']}',
+              ].where((x) => x.isNotEmpty).join(' • '),
+            ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Receipts',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              if (editable)
+                TextButton.icon(
+                  onPressed: _uploading ? null : _addReceipt,
+                  icon: const Icon(Icons.add_a_photo_outlined),
+                  label: Text(_uploading ? 'Uploading...' : 'Add'),
+                ),
+            ],
+          ),
+          if (attachments.isEmpty)
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(18),
+                child: Text('No receipt photos attached.'),
+              ),
+            )
+          else
+            ...attachments.map(
+              (attachment) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                  child: Row(
+                    children: [
+                      InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => _openAttachment(attachment),
+                        child: _receiptThumbnail(attachment),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'View receipt',
+                        onPressed: () => _openAttachment(attachment),
+                        icon: const Icon(Icons.zoom_in),
+                      ),
+                      if (editable)
+                        IconButton(
+                          tooltip: 'Replace receipt photo',
+                          onPressed: _uploading
+                              ? null
+                              : () => _replaceReceipt(attachment),
+                          icon: const Icon(Icons.edit_outlined),
+                        ),
+                      if (editable)
+                        IconButton(
+                          tooltip: 'Delete receipt photo',
+                          onPressed:
+                              _deletingAttachmentId ==
+                                      attachment['attachment_id']?.toString()
+                                  ? null
+                                  : () => _deleteAttachment(attachment),
+                          icon: _deletingAttachmentId ==
+                                  attachment['attachment_id']?.toString()
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.delete_outline),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Receipt Details',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              if (_canEditReceipt)
+                TextButton.icon(
+                  onPressed: _busy ? null : _editReceiptHeader,
+                  icon: const Icon(Icons.edit_note_outlined),
+                  label: const Text('Edit'),
+                ),
+            ],
+          ),
+          Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Builder(
+                builder: (context) {
+                  final receipt =
+                      _receiptStructure ?? const <String, dynamic>{};
+                  final invoice =
+                      receipt['vendor_invoice_number']?.toString() ?? '';
+                  final receiptDate =
+                      receipt['receipt_date']?.toString() ?? '';
+                  final receiptTotal =
+                      receipt['receipt_total'];
+                  final summary =
+                      receipt['item_summary']?.toString() ?? '';
+
+                  if (invoice.isEmpty &&
+                      receiptDate.isEmpty &&
+                      receiptTotal == null &&
+                      summary.isEmpty) {
+                    return const Text(
+                      'No structured receipt details yet. The receipt photo remains the original source document.',
+                    );
+                  }
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (invoice.isNotEmpty)
+                        _DetailRow(
+                          label: 'Vendor invoice',
+                          value: invoice,
+                        ),
+                      if (receiptDate.isNotEmpty)
+                        _DetailRow(
+                          label: 'Receipt date',
+                          value: receiptDate,
+                        ),
+                      if (receiptTotal != null)
+                        _DetailRow(
+                          label: 'Receipt total',
+                          value: _money(receiptTotal),
+                        ),
+                      if (summary.isNotEmpty)
+                        _DetailRow(
+                          label: 'Items',
+                          value: summary,
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Receipt Items',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              if (_canEditReceipt)
+                TextButton.icon(
+                  onPressed: _busy
+                      ? null
+                      : () => _editReceiptItem(),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add item'),
+                ),
+            ],
+          ),
+          Builder(
+            builder: (context) {
+              final items = List<dynamic>.from(
+                _receiptStructure?['items'] ?? const <dynamic>[],
+              )
+                  .whereType<Map>()
+                  .map((raw) => Map<String, dynamic>.from(raw))
+                  .toList();
+
+              if (items.isEmpty) {
+                return const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text(
+                      'No structured receipt items yet.',
+                    ),
+                  ),
+                );
+              }
+
+              return Column(
+                children: items.map((item) {
+                  final linked = List<dynamic>.from(
+                    item['linked_invoice_lines'] ??
+                        const <dynamic>[],
+                  );
+                  final priceParts = <String>[
+                    if (item['quantity'] != null)
+                      'Qty ${item['quantity']}',
+                    if (item['total_amount'] != null)
+                      _money(item['total_amount']),
+                  ];
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      leading: const Icon(
+                        Icons.inventory_2_outlined,
+                      ),
+                      title: Text(
+                        item['description']?.toString() ??
+                            'Receipt item',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      subtitle: Text(
+                        <String>[
+                          if ((item['sku']?.toString() ?? '')
+                              .isNotEmpty)
+                            'SKU ${item['sku']}',
+                          ...priceParts,
+                          if (linked.isNotEmpty)
+                            linked.length == 1
+                                ? 'Linked to customer invoice'
+                                : 'Linked to ${linked.length} invoice items',
+                        ].join(' • '),
+                      ),
+                      onTap: _canEditReceipt
+                          ? () => _editReceiptItem(item)
+                          : null,
+                      trailing: _canDeleteRecords
+                          ? IconButton(
+                              tooltip: 'Delete receipt item',
+                              onPressed: _busy
+                                  ? null
+                                  : () => _deleteReceiptItem(item),
+                              icon: const Icon(
+                                Icons.delete_outline,
+                              ),
+                            )
+                          : _canEditReceipt
+                              ? const Icon(Icons.edit_outlined)
+                              : null,
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    if (value.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(sheetContext, true),
+                  child: const Text('Save'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final invoiceValue = invoiceNumber.text.trim();
+    final totalValue = num.tryParse(total.text.trim());
+    invoiceNumber.dispose();
+    total.dispose();
+
+    if (saved != true) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final updated = await _api.saveExpenseReceiptHeader(
+        widget.businessId,
+        widget.transactionId,
+        vendorInvoiceNumber:
+            invoiceValue.isEmpty ? null : invoiceValue,
+        receiptDate: receiptDate == null
+            ? null
+            : DateFormat('yyyy-MM-dd').format(receiptDate!),
+        receiptTotal: totalValue,
+        itemSummary:
+            _receiptStructure?['item_summary']?.toString(),
+      );
+      if (mounted) {
+        setState(() => _receiptStructure = updated);
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _editReceiptItem([
+    Map<String, dynamic>? item,
+  ]) async {
+    if (!_canEditReceipt || _busy) return;
+
+    final description = TextEditingController(
+      text: item?['description']?.toString() ?? '',
+    );
+    final sku = TextEditingController(
+      text: item?['sku']?.toString() ?? '',
+    );
+    final quantity = TextEditingController(
+      text: item?['quantity']?.toString() ?? '',
+    );
+    final unitPrice = TextEditingController(
+      text: item?['unit_price']?.toString() ?? '',
+    );
+    final totalAmount = TextEditingController(
+      text: item?['total_amount']?.toString() ?? '',
+    );
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  item == null
+                      ? 'Add receipt item'
+                      : 'Edit receipt item',
+                  style: const TextStyle(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: description,
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Description',
+                  hintText: 'Example: Water pump',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: sku,
+                decoration: const InputDecoration(
+                  labelText: 'Part / SKU (optional)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: quantity,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Qty',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: unitPrice,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Unit price',
+                        prefixText: '\Map<String, dynamic> attachment) {
+    const size = 52.0;
+    final bucket = attachment['bucket']?.toString() ?? '';
+    final key = attachment['key']?.toString() ?? '';
+
+    if (bucket.isEmpty || key.isEmpty) {
+      return Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: BriskersColors.expenses.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(Icons.broken_image_outlined),
+      );
+    }
+
+    return FutureBuilder<String>(
+      future: _api.signedAttachmentUrl(bucket, key),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return Container(
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: snapshot.hasError
+                ? const Icon(Icons.broken_image_outlined)
+                : const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+          );
+        }
+
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            snapshot.data!,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => Container(
+              width: size,
+              height: size,
+              alignment: Alignment.center,
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              child: const Icon(Icons.broken_image_outlined),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Transaction')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final detail = _detail;
+    if (detail == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Transaction')),
+        body: Center(child: Text(_error ?? 'Transaction not found.')),
+      );
+    }
+
+    final income = detail['direction']?.toString() == 'income';
+    final editable = detail['editable'] == true;
+    final deletable = detail['deletable'] == true;
+    final attachments = List<dynamic>.from(detail['attachments'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+    final counterparty = detail['counterparty']?.toString() ??
+        (income ? 'Income' : 'Expense');
+    final category = detail['category']?.toString() ?? '';
+    final account = detail['account']?.toString() ?? '';
+    final date = detail['date']?.toString() ?? '';
+    final remarks = detail['remarks']?.toString() ?? '';
+    final jobNumber = detail['job_number']?.toString().trim() ?? '';
+    final jobTitle = detail['job_title']?.toString().trim() ?? '';
+    final customerName =
+        detail['job_customer_name']?.toString().trim() ?? '';
+    final documentNumber = detail['document_number']?.toString().trim() ?? '';
+    final contextLine = <String>[
+      if (customerName.isNotEmpty) customerName,
+      if (jobNumber.isNotEmpty || jobTitle.isNotEmpty)
+        <String>[
+          if (jobNumber.isNotEmpty) jobNumber,
+          if (jobTitle.isNotEmpty) jobTitle,
+        ].join(' — '),
+      if (documentNumber.isNotEmpty) 'Invoice #$documentNumber',
+    ].join(' • ');
+    final recurring = detail['recurring_rule'];
+    final color =
+        income ? const Color(0xFF169B62) : BriskersColors.expenses;
+
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: color.withValues(alpha: 0.10),
+        title: Text(income ? 'Income' : 'Expense'),
+        actions: [
+          if (editable)
+            PopupMenuButton<String>(
+              onSelected: _handleMenu,
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('Edit transaction'),
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'copy',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.copy_outlined),
+                    title: Text('Copy transaction'),
+                  ),
+                ),
+                if (deletable)
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.delete_outline),
+                      title: Text('Delete transaction'),
+                    ),
+                  ),
+              ],
+            ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        children: [
+          Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor: color.withValues(alpha: 0.12),
+                    child: Icon(
+                      income ? Icons.south_west : Icons.north_east,
+                      color: color,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      counterparty,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${income ? '+' : '-'}${_money(detail['amount'])}',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (contextLine.isNotEmpty) ...[
+            Card(
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.link_outlined),
+                title: const Text(
+                  'Linked to',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(contextLine),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (remarks.isNotEmpty) ...[
+            Text(
+              'Description / notes',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 6),
+            Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(remarks),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          _DetailRow(label: 'Category', value: category),
+          _DetailRow(label: 'Account', value: account),
+          _DetailRow(label: 'Date', value: date),
+          if (jobNumber.isNotEmpty)
+            _DetailRow(label: 'Job', value: jobNumber),
+          if (documentNumber.isNotEmpty)
+            _DetailRow(label: 'Invoice', value: documentNumber),
+          if (recurring is Map)
+            _DetailRow(
+              label: 'Repeating',
+              value: <String>[
+                recurring['frequency']?.toString() ?? '',
+                if ((recurring['next_date']?.toString() ?? '').isNotEmpty)
+                  'next ${recurring['next_date']}',
+              ].where((x) => x.isNotEmpty).join(' • '),
+            ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Receipts',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              if (editable)
+                TextButton.icon(
+                  onPressed: _uploading ? null : _addReceipt,
+                  icon: const Icon(Icons.add_a_photo_outlined),
+                  label: Text(_uploading ? 'Uploading...' : 'Add'),
+                ),
+            ],
+          ),
+          if (attachments.isEmpty)
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(18),
+                child: Text('No receipt photos attached.'),
+              ),
+            )
+          else
+            ...attachments.map(
+              (attachment) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                  child: Row(
+                    children: [
+                      InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => _openAttachment(attachment),
+                        child: _receiptThumbnail(attachment),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'View receipt',
+                        onPressed: () => _openAttachment(attachment),
+                        icon: const Icon(Icons.zoom_in),
+                      ),
+                      if (editable)
+                        IconButton(
+                          tooltip: 'Replace receipt photo',
+                          onPressed: _uploading
+                              ? null
+                              : () => _replaceReceipt(attachment),
+                          icon: const Icon(Icons.edit_outlined),
+                        ),
+                      if (editable)
+                        IconButton(
+                          tooltip: 'Delete receipt photo',
+                          onPressed:
+                              _deletingAttachmentId ==
+                                      attachment['attachment_id']?.toString()
+                                  ? null
+                                  : () => _deleteAttachment(attachment),
+                          icon: _deletingAttachmentId ==
+                                  attachment['attachment_id']?.toString()
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.delete_outline),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    if (value.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+,
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: totalAmount,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Item total',
+                        prefixText: '\Map<String, dynamic> attachment) {
+    const size = 52.0;
+    final bucket = attachment['bucket']?.toString() ?? '';
+    final key = attachment['key']?.toString() ?? '';
+
+    if (bucket.isEmpty || key.isEmpty) {
+      return Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: BriskersColors.expenses.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(Icons.broken_image_outlined),
+      );
+    }
+
+    return FutureBuilder<String>(
+      future: _api.signedAttachmentUrl(bucket, key),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return Container(
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: snapshot.hasError
+                ? const Icon(Icons.broken_image_outlined)
+                : const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+          );
+        }
+
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            snapshot.data!,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => Container(
+              width: size,
+              height: size,
+              alignment: Alignment.center,
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              child: const Icon(Icons.broken_image_outlined),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Transaction')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final detail = _detail;
+    if (detail == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Transaction')),
+        body: Center(child: Text(_error ?? 'Transaction not found.')),
+      );
+    }
+
+    final income = detail['direction']?.toString() == 'income';
+    final editable = detail['editable'] == true;
+    final deletable = detail['deletable'] == true;
+    final attachments = List<dynamic>.from(detail['attachments'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+    final counterparty = detail['counterparty']?.toString() ??
+        (income ? 'Income' : 'Expense');
+    final category = detail['category']?.toString() ?? '';
+    final account = detail['account']?.toString() ?? '';
+    final date = detail['date']?.toString() ?? '';
+    final remarks = detail['remarks']?.toString() ?? '';
+    final jobNumber = detail['job_number']?.toString().trim() ?? '';
+    final jobTitle = detail['job_title']?.toString().trim() ?? '';
+    final customerName =
+        detail['job_customer_name']?.toString().trim() ?? '';
+    final documentNumber = detail['document_number']?.toString().trim() ?? '';
+    final contextLine = <String>[
+      if (customerName.isNotEmpty) customerName,
+      if (jobNumber.isNotEmpty || jobTitle.isNotEmpty)
+        <String>[
+          if (jobNumber.isNotEmpty) jobNumber,
+          if (jobTitle.isNotEmpty) jobTitle,
+        ].join(' — '),
+      if (documentNumber.isNotEmpty) 'Invoice #$documentNumber',
+    ].join(' • ');
+    final recurring = detail['recurring_rule'];
+    final color =
+        income ? const Color(0xFF169B62) : BriskersColors.expenses;
+
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: color.withValues(alpha: 0.10),
+        title: Text(income ? 'Income' : 'Expense'),
+        actions: [
+          if (editable)
+            PopupMenuButton<String>(
+              onSelected: _handleMenu,
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('Edit transaction'),
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'copy',
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.copy_outlined),
+                    title: Text('Copy transaction'),
+                  ),
+                ),
+                if (deletable)
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.delete_outline),
+                      title: Text('Delete transaction'),
+                    ),
+                  ),
+              ],
+            ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        children: [
+          Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor: color.withValues(alpha: 0.12),
+                    child: Icon(
+                      income ? Icons.south_west : Icons.north_east,
+                      color: color,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      counterparty,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${income ? '+' : '-'}${_money(detail['amount'])}',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (contextLine.isNotEmpty) ...[
+            Card(
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.link_outlined),
+                title: const Text(
+                  'Linked to',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(contextLine),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (remarks.isNotEmpty) ...[
+            Text(
+              'Description / notes',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: 6),
+            Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(remarks),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          _DetailRow(label: 'Category', value: category),
+          _DetailRow(label: 'Account', value: account),
+          _DetailRow(label: 'Date', value: date),
+          if (jobNumber.isNotEmpty)
+            _DetailRow(label: 'Job', value: jobNumber),
+          if (documentNumber.isNotEmpty)
+            _DetailRow(label: 'Invoice', value: documentNumber),
+          if (recurring is Map)
+            _DetailRow(
+              label: 'Repeating',
+              value: <String>[
+                recurring['frequency']?.toString() ?? '',
+                if ((recurring['next_date']?.toString() ?? '').isNotEmpty)
+                  'next ${recurring['next_date']}',
+              ].where((x) => x.isNotEmpty).join(' • '),
+            ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Receipts',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              if (editable)
+                TextButton.icon(
+                  onPressed: _uploading ? null : _addReceipt,
+                  icon: const Icon(Icons.add_a_photo_outlined),
+                  label: Text(_uploading ? 'Uploading...' : 'Add'),
+                ),
+            ],
+          ),
+          if (attachments.isEmpty)
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(18),
+                child: Text('No receipt photos attached.'),
+              ),
+            )
+          else
+            ...attachments.map(
+              (attachment) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+                  child: Row(
+                    children: [
+                      InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => _openAttachment(attachment),
+                        child: _receiptThumbnail(attachment),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'View receipt',
+                        onPressed: () => _openAttachment(attachment),
+                        icon: const Icon(Icons.zoom_in),
+                      ),
+                      if (editable)
+                        IconButton(
+                          tooltip: 'Replace receipt photo',
+                          onPressed: _uploading
+                              ? null
+                              : () => _replaceReceipt(attachment),
+                          icon: const Icon(Icons.edit_outlined),
+                        ),
+                      if (editable)
+                        IconButton(
+                          tooltip: 'Delete receipt photo',
+                          onPressed:
+                              _deletingAttachmentId ==
+                                      attachment['attachment_id']?.toString()
+                                  ? null
+                                  : () => _deleteAttachment(attachment),
+                          icon: _deletingAttachmentId ==
+                                  attachment['attachment_id']?.toString()
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.delete_outline),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    if (value.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+,
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () {
+                    if (description.text.trim().isEmpty) return;
+                    Navigator.pop(sheetContext, true);
+                  },
+                  child: const Text('Save item'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final descriptionValue = description.text.trim();
+    final skuValue = sku.text.trim();
+    final quantityValue = num.tryParse(quantity.text.trim());
+    final unitPriceValue = num.tryParse(unitPrice.text.trim());
+    final totalAmountValue =
+        num.tryParse(totalAmount.text.trim());
+
+    description.dispose();
+    sku.dispose();
+    quantity.dispose();
+    unitPrice.dispose();
+    totalAmount.dispose();
+
+    if (saved != true || descriptionValue.isEmpty) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final response = await _api.saveExpenseReceiptItem(
+        widget.businessId,
+        widget.transactionId,
+        itemId: item?['id']?.toString(),
+        expectedRowVersion: int.tryParse(
+          item?['row_version']?.toString() ?? '',
+        ),
+        description: descriptionValue,
+        sku: skuValue.isEmpty ? null : skuValue,
+        quantity: quantityValue,
+        unitPrice: unitPriceValue,
+        totalAmount: totalAmountValue,
+      );
+      final rawReceipt = response['receipt'];
+      if (mounted && rawReceipt is Map) {
+        setState(() {
+          _receiptStructure =
+              Map<String, dynamic>.from(rawReceipt);
+        });
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _deleteReceiptItem(
+    Map<String, dynamic> item,
+  ) async {
+    if (!_canDeleteRecords || _busy) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete receipt item?'),
+        content: Text(
+          'Delete "${item['description'] ?? 'this item'}" from the structured receipt details?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(
+              backgroundColor:
+                  Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _api.deleteExpenseReceiptItem(
+        widget.businessId,
+        widget.transactionId,
+        item['id'].toString(),
+      );
+      final updated = await _api.expenseReceiptStructure(
+        widget.businessId,
+        widget.transactionId,
+      );
+      if (mounted) {
+        setState(() => _receiptStructure = updated);
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Widget _receiptThumbnail(Map<String, dynamic> attachment) {
