@@ -29,6 +29,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   bool _loading = true;
   bool _canDeleteRecords = false;
   bool _canEditReceipt = false;
+  bool _extractingReceipt = false;
   bool _uploading = false;
   String? _deletingAttachmentId;
   bool _busy = false;
@@ -1168,6 +1169,32 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                   ),
                 ),
               ),
+              if (_canEditReceipt &&
+                  List<dynamic>.from(
+                    _receiptStructure?['items'] ??
+                        const <dynamic>[],
+                  ).isEmpty &&
+                  List<dynamic>.from(
+                    _receiptStructure?['attachments'] ??
+                        const <dynamic>[],
+                  ).isNotEmpty)
+                TextButton.icon(
+                  onPressed:
+                      _extractingReceipt ? null : _aiExtractReceipt,
+                  icon: _extractingReceipt
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Icon(Icons.auto_awesome_outlined),
+                  label: Text(
+                    _extractingReceipt
+                        ? 'Reading...'
+                        : 'AI Extract',
+                  ),
+                ),
               if (_canEditReceipt)
                 TextButton.icon(
                   onPressed: _busy
@@ -2312,6 +2339,249 @@ class _DetailRow extends StatelessWidget {
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _aiExtractReceipt() async {
+    if (!_canEditReceipt || _busy || _extractingReceipt) return;
+
+    final existingItems = List<dynamic>.from(
+      _receiptStructure?['items'] ?? const <dynamic>[],
+    );
+    if (existingItems.isNotEmpty) {
+      setState(() {
+        _error =
+            'Receipt items already exist. Edit them directly instead of replacing them with AI extraction.';
+      });
+      return;
+    }
+
+    final receiptAttachments = List<dynamic>.from(
+      _receiptStructure?['attachments'] ?? const <dynamic>[],
+    );
+    if (receiptAttachments.isEmpty) {
+      setState(() {
+        _error = 'Attach a receipt image before using AI Extract.';
+      });
+      return;
+    }
+
+    setState(() {
+      _extractingReceipt = true;
+      _error = null;
+    });
+
+    try {
+      final response = await _api.parseExpenseReceipt(
+        widget.businessId,
+        widget.transactionId,
+      );
+      final raw = response['extraction'];
+      if (raw is! Map) {
+        throw StateError('AI returned no receipt extraction.');
+      }
+
+      final extraction = Map<String, dynamic>.from(raw);
+      final items = List<dynamic>.from(
+        extraction['items'] ?? const <dynamic>[],
+      )
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .where(
+            (item) =>
+                (item['description']?.toString().trim() ?? '').isNotEmpty,
+          )
+          .toList();
+
+      if (!mounted) return;
+
+      final apply = await showModalBottomSheet<bool>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (sheetContext) => SizedBox(
+          height: MediaQuery.sizeOf(sheetContext).height * 0.82,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Review AI receipt extraction',
+                        style: TextStyle(
+                          fontSize: 21,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    Chip(
+                      label: Text(
+                        response['model']?.toString() ?? 'AI',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Review these values before saving. The original receipt image remains the source document.',
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  children: [
+                    _DetailRow(
+                      label: 'Vendor',
+                      value:
+                          extraction['vendor_name']?.toString() ?? '',
+                    ),
+                    _DetailRow(
+                      label: 'Vendor invoice',
+                      value: extraction['vendor_invoice_number']
+                              ?.toString() ??
+                          '',
+                    ),
+                    _DetailRow(
+                      label: 'Receipt date',
+                      value:
+                          extraction['receipt_date']?.toString() ?? '',
+                    ),
+                    if (extraction['receipt_total'] != null)
+                      _DetailRow(
+                        label: 'Receipt total',
+                        value: _money(extraction['receipt_total']),
+                      ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Items',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    if (items.isEmpty)
+                      const Card(
+                        child: Padding(
+                          padding: EdgeInsets.all(14),
+                          child: Text(
+                            'No purchased line items were read confidently.',
+                          ),
+                        ),
+                      )
+                    else
+                      ...items.map(
+                        (item) => Card(
+                          child: ListTile(
+                            leading: const Icon(
+                              Icons.inventory_2_outlined,
+                            ),
+                            title: Text(
+                              item['description']?.toString() ??
+                                  'Item',
+                            ),
+                            subtitle: Text(
+                              <String>[
+                                if ((item['sku']?.toString() ?? '')
+                                    .isNotEmpty)
+                                  'SKU ${item['sku']}',
+                                if (item['quantity'] != null)
+                                  'Qty ${item['quantity']}',
+                                if (item['total_amount'] != null)
+                                  _money(item['total_amount']),
+                              ].join(' • '),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () =>
+                            Navigator.pop(sheetContext, false),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () =>
+                            Navigator.pop(sheetContext, true),
+                        child: const Text('Apply extraction'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (apply != true) return;
+
+      setState(() => _busy = true);
+
+      final summary = items
+          .map((item) => item['description']?.toString().trim() ?? '')
+          .where((value) => value.isNotEmpty)
+          .join(', ');
+
+      await _api.saveExpenseReceiptHeader(
+        widget.businessId,
+        widget.transactionId,
+        vendorInvoiceNumber:
+            extraction['vendor_invoice_number']?.toString(),
+        receiptDate: extraction['receipt_date']?.toString(),
+        receiptTotal: extraction['receipt_total'] as num?,
+        itemSummary: summary.isEmpty ? null : summary,
+      );
+
+      for (final item in items) {
+        await _api.saveExpenseReceiptItem(
+          widget.businessId,
+          widget.transactionId,
+          description: item['description'].toString(),
+          sku: item['sku']?.toString(),
+          quantity: item['quantity'] as num?,
+          unitPrice: item['unit_price'] as num?,
+          totalAmount: item['total_amount'] as num?,
+        );
+      }
+
+      final updated = await _api.expenseReceiptStructure(
+        widget.businessId,
+        widget.transactionId,
+      );
+      if (mounted) {
+        setState(() {
+          _receiptStructure = updated;
+          _error = null;
+        });
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) {
+        setState(() {
+          _extractingReceipt = false;
+          _busy = false;
+        });
+      }
     }
   }
 
