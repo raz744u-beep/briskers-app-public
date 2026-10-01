@@ -150,6 +150,7 @@ class _ShellScreenState extends State<ShellScreen> {
         refreshToken: _todayRefreshToken,
         onCustomersTap: () => _goTo(1),
         onAppointmentsTap: () => _goTo(2),
+        onJobsChanged: _refreshNavCounts,
       ),
       CustomersScreen(
         businessId: widget.businessId,
