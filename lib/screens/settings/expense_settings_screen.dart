@@ -198,6 +198,42 @@ class _AccountsSettingsScreenState
     if (changed == true) await _load();
   }
 
+  Future<void> _deleteAccount(Map<String, dynamic> row) async {
+    if (usage(row) > 0) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete account?'),
+        content: Text(
+          'Delete "' + (row['name']?.toString() ?? '') +
+              '"? This is only allowed for accounts with no transaction history.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await api.deleteFinancialAccount(
+        widget.businessId,
+        row['id'].toString(),
+      );
+      await _load();
+    } catch (e) {
+      await showError(e);
+    }
+  }
+
   IconData _icon(String? kind) {
     switch (kind) {
       case 'bank':
@@ -287,7 +323,24 @@ class _AccountsSettingsScreenState
                             if (!active) 'Inactive',
                           ].join(' • '),
                         ),
-                        trailing: const Icon(Icons.chevron_right),
+                        trailing: usage(row) == 0
+                            ? PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'edit') _edit(row);
+                                  if (value == 'delete') _deleteAccount(row);
+                                },
+                                itemBuilder: (_) => const [
+                                  PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('Edit'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Delete'),
+                                  ),
+                                ],
+                              )
+                            : const Icon(Icons.chevron_right),
                         onTap: () => _edit(row),
                       ),
                     );
@@ -1319,8 +1372,7 @@ class _QuickDialogState extends State<_QuickDialog> {
     direction = widget.template?['direction']?.toString() == 'income'
         ? 'income'
         : 'expense';
-    accountId = widget.template?['account_id']?.toString() ??
-        (activeAccounts.isEmpty ? null : activeAccounts.first['id']?.toString());
+    accountId = widget.template?['account_id']?.toString();
     categoryId = widget.template?['category_id']?.toString() ??
         (activeCategories.isEmpty
             ? null
@@ -1433,6 +1485,7 @@ class _QuickDialogState extends State<_QuickDialog> {
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               initialValue: accountId,
+              hint: const Text('Choose account'),
               decoration: const InputDecoration(labelText: 'Account'),
               items: activeAccounts
                   .map(
