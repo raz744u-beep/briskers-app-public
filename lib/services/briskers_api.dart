@@ -1124,6 +1124,35 @@ class BriskersApi {
     }
   }
 
+  Future<Map<String, dynamic>> createEmployeeTestLogin(
+    String businessId,
+    String employeeId, {
+    required String email,
+    required String password,
+  }) async {
+    try {
+      final result = await supabase.functions.invoke(
+        'employee-account-admin',
+        body: {
+          'business_id': businessId,
+          'employee_id': employeeId,
+          'email': email.trim(),
+          'action': 'test_login',
+          'password': password,
+        },
+      );
+      return Map<String, dynamic>.from(result.data as Map);
+    } on FunctionException catch (error) {
+      final details = error.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception(
+        error.reasonPhrase ?? 'Could not create test employee login.',
+      );
+    }
+  }
+
   Future<String> createJob(
     String businessId, {
     required String customerId,
