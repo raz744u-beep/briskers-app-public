@@ -25,6 +25,7 @@ class _ExpenseReceiptDetailsScreenState
   Map<String, dynamic>? _receipt;
   bool _loading = true;
   bool _busy = false;
+  bool _canEdit = false;
   bool _canDelete = false;
   String? _error;
 
@@ -54,6 +55,7 @@ class _ExpenseReceiptDetailsScreenState
       setState(() {
         _receipt = Map<String, dynamic>.from(results[0] as Map);
         final permissions = List<String>.from(results[1] as List);
+        _canEdit = permissions.contains('expenses.create');
         _canDelete = permissions.contains('records.delete');
         _loading = false;
         _error = null;
@@ -69,7 +71,7 @@ class _ExpenseReceiptDetailsScreenState
 
   Future<void> _editHeader() async {
     final receipt = _receipt;
-    if (receipt == null || receipt['editable'] == false || _busy) return;
+    if (receipt == null || !_canEdit || _busy) return;
 
     final invoice = TextEditingController(
       text: receipt['vendor_invoice_number']?.toString() ?? '',
@@ -207,7 +209,7 @@ class _ExpenseReceiptDetailsScreenState
 
   Future<void> _editItem([Map<String, dynamic>? item]) async {
     final receipt = _receipt;
-    if (receipt == null || receipt['editable'] == false || _busy) return;
+    if (receipt == null || !_canEdit || _busy) return;
 
     final description = TextEditingController(
       text: item?['description']?.toString() ?? '',
@@ -489,7 +491,7 @@ class _ExpenseReceiptDetailsScreenState
       );
     }
 
-    final editable = receipt['editable'] == true;
+    final editable = _canEdit;
     final items = List<dynamic>.from(receipt['items'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
