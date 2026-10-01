@@ -11,10 +11,12 @@ class ExpenseDetailScreen extends StatefulWidget {
     super.key,
     required this.businessId,
     required this.transactionId,
+    this.allowRecurring = true,
   });
 
   final String businessId;
   final String transactionId;
+  final bool allowRecurring;
 
   @override
   State<ExpenseDetailScreen> createState() => _ExpenseDetailScreenState();
@@ -615,6 +617,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         builder: (_) => ExpenseEntryScreen(
           businessId: widget.businessId,
           copyTransactionId: widget.transactionId,
+          allowRecurring: widget.allowRecurring,
         ),
       ),
     );
@@ -893,7 +896,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
             _DetailRow(label: 'Job', value: jobNumber),
           if (documentNumber.isNotEmpty)
             _DetailRow(label: 'Invoice', value: documentNumber),
-          if (recurring is Map)
+          if (widget.allowRecurring && recurring is Map)
             _DetailRow(
               label: 'Repeating',
               value: <String>[
