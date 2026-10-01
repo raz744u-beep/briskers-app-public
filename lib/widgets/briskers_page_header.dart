@@ -49,7 +49,7 @@ class BriskersPageTitle extends StatelessWidget {
         Expanded(
           child: FittedBox(
             fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
+            alignment: Alignment.centerRight,
             child: Text(
               title,
               maxLines: 1,
