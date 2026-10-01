@@ -972,6 +972,14 @@ class _CounterpartiesSettingsScreenState
                   ...visible.map((row) {
                     final active = row['active'] != false;
                     final count = usage(row);
+                    final surcharge = num.tryParse(
+                          row['default_surcharge_percent']?.toString() ?? '',
+                        ) ??
+                        0;
+                    final surchargeLabel =
+                        surcharge == surcharge.roundToDouble()
+                            ? '${surcharge.toInt()}% surcharge'
+                            : '$surcharge% surcharge';
                     return Card(
                       child: ListTile(
                         leading: CircleAvatar(
@@ -997,6 +1005,7 @@ class _CounterpartiesSettingsScreenState
                             if ((row['default_category']?.toString() ?? '')
                                 .isNotEmpty)
                               'Default: ${row['default_category']}',
+                            if (surcharge > 0) surchargeLabel,
                             '$count transaction(s)',
                             if (!active) 'Inactive',
                           ].join(' • '),
@@ -1048,6 +1057,7 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
   static const _api = BriskersApi();
 
   late final TextEditingController name;
+  late final TextEditingController surchargePercent;
   late bool active;
   String? defaultCategoryId;
   bool saving = false;
@@ -1057,6 +1067,15 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
   void initState() {
     super.initState();
     name = TextEditingController(text: widget.row?['name']?.toString() ?? '');
+    final rawSurcharge = num.tryParse(
+          widget.row?['default_surcharge_percent']?.toString() ?? '',
+        ) ??
+        0;
+    surchargePercent = TextEditingController(
+      text: rawSurcharge == rawSurcharge.roundToDouble()
+          ? rawSurcharge.toInt().toString()
+          : rawSurcharge.toString(),
+    );
     active = widget.row?['active'] != false;
     defaultCategoryId = widget.row?['default_category_id']?.toString();
   }
@@ -1064,12 +1083,18 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
   @override
   void dispose() {
     name.dispose();
+    surchargePercent.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     if (name.text.trim().isEmpty) {
       setState(() => error = 'Name is required.');
+      return;
+    }
+    final surcharge = num.tryParse(surchargePercent.text.trim());
+    if (surcharge == null || surcharge < 0 || surcharge > 100) {
+      setState(() => error = 'Surcharge must be between 0 and 100%.');
       return;
     }
     setState(() {
@@ -1083,6 +1108,7 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
         name: name.text.trim(),
         active: active,
         defaultCategoryId: defaultCategoryId,
+        defaultSurchargePercent: surcharge,
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
@@ -1099,51 +1125,66 @@ class _CounterpartyDialogState extends State<_CounterpartyDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.row == null ? 'Add payee / payer' : 'Edit payee / payer'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: name,
-            enabled: !saving,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(labelText: 'Name'),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String?>(
-            initialValue: defaultCategoryId,
-            decoration: const InputDecoration(
-              labelText: 'Default expense category',
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: name,
+              enabled: !saving,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Name'),
             ),
-            items: [
-              const DropdownMenuItem<String?>(
-                value: null,
-                child: Text('No default category'),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String?>(
+              initialValue: defaultCategoryId,
+              decoration: const InputDecoration(
+                labelText: 'Default expense category',
               ),
-              ...widget.categories.map(
-                (category) => DropdownMenuItem<String?>(
-                  value: category['id']?.toString(),
-                  child: Text(category['name']?.toString() ?? ''),
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('No default category'),
                 ),
+                ...widget.categories.map(
+                  (category) => DropdownMenuItem<String?>(
+                    value: category['id']?.toString(),
+                    child: Text(category['name']?.toString() ?? ''),
+                  ),
+                ),
+              ],
+              onChanged: saving
+                  ? null
+                  : (value) => setState(() => defaultCategoryId = value),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: surchargePercent,
+              enabled: !saving,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Default receipt surcharge',
+                suffixText: '%',
+                helperText:
+                    'Example: enter 3 for vendors that normally add a 3% surcharge.',
               ),
-            ],
-            onChanged: saving
-                ? null
-                : (value) => setState(() => defaultCategoryId = value),
-          ),
-          if (widget.row != null)
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Active'),
-              value: active,
-              onChanged:
-                  saving ? null : (value) => setState(() => active = value),
             ),
-          if (error != null)
-            Text(
-              error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-        ],
+            if (widget.row != null)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Active'),
+                value: active,
+                onChanged:
+                    saving ? null : (value) => setState(() => active = value),
+              ),
+            if (error != null)
+              Text(
+                error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+          ],
+        ),
       ),
       actions: [
         TextButton(
