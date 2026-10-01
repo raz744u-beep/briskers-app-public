@@ -1098,6 +1098,32 @@ class BriskersApi {
     );
   }
 
+  Future<Map<String, dynamic>> inviteEmployeeAppLogin(
+    String businessId,
+    String employeeId, {
+    required String email,
+  }) async {
+    try {
+      final result = await supabase.functions.invoke(
+        'employee-account-admin',
+        body: {
+          'business_id': businessId,
+          'employee_id': employeeId,
+          'email': email.trim(),
+        },
+      );
+      return Map<String, dynamic>.from(result.data as Map);
+    } on FunctionException catch (error) {
+      final details = error.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception(
+        error.reasonPhrase ?? 'Could not create employee app login.',
+      );
+    }
+  }
+
   Future<String> createJob(
     String businessId, {
     required String customerId,
