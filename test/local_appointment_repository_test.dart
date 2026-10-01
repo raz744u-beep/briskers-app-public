@@ -16,12 +16,12 @@ void main() {
       INSERT INTO local_appointments (
         id, business_id, customer_id, vehicle_id, employee_id,
         job_id, request_id, starts_at, ends_at, status,
-        title, description, customer_name, vehicle_year,
-        vehicle_make, vehicle_model, vehicle_label,
+        title, description, customer_name, customer_phone_norm,
+        vehicle_year, vehicle_make, vehicle_model, vehicle_label,
         mechanic_name, can_check_in, row_version, sync_state
       ) VALUES (
         ?, ?, ?, ?, ?, NULL, NULL, ?, ?, 'confirmed',
-        ?, ?, ?, ?, ?, ?, ?, ?, 1, 3, 'pending'
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 3, 'pending'
       )
       ''',
       [
@@ -35,6 +35,7 @@ void main() {
         'Brake inspection',
         'Brake noise',
         'Jane Customer',
+        '5045551234',
         2020,
         'BMW',
         'X5',
@@ -56,6 +57,19 @@ void main() {
     );
     expect(one, isNotNull);
     expect(one!['title'], 'Brake inspection');
+
+    final matches = await repository.appointmentsForPhone(
+      'business-1',
+      '504-555-1234',
+    );
+    expect(matches, hasLength(1));
+    expect(matches.single['id'], 'appt-1');
+
+    final noMatches = await repository.appointmentsForPhone(
+      'business-1',
+      '5045559999',
+    );
+    expect(noMatches, isEmpty);
 
     await database.close();
   });
