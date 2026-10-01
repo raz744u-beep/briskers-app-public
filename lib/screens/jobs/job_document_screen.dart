@@ -132,6 +132,36 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       );
       if (!mounted) return;
 
+      if (expenses.isEmpty) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('No linked expenses'),
+            content: const Text(
+              'There are no expenses or credits linked to this invoice yet. '
+              'Invoice items are sales lines; this section is for actual '
+              'business costs such as parts purchases, vendor receipts, or '
+              'other expenses assigned to this invoice.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Close'),
+              ),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _addInvoiceExpense();
+                },
+                icon: const Icon(Icons.add_card_outlined),
+                label: const Text('Add expense'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
       await showModalBottomSheet<void>(
         context: context,
         showDragHandle: true,
@@ -166,11 +196,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   ),
                 ),
                 Expanded(
-                  child: expenses.isEmpty
-                      ? const Center(
-                          child: Text('No expenses or credits linked to this invoice yet.'),
-                        )
-                      : ListView.separated(
+                  child: ListView.separated(
                           itemCount: expenses.length,
                           separatorBuilder: (_, _) => const Divider(height: 1),
                           itemBuilder: (context, index) {
