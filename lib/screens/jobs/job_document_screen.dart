@@ -1896,7 +1896,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  _estimate ? 'Estimate notes' : 'Invoice notes',
+                  _estimate ? tr('estimateNotes') : tr('invoiceNotes'),
                   style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
@@ -1909,9 +1909,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 autofocus: true,
                 minLines: 5,
                 maxLines: 10,
-                decoration: const InputDecoration(
-                  hintText: 'Enter notes that should appear on the document.',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  hintText: tr('enterDocumentNotes'),
+                  helperText: BriskersLanguageController.instance.isSpanish
+                      ? tr('translateEnglishNotice')
+                      : null,
+                  border: const OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 12),
@@ -1920,7 +1923,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 child: FilledButton(
                   onPressed: () =>
                       Navigator.pop(sheetContext, controller.text.trim()),
-                  child: const Text('Save notes'),
+                  child: Text(tr('saveNotes')),
                 ),
               ),
             ],
@@ -2028,14 +2031,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         .map((line) => _number(line['tax_rate']))
         .where((rate) => rate > 0)
         .toSet();
-    if (rates.length != 1) return 'Tax';
+    if (rates.length != 1) return tr('tax');
     final percent = rates.single * 100;
     var value = percent.toStringAsFixed(2);
     while (value.endsWith('0')) {
       value = value.substring(0, value.length - 1);
     }
     if (value.endsWith('.')) value = value.substring(0, value.length - 1);
-    return 'Tax ($value%)';
+    return '${tr('tax')} ($value%)';
   }
 
   Map<String, dynamic>? _invoiceStyle(String code) {
@@ -2071,12 +2074,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final rawStatus = _detail?['status']?.toString() ?? 'draft';
     if (_readOnly) return 'Converted';
     if (_estimate) {
-      if (rawStatus == 'void') return 'Void';
-      if (rawStatus == 'accepted') return 'Accepted';
-      if (rawStatus == 'declined') return 'Declined';
-      if (rawStatus == 'expired') return 'Expired';
-      if (rawStatus == 'issued') return 'Issued';
-      return 'Draft';
+      if (rawStatus == 'void') return tr('documentVoid');
+      if (rawStatus == 'accepted') return tr('documentAccepted');
+      if (rawStatus == 'declined') return tr('documentDeclined');
+      if (rawStatus == 'expired') return tr('documentExpired');
+      if (rawStatus == 'issued') return tr('documentIssued');
+      return tr('documentDraft');
     }
 
     final code = _invoiceStatusCode(
@@ -2084,6 +2087,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       finalizedPaid: finalizedPaid,
       pendingPaid: pendingPaid,
     );
+    if (BriskersLanguageController.instance.isSpanish) {
+      switch (code) {
+        case 'partial':
+          return tr('invoicePartial');
+        case 'pending_close':
+          return tr('invoicePendingClose');
+        case 'paid':
+          return tr('invoicePaid');
+        case 'void':
+          return tr('documentVoid');
+        default:
+          return tr('invoiceOpen');
+      }
+    }
+
     final style = _invoiceStyle(code);
     if (style != null) return style['name']?.toString() ?? 'Open';
     switch (code) {
@@ -2428,13 +2446,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       children: [
         infoLine(
           Icons.calendar_month_outlined,
-          date.isEmpty ? 'Date: —' : 'Date: $date',
+          date.isEmpty
+              ? '${tr('date')}: —'
+              : '${tr('date')}: $date',
           maxLines: 2,
         ),
         const SizedBox(height: 12),
         infoLine(
           Icons.receipt_long_outlined,
-          job.isEmpty ? 'No job' : 'Job $job',
+          job.isEmpty ? '—' : '${tr('jobLabel')} $job',
           maxLines: 1,
           onTap: job.isEmpty ? null : _openLinkedJob,
           valueColor: job.isEmpty ? null : _accent,
@@ -2492,12 +2512,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           Container(
             color: const Color(0xFFF2F6F7),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-            child: const Row(
+            child: Row(
               children: [
                 Expanded(
                   child: Text(
-                    'Item',
-                    style: TextStyle(
+                    tr('itemColumn'),
+                    style: const TextStyle(
                       color: Color(0xFF405064),
                       fontWeight: FontWeight.w500,
                     ),
@@ -2506,9 +2526,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 SizedBox(
                   width: 58,
                   child: Text(
-                    'Qty',
+                    tr('qtyColumn'),
                     textAlign: TextAlign.center,
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: Color(0xFF405064),
                       fontWeight: FontWeight.w500,
                     ),
@@ -2517,9 +2537,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 SizedBox(
                   width: 92,
                   child: Text(
-                    'Amount',
+                    tr('amountColumn'),
                     textAlign: TextAlign.right,
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: Color(0xFF405064),
                       fontWeight: FontWeight.w500,
                     ),
@@ -2901,7 +2921,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             children: [
               Expanded(
                 child: Text(
-                  _estimate ? 'Estimate Notes' : 'Invoice Notes',
+                  _estimate ? tr('estimateNotes') : tr('invoiceNotes'),
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),
@@ -2911,7 +2931,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 TextButton.icon(
                   onPressed: _busy ? null : _editNotes,
                   icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Edit'),
+                  label: Text(tr('edit')),
                 ),
             ],
           ),
@@ -2928,8 +2948,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             child: Text(
               memo.isEmpty
                   ? (_estimate
-                      ? 'No estimate notes yet.'
-                      : 'No invoice notes yet.')
+                      ? tr('noEstimateNotes')
+                      : tr('noInvoiceNotes'))
                   : memo,
               style: TextStyle(
                 fontSize: 15,
@@ -2942,7 +2962,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'These notes appear on the PDF preview.',
+            tr('notesPdfHelp'),
             style: TextStyle(
               fontSize: 12,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -3057,10 +3077,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       number.isEmpty
-                          ? (_estimate ? 'Estimate' : 'Invoice')
+                          ? (_estimate ? tr('estimate') : tr('invoice'))
                           : (_estimate
-                              ? 'Estimate #$number'
-                              : 'Invoice #$number'),
+                              ? '${tr('estimate')} #$number'
+                              : '${tr('invoice')} #$number'),
                       maxLines: 1,
                       softWrap: false,
                       style: const TextStyle(
@@ -3104,67 +3124,67 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.edit_outlined),
                       title: Text(
-                        _estimate ? 'Edit estimate' : 'Edit invoice',
+                        _estimate ? tr('editEstimate') : tr('editInvoice'),
                       ),
                     ),
                   ),
                 if (!_estimate)
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'copy',
                     child: ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.copy_outlined),
-                      title: Text('Copy invoice'),
+                      leading: const Icon(Icons.copy_outlined),
+                      title: Text(tr('copyInvoice')),
                     ),
                   ),
                 if (!_estimate)
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'findings',
                     child: ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.car_repair_outlined),
-                      title: Text('Vehicle findings'),
+                      leading: const Icon(Icons.car_repair_outlined),
+                      title: Text(tr('vehicleFindings')),
                     ),
                   ),
                 if (!_estimate && _canManageInvoiceExpenses)
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'expenses',
                     child: ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.payments_outlined),
-                      title: Text('View expenses'),
+                      leading: const Icon(Icons.payments_outlined),
+                      title: Text(tr('viewExpenses')),
                     ),
                   ),
                 if (!_estimate && _canManageInvoiceExpenses)
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'add_expense',
                     child: ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.add_card_outlined),
-                      title: Text('Add expense'),
+                      leading: const Icon(Icons.add_card_outlined),
+                      title: Text(tr('addExpense')),
                     ),
                   ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'refresh',
                   child: ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.refresh),
-                    title: Text('Refresh'),
+                    leading: const Icon(Icons.refresh),
+                    title: Text(tr('refresh')),
                   ),
                 ),
                 if (_estimate && !_converted)
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'convert',
                     child: ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.receipt_long_outlined),
-                      title: Text('Create invoice'),
+                      leading: const Icon(Icons.receipt_long_outlined),
+                      title: Text(tr('createInvoice')),
                     ),
                   ),
                 if (widget.isOwner && (!_estimate || !_converted))
@@ -3175,7 +3195,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.delete_outline),
                       title: Text(
-                        _estimate ? 'Delete estimate' : 'Delete invoice',
+                        _estimate
+                            ? tr('deleteEstimate')
+                            : tr('deleteInvoice'),
                       ),
                     ),
                   ),
@@ -3205,9 +3227,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   fontWeight: FontWeight.w800,
                 ),
                 tabs: [
-                  const Tab(text: 'Items'),
-                  if (!_estimate) const Tab(text: 'Payment'),
-                  const Tab(text: 'Notes'),
+                  Tab(text: tr('itemsTab')),
+                  if (!_estimate) Tab(text: tr('paymentTab')),
+                  Tab(text: tr('notesTab')),
                 ],
               ),
             ),
@@ -3245,7 +3267,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               children: [
                 _bottomAction(
                   icon: Icons.add_circle,
-                  label: 'Add Item',
+                  label: tr('addItem'),
                   onTap: _readOnly || _busy
                       ? null
                       : () async {
@@ -3261,14 +3283,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                     leading: const Icon(
                                       Icons.inventory_2_outlined,
                                     ),
-                                    title: const Text('Add from item list'),
+                                    title: Text(tr('addFromItemList')),
                                     onTap: () =>
                                         Navigator.pop(sheetContext, 'catalog'),
                                   ),
                                   ListTile(
                                     leading:
                                         const Icon(Icons.add_box_outlined),
-                                    title: const Text('Add custom line'),
+                                    title: Text(tr('addCustomLine')),
                                     onTap: () =>
                                         Navigator.pop(sheetContext, 'custom'),
                                   ),
@@ -3276,7 +3298,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                     leading: const Icon(
                                       Icons.percent_outlined,
                                     ),
-                                    title: const Text('Add discount'),
+                                    title: Text(tr('addDiscount')),
                                     onTap: () =>
                                         Navigator.pop(sheetContext, 'discount'),
                                   ),
@@ -3296,7 +3318,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 ),
                 _bottomAction(
                   icon: Icons.visibility_outlined,
-                  label: 'Preview',
+                  label: tr('preview'),
                   onTap: _busy ? null : _previewPdf,
                 ),
                 Container(
@@ -3306,7 +3328,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 ),
                 _bottomAction(
                   icon: Icons.outbox_outlined,
-                  label: 'Send',
+                  label: tr('send'),
                   onTap: _busy ? null : _showSendMenu,
                 ),
               ],
