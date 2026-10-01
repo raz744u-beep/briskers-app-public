@@ -62,6 +62,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       widget.roleCode == 'manager' ||
       widget.roleCode == 'office';
 
+  bool get _allowRecurring =>
+      widget.roleCode == 'owner' || widget.roleCode == 'manager';
+
   @override
   void initState() {
     super.initState();
@@ -1093,6 +1096,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (_) => ExpenseEntryScreen(
           businessId: widget.businessId,
           initialDirection: 'expense',
+          allowRecurring: _allowRecurring,
         ),
       ),
     );
@@ -1163,6 +1167,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             businessId: widget.businessId,
             initialDirection: 'expense',
             quickTemplate: selected,
+            allowRecurring: _allowRecurring,
           ),
         ),
       );
@@ -1173,6 +1178,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _openRecurringTransactions() async {
+    if (!_allowRecurring) return;
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
@@ -1484,11 +1490,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 label: tr('viewTransactions'),
                 onTap: _openExpenses,
               ),
-              _DashboardDrawerAction(
-                icon: Icons.event_repeat_outlined,
-                label: tr('recurringTransactions'),
-                onTap: _openRecurringTransactions,
-              ),
+              if (_allowRecurring)
+                _DashboardDrawerAction(
+                  icon: Icons.event_repeat_outlined,
+                  label: tr('recurringTransactions'),
+                  onTap: _openRecurringTransactions,
+                ),
             ],
           );
       }
