@@ -565,37 +565,17 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
               children: [
                 Row(
                   children: [
-                    Text(
-                      tr('appointments'),
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                  color: BriskersColors.appointments,
-                                ),
-                    ),
-                    const SizedBox(width: 8),
-                    PopupMenuButton<String>(
-                      tooltip: 'Filter appointments',
-                      onSelected: (value) {
-                        setState(() => _filter = value);
-                        _load();
-                      },
-                      itemBuilder: (_) => [
-                        PopupMenuItem(value: 'all', child: Text(tr('all'))),
-                        PopupMenuItem(value: 'today', child: Text(tr('today'))),
-                        PopupMenuItem(value: 'upcoming', child: Text(tr('upcoming'))),
-                        PopupMenuItem(value: 'past', child: Text(tr('past'))),
-                      ],
-                      child: Chip(
-                        label: Text(
-                          _filter == 'all' ? tr('all')
-                              : _filter == 'today' ? tr('today')
-                              : _filter == 'upcoming' ? tr('upcoming')
-                              : tr('past'),
-                        ),
-                        avatar: const Icon(Icons.chevron_right, size: 18),
+                    Expanded(
+                      child: Text(
+                        tr('appointments'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    color: BriskersColors.appointments,
+                                  ),
                       ),
                     ),
-                    const Spacer(),
                     Text(
                       '${tr('total')} $total',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -607,7 +587,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       const SizedBox(width: 8),
                       FilledButton.icon(
                         style: FilledButton.styleFrom(
-                                backgroundColor: BriskersColors.appointments,
+                          backgroundColor: BriskersColors.actionBlue,
                         ),
                         onPressed: _addAppointment,
                         icon: const Icon(Icons.add),
@@ -615,6 +595,52 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       ),
                     ],
                   ],
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: 7,
+                    runSpacing: 6,
+                    children: [
+                      for (final option in const <String>[
+                        'today',
+                        'upcoming',
+                        'past',
+                        'all',
+                      ])
+                        ChoiceChip(
+                          label: Text(
+                            option == 'today'
+                                ? tr('today')
+                                : option == 'upcoming'
+                                    ? tr('upcoming')
+                                    : option == 'past'
+                                        ? tr('past')
+                                        : tr('all'),
+                          ),
+                          selected: _filter == option,
+                          onSelected: (_) {
+                            if (_filter == option) return;
+                            setState(() => _filter = option);
+                            _load();
+                          },
+                          selectedColor:
+                              BriskersColors.actionBlue.withValues(alpha: 0.16),
+                          side: BorderSide(
+                            color: BriskersColors.actionBlue.withValues(
+                              alpha: _filter == option ? 0.75 : 0.34,
+                            ),
+                          ),
+                          labelStyle: TextStyle(
+                            color: BriskersColors.actionBlue,
+                            fontWeight: _filter == option
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 10),
                 SearchBar(
