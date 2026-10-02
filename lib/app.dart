@@ -11,7 +11,7 @@ class BriskersApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF1976D2),
+      seedColor: const Color(0xFF3B82F6),
       brightness: Brightness.light,
     );
 
