@@ -7,6 +7,8 @@ import '../core/briskers_i18n.dart';
 import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
+import '../services/document_index_sync_service.dart';
+import '../services/local_document_repository.dart';
 import '../services/local_job_repository.dart';
 import '../widgets/job_compact_card.dart';
 import 'jobs/job_detail_screen.dart';
@@ -33,6 +35,8 @@ class _JobsScreenState extends State<JobsScreen> {
   static const _api = BriskersApi();
   final LocalJobRepository _localJobs = LocalJobRepository();
   final JobSyncService _jobSync = JobSyncService();
+  final DocumentIndexSyncService _documentSync = DocumentIndexSyncService();
+  final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
 
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _statuses = const [];
@@ -40,6 +44,7 @@ class _JobsScreenState extends State<JobsScreen> {
   final TextEditingController _search = TextEditingController();
   int _totalCount = 0;
   Map<String, int> _statusCounts = const {};
+  List<Map<String, dynamic>> _documentMatches = const [];
   String? _error;
   String? _busyJobId;
   bool _onlineReady = false;
@@ -94,6 +99,10 @@ class _JobsScreenState extends State<JobsScreen> {
 
       final localRows =
           List<Map<String, dynamic>>.from(localResults[0] as List);
+      final query = _search.text.trim();
+      final documentMatches = query.isEmpty
+          ? <Map<String, dynamic>>[]
+          : await _localDocuments.search(widget.businessId, query, limit: 30);
       final localStatuses =
           List<Map<String, dynamic>>.from(localResults[1] as List);
       final bootstrapped = localResults[2] == true;
@@ -110,6 +119,7 @@ class _JobsScreenState extends State<JobsScreen> {
           _onlineReady = false;
           _totalCount = localTotal;
           _statusCounts = statusCounts;
+          _documentMatches = documentMatches;
           _error = null;
         });
       }
@@ -136,6 +146,7 @@ class _JobsScreenState extends State<JobsScreen> {
         _error = null;
       });
 
+      unawaited(_documentSync.refreshBestEffort(widget.businessId));
       unawaited(
         _persistOnlineSnapshot(
           onlineRows,
@@ -511,6 +522,40 @@ class _JobsScreenState extends State<JobsScreen> {
               ),
             ),
           const SizedBox(height: 6),
+          if (_search.text.trim().isNotEmpty && _documentMatches.isNotEmpty) ...[
+            Text(
+              'Invoices & estimates',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: BriskersColors.invoices,
+                  ),
+            ),
+            const SizedBox(height: 6),
+            ..._documentMatches.map(
+              (document) => Card(
+                child: ListTile(
+                  leading: Icon(
+                    document['kind'] == 'estimate'
+                        ? Icons.request_quote_outlined
+                        : Icons.receipt_long_outlined,
+                    color: BriskersColors.invoices,
+                  ),
+                  title: Text(
+                    '${document['kind'] == 'estimate' ? 'Estimate' : 'Invoice'} #${document['document_number'] ?? ''}',
+                  ),
+                  subtitle: Text(
+                    [
+                      document['customer_name'],
+                      if ((document['job_number']?.toString() ?? '').isNotEmpty)
+                        'Job #${document['job_number']}',
+                      document['vehicle'],
+                    ].where((value) => value != null && value.toString().isNotEmpty).join(' • '),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           if (_rows == null)
             const Center(
               child: Padding(
