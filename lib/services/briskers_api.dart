@@ -938,12 +938,14 @@ class BriskersApi {
   Future<Map<String, dynamic>> updateTaxSettings(
     String businessId, {
     required num salesTaxRate,
+    String? invoiceWarrantyMessage,
   }) async {
     final result = await supabase.rpc(
-      'briskers_update_tax_settings',
+      'briskers_update_tax_settings_v2',
       params: {
         'p_business_id': businessId,
         'p_sales_tax_rate': salesTaxRate,
+        'p_invoice_warranty_message': invoiceWarrantyMessage,
       },
     );
     return Map<String, dynamic>.from(result as Map);
@@ -2767,6 +2769,25 @@ class BriskersApi {
         'p_business_id': businessId,
         'p_document_id': documentId,
         'p_odometer': odometer,
+      },
+    );
+  }
+
+  Future<void> updateDocumentClaimInfo(
+    String businessId,
+    String documentId, {
+    required int expectedVersion,
+    String? claimNumber,
+    String? authorizationNumber,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_document_claim_info',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_expected_version': expectedVersion,
+        'p_claim_number': claimNumber,
+        'p_authorization_number': authorizationNumber,
       },
     );
   }
