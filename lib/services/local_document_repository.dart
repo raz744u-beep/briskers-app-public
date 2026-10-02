@@ -49,6 +49,48 @@ class LocalDocumentRepository {
     });
   }
 
+  Future<void> upsertFromServer(
+    String businessId,
+    List<Map<String, dynamic>> documents,
+  ) async {
+    await _database.transaction(() async {
+      for (final document in documents) {
+        final id = document['id']?.toString() ?? '';
+        if (id.isEmpty) continue;
+        await _database.customStatement(
+          '''
+          INSERT INTO local_documents (
+            id, business_id, job_id, customer_id, kind, document_number,
+            status, total, created_at, server_updated_at, row_version, sync_state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+          ON CONFLICT(id) DO UPDATE SET
+            job_id=excluded.job_id,
+            customer_id=excluded.customer_id,
+            kind=excluded.kind,
+            document_number=excluded.document_number,
+            status=excluded.status,
+            total=excluded.total,
+            created_at=excluded.created_at,
+            server_updated_at=excluded.server_updated_at,
+            row_version=excluded.row_version,
+            sync_state='synced'
+          WHERE local_documents.sync_state = 'synced'
+          ''',
+          [
+            id, businessId, _text(document['job_id']),
+            _text(document['customer_id']),
+            document['kind']?.toString() ?? 'invoice',
+            _text(document['document_number']), _text(document['status']),
+            _double(document['total_amount'] ?? document['total']) ?? 0,
+            _unix(_date(document['created_at'])),
+            _unix(_date(document['updated_at'])),
+            _int(document['row_version']),
+          ],
+        );
+      }
+    });
+  }
+
   Future<List<Map<String, dynamic>>> search(
     String businessId,
     String query, {
