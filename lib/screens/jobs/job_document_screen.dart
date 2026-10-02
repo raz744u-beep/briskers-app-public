@@ -36,6 +36,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   final ImagePicker _picker = ImagePicker();
 
   Map<String, dynamic>? _detail;
+  Map<String, dynamic> _identifixMeta = const {};
   List<Map<String, dynamic>> _invoiceStyles = const [];
   num _defaultTaxRate = 0;
   bool _loading = true;
@@ -68,9 +69,23 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       if (detail['kind']?.toString() == 'invoice') {
         invoiceStyles = await _api.invoiceStatusStyles(widget.businessId);
       }
+
+      Map<String, dynamic> identifixMeta = const {};
+      if (detail['kind']?.toString() == 'estimate') {
+        try {
+          identifixMeta = await _api.identifixPricingStatus(
+            widget.businessId,
+            widget.documentId,
+          );
+        } catch (_) {
+          identifixMeta = const {};
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _detail = detail;
+        _identifixMeta = identifixMeta;
         _invoiceStyles = invoiceStyles;
         _defaultTaxRate =
             num.tryParse(taxSettings['sales_tax_rate']?.toString() ?? '') ?? 0;
@@ -2639,11 +2654,70 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     required num shownPaid,
     required num balance,
   }) {
+    final importLines = List<dynamic>.from(
+      _identifixMeta['lines'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    final importByLine = <String, Map<String, dynamic>>{
+      for (final item in importLines)
+        if ((item['line_id']?.toString() ?? '').isNotEmpty)
+          item['line_id'].toString(): item,
+    };
+    final identifixImported =
+        _identifixMeta['source_system']?.toString() == 'identifix';
+    final verifiedCount = importLines
+        .where((item) => item['verification_status'] == 'verified')
+        .length;
+    final updatedCount = importLines
+        .where((item) => item['verification_status'] == 'updated')
+        .length;
+    final reviewCount = importLines
+        .where(
+          (item) =>
+              item['verification_status'] == 'needs_review' ||
+              item['verification_status'] == 'not_found',
+        )
+        .length;
+
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
+          if (identifixImported)
+            Container(
+              margin: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: BriskersColors.estimates.withValues(alpha: 0.07),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: BriskersColors.estimates.withValues(alpha: 0.20),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.auto_awesome_outlined,
+                    color: BriskersColors.estimates,
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      <String>[
+                        'Imported from Identifix',
+                        if ((_identifixMeta['source_reference']?.toString() ?? '')
+                            .isNotEmpty)
+                          'Source #${_identifixMeta['source_reference']}',
+                        '$verifiedCount verified',
+                        if (updatedCount > 0) '$updatedCount updated',
+                        if (reviewCount > 0) '$reviewCount needs review',
+                      ].join(' • '),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Container(
             color: const Color(0xFFF2F6F7),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
@@ -2693,6 +2767,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               final description =
                   line['description']?.toString().trim() ?? '';
               final amount = _number(line['net_amount']);
+              final importMeta =
+                  importByLine[line['id']?.toString()] ?? const {};
+              final partNumber =
+                  importMeta['part_number']?.toString().trim() ?? '';
+              final verification =
+                  importMeta['verification_status']?.toString() ?? '';
+              final dealerList = importMeta['dealer_list_price'];
+              final importedPrice = importMeta['imported_unit_price'];
               return InkWell(
                 onTap: _readOnly || _busy ? null : () => _editLine(line),
                 onLongPress: _readOnly || _busy
@@ -2735,6 +2817,40 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                   height: 1.25,
                                   color: Color(0xFF405064),
                                 ),
+                              ),
+                            ],
+                            if (partNumber.isNotEmpty) ...[
+                              const SizedBox(height: 3),
+                              Text(
+                                'Part # $partNumber',
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF405064),
+                                ),
+                              ),
+                            ],
+                            if (verification.isNotEmpty &&
+                                verification != 'not_applicable') ...[
+                              const SizedBox(height: 5),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  _PriceVerificationChip(status: verification),
+                                  if (dealerList != null)
+                                    Text(
+                                      verification == 'updated' &&
+                                              importedPrice != null
+                                          ? 'Identifix ${_money(importedPrice)} → Dealer list ${_money(dealerList)}'
+                                          : 'Dealer list ${_money(dealerList)}',
+                                      style: const TextStyle(
+                                        fontSize: 11.5,
+                                        color: Color(0xFF405064),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ],
                           ],
@@ -3484,6 +3600,81 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _PriceVerificationChip extends StatelessWidget {
+  const _PriceVerificationChip({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    late final String label;
+    late final IconData icon;
+    late final Color color;
+
+    switch (status) {
+      case 'verified':
+        label = 'Verified';
+        icon = Icons.check_circle_outline;
+        color = const Color(0xFF169B62);
+        break;
+      case 'updated':
+        label = 'Updated';
+        icon = Icons.sync_alt;
+        color = const Color(0xFFE58A00);
+        break;
+      case 'needs_review':
+        label = 'Needs review';
+        icon = Icons.warning_amber_outlined;
+        color = const Color(0xFFC62828);
+        break;
+      case 'not_found':
+        label = 'Price not found';
+        icon = Icons.search_off_outlined;
+        color = const Color(0xFFC62828);
+        break;
+      case 'manual':
+        label = 'Manual price';
+        icon = Icons.edit_outlined;
+        color = const Color(0xFF607D8B);
+        break;
+      case 'pending':
+        label = 'Checking';
+        icon = Icons.hourglass_top_outlined;
+        color = BriskersColors.estimates;
+        break;
+      default:
+        label = status;
+        icon = Icons.info_outline;
+        color = const Color(0xFF607D8B);
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
       ),
     );
   }

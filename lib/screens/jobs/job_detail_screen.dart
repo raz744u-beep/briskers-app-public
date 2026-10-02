@@ -15,6 +15,7 @@ import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_work_findings_service.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
+import 'identifix_estimate_import_screen.dart';
 import 'job_document_screen.dart';
 
 class JobDetailScreen extends StatefulWidget {
@@ -1965,6 +1966,31 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     });
     if (!mounted || id == null) return;
     await _openDocument(id!);
+  }
+
+  Future<void> _importIdentifixEstimate() async {
+    if (!_canSeeFinancial || _job == null) return;
+
+    final customerName =
+        _job!['customer_name']?.toString().trim() ?? 'Customer';
+    final vehicle = _job!['vehicle']?.toString().trim() ?? '';
+
+    final documentId = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => IdentifixEstimateImportScreen(
+          businessId: widget.businessId,
+          jobId: widget.jobId,
+          customerName: customerName,
+          vehicle: vehicle,
+        ),
+      ),
+    );
+
+    if (!mounted || documentId == null || documentId.isEmpty) return;
+    await _load();
+    if (!mounted) return;
+    await _openDocument(documentId);
   }
 
   Future<void> _createInvoice() async {
@@ -4145,12 +4171,24 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             tooltip: 'Create document',
                             onSelected: (value) async {
                               if (value == 'estimate') await _createEstimate();
+                              if (value == 'identifix') {
+                                await _importIdentifixEstimate();
+                              }
                               if (value == 'invoice') await _createInvoice();
                             },
                             itemBuilder: (_) => const [
                               PopupMenuItem(
                                 value: 'estimate',
                                 child: Text('New estimate'),
+                              ),
+                              PopupMenuItem(
+                                value: 'identifix',
+                                child: ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(Icons.document_scanner_outlined),
+                                  title: Text('Import from Identifix'),
+                                  subtitle: Text('Scan or upload printed estimate'),
+                                ),
                               ),
                               PopupMenuItem(
                                 value: 'invoice',

@@ -2465,6 +2465,167 @@ class BriskersApi {
     );
   }
 
+  Future<Map<String, dynamic>> parseIdentifixEstimate(
+    String businessId,
+    Uint8List bytes, {
+    String mimeType = 'image/jpeg',
+  }) async {
+    try {
+      final result = await supabase.functions.invoke(
+        'identifix-estimate-parse',
+        body: {
+          'business_id': businessId,
+          'mime_type': mimeType,
+          'image_base64': base64Encode(bytes),
+        },
+      );
+      final data = Map<String, dynamic>.from(result.data as Map);
+      return Map<String, dynamic>.from(data['extraction'] as Map);
+    } on FunctionException catch (error) {
+      final details = error.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception(
+        error.reasonPhrase ?? 'Could not read Identifix estimate.',
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> createIdentifixEstimate(
+    String businessId,
+    String jobId,
+    Map<String, dynamic> extraction,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_create_identifix_estimate',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+        'p_extraction': extraction,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> verifyImportedPartPrice(
+    String businessId, {
+    required String lineId,
+    required String partNumber,
+    required String description,
+    required String vehicle,
+    required num importedUnitPrice,
+  }) async {
+    try {
+      final result = await supabase.functions.invoke(
+        'part-price-verify',
+        body: {
+          'business_id': businessId,
+          'line_id': lineId,
+          'part_number': partNumber,
+          'description': description,
+          'vehicle': vehicle,
+          'imported_unit_price': importedUnitPrice,
+        },
+      );
+      final data = Map<String, dynamic>.from(result.data as Map);
+      return Map<String, dynamic>.from(data['verification'] as Map);
+    } on FunctionException catch (error) {
+      final details = error.details;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error'].toString());
+      }
+      throw Exception(
+        error.reasonPhrase ?? 'Dealer price verification failed.',
+      );
+    }
+  }
+
+  Future<void> markImportedPartPriceReview(
+    String businessId,
+    String lineId, {
+    required String note,
+  }) async {
+    await supabase.rpc(
+      'briskers_apply_part_price_verification',
+      params: {
+        'p_business_id': businessId,
+        'p_line_id': lineId,
+        'p_status': 'needs_review',
+        'p_dealer_list_price': null,
+        'p_source_name': null,
+        'p_source_url': null,
+        'p_note': note,
+        'p_confidence': 'low',
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> identifixPricingStatus(
+    String businessId,
+    String documentId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_identifix_pricing_status',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> registerDocumentSourceImage(
+    String businessId,
+    String documentId, {
+    required String filename,
+    required String mimeType,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_register_document_source_image',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_original_filename': filename,
+        'p_mime_type': mimeType,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<void> uploadDocumentSourceImage(
+    String businessId,
+    String documentId, {
+    required String filename,
+    required String mimeType,
+    required Uint8List bytes,
+  }) async {
+    final registration = await registerDocumentSourceImage(
+      businessId,
+      documentId,
+      filename: filename,
+      mimeType: mimeType,
+    );
+    final bucket = registration['bucket'].toString();
+    final key = registration['key'].toString();
+    final attachmentId = registration['attachment_id'].toString();
+
+    await supabase.storage.from(bucket).uploadBinary(
+      key,
+      bytes,
+      fileOptions: FileOptions(contentType: mimeType, upsert: false),
+    );
+
+    await supabase.rpc(
+      'briskers_finalize_attachment',
+      params: {
+        'p_business_id': businessId,
+        'p_attachment_id': attachmentId,
+        'p_byte_size': bytes.length,
+      },
+    );
+  }
+
   Future<String> createEstimate(
     String businessId,
     String jobId,
