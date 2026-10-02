@@ -28,41 +28,18 @@ class LocalCatalogRepository {
     bool includeInactive = true,
   }) async {
     final query = search?.trim().toLowerCase() ?? '';
-    final variables = <Variable<Object>>[Variable<String>(businessId)];
-    final where = <String>['business_id = ?'];
-    if (!includeInactive) where.add('active = 1');
-    if (query.isNotEmpty) {
-      where.add('''
-        (lower(name) LIKE ? OR lower(COALESCE(description, '')) LIKE ?
-         OR lower(COALESCE(category, '')) LIKE ?)
-      ''');
-      final like = '%$query%';
-      variables.addAll([
-        Variable<String>(like),
-        Variable<String>(like),
-        Variable<String>(like),
-      ]);
-    }
-
     final rows = await _database.customSelect(
       '''
       SELECT *
       FROM local_catalog_items
-      WHERE ${where.join(' AND ')}
-      ORDER BY
-        CASE WHEN lower(name) = ? THEN 0
-             WHEN lower(name) LIKE ? THEN 1
-             ELSE 2 END,
-        lower(name), id
+      WHERE business_id = ?
+        ${includeInactive ? '' : 'AND active = 1'}
+      ORDER BY lower(name), id
       ''',
-      variables: [
-        ...variables,
-        Variable<String>(query),
-        Variable<String>('$query%'),
-      ],
+      variables: [Variable<String>(businessId)],
     ).get();
 
-    return rows.map((row) => <String, dynamic>{
+    final mapped = rows.map((row) => <String, dynamic>{
       'id': row.read<String>('id'),
       'name': row.read<String>('name'),
       'description': row.readNullable<String>('description'),
@@ -76,6 +53,83 @@ class LocalCatalogRepository {
       'active': row.read<int>('active') == 1,
       '_local_snapshot': true,
     }).toList();
+
+    if (query.isEmpty) return mapped;
+
+    final ranked = <MapEntry<int, Map<String, dynamic>>>[];
+    for (final item in mapped) {
+      final name = (item['name']?.toString() ?? '').toLowerCase();
+      final description =
+          (item['description']?.toString() ?? '').toLowerCase();
+      final category = (item['category']?.toString() ?? '').toLowerCase();
+      final score = _matchScore(query, name, description, category);
+      if (score != null) ranked.add(MapEntry(score, item));
+    }
+    ranked.sort((a, b) {
+      final byScore = a.key.compareTo(b.key);
+      if (byScore != 0) return byScore;
+      return (a.value['name']?.toString() ?? '')
+          .toLowerCase()
+          .compareTo((b.value['name']?.toString() ?? '').toLowerCase());
+    });
+    return ranked.map((entry) => entry.value).toList();
+  }
+
+  int? _matchScore(
+    String query,
+    String name,
+    String description,
+    String category,
+  ) {
+    if (name == query) return 0;
+    if (name.startsWith(query)) return 10;
+    if (name.contains(query)) return 20;
+    if (description.contains(query)) return 30;
+    if (category.contains(query)) return 40;
+
+    // Fuzzy matching is intentionally conservative: it is a suggestion layer,
+    // never an automatic substitution. This catches handwriting/typing cases
+    // such as "insulator" -> "isolator" without hiding exact matches.
+    final queryWords = _words(query);
+    final nameWords = _words(name);
+    var best = 999;
+    for (final q in queryWords) {
+      for (final n in nameWords) {
+        final distance = _levenshtein(q, n);
+        final allowed = q.length >= 8 ? 3 : (q.length >= 5 ? 2 : 1);
+        if (distance <= allowed) {
+          final normalized = 50 + distance * 5 + (n.length - q.length).abs();
+          if (normalized < best) best = normalized;
+        }
+      }
+    }
+    return best == 999 ? null : best;
+  }
+
+  List<String> _words(String value) => value
+      .split(RegExp(r'[^a-z0-9]+'))
+      .where((word) => word.isNotEmpty)
+      .toList();
+
+  int _levenshtein(String a, String b) {
+    if (a == b) return 0;
+    if (a.isEmpty) return b.length;
+    if (b.isEmpty) return a.length;
+    var previous = List<int>.generate(b.length + 1, (i) => i);
+    for (var i = 0; i < a.length; i++) {
+      final current = List<int>.filled(b.length + 1, 0);
+      current[0] = i + 1;
+      for (var j = 0; j < b.length; j++) {
+        final cost = a.codeUnitAt(i) == b.codeUnitAt(j) ? 0 : 1;
+        current[j + 1] = [
+          current[j] + 1,
+          previous[j + 1] + 1,
+          previous[j] + cost,
+        ].reduce((x, y) => x < y ? x : y);
+      }
+      previous = current;
+    }
+    return previous[b.length];
   }
 
   Future<void> upsertLocal(
