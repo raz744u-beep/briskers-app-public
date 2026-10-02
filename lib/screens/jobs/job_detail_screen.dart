@@ -2878,6 +2878,25 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
+  Future<void> _scanJobExpense() async {
+    final job = _job;
+    if (job == null) return;
+    final number = job['job_number']?.toString().trim() ?? '';
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExpenseEntryScreen(
+          businessId: widget.businessId,
+          jobId: widget.jobId,
+          contextLabel: number.isEmpty ? 'This job' : 'Job $number',
+          initialDirection: 'expense',
+          autoScanReceipt: true,
+        ),
+      ),
+    );
+    if (changed == true) await _load();
+  }
+
   Future<void> _addJobExpense() async {
     final job = _job;
     if (job == null) return;
@@ -3207,20 +3226,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   Widget _jobExpensesDrawer() {
     if (_jobExpenses.isEmpty) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text('No expenses are linked to this job yet.'),
-          ),
-          if (_canManage)
-            OutlinedButton.icon(
-              onPressed: _busy ? null : _addJobExpense,
-              icon: const Icon(Icons.add_card_outlined),
-              label: const Text('Add expense'),
-            ),
-        ],
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text('No expenses are linked to this job yet.'),
       );
     }
 
@@ -3304,14 +3312,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
           );
         }),
-        if (_canManage) ...[
-          const SizedBox(height: 6),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _addJobExpense,
-            icon: const Icon(Icons.add_card_outlined),
-            label: const Text('Add expense'),
-          ),
-        ],
       ],
     );
   }
@@ -4177,10 +4177,58 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             label: const Text('Add Finding'),
                           ),
                         if (key == 'expenses' && _canManage)
-                          IconButton(
-                            tooltip: 'Add expense',
-                            onPressed: _busy ? null : _addJobExpense,
-                            icon: const Icon(Icons.add_circle_outline),
+                          PopupMenuButton<String>(
+                            tooltip: 'Add job expense',
+                            enabled: !_busy,
+                            onSelected: (value) async {
+                              if (value == 'scan') await _scanJobExpense();
+                              if (value == 'expense') await _addJobExpense();
+                              if (value == 'quick_expense') {
+                                await _addQuickJobExpense();
+                              }
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'scan',
+                                child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(
+                                    Icons.document_scanner_outlined,
+                                    color: BriskersColors.expenses,
+                                  ),
+                                  title: Text('Scan expense'),
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'expense',
+                                child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(
+                                    Icons.add_card_outlined,
+                                    color: BriskersColors.expenses,
+                                  ),
+                                  title: Text('New expense'),
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'quick_expense',
+                                child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(
+                                    Icons.bolt,
+                                    color: BriskersColors.expenses,
+                                  ),
+                                  title: Text('New quick expense'),
+                                ),
+                              ),
+                            ],
+                            icon: const Icon(
+                              Icons.add_circle_outline,
+                              color: BriskersColors.expenses,
+                            ),
                           ),
                         if (key == 'documents' && _canSeeFinancial)
                           PopupMenuButton<String>(
@@ -4249,7 +4297,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                                 ),
                               ),
                             ],
-                            icon: const Icon(Icons.add_circle_outline),
+                            icon: const Icon(
+                              Icons.add_circle_outline,
+                              color: BriskersColors.invoices,
+                            ),
                           ),
                         IconButton(
                           tooltip: 'Close',

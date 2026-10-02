@@ -17,6 +17,7 @@ class ExpenseEntryScreen extends StatefulWidget {
     this.copyTransactionId,
     this.quickTemplate,
     this.allowRecurring = true,
+    this.autoScanReceipt = false,
   });
 
   final String businessId;
@@ -28,6 +29,7 @@ class ExpenseEntryScreen extends StatefulWidget {
   final String? copyTransactionId;
   final Map<String, dynamic>? quickTemplate;
   final bool allowRecurring;
+  final bool autoScanReceipt;
 
   @override
   State<ExpenseEntryScreen> createState() => _ExpenseEntryScreenState();
@@ -67,6 +69,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   bool _loading = true;
   bool _saving = false;
   bool _readingReceipt = false;
+  bool _autoScanLaunched = false;
   num? _receiptBaseAmount;
   num _receiptSurchargePercent = 0;
   bool _applyReceiptSurcharge = false;
@@ -251,6 +254,16 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         _loading = false;
         _error = null;
       });
+
+      if (widget.autoScanReceipt &&
+          !_autoScanLaunched &&
+          !_editing &&
+          !_copying) {
+        _autoScanLaunched = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _takeReceiptPhoto();
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -775,6 +788,19 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     if (value != null && mounted) setState(() => _endDate = value);
   }
 
+  Future<void> _takeReceiptPhoto() async {
+    _counterpartyFocusNode.unfocus();
+    final file = await _picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 82,
+      maxWidth: 2200,
+    );
+    if (file != null && mounted) {
+      setState(() => _receipts = [..._receipts, file]);
+      await _readReceipt(file);
+    }
+  }
+
   Future<void> _addReceipts() async {
     _counterpartyFocusNode.unfocus();
     final source = await showModalBottomSheet<ImageSource>(
@@ -810,15 +836,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         await _readReceipt(files.first);
       }
     } else {
-      final file = await _picker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 82,
-        maxWidth: 2200,
-      );
-      if (file != null && mounted) {
-        setState(() => _receipts = [..._receipts, file]);
-        await _readReceipt(file);
-      }
+      await _takeReceiptPhoto();
     }
   }
 
