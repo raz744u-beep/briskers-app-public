@@ -4196,12 +4196,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                               }
                               if (value == 'invoice') await _createInvoice();
                             },
-                            itemBuilder: (_) => const [
-                              PopupMenuItem(
+                            itemBuilder: (_) => [
+                              const PopupMenuItem(
                                 value: 'estimate',
                                 child: Text('New estimate'),
                               ),
-                              PopupMenuItem(
+                              const PopupMenuItem(
                                 value: 'identifix',
                                 child: ListTile(
                                   contentPadding: EdgeInsets.zero,
@@ -4210,7 +4210,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                                   subtitle: Text('Scan or upload printed estimate'),
                                 ),
                               ),
-                              PopupMenuDivider(),
+                              const PopupMenuDivider(),
                               PopupMenuItem(
                                 value: 'invoice',
                                 child: Container(
