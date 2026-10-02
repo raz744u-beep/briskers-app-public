@@ -316,6 +316,27 @@ class LocalFindings extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+class LocalCatalogItems extends Table {
+  TextColumn get id => text()();
+  TextColumn get businessId => text()();
+  TextColumn get name => text()();
+  TextColumn get description => text().nullable()();
+  TextColumn get itemType => text().withDefault(const Constant('non_inventory'))();
+  RealColumn get sellingPrice => real().withDefault(const Constant(0))();
+  TextColumn get pricingUnit => text().nullable()();
+  RealColumn get cost => real().withDefault(const Constant(0))();
+  BoolColumn get taxable => boolean().withDefault(const Constant(true))();
+  TextColumn get category => text().nullable()();
+  TextColumn get barcode => text().nullable()();
+  BoolColumn get active => boolean().withDefault(const Constant(true))();
+  DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
+  IntColumn get rowVersion => integer().nullable()();
+  TextColumn get syncState => text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
 @DriftDatabase(
   tables: [
     LocalSyncStates,
@@ -333,6 +354,7 @@ class LocalFindings extends Table {
     LocalPreInspectionPhotos,
     LocalFindings,
     LocalFindingPhotos,
+    LocalCatalogItems,
   ],
 )
 class BriskersLocalDatabase extends _$BriskersLocalDatabase {
@@ -349,7 +371,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -399,6 +421,9 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
           }
           if (from < 7) {
             await migrator.createTable(localKioskSettings);
+          }
+          if (from < 8) {
+            await migrator.createTable(localCatalogItems);
           }
         },
       );
