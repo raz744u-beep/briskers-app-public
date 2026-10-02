@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths-ignore:
+      - '.github/workflows/**'
 
 permissions:
   contents: read
@@ -330,4 +332,4 @@ jobs:
           name: briskers-android-debug
           path: generated/build/app/outputs/flutter-apk/Briskers-v*.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 2

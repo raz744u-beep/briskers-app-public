@@ -244,7 +244,7 @@ jobs:
           name: briskers-ios
           path: generated/build/ios/ipa/*.ipa
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 2
 
       - name: Upload to TestFlight
         working-directory: generated
