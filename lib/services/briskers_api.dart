@@ -456,6 +456,22 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> syncPullDocuments(
+    String businessId, {
+    int afterVersion = 0,
+    int limit = 500,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_sync_pull_documents',
+      params: {
+        'p_business_id': businessId,
+        'p_after_version': afterVersion,
+        'p_limit': limit,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<List<Map<String, dynamic>>> documents(
     String businessId, {
     required String kind,
