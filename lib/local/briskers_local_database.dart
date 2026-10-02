@@ -316,6 +316,25 @@ class LocalFindings extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+
+class LocalDocuments extends Table {
+  TextColumn get id => text()();
+  TextColumn get businessId => text()();
+  TextColumn get jobId => text().nullable()();
+  TextColumn get customerId => text().nullable()();
+  TextColumn get kind => text()();
+  TextColumn get documentNumber => text().nullable()();
+  TextColumn get status => text().nullable()();
+  RealColumn get total => real().withDefault(const Constant(0))();
+  DateTimeColumn get createdAt => dateTime().nullable()();
+  DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
+  IntColumn get rowVersion => integer().nullable()();
+  TextColumn get syncState => text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
 class LocalCatalogItems extends Table {
   TextColumn get id => text()();
   TextColumn get businessId => text()();
@@ -355,6 +374,7 @@ class LocalCatalogItems extends Table {
     LocalFindings,
     LocalFindingPhotos,
     LocalCatalogItems,
+    LocalDocuments,
   ],
 )
 class BriskersLocalDatabase extends _$BriskersLocalDatabase {
@@ -371,7 +391,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -383,6 +403,9 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
           await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_vehicle ON local_jobs (business_id, vehicle_label)');
           await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_vin ON local_jobs (business_id, vehicle_vin)');
           await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_plate ON local_jobs (business_id, vehicle_plate)');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_number ON local_documents (business_id, document_number)');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_job ON local_documents (business_id, job_id)');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_customer ON local_documents (business_id, customer_id)');
         },
         onUpgrade: (migrator, from, to) async {
           if (from < 2) {
@@ -438,6 +461,12 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
             await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_vehicle ON local_jobs (business_id, vehicle_label)');
             await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_vin ON local_jobs (business_id, vehicle_vin)');
             await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_plate ON local_jobs (business_id, vehicle_plate)');
+          }
+          if (from < 10) {
+            await migrator.createTable(localDocuments);
+            await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_number ON local_documents (business_id, document_number)');
+            await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_job ON local_documents (business_id, job_id)');
+            await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_customer ON local_documents (business_id, customer_id)');
           }
         },
       );
