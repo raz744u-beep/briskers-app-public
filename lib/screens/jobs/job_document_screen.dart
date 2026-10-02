@@ -3335,11 +3335,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                     child: ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.delete_outline),
+                      leading: Icon(
+                        Icons.delete_outline,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
                       title: Text(
                         _estimate
                             ? tr('deleteEstimate')
                             : tr('deleteInvoice'),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ),
