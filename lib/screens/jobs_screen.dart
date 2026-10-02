@@ -372,7 +372,7 @@ class _JobsScreenState extends State<JobsScreen> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    PopupMenuButton<String>(
+PopupMenuButton<String>(
                     tooltip: tr('filterJobs'),
                     onSelected: (value) {
                       setState(() => _selectedStatus = value == '__all__' ? null : value);
@@ -465,7 +465,6 @@ class _JobsScreenState extends State<JobsScreen> {
                       },
                     ),
                   ),
-                ),
                     if (_rows != null)
                       Text(
                         '${tr('total')} $_totalCount',
@@ -498,101 +497,7 @@ class _JobsScreenState extends State<JobsScreen> {
                     _load();
                   },
                 ),
-         alignment: Alignment.centerLeft,
-                  child: PopupMenuButton<String>(
-                    tooltip: tr('filterJobs'),
-                    onSelected: (value) {
-                      setState(() => _selectedStatus = value == '__all__' ? null : value);
-                      _load();
-                    },
-                    itemBuilder: (_) => [
-                      PopupMenuItem<String>(
-                        value: '__all__',
-                        child: Row(
-                                children: [
-                                  const Icon(Icons.all_inclusive),
-                                  const SizedBox(width: 10),
-                                  Expanded(child: Text(tr('all'))),
-                                  _menuCount(_statusCounts.values.fold<int>(0, (a, b) => a + b), alwaysShow: true),
-                                ],
-                        ),
-                      ),
-                      ..._statuses.map((status) {
-                        final color =
-                                  colorFromHex(status['color_hex']?.toString());
-                        final code = status['code']?.toString() ?? '';
-                        final count = _statusCount(code);
-                        return PopupMenuItem<String>(
-                                value: code,
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      jobStatusIcon(status['icon_key']?.toString()),
-                                      color: color,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(jobStatusLabel(status['code']?.toString(), status['name']?.toString() ?? '')),
-                                    ),
-                                    _menuCount(count),
-                                  ],
-                                ),
-                        );
-                      }),
-                    ],
-                    child: Builder(
-                      builder: (context) {
-                        Map<String, dynamic>? selected;
-                        if (_selectedStatus != null) {
-                                for (final status in _statuses) {
-                                  if (status['code']?.toString() == _selectedStatus) {
-                                    selected = status;
-                                    break;
-                                  }
-                                }
-                        }
-                        final color = selected == null
-                                  ? BriskersColors.jobs
-                                  : colorFromHex(selected['color_hex']?.toString());
-                        final label = selected == null
-                                  ? tr('all')
-                                  : jobStatusLabel(selected['code']?.toString(), selected['name']?.toString() ?? '');
 
-                        return Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: color.withValues(alpha: 0.08),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: color.withValues(alpha: 0.45),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      label,
-                                      style: TextStyle(
-                                        color: color,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 3),
-                                    Icon(
-                                      Icons.chevron_right,
-                                      size: 18,
-                                      color: color,
-                                    ),
-                                  ],
-                                ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
 
               ],
             ),
