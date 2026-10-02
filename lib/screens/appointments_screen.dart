@@ -600,6 +600,35 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                                   ),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    PopupMenuButton<String>(
+                      tooltip: 'Filter appointments',
+                      onSelected: (value) {
+                        setState(() => _filter = value);
+                        _load();
+                      },
+                      itemBuilder: (_) => [
+                        PopupMenuItem(value: 'all', child: Text(tr('all'))),
+                        PopupMenuItem(value: 'today', child: Text(tr('today'))),
+                        PopupMenuItem(value: 'upcoming', child: Text(tr('upcoming'))),
+                        PopupMenuItem(value: 'past', child: Text(tr('past'))),
+                      ],
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                                        : _filter == 'upcoming' ? tr('upcoming')
+                                  : tr('past'),
+                              style: const TextStyle(
+                                color: BriskersColors.appointments,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(width: 3),
+                            const Icon(Icons.chevron_right, size: 18, color: BriskersColors.appointments),
+                          ],
+                        ),
+                      ),
+                    ),
                     Text(
                       '${tr('total')} $total',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
