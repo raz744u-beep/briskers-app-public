@@ -128,35 +128,39 @@ class _JobsScreenState extends State<JobsScreen> {
     }
 
     try {
-      final results = await Future.wait<dynamic>([
-        _api.jobs(widget.businessId),
-        _api.jobStatuses(widget.businessId),
+      // Jobs themselves are refreshed incrementally into the local database.
+      // Do not download the complete server job list as history grows.
+      final onlineStatuses = await _api.jobStatuses(widget.businessId);
+      await _localJobs.replaceJobStatuses(widget.businessId, onlineStatuses);
+      await _jobSync.pull(widget.businessId);
+      unawaited(_documentSync.refreshBestEffort(widget.businessId));
+
+      final query = _search.text.trim();
+      final refreshed = await Future.wait<dynamic>([
+        _localJobs.listJobs(
+          widget.businessId,
+          status: _selectedStatus,
+          search: query.isEmpty ? null : query,
+          limit: 30,
+        ),
+        _localJobs.jobCount(
+          widget.businessId,
+          status: _selectedStatus,
+          search: query.isEmpty ? null : query,
+        ),
+        _localJobs.jobStatusCounts(widget.businessId),
       ]);
-      final onlineRows =
-          List<Map<String, dynamic>>.from(results[0] as List);
-      final onlineStatuses =
-          List<Map<String, dynamic>>.from(results[1] as List);
 
       if (!mounted) return;
-      if (!localAvailable) {
-        setState(() {
-          _rows = onlineRows;
-          _statuses = onlineStatuses;
-          _showingLocal = false;
-          _onlineReady = true;
-          _error = null;
-        });
-      } else {
-        setState(() => _onlineReady = true);
-      }
-
-      unawaited(_documentSync.refreshBestEffort(widget.businessId));
-      unawaited(
-        _persistOnlineSnapshot(
-          onlineRows,
-          onlineStatuses,
-        ),
-      );
+      setState(() {
+        _rows = List<Map<String, dynamic>>.from(refreshed[0] as List);
+        _statuses = onlineStatuses;
+        _totalCount = refreshed[1] as int;
+        _statusCounts = Map<String, int>.from(refreshed[2] as Map);
+        _showingLocal = false;
+        _onlineReady = true;
+        _error = null;
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -173,24 +177,6 @@ class _JobsScreenState extends State<JobsScreen> {
     }
   }
 
-  Future<void> _persistOnlineSnapshot(
-    List<Map<String, dynamic>> jobs,
-    List<Map<String, dynamic>> statuses,
-  ) async {
-    try {
-      await _localJobs.replaceJobStatuses(
-        widget.businessId,
-        statuses,
-      );
-      await _jobSync.pull(widget.businessId);
-      await _localJobs.applyServerListDecorations(
-        widget.businessId,
-        jobs,
-      );
-    } catch (_) {
-      // The visible online screen is already current. Persistence retries later.
-    }
-  }
 
   Future<void> _openDocument(Map<String, dynamic> document) async {
     final id = document['id']?.toString() ?? '';
