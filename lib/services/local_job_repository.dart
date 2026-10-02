@@ -62,10 +62,21 @@ class LocalJobRepository {
          OR lower(COALESCE(j.vehicle_label, '')) LIKE ?
          OR lower(COALESCE(j.vehicle_vin, '')) LIKE ?
          OR lower(COALESCE(j.vehicle_plate, '')) LIKE ?
-         OR lower(j.title) LIKE ?)
+         OR lower(j.title) LIKE ?
+         OR EXISTS (
+           SELECT 1 FROM local_customers c
+           WHERE c.business_id = j.business_id
+             AND c.id = j.customer_id
+             AND (
+               lower(COALESCE(c.email, '')) LIKE ?
+               OR lower(COALESCE(c.phone, '')) LIKE ?
+               OR lower(COALESCE(c.list_email, '')) LIKE ?
+               OR lower(COALESCE(c.list_phone, '')) LIKE ?
+             )
+         ))
       ''');
       final like = '%$query%';
-      for (var i = 0; i < 6; i++) {
+      for (var i = 0; i < 10; i++) {
         variables.add(Variable<String>(like));
       }
     }
@@ -118,10 +129,21 @@ class LocalJobRepository {
          OR lower(COALESCE(vehicle_label, '')) LIKE ?
          OR lower(COALESCE(vehicle_vin, '')) LIKE ?
          OR lower(COALESCE(vehicle_plate, '')) LIKE ?
-         OR lower(title) LIKE ?)
+         OR lower(title) LIKE ?
+         OR EXISTS (
+           SELECT 1 FROM local_customers c
+           WHERE c.business_id = local_jobs.business_id
+             AND c.id = local_jobs.customer_id
+             AND (
+               lower(COALESCE(c.email, '')) LIKE ?
+               OR lower(COALESCE(c.phone, '')) LIKE ?
+               OR lower(COALESCE(c.list_email, '')) LIKE ?
+               OR lower(COALESCE(c.list_phone, '')) LIKE ?
+             )
+         ))
       ''');
       final like = '%$query%';
-      for (var i = 0; i < 6; i++) {
+      for (var i = 0; i < 10; i++) {
         variables.add(Variable<String>(like));
       }
     }
