@@ -26,18 +26,64 @@ class LocalAppointmentRepository {
   }
 
   Future<List<Map<String, dynamic>>> appointments(
-    String businessId,
-  ) async {
+    String businessId, {
+    String filter = 'today',
+    String? search,
+    int pastLimit = 30,
+  }) async {
+    final now = DateTime.now().toUtc();
+    final today = DateTime.utc(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+    final where = <String>['a.business_id = ?'];
+    final variables = <Variable<Object>>[Variable<String>(businessId)];
+
+    if (filter == 'today') {
+      where.add('a.starts_at >= ? AND a.starts_at < ?');
+      variables.add(Variable<DateTime>(today));
+      variables.add(Variable<DateTime>(tomorrow));
+    } else if (filter == 'upcoming') {
+      where.add('a.starts_at >= ?');
+      variables.add(Variable<DateTime>(tomorrow));
+    } else if (filter == 'past') {
+      where.add('a.starts_at < ?');
+      variables.add(Variable<DateTime>(today));
+    }
+
+    final query = search?.trim().toLowerCase() ?? '';
+    if (query.isNotEmpty) {
+      where.add('''
+        (lower(COALESCE(a.customer_name, '')) LIKE ?
+         OR lower(COALESCE(a.customer_phone_norm, '')) LIKE ?
+         OR lower(COALESCE(a.vehicle_label, '')) LIKE ?
+         OR lower(COALESCE(a.vehicle_make, '')) LIKE ?
+         OR lower(COALESCE(a.vehicle_model, '')) LIKE ?
+         OR lower(COALESCE(a.title, '')) LIKE ?
+         OR lower(COALESCE(a.description, '')) LIKE ?
+         OR EXISTS (
+           SELECT 1 FROM local_customers c
+           WHERE c.business_id=a.business_id AND c.id=a.customer_id
+             AND lower(COALESCE(c.email, '')) LIKE ?
+         ))
+      ''');
+      final like = '%$query%';
+      for (var i = 0; i < 8; i++) variables.add(Variable<String>(like));
+    }
+
+    final order = filter == 'past'
+        ? 'a.starts_at DESC, a.id'
+        : 'a.starts_at, a.id';
+    final limit = filter == 'past' && query.isEmpty ? 'LIMIT $pastLimit' : '';
+
     final rows = await _database.customSelect(
       '''
-      SELECT *
-      FROM local_appointments
-      WHERE business_id = ?
-      ORDER BY starts_at, id
+      SELECT a.*
+      FROM local_appointments a
+      WHERE ${where.join(' AND ')}
+      ORDER BY $order
+      $limit
       ''',
-      variables: [Variable<String>(businessId)],
+      variables: variables,
     ).get();
-
     return rows.map(_mapRow).toList();
   }
 
