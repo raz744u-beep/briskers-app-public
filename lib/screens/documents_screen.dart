@@ -539,14 +539,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           children: [
             Row(
               children: [
-                Expanded(
-                  child: Text(
-                    _title,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: accent,
-                        ),
-                  ),
+                Text(
+                  _title,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: accent,
+                      ),
                 ),
                 const SizedBox(width: 8),
                 PopupMenuButton<String>(
@@ -625,6 +623,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                   ),
                                 ),
                               ),
+                const Spacer(),
                 if (_rows != null)
                   Text(
                     '${tr('total')} ${_rows!.length}',
