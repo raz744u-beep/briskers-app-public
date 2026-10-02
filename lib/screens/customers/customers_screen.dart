@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/formatters.dart';
 import '../../core/briskers_i18n.dart';
+import '../../core/briskers_colors.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/local_customer_repository.dart';
 import 'customer_detail_screen.dart';
@@ -188,6 +189,10 @@ class _CustomersScreenState extends State<CustomersScreen> {
               ),
               const SizedBox(width: 8),
               IconButton.filled(
+                style: IconButton.styleFrom(
+                  backgroundColor: BriskersColors.actionBlue,
+                  foregroundColor: Colors.white,
+                ),
                 onPressed: _onlineReady ? _add : null,
                 tooltip: tr('addCustomer'),
                 icon: const Icon(Icons.person_add),
@@ -246,8 +251,13 @@ class _CustomersScreenState extends State<CustomersScreen> {
                       ].join(' • ');
 
                       return ListTile(
-                        leading: const CircleAvatar(
-                          child: Icon(Icons.person),
+                        leading: CircleAvatar(
+                          backgroundColor:
+                              BriskersColors.actionBlue.withValues(alpha: 0.14),
+                          child: const Icon(
+                            Icons.person,
+                            color: BriskersColors.actionBlue,
+                          ),
                         ),
                         title: Text(
                           '${customer['display_name'] ?? ''}',
