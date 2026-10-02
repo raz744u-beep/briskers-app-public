@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
+import '../../services/catalog_sync_service.dart';
+import '../../services/local_catalog_repository.dart';
 
 class CatalogSettingsScreen extends StatefulWidget {
   const CatalogSettingsScreen({
@@ -18,6 +20,8 @@ class CatalogSettingsScreen extends StatefulWidget {
 
 class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
   static const _api = BriskersApi();
+  final _localCatalog = LocalCatalogRepository();
+  final _catalogSync = CatalogSyncService();
 
   final _search = TextEditingController();
   List<Map<String, dynamic>>? _items;
@@ -43,18 +47,28 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
     final generation = ++_searchGeneration;
     try {
       final query = _search.text.trim();
-      final results = await Future.wait<dynamic>([
-        _api.catalogItemsSettings(
+      await _catalogSync.ensureBootstrap(widget.businessId);
+      final localItems = await _localCatalog.items(
+        widget.businessId,
+        search: query.isEmpty ? null : query,
+        includeInactive: _includeInactive,
+      );
+
+      List<Map<String, dynamic>> categories = _categories;
+      try {
+        categories = await _api.itemCategories(
           widget.businessId,
-          search: query.isEmpty ? null : query,
-          includeInactive: _includeInactive,
-        ),
-        _api.itemCategories(widget.businessId, includeInactive: true),
-      ]);
+          includeInactive: true,
+        );
+      } catch (_) {
+        // Categories are only needed for catalog administration. Item search
+        // continues to work from the local catalog while offline.
+      }
+
       if (!mounted || generation != _searchGeneration) return;
       setState(() {
-        _items = List<Map<String, dynamic>>.from(results[0] as List);
-        _categories = List<Map<String, dynamic>>.from(results[1] as List);
+        _items = localItems;
+        _categories = categories;
         _error = null;
       });
     } catch (error) {
