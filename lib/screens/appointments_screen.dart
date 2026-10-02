@@ -600,6 +600,13 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                                   ),
                       ),
                     ),
+                    Text(
+                      '${tr('total')} $total',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: BriskersColors.appointments,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                    ),
                     const SizedBox(width: 8),
                     PopupMenuButton<String>(
                       tooltip: 'Filter appointments',
@@ -613,28 +620,15 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                         PopupMenuItem(value: 'upcoming', child: Text(tr('upcoming'))),
                         PopupMenuItem(value: 'past', child: Text(tr('past'))),
                       ],
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                                        : _filter == 'upcoming' ? tr('upcoming')
-                                  : tr('past'),
-                              style: const TextStyle(
-                                color: BriskersColors.appointments,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(width: 3),
-                            const Icon(Icons.chevron_right, size: 18, color: BriskersColors.appointments),
-                          ],
+                      child: Chip(
+                        label: Text(
+                          _filter == 'all' ? tr('all')
+                              : _filter == 'today' ? tr('today')
+                              : _filter == 'upcoming' ? tr('upcoming')
+                              : tr('past'),
                         ),
+                        avatar: const Icon(Icons.chevron_right, size: 18),
                       ),
-                    ),
-                    Text(
-                      '${tr('total')} $total',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: BriskersColors.appointments,
-                                  fontWeight: FontWeight.w700,
-                                ),
                     ),
                     if (_canManage && _onlineReady) ...[
                       const SizedBox(width: 8),
@@ -648,21 +642,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       ),
                     ],
                   ],
-                ),
-                const SizedBox(height: 10),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      _filterChip('all', tr('all')),
-                      const SizedBox(width: 7),
-                      _filterChip('today', tr('today')),
-                      const SizedBox(width: 7),
-                      _filterChip('upcoming', tr('upcoming')),
-                      const SizedBox(width: 7),
-                      _filterChip('past', tr('past')),
-                    ],
-                  ),
                 ),
                 const SizedBox(height: 10),
                 SearchBar(
