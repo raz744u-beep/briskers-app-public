@@ -42,8 +42,36 @@ class LocalJobRepository {
   }
 
   Future<List<Map<String, dynamic>>> listJobs(
-    String businessId,
-  ) async {
+    String businessId, {
+    String? status,
+    String? search,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final where = <String>['j.business_id = ?'];
+    final variables = <Variable<Object>>[Variable<String>(businessId)];
+    if (status != null && status.isNotEmpty) {
+      where.add('j.status = ?');
+      variables.add(Variable<String>(status));
+    }
+    final query = search?.trim().toLowerCase() ?? '';
+    if (query.isNotEmpty) {
+      where.add('''
+        (lower(COALESCE(j.job_number, '')) LIKE ?
+         OR lower(COALESCE(j.customer_name, '')) LIKE ?
+         OR lower(COALESCE(j.vehicle_label, '')) LIKE ?
+         OR lower(COALESCE(j.vehicle_vin, '')) LIKE ?
+         OR lower(COALESCE(j.vehicle_plate, '')) LIKE ?
+         OR lower(j.title) LIKE ?)
+      ''');
+      final like = '%$query%';
+      for (var i = 0; i < 6; i++) {
+        variables.add(Variable<String>(like));
+      }
+    }
+    variables.add(Variable<int>(limit));
+    variables.add(Variable<int>(offset));
+
     final rows = await _database.customSelect(
       '''
       SELECT
@@ -58,22 +86,66 @@ class LocalJobRepository {
         ) AS open_findings
       FROM local_jobs j
       LEFT JOIN local_job_statuses s
-        ON s.business_id = j.business_id
-       AND s.code = j.status
-      WHERE j.business_id = ?
+        ON s.business_id = j.business_id AND s.code = j.status
+      WHERE ${where.join(' AND ')}
       ORDER BY
-        CASE
-          WHEN j.status IN ('completed','cancelled') THEN 1
-          ELSE 0
-        END,
+        CASE WHEN j.status IN ('completed','cancelled') THEN 1 ELSE 0 END,
         COALESCE(s.sort_order, 9999),
-        j.created_at DESC,
-        j.id
+        j.created_at DESC, j.id
+      LIMIT ? OFFSET ?
+      ''',
+      variables: variables,
+    ).get();
+    return rows.map(_jobListMap).toList();
+  }
+
+  Future<int> jobCount(
+    String businessId, {
+    String? status,
+    String? search,
+  }) async {
+    final where = <String>['business_id = ?'];
+    final variables = <Variable<Object>>[Variable<String>(businessId)];
+    if (status != null && status.isNotEmpty) {
+      where.add('status = ?');
+      variables.add(Variable<String>(status));
+    }
+    final query = search?.trim().toLowerCase() ?? '';
+    if (query.isNotEmpty) {
+      where.add('''
+        (lower(COALESCE(job_number, '')) LIKE ?
+         OR lower(COALESCE(customer_name, '')) LIKE ?
+         OR lower(COALESCE(vehicle_label, '')) LIKE ?
+         OR lower(COALESCE(vehicle_vin, '')) LIKE ?
+         OR lower(COALESCE(vehicle_plate, '')) LIKE ?
+         OR lower(title) LIKE ?)
+      ''');
+      final like = '%$query%';
+      for (var i = 0; i < 6; i++) {
+        variables.add(Variable<String>(like));
+      }
+    }
+    final row = await _database.customSelect(
+      'SELECT COUNT(*) AS count FROM local_jobs WHERE ${where.join(' AND ')}',
+      variables: variables,
+    ).getSingle();
+    return row.read<int>('count');
+  }
+
+  Future<Map<String, int>> jobStatusCounts(String businessId) async {
+    final rows = await _database.customSelect(
+      '''
+      SELECT status, COUNT(*) AS count
+      FROM local_jobs
+      WHERE business_id = ?
+      GROUP BY status
       ''',
       variables: [Variable<String>(businessId)],
     ).get();
-
-    return rows.map(_jobListMap).toList();
+    return {
+      for (final row in rows)
+        row.read<String>('status'): row.read<int>('count'),
+    };
   }
 
   Future<List<Map<String, dynamic>>> jobStatuses(
