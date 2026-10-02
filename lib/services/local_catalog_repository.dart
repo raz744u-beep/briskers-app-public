@@ -78,6 +78,60 @@ class LocalCatalogRepository {
     }).toList();
   }
 
+  Future<void> upsertLocal(
+    String businessId, {
+    required String id,
+    required String name,
+    String? description,
+    required String itemType,
+    required num sellingPrice,
+    String? pricingUnit,
+    required num cost,
+    required bool taxable,
+    String? category,
+    String? barcode,
+    required bool active,
+    String syncState = 'pending',
+  }) async {
+    await _database.customStatement(
+      '''
+      INSERT INTO local_catalog_items (
+        id, business_id, name, description, item_type, selling_price,
+        pricing_unit, cost, taxable, category, barcode, active, sync_state
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        business_id=excluded.business_id,
+        name=excluded.name,
+        description=excluded.description,
+        item_type=excluded.item_type,
+        selling_price=excluded.selling_price,
+        pricing_unit=excluded.pricing_unit,
+        cost=excluded.cost,
+        taxable=excluded.taxable,
+        category=excluded.category,
+        barcode=excluded.barcode,
+        active=excluded.active,
+        sync_state=excluded.sync_state
+      ''',
+      [
+        id, businessId, name, description, itemType, sellingPrice.toDouble(),
+        pricingUnit, cost.toDouble(), taxable ? 1 : 0, category, barcode,
+        active ? 1 : 0, syncState,
+      ],
+    );
+  }
+
+  Future<void> markSynced(String businessId, String id) async {
+    await _database.customStatement(
+      '''
+      UPDATE local_catalog_items
+      SET sync_state = 'synced'
+      WHERE business_id = ? AND id = ?
+      ''',
+      [businessId, id],
+    );
+  }
+
   Future<void> replaceFromServer(
     String businessId,
     List<Map<String, dynamic>> items,
