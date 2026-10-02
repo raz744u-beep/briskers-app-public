@@ -193,7 +193,7 @@ class _JobsScreenState extends State<JobsScreen> {
         ),
       ),
     );
-    await _load();
+    if (mounted) unawaited(_load());
     widget.onJobsChanged?.call();
   }
 
@@ -208,7 +208,7 @@ class _JobsScreenState extends State<JobsScreen> {
         ),
       ),
     );
-    await _load();
+    if (mounted) unawaited(_load());
     widget.onJobsChanged?.call();
   }
 
