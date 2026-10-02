@@ -116,7 +116,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
     });
 
     try {
-      await _api.saveCatalogItem(
+      await _catalogSync.queueSave(
         widget.businessId,
         itemId: item?['id']?.toString(),
         name: result['name'].toString(),
@@ -131,6 +131,9 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
         active: result['active'] == true,
       );
       await _load();
+      // Best-effort background-style flush. The local save is already
+      // complete, so losing connectivity here does not lose the edit.
+      _catalogSync.flush(widget.businessId);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -145,7 +148,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
       _error = null;
     });
     try {
-      await _api.saveCatalogItem(
+      await _catalogSync.queueSave(
         widget.businessId,
         itemId: item['id'].toString(),
         name: item['name']?.toString() ?? '',
@@ -160,6 +163,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
         active: item['active'] != true,
       );
       await _load();
+      _catalogSync.flush(widget.businessId);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
