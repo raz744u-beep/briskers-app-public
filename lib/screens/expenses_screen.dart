@@ -40,6 +40,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   String? _error;
 
   bool get _owner => widget.roleCode == 'owner';
+  bool get _showFinancialSummary =>
+      widget.roleCode == 'owner' || widget.roleCode == 'manager';
   bool get _allowRecurring =>
       widget.roleCode == 'owner' || widget.roleCode == 'manager';
 
@@ -398,54 +400,59 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
                 children: [
-                  Card(
-                    margin: EdgeInsets.zero,
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Income',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
-                                ),
-                                Text(
-                                  _money(income),
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w900,
-                                    color: Color(0xFF169B62),
+                  if (_showFinancialSummary)
+                    Card(
+                      margin: EdgeInsets.zero,
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Income',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                const Text(
-                                  'Expenses',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
-                                ),
-                                Text(
-                                  _money(expenses),
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w900,
-                                    color: Color(0xFFC62828),
+                                  Text(
+                                    _money(income),
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w900,
+                                      color: Color(0xFF169B62),
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                        ],
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  const Text(
+                                    'Expenses',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  Text(
+                                    _money(expenses),
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w900,
+                                      color: Color(0xFFC62828),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
                   if (_allowRecurring) ...[
                     const SizedBox(height: 10),
                     Card(
