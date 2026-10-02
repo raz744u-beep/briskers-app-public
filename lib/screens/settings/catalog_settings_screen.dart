@@ -25,6 +25,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
   String? _error;
   bool _includeInactive = true;
   bool _busy = false;
+  int _searchGeneration = 0;
 
   @override
   void initState() {
@@ -39,6 +40,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
   }
 
   Future<void> _load() async {
+    final generation = ++_searchGeneration;
     try {
       final query = _search.text.trim();
       final results = await Future.wait<dynamic>([
@@ -49,7 +51,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
         ),
         _api.itemCategories(widget.businessId, includeInactive: true),
       ]);
-      if (!mounted) return;
+      if (!mounted || generation != _searchGeneration) return;
       setState(() {
         _items = List<Map<String, dynamic>>.from(results[0] as List);
         _categories = List<Map<String, dynamic>>.from(results[1] as List);
@@ -187,7 +189,10 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
                   ),
               ],
               onSubmitted: (_) => _load(),
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) {
+                setState(() {});
+                _load();
+              },
             ),
           ),
           Padding(
