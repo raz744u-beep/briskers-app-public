@@ -100,7 +100,6 @@ class _JobsScreenState extends State<JobsScreen> {
 
       final localRows =
           List<Map<String, dynamic>>.from(localResults[0] as List);
-      final query = _search.text.trim();
       final documentMatches = query.isEmpty
           ? <Map<String, dynamic>>[]
           : await _localDocuments.search(widget.businessId, query, limit: 30);
@@ -139,13 +138,17 @@ class _JobsScreenState extends State<JobsScreen> {
           List<Map<String, dynamic>>.from(results[1] as List);
 
       if (!mounted) return;
-      if (!localAvailable) setState(() {
-        _rows = onlineRows;
-        _statuses = onlineStatuses;
-        _showingLocal = false;
-        _onlineReady = true;
-        _error = null;
-      });
+      if (!localAvailable) {
+        setState(() {
+          _rows = onlineRows;
+          _statuses = onlineStatuses;
+          _showingLocal = false;
+          _onlineReady = true;
+          _error = null;
+        });
+      } else {
+        setState(() => _onlineReady = true);
+      }
 
       unawaited(_documentSync.refreshBestEffort(widget.businessId));
       unawaited(
