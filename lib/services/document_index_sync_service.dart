@@ -1,3 +1,6 @@
+import 'package:drift/drift.dart';
+
+import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_document_repository.dart';
 
@@ -8,30 +11,89 @@ class DocumentIndexSyncService {
   })  : _api = api,
         _repository = repository ?? LocalDocumentRepository();
 
+  static const _scope = 'documents';
   final BriskersApi _api;
   final LocalDocumentRepository _repository;
 
   Future<void> pull(String businessId) async {
-    for (final kind in const ['estimate', 'invoice']) {
-      final rows = await _api.documents(businessId, kind: kind);
-      final normalized = rows.map((row) {
-        final copy = Map<String, dynamic>.from(row);
-        copy['kind'] ??= kind;
-        return copy;
-      }).toList();
-      await _repository.replaceFromServer(
+    final state = await localDatabase.customSelect(
+      '''
+      SELECT last_server_cursor
+      FROM local_sync_states
+      WHERE business_id = ? AND scope = ?
+      LIMIT 1
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        const Variable<String>(_scope),
+      ],
+    ).get();
+
+    var cursor = state.isEmpty
+        ? 0
+        : state.first.readNullable<int>('last_server_cursor') ?? 0;
+    var hasMore = true;
+
+    while (hasMore) {
+      final response = await _api.syncPullDocuments(
         businessId,
-        normalized,
-        kind: kind,
+        afterVersion: cursor,
       );
+      final raw = List<dynamic>.from(
+        response['documents'] ?? const <dynamic>[],
+      );
+      final documents = raw
+          .whereType<Map>()
+          .map((value) => Map<String, dynamic>.from(value))
+          .toList();
+      final next = int.tryParse(
+            response['next_version']?.toString() ?? '',
+          ) ??
+          cursor;
+
+      await _repository.upsertFromServer(businessId, documents);
+      await localDatabase.customStatement(
+        '''
+        INSERT INTO local_sync_states (
+          business_id, scope, last_server_cursor, last_pull_at,
+          last_error, bootstrapped
+        ) VALUES (?, ?, ?, ?, NULL, 1)
+        ON CONFLICT(business_id, scope) DO UPDATE SET
+          last_server_cursor=excluded.last_server_cursor,
+          last_pull_at=excluded.last_pull_at,
+          last_error=NULL,
+          bootstrapped=1
+        ''',
+        [
+          businessId,
+          _scope,
+          next,
+          DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+        ],
+      );
+
+      hasMore = response['has_more'] == true;
+      if (hasMore && next <= cursor) {
+        throw StateError('Document sync cursor did not advance.');
+      }
+      cursor = next;
     }
   }
 
   Future<void> refreshBestEffort(String businessId) async {
     try {
       await pull(businessId);
-    } catch (_) {
-      // Keep the existing local index available offline.
+    } catch (error) {
+      await localDatabase.customStatement(
+        '''
+        INSERT INTO local_sync_states (
+          business_id, scope, last_error, bootstrapped
+        ) VALUES (?, ?, ?, 0)
+        ON CONFLICT(business_id, scope) DO UPDATE SET
+          last_error=excluded.last_error
+        ''',
+        [businessId, _scope, error.toString()],
+      );
     }
   }
 }
