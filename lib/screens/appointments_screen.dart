@@ -138,9 +138,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     }
   }
 
-  bool _sameDay(DateTime a, DateTime b) =>
-      a.year == b.year && a.month == b.month && a.day == b.day;
-
   List<Map<String, dynamic>> get _visibleAppointments =>
       _appointments ?? const <Map<String, dynamic>>[];
 
