@@ -11,12 +11,15 @@ class LocalDocumentRepository {
 
   Future<void> replaceFromServer(
     String businessId,
-    List<Map<String, dynamic>> documents,
-  ) async {
+    List<Map<String, dynamic>> documents, {
+    String? kind,
+  }) async {
     await _database.transaction(() async {
       await _database.customStatement(
-        "DELETE FROM local_documents WHERE business_id = ? AND sync_state = 'synced'",
-        [businessId],
+        kind == null
+            ? "DELETE FROM local_documents WHERE business_id = ? AND sync_state = 'synced'"
+            : "DELETE FROM local_documents WHERE business_id = ? AND kind = ? AND sync_state = 'synced'",
+        kind == null ? [businessId] : [businessId, kind],
       );
       for (final document in documents) {
         final id = document['id']?.toString() ?? '';
