@@ -144,10 +144,24 @@ class LocalCatalogRepository {
       for (final item in items) {
         await _database.customStatement(
           '''
-          INSERT OR REPLACE INTO local_catalog_items
+          INSERT INTO local_catalog_items
           (id, business_id, name, description, item_type, selling_price,
            pricing_unit, cost, taxable, category, barcode, active, sync_state)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+          ON CONFLICT(id) DO UPDATE SET
+            business_id=excluded.business_id,
+            name=excluded.name,
+            description=excluded.description,
+            item_type=excluded.item_type,
+            selling_price=excluded.selling_price,
+            pricing_unit=excluded.pricing_unit,
+            cost=excluded.cost,
+            taxable=excluded.taxable,
+            category=excluded.category,
+            barcode=excluded.barcode,
+            active=excluded.active,
+            sync_state='synced'
+          WHERE local_catalog_items.sync_state = 'synced'
           ''',
           [
             item['id']?.toString(),
