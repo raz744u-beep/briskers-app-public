@@ -36,6 +36,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   List<Map<String, dynamic>>? _appointments;
   String _filter = 'today';
+  final TextEditingController _search = TextEditingController();
   String? _error;
   String? _checkingInId;
   int _pending = 0;
@@ -51,6 +52,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       _canManage || widget.roleCode == 'kiosk';
 
   @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
     _load();
@@ -61,7 +68,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
     try {
       final localRows =
-          await _localAppointments.appointments(widget.businessId);
+          await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim());
       final bootstrapped =
           await _localAppointments.hasBootstrap(widget.businessId);
       localAvailable = bootstrapped || localRows.isNotEmpty;
@@ -89,7 +96,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
       await _appointmentSync.pull(widget.businessId);
       final localRows =
-          await _localAppointments.appointments(widget.businessId);
+          await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim());
       final bootstrapped =
           await _localAppointments.hasBootstrap(widget.businessId);
 
@@ -134,25 +141,8 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   bool _sameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
-  List<Map<String, dynamic>> get _visibleAppointments {
-    final rows = _appointments ?? const <Map<String, dynamic>>[];
-    final now = DateTime.now();
-    return rows.where((row) {
-      final start =
-          DateTime.tryParse(row['starts_at']?.toString() ?? '')?.toLocal();
-      if (start == null) return false;
-      switch (_filter) {
-        case 'today':
-          return _sameDay(start, now);
-        case 'upcoming':
-          return start.isAfter(now) && !_sameDay(start, now);
-        case 'past':
-          return start.isBefore(now) && !_sameDay(start, now);
-        default:
-          return true;
-      }
-    }).toList();
-  }
+  List<Map<String, dynamic>> get _visibleAppointments =>
+      _appointments ?? const <Map<String, dynamic>>[];
 
   Future<void> _addAppointment() async {
     if (!_onlineReady || !_canManage) return;
@@ -294,6 +284,8 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
       final local = await _localAppointments.appointments(
         widget.businessId,
+        filter: _filter,
+        search: _search.text.trim().isEmpty ? null : _search.text.trim(),
       );
       if (mounted) {
         setState(() {
@@ -568,7 +560,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         softWrap: false,
       ),
       selected: selected,
-      onSelected: (_) => setState(() => _filter = value),
+      onSelected: (_) {
+        setState(() => _filter = value);
+        _load();
+      },
       labelStyle: TextStyle(
         fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
         color: selected ? Colors.white : BriskersColors.appointments,
@@ -638,6 +633,27 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 _filterChip('past', tr('past')),
               ],
             ),
+          ),
+          const SizedBox(height: 10),
+          SearchBar(
+            controller: _search,
+            hintText: 'Search appointments',
+            leading: const Icon(Icons.search),
+            trailing: [
+              if (_search.text.isNotEmpty)
+                IconButton(
+                  onPressed: () {
+                    _search.clear();
+                    setState(() {});
+                    _load();
+                  },
+                  icon: const Icon(Icons.close),
+                ),
+            ],
+            onChanged: (_) {
+              setState(() {});
+              _load();
+            },
           ),
           if (_canManage && _onlineReady && _pending > 0) ...[
             const SizedBox(height: 10),
