@@ -583,253 +583,272 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final visible = _visibleAppointments;
     final total = _appointments?.length ?? 0;
 
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 84),
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  tr('appointments'),
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: BriskersColors.appointments,
-                      ),
-                ),
-              ),
-              Text(
-                '${tr('total')} $total',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: BriskersColors.appointments,
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              if (_canManage && _onlineReady) ...[
-                const SizedBox(width: 8),
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: BriskersColors.appointments,
-                  ),
-                  onPressed: _addAppointment,
-                  icon: const Icon(Icons.add),
-                  label: Text(tr('add')),
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 10),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
+    return Column(
+      children: [
+        Material(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          elevation: 1,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+            child: Column(
               children: [
-                _filterChip('all', tr('all')),
-                const SizedBox(width: 7),
-                _filterChip('today', tr('today')),
-                const SizedBox(width: 7),
-                _filterChip('upcoming', tr('upcoming')),
-                const SizedBox(width: 7),
-                _filterChip('past', tr('past')),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          SearchBar(
-            controller: _search,
-            hintText: 'Search appointments',
-            leading: const Icon(Icons.search),
-            trailing: [
-              if (_search.text.isNotEmpty)
-                IconButton(
-                  onPressed: () {
-                    _search.clear();
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        tr('appointments'),
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    color: BriskersColors.appointments,
+                                  ),
+                      ),
+                    ),
+                    Text(
+                      '${tr('total')} $total',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: BriskersColors.appointments,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                    ),
+                    if (_canManage && _onlineReady) ...[
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                                backgroundColor: BriskersColors.appointments,
+                        ),
+                        onPressed: _addAppointment,
+                        icon: const Icon(Icons.add),
+                        label: Text(tr('add')),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 10),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _filterChip('all', tr('all')),
+                      const SizedBox(width: 7),
+                      _filterChip('today', tr('today')),
+                      const SizedBox(width: 7),
+                      _filterChip('upcoming', tr('upcoming')),
+                      const SizedBox(width: 7),
+                      _filterChip('past', tr('past')),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SearchBar(
+                  controller: _search,
+                  hintText: 'Search appointments',
+                  leading: const Icon(Icons.search),
+                  trailing: [
+                    if (_search.text.isNotEmpty)
+                      IconButton(
+                        onPressed: () {
+                                _search.clear();
+                                setState(() {});
+                                _load();
+                        },
+                        icon: const Icon(Icons.close),
+                      ),
+                  ],
+                  onChanged: (_) {
                     setState(() {});
                     _load();
                   },
-                  icon: const Icon(Icons.close),
                 ),
-            ],
-            onChanged: (_) {
-              setState(() {});
-              _load();
-            },
-          ),
-          if (_canManage && _onlineReady && _pending > 0) ...[
-            const SizedBox(height: 10),
-            Card(
-              color: BriskersColors.appointments.withValues(alpha: 0.07),
-              child: ListTile(
-                dense: true,
-                leading: const Icon(
-                  Icons.pending_actions,
-                  color: BriskersColors.appointments,
-                ),
-                title: Text(tr('pendingCustomerRequests')),
-                trailing: Text(
-                  '$_pending',
-                  style: const TextStyle(
-                    color: BriskersColors.appointments,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 18,
-                  ),
-                ),
-              ),
+
+              ],
             ),
-          ],
-          if (_showingLocal) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 8,
-              ),
-              decoration: BoxDecoration(
-                color: BriskersColors.appointments.withValues(
-                  alpha: 0.08,
-                ),
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.cloud_off_outlined, size: 18),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: Text(
-                      tr('savedAppointmentsOffline'),
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 84),
+              children: [
+                if (_canManage && _onlineReady && _pending > 0) ...[
+                  const SizedBox(height: 10),
+                  Card(
+                    color: BriskersColors.appointments.withValues(alpha: 0.07),
+                    child: ListTile(
+                      dense: true,
+                      leading: const Icon(
+                        Icons.pending_actions,
+                        color: BriskersColors.appointments,
+                      ),
+                      title: Text(tr('pendingCustomerRequests')),
+                      trailing: Text(
+                        '$_pending',
+                        style: const TextStyle(
+                                color: BriskersColors.appointments,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 18,
+                        ),
+                      ),
                     ),
                   ),
                 ],
-              ),
-            ),
-          ],
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ],
-          const SizedBox(height: 10),
-          if (_appointments == null)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (visible.isEmpty)
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Text(tr('noAppointments')),
-              ),
-            )
-          else
-            ...visible.map((item) {
-              final start =
-                  DateTime.tryParse(item['starts_at']?.toString() ?? '')
-                      ?.toLocal();
-              final make = item['vehicle_make']?.toString() ?? '';
-              final year = item['vehicle_year']?.toString() ?? '';
-              final model = item['vehicle_model']?.toString() ?? '';
-              final vehicle = <String>[year, make, model]
-                  .where((value) => value.trim().isNotEmpty)
-                  .join(' ');
-              final service = item['title']?.toString() ?? '';
-              final checking = _checkingInId == item['id']?.toString();
-
-              return Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                elevation: 0.8,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: (_canManage || _canCheckIn)
-                      ? () => _showOptions(item)
-                      : null,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+                if (_showingLocal) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: BriskersColors.appointments.withValues(
+                        alpha: 0.08,
+                      ),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
+                        const Icon(Icons.cloud_off_outlined, size: 18),
+                        const SizedBox(width: 7),
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Text(
-                                    start == null
-                                        ? '--'
-                                        : DateFormat('h:mm a').format(start),
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w900,
-                                      color: BriskersColors.appointments,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      item['customer']?.toString() ??
-                                          'Appointment',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontSize: 17,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (vehicle.isNotEmpty) ...[
-                                const SizedBox(height: 3),
-                                Text(
-                                  vehicle,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 15.5,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                                child: Text(
+                                  tr('savedAppointmentsOffline'),
+                                  style: const TextStyle(fontWeight: FontWeight.w700),
                                 ),
-                              ],
-                              if (service.isNotEmpty) ...[
-                                const SizedBox(height: 2),
-                                Text(
-                                  service,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 14.5,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
                         ),
-                        const SizedBox(width: 8),
-                        if (checking)
-                          const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        else
-                          _statusPill(item),
                       ],
                     ),
                   ),
-                ),
-              );
-            }),
-        ],
-      ),
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _error!,
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ],
+                const SizedBox(height: 10),
+                if (_appointments == null)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                else if (visible.isEmpty)
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Text(tr('noAppointments')),
+                    ),
+                  )
+                else
+                  ...visible.map((item) {
+                    final start =
+                        DateTime.tryParse(item['starts_at']?.toString() ?? '')
+                                  ?.toLocal();
+                    final make = item['vehicle_make']?.toString() ?? '';
+                    final year = item['vehicle_year']?.toString() ?? '';
+                    final model = item['vehicle_model']?.toString() ?? '';
+                    final vehicle = <String>[year, make, model]
+                        .where((value) => value.trim().isNotEmpty)
+                        .join(' ');
+                    final service = item['title']?.toString() ?? '';
+                    final checking = _checkingInId == item['id']?.toString();
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      elevation: 0.8,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: (_canManage || _canCheckIn)
+                                  ? () => _showOptions(item)
+                                  : null,
+                        child: Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                                Row(
+                                                  children: [
+                                                    Text(
+                                                      start == null
+                                                                ? '--'
+                                                                : DateFormat('h:mm a').format(start),
+                                                      style: const TextStyle(
+                                                        fontSize: 16,
+                                                        fontWeight: FontWeight.w900,
+                                                        color: BriskersColors.appointments,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Expanded(
+                                                      child: Text(
+                                                        item['customer']?.toString() ??
+                                                                  'Appointment',
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow.ellipsis,
+                                                        style: const TextStyle(
+                                                                fontSize: 17,
+                                                                fontWeight: FontWeight.w800,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                if (vehicle.isNotEmpty) ...[
+                                                  const SizedBox(height: 3),
+                                                  Text(
+                                                    vehicle,
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    style: const TextStyle(
+                                                      fontSize: 15.5,
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ],
+                                                if (service.isNotEmpty) ...[
+                                                  const SizedBox(height: 2),
+                                                  Text(
+                                                    service,
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      fontSize: 14.5,
+                                                      color: Theme.of(context)
+                                                                .colorScheme
+                                                                .onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                                ],
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    if (checking)
+                                      const SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
+                                    else
+                                      _statusPill(item),
+                                  ],
+                                ),
+                        ),
+                      ),
+                    );
+                  }),
+
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
