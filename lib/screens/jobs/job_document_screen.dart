@@ -1213,6 +1213,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     String? vehicleId = _detail!['vehicle_id']?.toString();
     var vehicleName = _detail!['vehicle']?.toString() ?? '';
     var mileageText = _detail!['odometer_in']?.toString().trim() ?? '';
+    final claimController = TextEditingController(
+      text: _detail!['claim_number']?.toString() ?? '',
+    );
+    final authorizationController = TextEditingController(
+      text: _detail!['authorization_number']?.toString() ?? '',
+    );
     var date = DateTime.tryParse(
           _detail!['document_date']?.toString() ?? '',
         ) ??
@@ -1368,6 +1374,26 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                     }
                   },
                 ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: claimController,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    labelText: 'Claim number',
+                    prefixIcon: Icon(Icons.assignment_outlined),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: authorizationController,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    labelText: 'Authorization number',
+                    prefixIcon: Icon(Icons.verified_outlined),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
                 if ((_detail!['job_number']?.toString() ?? '').isNotEmpty)
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
@@ -1396,6 +1422,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       ),
     );
 
+    final newClaimNumber = claimController.text.trim();
+    final newAuthorizationNumber = authorizationController.text.trim();
+    claimController.dispose();
+    authorizationController.dispose();
+
     if (save != true) return;
 
     final originalCustomerId = _detail!['customer_id']?.toString() ?? '';
@@ -1406,6 +1437,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final originalMileage =
         _detail!['odometer_in']?.toString().replaceAll(',', '').trim() ?? '';
     final newMileage = mileageText.replaceAll(',', '').trim();
+    final originalClaimNumber =
+        _detail!['claim_number']?.toString().trim() ?? '';
+    final originalAuthorizationNumber =
+        _detail!['authorization_number']?.toString().trim() ?? '';
 
     final headerChanged =
         customerId != originalCustomerId ||
@@ -1444,6 +1479,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           widget.businessId,
           widget.documentId,
           odometer: newMileage.isEmpty ? null : num.tryParse(newMileage),
+        );
+      });
+    }
+
+    if (newClaimNumber != originalClaimNumber ||
+        newAuthorizationNumber != originalAuthorizationNumber) {
+      await _run(() async {
+        await _api.updateDocumentClaimInfo(
+          widget.businessId,
+          widget.documentId,
+          expectedVersion: _version,
+          claimNumber: newClaimNumber.isEmpty ? null : newClaimNumber,
+          authorizationNumber:
+              newAuthorizationNumber.isEmpty ? null : newAuthorizationNumber,
         );
       });
     }
@@ -1982,11 +2031,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 minLines: 5,
                 maxLines: 10,
                 decoration: InputDecoration(
-                  hintText: tr('enterDocumentNotes'),
+                  labelText: tr('notesTab'),
                   helperText: BriskersLanguageController.instance.isSpanish
                       ? tr('translateEnglishNotice')
                       : null,
                   border: const OutlineInputBorder(),
+                  alignLabelWithHint: true,
                 ),
               ),
               const SizedBox(height: 12),
