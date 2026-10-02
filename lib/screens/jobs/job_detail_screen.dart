@@ -3037,28 +3037,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
           ),
         if (_canSeeFinancial)
-          PopupMenuItem(
+          const PopupMenuItem(
             value: 'invoice',
-            child: Container(
-              decoration: BoxDecoration(
-                color: BriskersColors.invoices.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(10),
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.receipt_long_outlined,
+                color: BriskersColors.invoices,
               ),
-              child: const ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 10),
-                leading: Icon(
-                  Icons.receipt_long_outlined,
-                  color: BriskersColors.invoices,
-                ),
-                title: Text(
-                  'New invoice',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: BriskersColors.invoices,
-                  ),
-                ),
-              ),
+              title: Text('New invoice'),
             ),
           ),
         if (_canSeeFinancial && _canManage)
@@ -4222,6 +4210,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                                   subtitle: Text('Scan or upload printed estimate'),
                                 ),
                               ),
+                              PopupMenuDivider(),
                               PopupMenuItem(
                                 value: 'invoice',
                                 child: Container(
