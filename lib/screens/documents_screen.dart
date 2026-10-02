@@ -392,7 +392,15 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   String _money(Object? raw) {
     final value = num.tryParse(raw?.toString() ?? '') ?? 0;
-    return NumberFormat.currency(symbol: '\
+    return NumberFormat.currency(symbol: '\$').format(value);
+  }
+
+  String _shortDate(Object? raw) {
+    final date = DateTime.tryParse(raw?.toString() ?? '');
+    if (date == null) return '';
+    return DateFormat('MMM d, yyyy').format(date.toLocal());
+  }
+
   Future<void> _showExpensesFromList(Map<String, dynamic> row) async {
     try {
       final expenses = await _api.documentExpenses(
