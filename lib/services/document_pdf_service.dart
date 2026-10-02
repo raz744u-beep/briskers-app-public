@@ -249,7 +249,7 @@ class DocumentPdfService {
               pw.Expanded(
                 flex: 4,
                 child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Align(
                       alignment: pw.Alignment.centerRight,
@@ -281,7 +281,7 @@ class DocumentPdfService {
           ),
           pw.SizedBox(height: 14),
           pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Expanded(
                 child: _infoBox(
@@ -360,7 +360,7 @@ class DocumentPdfService {
           ],
           pw.SizedBox(height: 12),
           pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Expanded(
                 child: _claimBox(
@@ -589,7 +589,7 @@ class DocumentPdfService {
       ),
       child: hasInfo
           ? pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Container(
                   color: PdfColors.grey200,
