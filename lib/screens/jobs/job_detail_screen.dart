@@ -119,13 +119,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         localShown = true;
         setState(() {
           _job = snapshot.job;
-          _profitability = null;
           _preInspection = snapshot.preInspection;
-          _employees = const [];
           _statuses = snapshot.statuses;
-          _documents = const [];
           _findings = snapshot.findings;
-          _jobExpenses = const [];
           _loading = false;
           _onlineReady = false;
           _showingLocal = true;
@@ -2019,7 +2015,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         ),
       ),
     );
-    await _load();
+    if (mounted) unawaited(_load());
   }
 
 
@@ -3046,9 +3042,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               contentPadding: EdgeInsets.zero,
               leading: Icon(
                 Icons.document_scanner_outlined,
-                color: BriskersColors.estimates,
+                color: Color(0xFF6B7280),
               ),
-              title: Text('Import from Identifix'),
+              title: Text(
+                'Import from Identifix',
+                style: TextStyle(color: Color(0xFF6B7280)),
+              ),
             ),
           ),
         if (_canSeeFinancial)
@@ -4244,9 +4243,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                               const PopupMenuItem(
                                 value: 'identifix',
                                 child: ListTile(
+                                  dense: true,
                                   contentPadding: EdgeInsets.zero,
-                                  leading: Icon(Icons.document_scanner_outlined),
-                                  title: Text('Import from Identifix'),
+                                  leading: Icon(
+                                    Icons.document_scanner_outlined,
+                                    color: Color(0xFF6B7280),
+                                  ),
+                                  title: Text(
+                                    'Import from Identifix',
+                                    style: TextStyle(color: Color(0xFF6B7280)),
+                                  ),
                                   subtitle: Text('Scan or upload printed estimate'),
                                 ),
                               ),
@@ -4268,30 +4274,20 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                                   ),
                                 ),
                               ),
-                              const PopupMenuDivider(),
-                              PopupMenuItem(
+                              const PopupMenuItem(
                                 value: 'invoice',
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: BriskersColors.invoices
-                                        .withValues(alpha: 0.10),
-                                    borderRadius: BorderRadius.circular(10),
+                                child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(
+                                    Icons.receipt_long_outlined,
+                                    color: BriskersColors.invoices,
                                   ),
-                                  child: const ListTile(
-                                    dense: true,
-                                    contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                    ),
-                                    leading: Icon(
-                                      Icons.receipt_long_outlined,
+                                  title: Text(
+                                    'New invoice',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w800,
                                       color: BriskersColors.invoices,
-                                    ),
-                                    title: Text(
-                                      'New invoice',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        color: BriskersColors.invoices,
-                                      ),
                                     ),
                                   ),
                                 ),
