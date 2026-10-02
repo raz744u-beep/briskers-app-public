@@ -9,6 +9,8 @@ import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/document_pdf_service.dart';
+import '../../services/catalog_sync_service.dart';
+import '../../services/local_catalog_repository.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'job_detail_screen.dart';
@@ -33,6 +35,8 @@ class JobDocumentScreen extends StatefulWidget {
 
 class _JobDocumentScreenState extends State<JobDocumentScreen> {
   static const _api = BriskersApi();
+  final _localCatalog = LocalCatalogRepository();
+  final _catalogSync = CatalogSyncService();
   final ImagePicker _picker = ImagePicker();
 
   Map<String, dynamic>? _detail;
@@ -454,7 +458,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     List<Map<String, dynamic>> items;
     try {
-      items = await _api.catalogItemsForSale(widget.businessId);
+      await _catalogSync.ensureBootstrap(widget.businessId);
+      items = await _localCatalog.items(
+        widget.businessId,
+        includeInactive: false,
+      );
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
       return;
