@@ -12,6 +12,7 @@ import '../services/local_document_repository.dart';
 import '../services/local_job_repository.dart';
 import '../widgets/job_compact_card.dart';
 import 'jobs/job_detail_screen.dart';
+import 'jobs/job_document_screen.dart';
 
 class JobsScreen extends StatefulWidget {
   const JobsScreen({
@@ -186,6 +187,25 @@ class _JobsScreenState extends State<JobsScreen> {
     } catch (_) {
       // The visible online screen is already current. Persistence retries later.
     }
+  }
+
+  Future<void> _openDocument(Map<String, dynamic> document) async {
+    final id = document['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: id,
+          isOwner: widget.roleCode == 'owner',
+          canManageExpenses: <String>{'owner', 'manager', 'office'}
+              .contains(widget.roleCode),
+        ),
+      ),
+    );
+    await _load();
+    widget.onJobsChanged?.call();
   }
 
   Future<void> _openJob(Map<String, dynamic> job) async {
@@ -534,6 +554,7 @@ class _JobsScreenState extends State<JobsScreen> {
             ..._documentMatches.map(
               (document) => Card(
                 child: ListTile(
+                  onTap: () => _openDocument(document),
                   leading: Icon(
                     document['kind'] == 'estimate'
                         ? Icons.request_quote_outlined
