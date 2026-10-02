@@ -3302,6 +3302,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       num amount, {
       bool emphasized = false,
     }) {
+      final emphasizedColor =
+          amount < 0 ? Colors.red.shade700 : Colors.green.shade700;
+
       return Container(
         margin: EdgeInsets.only(bottom: emphasized ? 12 : 2),
         padding: EdgeInsets.symmetric(
@@ -3310,10 +3313,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         ),
         decoration: emphasized
             ? BoxDecoration(
-                color: Colors.green.withValues(alpha: 0.11),
+                color: emphasizedColor.withValues(alpha: 0.11),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: Colors.green.withValues(alpha: 0.28),
+                  color: emphasizedColor.withValues(alpha: 0.28),
                 ),
               )
             : null,
@@ -3334,7 +3337,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               style: TextStyle(
                 fontSize: emphasized ? 22 : 17,
                 fontWeight: FontWeight.w900,
-                color: emphasized ? Colors.green.shade700 : null,
+                color: emphasized ? emphasizedColor : null,
               ),
             ),
           ],
@@ -3363,20 +3366,29 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     ),
                   ),
                 ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    '${margin.toStringAsFixed(1)}%',
-                    style: TextStyle(
-                      color: Colors.green.shade700,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
+                Builder(
+                  builder: (context) {
+                    final marginColor = profit < 0
+                        ? Colors.red.shade700
+                        : Colors.green.shade700;
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: marginColor.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '${margin.toStringAsFixed(1)}%',
+                        style: TextStyle(
+                          color: marginColor,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
