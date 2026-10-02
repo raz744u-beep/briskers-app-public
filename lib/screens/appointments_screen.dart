@@ -548,32 +548,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     );
   }
 
-  Widget _filterChip(String value, String label) {
-    final selected = _filter == value;
-    return ChoiceChip(
-      label: Text(
-        label,
-        maxLines: 1,
-        softWrap: false,
-      ),
-      selected: selected,
-      onSelected: (_) {
-        setState(() => _filter = value);
-        _load();
-      },
-      labelStyle: TextStyle(
-        fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-        color: selected ? Colors.white : BriskersColors.appointments,
-      ),
-      selectedColor: BriskersColors.appointments,
-      backgroundColor: BriskersColors.appointments.withValues(alpha: 0.08),
-      side: BorderSide(
-        color: BriskersColors.appointments.withValues(alpha: 0.35),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      visualDensity: VisualDensity.compact,
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
