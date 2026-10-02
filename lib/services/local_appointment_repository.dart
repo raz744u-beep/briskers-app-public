@@ -66,7 +66,9 @@ class LocalAppointmentRepository {
          ))
       ''');
       final like = '%$query%';
-      for (var i = 0; i < 8; i++) variables.add(Variable<String>(like));
+      for (var i = 0; i < 8; i++) {
+        variables.add(Variable<String>(like));
+      }
     }
 
     final order = filter == 'past'
