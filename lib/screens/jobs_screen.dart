@@ -362,17 +362,15 @@ class _JobsScreenState extends State<JobsScreen> {
               children: [
                 Row(
                   children: [
-                    Expanded(
-                      child: Text(
-                        tr('jobs'),
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                    color: BriskersColors.jobs,
-                                  ),
-                      ),
+                    Text(
+                      tr('jobs'),
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: BriskersColors.jobs,
+                                ),
                     ),
                     const SizedBox(width: 8),
-PopupMenuButton<String>(
+                    PopupMenuButton<String>(
                     tooltip: tr('filterJobs'),
                     onSelected: (value) {
                       setState(() => _selectedStatus = value == '__all__' ? null : value);
@@ -465,6 +463,7 @@ PopupMenuButton<String>(
                       },
                     ),
                   ),
+                    const Spacer(),
                     if (_rows != null)
                       Text(
                         '${tr('total')} $_totalCount',
