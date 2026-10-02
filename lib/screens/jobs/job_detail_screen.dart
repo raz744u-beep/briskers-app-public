@@ -3021,17 +3021,48 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           ),
         if (_canSeeFinancial)
           const PopupMenuItem(
-            value: 'invoice',
+            value: 'identifix',
             child: ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
               leading: Icon(
-                Icons.receipt_long_outlined,
-                color: BriskersColors.invoices,
+                Icons.document_scanner_outlined,
+                color: BriskersColors.estimates,
               ),
-              title: Text('New invoice'),
+              title: Text(
+                'Import from Identifix',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: Text('Scan or upload printed estimate'),
             ),
           ),
+        if (_canSeeFinancial)
+          PopupMenuItem(
+            value: 'invoice',
+            child: Container(
+              decoration: BoxDecoration(
+                color: BriskersColors.invoices.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.symmetric(horizontal: 10),
+                leading: Icon(
+                  Icons.receipt_long_outlined,
+                  color: BriskersColors.invoices,
+                ),
+                title: Text(
+                  'New invoice',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: BriskersColors.invoices,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (_canSeeFinancial && _canManage)
+          const PopupMenuDivider(),
         if (_canManage)
           const PopupMenuItem(
             value: 'expense',
@@ -3064,6 +3095,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     if (choice == 'inspection') { if (_preInspection == null) await _editPreInspectionDetails(); if (mounted) await _openSectionModal('inspection'); }
     if (choice == 'finding') await _addFinding();
     if (choice == 'estimate') await _createEstimate();
+    if (choice == 'identifix') await _importIdentifixEstimate();
     if (choice == 'invoice') await _createInvoice();
     if (choice == 'expense') await _addJobExpense();
     if (choice == 'quick_expense') await _addQuickJobExpense();
@@ -4192,7 +4224,30 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                               ),
                               PopupMenuItem(
                                 value: 'invoice',
-                                child: Text('New invoice'),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: BriskersColors.invoices
+                                        .withValues(alpha: 0.10),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const ListTile(
+                                    dense: true,
+                                    contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                    ),
+                                    leading: Icon(
+                                      Icons.receipt_long_outlined,
+                                      color: BriskersColors.invoices,
+                                    ),
+                                    title: Text(
+                                      'New invoice',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        color: BriskersColors.invoices,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ),
                             ],
                             icon: const Icon(Icons.add_circle_outline),
