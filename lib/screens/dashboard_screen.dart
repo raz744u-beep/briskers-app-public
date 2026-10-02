@@ -65,6 +65,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool get _allowRecurring =>
       widget.roleCode == 'owner' || widget.roleCode == 'manager';
 
+  String _friendlyDashboardError(Object error) {
+    final text = error.toString().toLowerCase();
+    if (text.contains('socketexception') ||
+        text.contains('failed host lookup') ||
+        text.contains('network') ||
+        text.contains('connection')) {
+      return 'Connection unavailable. Showing the most recent saved information.';
+    }
+    return 'Could not refresh the dashboard. Pull down to try again.';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -121,7 +132,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _error = null;
       });
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) {
+        setState(() => _error = _friendlyDashboardError(error));
+      }
     }
   }
 
