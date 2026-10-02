@@ -480,23 +480,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            void filter(String value) {
-              final query = value.trim().toLowerCase();
+            Future<void> filter(String value) async {
+              final results = await _localCatalog.items(
+                widget.businessId,
+                search: value.trim().isEmpty ? null : value,
+                includeInactive: false,
+              );
+              if (!sheetContext.mounted) return;
               setSheetState(() {
-                filtered = query.isEmpty
-                    ? List<Map<String, dynamic>>.from(items)
-                    : items
-                        .where(
-                          (item) =>
-                              (item['name']?.toString().toLowerCase() ?? '')
-                                  .contains(query) ||
-                              (item['description']
-                                          ?.toString()
-                                          .toLowerCase() ??
-                                      '')
-                                  .contains(query),
-                        )
-                        .toList();
+                filtered = results;
               });
             }
 
