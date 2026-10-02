@@ -351,239 +351,258 @@ class _JobsScreenState extends State<JobsScreen> {
   Widget build(BuildContext context) {
     final visible = _visibleRows;
 
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 80),
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  tr('jobs'),
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: BriskersColors.jobs,
+    return Column(
+      children: [
+        Material(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          elevation: 1,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        tr('jobs'),
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: BriskersColors.jobs,
+                                  ),
                       ),
-                ),
-              ),
-              if (_rows != null)
-                Text(
-                  '${tr('total')} $_totalCount',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: BriskersColors.jobs,
-                        fontWeight: FontWeight.w700,
+                    ),
+                    if (_rows != null)
+                      Text(
+                        '${tr('total')} $_totalCount',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: BriskersColors.jobs,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                       ),
+                  ],
                 ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          SearchBar(
-            controller: _search,
-            hintText: 'Search customer, job, vehicle, VIN or plate',
-            leading: const Icon(Icons.search),
-            trailing: [
-              if (_search.text.isNotEmpty)
-                IconButton(
-                  tooltip: 'Clear',
-                  onPressed: () {
-                    _search.clear();
+                const SizedBox(height: 8),
+                SearchBar(
+                  controller: _search,
+                  hintText: 'Search customer, job, vehicle, VIN or plate',
+                  leading: const Icon(Icons.search),
+                  trailing: [
+                    if (_search.text.isNotEmpty)
+                      IconButton(
+                        tooltip: 'Clear',
+                        onPressed: () {
+                                _search.clear();
+                                setState(() {});
+                                _load();
+                        },
+                        icon: const Icon(Icons.close),
+                      ),
+                  ],
+                  onChanged: (_) {
                     setState(() {});
                     _load();
                   },
-                  icon: const Icon(Icons.close),
                 ),
-            ],
-            onChanged: (_) {
-              setState(() {});
-              _load();
-            },
-          ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: PopupMenuButton<String>(
-              tooltip: tr('filterJobs'),
-              onSelected: (value) {
-                setState(() => _selectedStatus = value == '__all__' ? null : value);
-                _load();
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem<String>(
-                  value: '__all__',
-                  child: Row(
-                    children: [
-                      const Icon(Icons.all_inclusive),
-                      const SizedBox(width: 10),
-                      Expanded(child: Text(tr('all'))),
-                      _menuCount(_statusCounts.values.fold<int>(0, (a, b) => a + b), alwaysShow: true),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: PopupMenuButton<String>(
+                    tooltip: tr('filterJobs'),
+                    onSelected: (value) {
+                      setState(() => _selectedStatus = value == '__all__' ? null : value);
+                      _load();
+                    },
+                    itemBuilder: (_) => [
+                      PopupMenuItem<String>(
+                        value: '__all__',
+                        child: Row(
+                                children: [
+                                  const Icon(Icons.all_inclusive),
+                                  const SizedBox(width: 10),
+                                  Expanded(child: Text(tr('all'))),
+                                  _menuCount(_statusCounts.values.fold<int>(0, (a, b) => a + b), alwaysShow: true),
+                                ],
+                        ),
+                      ),
+                      ..._statuses.map((status) {
+                        final color =
+                                  colorFromHex(status['color_hex']?.toString());
+                        final code = status['code']?.toString() ?? '';
+                        final count = _statusCount(code);
+                        return PopupMenuItem<String>(
+                                value: code,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      jobStatusIcon(status['icon_key']?.toString()),
+                                      color: color,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(jobStatusLabel(status['code']?.toString(), status['name']?.toString() ?? '')),
+                                    ),
+                                    _menuCount(count),
+                                  ],
+                                ),
+                        );
+                      }),
                     ],
+                    child: Builder(
+                      builder: (context) {
+                        Map<String, dynamic>? selected;
+                        if (_selectedStatus != null) {
+                                for (final status in _statuses) {
+                                  if (status['code']?.toString() == _selectedStatus) {
+                                    selected = status;
+                                    break;
+                                  }
+                                }
+                        }
+                        final color = selected == null
+                                  ? BriskersColors.jobs
+                                  : colorFromHex(selected['color_hex']?.toString());
+                        final label = selected == null
+                                  ? tr('all')
+                                  : jobStatusLabel(selected['code']?.toString(), selected['name']?.toString() ?? '');
+
+                        return Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: color.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: color.withValues(alpha: 0.45),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      label,
+                                      style: TextStyle(
+                                        color: color,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Icon(
+                                      Icons.chevron_right,
+                                      size: 18,
+                                      color: color,
+                                    ),
+                                  ],
+                                ),
+                        );
+                      },
+                    ),
                   ),
                 ),
-                ..._statuses.map((status) {
-                  final color =
-                      colorFromHex(status['color_hex']?.toString());
-                  final code = status['code']?.toString() ?? '';
-                  final count = _statusCount(code);
-                  return PopupMenuItem<String>(
-                    value: code,
-                    child: Row(
-                      children: [
-                        Icon(
-                          jobStatusIcon(status['icon_key']?.toString()),
-                          color: color,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(jobStatusLabel(status['code']?.toString(), status['name']?.toString() ?? '')),
-                        ),
-                        _menuCount(count),
-                      ],
-                    ),
-                  );
-                }),
-              ],
-              child: Builder(
-                builder: (context) {
-                  Map<String, dynamic>? selected;
-                  if (_selectedStatus != null) {
-                    for (final status in _statuses) {
-                      if (status['code']?.toString() == _selectedStatus) {
-                        selected = status;
-                        break;
-                      }
-                    }
-                  }
-                  final color = selected == null
-                      ? BriskersColors.jobs
-                      : colorFromHex(selected['color_hex']?.toString());
-                  final label = selected == null
-                      ? tr('all')
-                      : jobStatusLabel(selected['code']?.toString(), selected['name']?.toString() ?? '');
 
-                  return Container(
+              ],
+            ),
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 80),
+              children: [
+                if (_showingLocal)
+                  Container(
+                    margin: const EdgeInsets.symmetric(vertical: 8),
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
+                      horizontal: 10,
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: color.withValues(alpha: 0.45),
-                      ),
+                      color: BriskersColors.jobs.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(9),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                    child: const Row(
                       children: [
-                        Text(
-                          label,
-                          style: TextStyle(
-                            color: color,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(width: 3),
-                        Icon(
-                          Icons.chevron_right,
-                          size: 18,
-                          color: color,
+                        Icon(Icons.cloud_off_outlined, size: 18),
+                        SizedBox(width: 7),
+                        Expanded(
+                                child: Text(
+                                  'Showing saved jobs • online actions are temporarily disabled',
+                                  style: TextStyle(fontWeight: FontWeight.w700),
+                                ),
                         ),
                       ],
                     ),
-                  );
-                },
-              ),
-            ),
-          ),
-          if (_showingLocal)
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 8),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 8,
-              ),
-              decoration: BoxDecoration(
-                color: BriskersColors.jobs.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.cloud_off_outlined, size: 18),
-                  SizedBox(width: 7),
-                  Expanded(
+                  ),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text(
-                      'Showing saved jobs • online actions are temporarily disabled',
-                      style: TextStyle(fontWeight: FontWeight.w700),
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
                     ),
                   ),
+                const SizedBox(height: 6),
+                if (_search.text.trim().isNotEmpty && _documentMatches.isNotEmpty) ...[
+                  Text(
+                    'Invoices & estimates',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: BriskersColors.invoices,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  ..._documentMatches.map(
+                    (document) => Card(
+                      child: ListTile(
+                        onTap: () => _openDocument(document),
+                        leading: Icon(
+                                document['kind'] == 'estimate'
+                                    ? Icons.request_quote_outlined
+                                    : Icons.receipt_long_outlined,
+                                color: BriskersColors.invoices,
+                        ),
+                        title: Text(
+                                '${document['kind'] == 'estimate' ? 'Estimate' : 'Invoice'} #${document['document_number'] ?? ''}',
+                        ),
+                        subtitle: Text(
+                                [
+                                  document['customer_name'],
+                                  if ((document['job_number']?.toString() ?? '').isNotEmpty)
+                                    'Job #${document['job_number']}',
+                                  document['vehicle'],
+                                ].where((value) => value != null && value.toString().isNotEmpty).join(' • '),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                 ],
-              ),
+                if (_rows == null)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                else if (visible.isEmpty)
+                  const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(18),
+                      child: Text('No jobs in this status.'),
+                    ),
+                  )
+                else
+                  ...visible.map(_jobCard),
+
+              ],
             ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                _error!,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
-                ),
-              ),
-            ),
-          const SizedBox(height: 6),
-          if (_search.text.trim().isNotEmpty && _documentMatches.isNotEmpty) ...[
-            Text(
-              'Invoices & estimates',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: BriskersColors.invoices,
-                  ),
-            ),
-            const SizedBox(height: 6),
-            ..._documentMatches.map(
-              (document) => Card(
-                child: ListTile(
-                  onTap: () => _openDocument(document),
-                  leading: Icon(
-                    document['kind'] == 'estimate'
-                        ? Icons.request_quote_outlined
-                        : Icons.receipt_long_outlined,
-                    color: BriskersColors.invoices,
-                  ),
-                  title: Text(
-                    '${document['kind'] == 'estimate' ? 'Estimate' : 'Invoice'} #${document['document_number'] ?? ''}',
-                  ),
-                  subtitle: Text(
-                    [
-                      document['customer_name'],
-                      if ((document['job_number']?.toString() ?? '').isNotEmpty)
-                        'Job #${document['job_number']}',
-                      document['vehicle'],
-                    ].where((value) => value != null && value.toString().isNotEmpty).join(' • '),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          if (_rows == null)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (visible.isEmpty)
-            const Card(
-              child: Padding(
-                padding: EdgeInsets.all(18),
-                child: Text('No jobs in this status.'),
-              ),
-            )
-          else
-            ...visible.map(_jobCard),
-        ],
-      ),
+          ),
+        ),
+      ],
     );
   }
 }
