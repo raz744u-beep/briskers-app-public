@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -29,6 +31,8 @@ class DocumentsScreen extends StatefulWidget {
 
 class _DocumentsScreenState extends State<DocumentsScreen> {
   static const _api = BriskersApi();
+  static final Map<String, List<Map<String, dynamic>>> _rowCache = {};
+  static final Map<String, List<Map<String, dynamic>>> _styleCache = {};
 
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _invoiceStyles = const [];
@@ -116,21 +120,44 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     return Icons.circle;
   }
 
+  String get _cacheKey => '${widget.businessId}:${widget.kind}';
+
   @override
   void initState() {
     super.initState();
-    _load();
+    final cachedRows = _rowCache[_cacheKey];
+    final cachedStyles = _styleCache[widget.businessId];
+    if (cachedRows != null) {
+      _rows = List<Map<String, dynamic>>.from(cachedRows);
+    }
+    if (!_estimate && cachedStyles != null) {
+      _invoiceStyles = List<Map<String, dynamic>>.from(cachedStyles);
+    }
+    unawaited(_load());
   }
 
   Future<void> _load() async {
     try {
-      final rows = await _api.documents(
-        widget.businessId,
-        kind: widget.kind,
-      );
-      final styles = _estimate
-          ? const <Map<String, dynamic>>[]
-          : await _api.invoiceStatusStyles(widget.businessId);
+      final results = await Future.wait<dynamic>([
+        _api.documents(
+          widget.businessId,
+          kind: widget.kind,
+        ),
+        if (!_estimate)
+          _api.invoiceStatusStyles(widget.businessId)
+        else
+          Future.value(const <Map<String, dynamic>>[]),
+      ]);
+
+      final rows = List<Map<String, dynamic>>.from(results[0] as List);
+      final styles = List<Map<String, dynamic>>.from(results[1] as List);
+
+      _rowCache[_cacheKey] = List<Map<String, dynamic>>.from(rows);
+      if (!_estimate) {
+        _styleCache[widget.businessId] =
+            List<Map<String, dynamic>>.from(styles);
+      }
+
       if (!mounted) return;
       setState(() {
         _rows = rows;
@@ -140,8 +167,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _rows = const [];
-        _error = error.toString();
+        _rows ??= _rowCache[_cacheKey] ?? const [];
+        _error = _rows!.isEmpty
+            ? 'Could not refresh documents. Pull down to try again.'
+            : null;
       });
     }
   }
@@ -239,7 +268,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         ),
       ),
     );
-    await _load();
+
+    if (mounted) unawaited(_load());
   }
 
   Future<void> _deleteDocument(Map<String, dynamic> row) async {
