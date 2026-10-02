@@ -21,6 +21,7 @@ class _TaxInvoicingSettingsScreenState
   static const _api = BriskersApi();
 
   final _taxPercent = TextEditingController();
+  final _warrantyMessage = TextEditingController();
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -34,6 +35,7 @@ class _TaxInvoicingSettingsScreenState
   @override
   void dispose() {
     _taxPercent.dispose();
+    _warrantyMessage.dispose();
     super.dispose();
   }
 
@@ -53,6 +55,8 @@ class _TaxInvoicingSettingsScreenState
       if (!mounted) return;
       setState(() {
         _taxPercent.text = _percentText(data['sales_tax_rate']);
+        _warrantyMessage.text =
+            data['invoice_warranty_message']?.toString() ?? '';
         _loading = false;
         _error = null;
       });
@@ -81,11 +85,14 @@ class _TaxInvoicingSettingsScreenState
       await _api.updateTaxSettings(
         widget.businessId,
         salesTaxRate: percent / 100,
+        invoiceWarrantyMessage: _warrantyMessage.text.trim().isEmpty
+            ? null
+            : _warrantyMessage.text.trim(),
       );
       if (!mounted) return;
       setState(() => _saving = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tax settings saved.')),
+        const SnackBar(content: Text('Invoicing settings saved.')),
       );
     } catch (error) {
       if (!mounted) return;
@@ -130,6 +137,29 @@ class _TaxInvoicingSettingsScreenState
                     helperText: 'Example: 9.45',
                   ),
                 ),
+                const SizedBox(height: 24),
+                Text(
+                  'Invoice warranty message',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Optional. This text appears in the full-width Warranty Information section on customer invoices and estimates.',
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _warrantyMessage,
+                  minLines: 4,
+                  maxLines: 8,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Warranty message',
+                    alignLabelWithHint: true,
+                    border: OutlineInputBorder(),
+                  ),
+                ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
                   Text(
@@ -149,7 +179,7 @@ class _TaxInvoicingSettingsScreenState
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.save_outlined),
-                  label: const Text('Save Tax Rate'),
+                  label: const Text('Save invoicing settings'),
                 ),
               ],
             ),
