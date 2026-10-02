@@ -3029,11 +3029,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 Icons.document_scanner_outlined,
                 color: BriskersColors.estimates,
               ),
-              title: Text(
-                'Import from Identifix',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              subtitle: Text('Scan or upload printed estimate'),
+              title: Text('Import from Identifix'),
             ),
           ),
         if (_canSeeFinancial)
@@ -4198,16 +4194,30 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             },
                             itemBuilder: (_) => [
                               const PopupMenuItem(
-                                value: 'estimate',
-                                child: Text('New estimate'),
-                              ),
-                              const PopupMenuItem(
                                 value: 'identifix',
                                 child: ListTile(
                                   contentPadding: EdgeInsets.zero,
                                   leading: Icon(Icons.document_scanner_outlined),
                                   title: Text('Import from Identifix'),
                                   subtitle: Text('Scan or upload printed estimate'),
+                                ),
+                              ),
+                              const PopupMenuItem(
+                                value: 'estimate',
+                                child: ListTile(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Icon(
+                                    Icons.request_quote_outlined,
+                                    color: BriskersColors.estimates,
+                                  ),
+                                  title: Text(
+                                    'New estimate',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      color: BriskersColors.estimates,
+                                    ),
+                                  ),
                                 ),
                               ),
                               const PopupMenuDivider(),
