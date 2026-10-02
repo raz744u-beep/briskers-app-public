@@ -27,7 +27,7 @@ class LocalAppointmentRepository {
 
   Future<List<Map<String, dynamic>>> appointments(
     String businessId, {
-    String filter = 'today',
+    String filter = 'all',
     String? search,
     int pastLimit = 30,
   }) async {
