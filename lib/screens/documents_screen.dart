@@ -438,6 +438,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     child: Text(
                       tr('viewExpenses'),
                       style: const TextStyle(
+                        color: BriskersColors.expenses,
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
                       ),
