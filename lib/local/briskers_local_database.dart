@@ -371,12 +371,18 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (migrator) async {
           await migrator.createAll();
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_status_created ON local_jobs (business_id, status, created_at DESC)');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_number ON local_jobs (business_id, job_number)');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_customer ON local_jobs (business_id, customer_name)');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_vehicle ON local_jobs (business_id, vehicle_label)');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_vin ON local_jobs (business_id, vehicle_vin)');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_plate ON local_jobs (business_id, vehicle_plate)');
         },
         onUpgrade: (migrator, from, to) async {
           if (from < 2) {
@@ -424,6 +430,14 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
           }
           if (from < 8) {
             await migrator.createTable(localCatalogItems);
+          }
+          if (from < 9) {
+            await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_status_created ON local_jobs (business_id, status, created_at DESC)');
+            await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_number ON local_jobs (business_id, job_number)');
+            await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_customer ON local_jobs (business_id, customer_name)');
+            await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_vehicle ON local_jobs (business_id, vehicle_label)');
+            await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_vin ON local_jobs (business_id, vehicle_vin)');
+            await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_plate ON local_jobs (business_id, vehicle_plate)');
           }
         },
       );
