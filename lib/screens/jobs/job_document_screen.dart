@@ -848,27 +848,40 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _previewPdf() async {
     final detail = await _preparePdf();
     if (detail == null || !mounted) return;
-    final bytes = await DocumentPdfService.build(detail);
 
-    if (!mounted) return;
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => Scaffold(
-          appBar: AppBar(
-            backgroundColor: _accent.withValues(alpha: 0.10),
-            title: Text(_estimate ? 'Estimate PDF' : 'Invoice PDF'),
-          ),
-          body: PdfPreview(
-            build: (format) async => bytes,
-            pdfFileName: DocumentPdfService.fileName(detail),
-            canChangeOrientation: false,
-            canChangePageFormat: false,
-            canDebug: false,
+    try {
+      final bytes = await DocumentPdfService.build(detail);
+      if (!mounted) return;
+
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => Scaffold(
+            appBar: AppBar(
+              backgroundColor: _accent.withValues(alpha: 0.10),
+              title: Text(_estimate ? 'Estimate PDF' : 'Invoice PDF'),
+            ),
+            body: PdfPreview(
+              build: (format) async => bytes,
+              pdfFileName: DocumentPdfService.fileName(detail),
+              canChangeOrientation: false,
+              canChangePageFormat: false,
+              canDebug: false,
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Could not create the PDF preview. Please try again.';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not create the PDF preview.'),
+        ),
+      );
+    }
   }
 
   Future<void> _printPdf() async {
