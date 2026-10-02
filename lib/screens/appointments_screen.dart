@@ -565,20 +565,11 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
               children: [
                 Row(
                   children: [
-                    Expanded(
-                      child: Text(
-                        tr('appointments'),
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                    color: BriskersColors.appointments,
-                                  ),
-                      ),
-                    ),
                     Text(
-                      '${tr('total')} $total',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      tr('appointments'),
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
                                   color: BriskersColors.appointments,
-                                  fontWeight: FontWeight.w700,
                                 ),
                     ),
                     const SizedBox(width: 8),
@@ -603,6 +594,14 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                         ),
                         avatar: const Icon(Icons.chevron_right, size: 18),
                       ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${tr('total')} $total',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: BriskersColors.appointments,
+                                  fontWeight: FontWeight.w700,
+                                ),
                     ),
                     if (_canManage && _onlineReady) ...[
                       const SizedBox(width: 8),
