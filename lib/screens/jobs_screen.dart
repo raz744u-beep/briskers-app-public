@@ -37,6 +37,9 @@ class _JobsScreenState extends State<JobsScreen> {
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _statuses = const [];
   String? _selectedStatus;
+  final TextEditingController _search = TextEditingController();
+  int _totalCount = 0;
+  Map<String, int> _statusCounts = const {};
   String? _error;
   String? _busyJobId;
   bool _onlineReady = false;
@@ -54,6 +57,12 @@ class _JobsScreenState extends State<JobsScreen> {
   }
 
   @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
   void didUpdateWidget(covariant JobsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.refreshToken != widget.refreshToken) {
@@ -65,10 +74,22 @@ class _JobsScreenState extends State<JobsScreen> {
     var localAvailable = false;
 
     try {
+      final query = _search.text.trim();
       final localResults = await Future.wait<dynamic>([
-        _localJobs.listJobs(widget.businessId),
+        _localJobs.listJobs(
+          widget.businessId,
+          status: _selectedStatus,
+          search: query.isEmpty ? null : query,
+          limit: 30,
+        ),
         _localJobs.jobStatuses(widget.businessId),
         _localJobs.hasJobBootstrap(widget.businessId),
+        _localJobs.jobCount(
+          widget.businessId,
+          status: _selectedStatus,
+          search: query.isEmpty ? null : query,
+        ),
+        _localJobs.jobStatusCounts(widget.businessId),
       ]);
 
       final localRows =
@@ -76,6 +97,8 @@ class _JobsScreenState extends State<JobsScreen> {
       final localStatuses =
           List<Map<String, dynamic>>.from(localResults[1] as List);
       final bootstrapped = localResults[2] == true;
+      final localTotal = localResults[3] as int;
+      final statusCounts = Map<String, int>.from(localResults[4] as Map);
 
       localAvailable = bootstrapped || localRows.isNotEmpty;
 
@@ -85,6 +108,8 @@ class _JobsScreenState extends State<JobsScreen> {
           _statuses = localStatuses;
           _showingLocal = true;
           _onlineReady = false;
+          _totalCount = localTotal;
+          _statusCounts = statusCounts;
           _error = null;
         });
       }
@@ -103,7 +128,7 @@ class _JobsScreenState extends State<JobsScreen> {
           List<Map<String, dynamic>>.from(results[1] as List);
 
       if (!mounted) return;
-      setState(() {
+      if (!localAvailable) setState(() {
         _rows = onlineRows;
         _statuses = onlineStatuses;
         _showingLocal = false;
@@ -201,10 +226,7 @@ class _JobsScreenState extends State<JobsScreen> {
         .toList();
   }
 
-  int _statusCount(String code) {
-    final rows = _rows ?? const <Map<String, dynamic>>[];
-    return rows.where((job) => job['status']?.toString() == code).length;
-  }
+  int _statusCount(String code) => _statusCounts[code] ?? 0;
 
   Widget _menuCount(int count, {bool alwaysShow = false}) {
     if (count <= 0 && !alwaysShow) return const SizedBox.shrink();
@@ -327,7 +349,7 @@ class _JobsScreenState extends State<JobsScreen> {
               ),
               if (_rows != null)
                 Text(
-                  '${tr('total')} ${_rows!.length}',
+                  '${tr('total')} $_totalCount',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         color: BriskersColors.jobs,
                         fontWeight: FontWeight.w700,
@@ -336,13 +358,36 @@ class _JobsScreenState extends State<JobsScreen> {
             ],
           ),
           const SizedBox(height: 8),
+          SearchBar(
+            controller: _search,
+            hintText: 'Search customer, job, vehicle, VIN or plate',
+            leading: const Icon(Icons.search),
+            trailing: [
+              if (_search.text.isNotEmpty)
+                IconButton(
+                  tooltip: 'Clear',
+                  onPressed: () {
+                    _search.clear();
+                    setState(() {});
+                    _load();
+                  },
+                  icon: const Icon(Icons.close),
+                ),
+            ],
+            onChanged: (_) {
+              setState(() {});
+              _load();
+            },
+          ),
+          const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerLeft,
             child: PopupMenuButton<String>(
               tooltip: tr('filterJobs'),
-              onSelected: (value) => setState(
-                () => _selectedStatus = value == '__all__' ? null : value,
-              ),
+              onSelected: (value) {
+                setState(() => _selectedStatus = value == '__all__' ? null : value);
+                _load();
+              },
               itemBuilder: (_) => [
                 PopupMenuItem<String>(
                   value: '__all__',
@@ -351,7 +396,7 @@ class _JobsScreenState extends State<JobsScreen> {
                       const Icon(Icons.all_inclusive),
                       const SizedBox(width: 10),
                       Expanded(child: Text(tr('all'))),
-                      _menuCount(_rows?.length ?? 0, alwaysShow: true),
+                      _menuCount(_statusCounts.values.fold<int>(0, (a, b) => a + b), alwaysShow: true),
                     ],
                   ),
                 ),
