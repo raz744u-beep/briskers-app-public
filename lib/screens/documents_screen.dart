@@ -872,6 +872,92 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         color: accent,
                       ),
                 ),
+                const SizedBox(width: 8),
+                PopupMenuButton<String>(
+                  tooltip: 'Filter $_title',
+                  onSelected: (value) => setState(
+                    () => _selectedStatus = value == '__all__' ? null : value,
+                  ),
+                  itemBuilder: (_) => [
+                    PopupMenuItem<String>(
+                      value: '__all__',
+                      child: Row(
+                        children: [
+                          const Icon(Icons.all_inclusive),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(tr('all'))),
+                          _menuCount(
+                            _rows?.length ?? 0,
+                            alwaysShow: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                    ..._statuses.map((status) {
+                      final count = _statusCount(status);
+                      return PopupMenuItem<String>(
+                        value: status,
+                        child: Row(
+                          children: [
+                            Icon(
+                              _statusIcon(status),
+                              size: 16,
+                              color: _statusColor(status),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _localizedStatusLabel(status),
+                              ),
+                            ),
+                            _menuCount(count),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: (_selectedStatus == null
+                                ? accent
+                                : _statusColor(_selectedStatus!))
+                            .withValues(alpha: 0.50),
+                      ),
+                      color: (_selectedStatus == null
+                              ? accent
+                              : _statusColor(_selectedStatus!))
+                          .withValues(alpha: 0.08),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          selectedLabel,
+                          style: TextStyle(
+                            color: _selectedStatus == null
+                                ? accent
+                                : _statusColor(_selectedStatus!),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(width: 3),
+                        Icon(
+                          Icons.chevron_right,
+                          size: 18,
+                          color: _selectedStatus == null
+                              ? accent
+                              : _statusColor(_selectedStatus!),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
                 const Spacer(),
                 if (_rows != null)
                   Text(
@@ -883,102 +969,24 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   ),
               ],
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                PopupMenuButton<String>(
-                                tooltip: 'Filter $_title',
-                                onSelected: (value) => setState(
-                                  () => _selectedStatus = value == '__all__' ? null : value,
-                                ),
-                                itemBuilder: (_) => [
-                                  PopupMenuItem<String>(
-                                    value: '__all__',
-                                    child: Row(
-                                      children: [
-                                        const Icon(Icons.all_inclusive),
-                                        const SizedBox(width: 10),
-                                        Expanded(child: Text(tr('all'))),
-                                        _menuCount(_rows?.length ?? 0, alwaysShow: true),
-                                      ],
-                                    ),
-                                  ),
-                                  ..._statuses.map((status) {
-                                    final count = _statusCount(status);
-                                    return PopupMenuItem<String>(
-                                      value: status,
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            _statusIcon(status),
-                                            size: 16,
-                                            color: _statusColor(status),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Expanded(child: Text(_localizedStatusLabel(status))),
-                                          _menuCount(count),
-                                        ],
-                                      ),
-                                    );
-                                  }),
-                                ],
-                                child: Container(
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(999),
-                                    border: Border.all(
-                                      color: (_selectedStatus == null
-                                              ? accent
-                                              : _statusColor(_selectedStatus!))
-                                          .withValues(alpha: 0.50),
-                                    ),
-                                    color: (_selectedStatus == null
-                                            ? accent
-                                            : _statusColor(_selectedStatus!))
-                                        .withValues(alpha: 0.08),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        selectedLabel,
-                                        style: TextStyle(
-                                          color: _selectedStatus == null
-                                              ? accent
-                                              : _statusColor(_selectedStatus!),
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 3),
-                                      Icon(
-                                        Icons.chevron_right,
-                                        size: 18,
-                                        color: _selectedStatus == null
-                                            ? accent
-                                            : _statusColor(_selectedStatus!),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                if (!_estimate && widget.isOwner) ...[
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: BriskersColors.invoices,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
+            if (!_estimate && widget.isOwner) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: BriskersColors.invoices,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
                     ),
-                    onPressed: _showCloseInvoices,
-                    icon: const Icon(Icons.lock_outline, size: 18),
-                    label: const Text('Close invoices'),
                   ),
-                ],
-              ],
-            ),
+                  onPressed: _showCloseInvoices,
+                  icon: const Icon(Icons.lock_outline, size: 18),
+                  label: const Text('Close invoices'),
+                ),
+              ),
+            ],
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
