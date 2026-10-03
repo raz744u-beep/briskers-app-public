@@ -539,40 +539,36 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
       return Container(
         color: Colors.white,
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: widget.readOnly || _busy ? null : _enableWarranty,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
-              children: [
-                Checkbox(
-                  value: false,
-                  onChanged: widget.readOnly || _busy
-                      ? null
-                      : (value) {
-                          if (value == true) _enableWarranty();
-                        },
-                  activeColor: BriskersColors.invoices,
-                  visualDensity: VisualDensity.compact,
-                ),
-                const SizedBox(width: 4),
-                const Expanded(
-                  child: Text(
-                    'Extended warranty job',
-                    style: TextStyle(
-                      fontSize: 15.5,
-                      fontWeight: FontWeight.w800,
-                    ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              Checkbox(
+                value: false,
+                onChanged: widget.readOnly || _busy
+                    ? null
+                    : (value) {
+                        if (value == true) _enableWarranty();
+                      },
+                activeColor: BriskersColors.invoices,
+                visualDensity: VisualDensity.compact,
+              ),
+              const SizedBox(width: 4),
+              const Expanded(
+                child: Text(
+                  'Extended warranty job',
+                  style: TextStyle(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
-                const Icon(
-                  Icons.chevron_right,
-                  size: 22,
-                  color: Color(0xFF667085),
-                ),
-              ],
-            ),
+              ),
+              const Icon(
+                Icons.settings_outlined,
+                size: 20,
+                color: Color(0xFFB0B7C3),
+              ),
+            ],
           ),
         ),
       );
