@@ -3430,6 +3430,211 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
   }
 
+  Future<void> _captureCustomerSignature() async {
+    if (_estimate || _busy || _detail == null) return;
+
+    final detail = await _preparePdf();
+    if (detail == null || !mounted) return;
+
+    final disclaimers = List<dynamic>.from(
+      _warrantyDetail['disclaimers'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CustomerInvoiceSignatureScreen(
+          customerName: detail['customer_name']?.toString() ?? '',
+          invoiceNumber: detail['document_number']?.toString() ?? '',
+          invoiceTotal: _money(detail['total_amount']),
+          disclaimers: disclaimers,
+          extendedWarranty:
+              _warrantyDetail['extended_warranty'] == true,
+        ),
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
+    final bytes = result['bytes'];
+    final signerName = result['signer_name']?.toString().trim() ?? '';
+    if (bytes is! Uint8List || signerName.isEmpty) return;
+
+    setState(() => _busy = true);
+    try {
+      await _api.uploadDocumentSignature(
+        widget.businessId,
+        widget.documentId,
+        signerName: signerName,
+        bytes: bytes,
+      );
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Customer signature saved.'),
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _showSubmissionRequirements() async {
+    if (_estimate || _busy) return;
+
+    Map<String, dynamic> readiness;
+    try {
+      readiness = await _api.warrantySubmissionReadiness(
+        widget.businessId,
+        widget.documentId,
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+
+    if (!mounted) return;
+
+    final ready = readiness['ready'] == true;
+    final missing = List<dynamic>.from(
+      readiness['missing'] ?? const [],
+    ).map((item) => item.toString()).toList();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(
+          ready ? 'Ready for warranty submission' : 'Warranty submission blocked',
+        ),
+        content: ready
+            ? Text(
+                'All required warranty information is complete.\n\n'
+                'Submission email: '
+                '${readiness['submission_email'] ?? ''}',
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Complete the following before submitting:',
+                  ),
+                  const SizedBox(height: 10),
+                  ...missing.map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 5),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.error_outline,
+                            color: Color(0xFFC62828),
+                            size: 18,
+                          ),
+                          const SizedBox(width: 7),
+                          Expanded(child: Text(item)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: BriskersColors.invoices,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+
+    if (mounted) {
+      setState(() => _submissionReadiness = readiness);
+    }
+  }
+
+  Future<void> _prepareWarrantySubmission() async {
+    if (_estimate || _busy) return;
+
+    Map<String, dynamic> readiness;
+    try {
+      readiness = await _api.warrantySubmissionReadiness(
+        widget.businessId,
+        widget.documentId,
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+
+    if (readiness['ready'] != true) {
+      if (mounted) setState(() => _submissionReadiness = readiness);
+      await _showSubmissionRequirements();
+      return;
+    }
+
+    final detail = await _preparePdf();
+    if (detail == null || !mounted) return;
+
+    final signature = await _api.documentSignatureStatus(
+      widget.businessId,
+      widget.documentId,
+    );
+    final bucket = signature['bucket']?.toString() ?? '';
+    final key = signature['key']?.toString() ?? '';
+    if (bucket.isNotEmpty && key.isNotEmpty) {
+      detail['signature_bytes'] = await _api.downloadAttachment(bucket, key);
+      detail['signer_name'] = signature['signer_name'];
+      detail['signed_at'] = signature['signed_at'];
+      detail['signature_current'] = signature['is_current'] == true;
+    }
+
+    final bytes = await DocumentPdfService.build(detail);
+    final email = readiness['submission_email']?.toString() ?? '';
+
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Warranty submission ready'),
+            content: Text(
+              'The signed warranty PDF is complete.\n\n'
+              'Submit to: $email\n\n'
+              'The system share sheet will open with the signed PDF attached.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: BriskersColors.invoices,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed) return;
+
+    await Printing.sharePdf(
+      bytes: bytes,
+      filename: DocumentPdfService.fileName(detail),
+    );
+  }
+
   Future<void> _addStandardNote() async {
     if (_readOnly || _busy) return;
 
