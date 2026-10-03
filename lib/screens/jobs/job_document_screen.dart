@@ -13,6 +13,7 @@ import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
+import 'invoice_warranty_panel.dart';
 import 'job_detail_screen.dart';
 
 class JobDocumentScreen extends StatefulWidget {
@@ -3707,6 +3708,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         body: Column(
           children: [
             _customerHeader(),
+            if (!_estimate)
+              InvoiceWarrantyPanel(
+                businessId: widget.businessId,
+                documentId: widget.documentId,
+                expectedVersion: _version,
+                invoiceTotal: total,
+                detail: _warrantyDetail,
+                readOnly: _readOnly,
+                onChanged: _load,
+              ),
             _openFindingsBanner(),
             if (_estimate && _converted) _convertedInvoiceBanner(),
             Container(
