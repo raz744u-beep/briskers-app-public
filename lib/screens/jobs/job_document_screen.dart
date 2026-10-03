@@ -3741,10 +3741,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       await showDialog<void>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Standard notes'),
-          content: const Text(
-            'No standard note templates are configured yet.',
-          ),
+          title: Text(tr('standardNotes')),
+          content: Text(tr('noStandardNoteTemplates')),
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(dialogContext),
@@ -3957,22 +3955,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           children: [
             const ListTile(
               title: Text(
-                'Add disclaimer',
-                style: TextStyle(
+                tr('addDisclaimer'),
+                style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              subtitle: Text(
-                'Choose a template or write a custom disclaimer.',
-              ),
+              subtitle: Text(tr('chooseDisclaimerTemplate')),
             ),
             ListTile(
               leading: const Icon(
                 Icons.edit_note_outlined,
                 color: BriskersColors.invoices,
               ),
-              title: const Text('Custom disclaimer'),
+              title: Text(tr('customDisclaimer')),
               onTap: () => Navigator.pop(sheetContext, <String, dynamic>{}),
             ),
             if (templates.isNotEmpty) const Divider(height: 1),
@@ -4092,10 +4088,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 0, 8, 6),
                 child: Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'Invoice disclaimers',
-                        style: TextStyle(
+                        tr('invoiceDisclaimers'),
+                        style: const TextStyle(
                           fontSize: 21,
                           fontWeight: FontWeight.w900,
                         ),
@@ -4103,7 +4099,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                     ),
                     if (!_readOnly)
                       IconButton(
-                        tooltip: 'Add disclaimer',
+                        tooltip: tr('addDisclaimer'),
                         onPressed: () {
                           Navigator.pop(sheetContext);
                           _addDisclaimer();
@@ -4118,8 +4114,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
               Expanded(
                 child: disclaimers.isEmpty
-                    ? const Center(
-                        child: Text('No disclaimer on this invoice.'),
+                    ? Center(
+                        child: Text(tr('noDisclaimerOnInvoice')),
                       )
                     : ListView.separated(
                         itemCount: disclaimers.length,
@@ -4279,7 +4275,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             OutlinedButton.icon(
               onPressed: _busy ? null : _addStandardNote,
               icon: const Icon(Icons.playlist_add_outlined),
-              label: const Text('Add standard note'),
+              label: Text(tr('addStandardNote')),
               style: OutlinedButton.styleFrom(
                 foregroundColor: _estimate
                     ? BriskersColors.estimates
@@ -4303,13 +4299,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       ? const Color(0xFFC66A00)
                       : BriskersColors.invoices,
                 ),
-                title: const Text(
-                  'Disclaimer',
-                  style: TextStyle(fontWeight: FontWeight.w800),
+                title: Text(
+                  tr('disclaimer'),
+                  style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 subtitle: Text(
                   disclaimers.isEmpty
-                      ? 'None'
+                      ? tr('none')
                       : disclaimers.length == 1
                           ? disclaimers.first['title']?.toString() ?? '1 disclaimer'
                           : '${disclaimers.length} disclaimers',
@@ -4336,8 +4332,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   ),
                   title: Text(
                     signatureCurrent
-                        ? 'Customer signature complete'
-                        : 'Customer signature required',
+                        ? tr('customerSignatureComplete')
+                        : tr('customerSignatureRequired'),
                     style: TextStyle(
                       color: signatureCurrent
                           ? BriskersColors.invoices
@@ -4353,11 +4349,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                               DateFormat('MMM d, yyyy h:mm a')
                                   .format(signedAt.toLocal()),
                           ].join(' • ')
-                        : 'Required before final warranty/disclaimer submission.',
+                        : tr('signatureRequiredBeforeSubmission'),
                   ),
                   trailing: TextButton(
                     onPressed: _busy ? null : _captureCustomerSignature,
-                    child: Text(signatureCurrent ? 'Re-sign' : 'Sign'),
+                    child: Text(signatureCurrent ? tr('resign') : tr('sign')),
                   ),
                 ),
               ),
