@@ -4731,6 +4731,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       ? null
                       : () async {
                           await _collapseWorkspaceHeader();
+                          if (!mounted) return;
                           final action =
                               await showModalBottomSheet<String>(
                             context: context,
