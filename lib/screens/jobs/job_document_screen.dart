@@ -42,6 +42,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Map<String, dynamic>? _detail;
   Map<String, dynamic> _identifixMeta = const {};
   List<Map<String, dynamic>> _invoiceStyles = const [];
+  List<Map<String, dynamic>> _openFindings = const [];
   num _defaultTaxRate = 0;
   bool _loading = true;
   bool _busy = false;
@@ -70,8 +71,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       );
       final taxSettings = await _api.taxSettings(widget.businessId);
       List<Map<String, dynamic>> invoiceStyles = const [];
+      List<Map<String, dynamic>> openFindings = const [];
       if (detail['kind']?.toString() == 'invoice') {
         invoiceStyles = await _api.invoiceStatusStyles(widget.businessId);
+        final vehicleId = detail['vehicle_id']?.toString() ?? '';
+        if (vehicleId.isNotEmpty) {
+          try {
+            openFindings = await _api.vehicleFindings(
+              widget.businessId,
+              vehicleId,
+              includeResolved: false,
+            );
+          } catch (_) {
+            openFindings = const [];
+          }
+        }
       }
 
       Map<String, dynamic> identifixMeta = const {};
@@ -91,6 +105,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _detail = detail;
         _identifixMeta = identifixMeta;
         _invoiceStyles = invoiceStyles;
+        _openFindings = openFindings;
         _defaultTaxRate =
             num.tryParse(taxSettings['sales_tax_rate']?.toString() ?? '') ?? 0;
         _loading = false;
@@ -2017,6 +2032,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         ),
       ),
     );
+    if (mounted) await _load();
   }
 
   Future<void> _editNotes() async {
@@ -2477,6 +2493,97 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
   }
 
+  Widget _openFindingsBanner() {
+    if (_estimate || _openFindings.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final count = _openFindings.length;
+    final firstBody = _openFindings.first['body']?.toString().trim() ?? '';
+    final more = count > 1 ? count - 1 : 0;
+
+    return Material(
+      color: Colors.white,
+      child: InkWell(
+        onTap: _busy ? null : _showInvoiceFindings,
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF1F0),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFF4B7B2)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(
+                Icons.warning_amber_rounded,
+                color: Color(0xFFC62828),
+                size: 28,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$count OPEN FINDING${count == 1 ? '' : 'S'}',
+                      style: const TextStyle(
+                        color: Color(0xFFC62828),
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    if (firstBody.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        firstBody,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF26354D),
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (more > 0) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '+$more more open finding${more == 1 ? '' : 's'}',
+                        style: const TextStyle(
+                          color: Color(0xFF667085),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 2),
+                    const Text(
+                      'Review before closing this invoice',
+                      style: TextStyle(
+                        color: Color(0xFF667085),
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: Icon(
+                  Icons.chevron_right,
+                  color: Color(0xFFC62828),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
   Widget _customerHeader() {
     final customer = _detail?['customer_name']?.toString().trim() ?? '';
     final phone = _detail?['customer_phone']?.toString().trim() ?? '';
@@ -3473,6 +3580,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         body: Column(
           children: [
             _customerHeader(),
+            _openFindingsBanner(),
             if (_estimate && _converted) _convertedInvoiceBanner(),
             Container(
               decoration: const BoxDecoration(
