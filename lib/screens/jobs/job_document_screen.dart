@@ -3677,8 +3677,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (!confirmed) return;
 
     final filename = DocumentPdfService.fileName(detail);
-    final invoiceNumber =
-        detail['document_number']?.toString().trim() ?? '';
     final customerName =
         detail['customer_name']?.toString().trim() ?? '';
     final vehicle =
@@ -3688,9 +3686,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final authorization =
         detail['authorization_number']?.toString().trim() ?? '';
 
-    final subject = invoiceNumber.isEmpty
-        ? 'Briskers Warranty Invoice'
-        : 'Briskers Invoice #$invoiceNumber - Warranty Claim';
+    final subject = [
+      customerName,
+      authorization,
+    ].where((value) => value.isNotEmpty).join(' - ');
 
     final body = <String>[
       'Please find the attached signed invoice for warranty processing.',
