@@ -66,6 +66,29 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     _load();
   }
 
+  bool _findingNeedsInvoiceAttention(
+    Map<String, dynamic> finding, {
+    Map<String, dynamic>? detail,
+  }) {
+    final status = finding['status']?.toString() ?? 'open';
+    if (status == 'resolved') return false;
+
+    final document = detail ?? _detail;
+    final invoiceJobId = document?['job_id']?.toString() ?? '';
+    final repairJobId = finding['repair_job_id']?.toString() ?? '';
+
+    // A finding assigned to this same job is already being addressed here.
+    // It remains technically "in_job" until the job is completed, but it
+    // should not be shown as a red unresolved warning on this invoice.
+    if (status == 'in_job' &&
+        invoiceJobId.isNotEmpty &&
+        repairJobId == invoiceJobId) {
+      return false;
+    }
+
+    return true;
+  }
+
   Future<void> _load() async {
     try {
       final detail = await _api.documentDetail(
@@ -80,11 +103,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         final vehicleId = detail['vehicle_id']?.toString() ?? '';
         if (vehicleId.isNotEmpty) {
           try {
-            openFindings = await _api.vehicleFindings(
+            final findings = await _api.vehicleFindings(
               widget.businessId,
               vehicleId,
               includeResolved: false,
             );
+            openFindings = findings
+                .where(
+                  (finding) => _findingNeedsInvoiceAttention(
+                    finding,
+                    detail: detail,
+                  ),
+                )
+                .toList();
           } catch (_) {
             openFindings = const [];
           }
@@ -1979,11 +2010,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     List<Map<String, dynamic>> findings;
     try {
-      findings = await _api.vehicleFindings(
+      final allFindings = await _api.vehicleFindings(
         widget.businessId,
         vehicleId,
         includeResolved: false,
       );
+      findings = allFindings
+          .where(_findingNeedsInvoiceAttention)
+          .toList();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
       return;
@@ -2025,7 +2059,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
               Expanded(
                 child: findings.isEmpty
-                    ? const Center(child: Text('No open findings.'))
+                    ? const Center(
+                        child: Text(
+                          'No open findings need attention on this invoice.',
+                        ),
+                      )
                     : ListView.separated(
                         itemCount: findings.length,
                         separatorBuilder: (context, index) =>
