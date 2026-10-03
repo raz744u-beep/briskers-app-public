@@ -406,52 +406,92 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 
   Future<void> _showDocumentActions(Map<String, dynamic> row) async {
-    final canViewExpenses = !_estimate && widget.canManageExpenses;
+    final canExpenses = !_estimate && (widget.isOwner || widget.canManageExpenses);
     final canDelete = widget.isOwner;
-    if (!canViewExpenses && !canDelete) return;
+    final status = row['display_status']?.toString() ?? '';
+    final total = num.tryParse(row['total_amount']?.toString() ?? '') ?? 0;
+    final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
+    final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
+    final canPayment = !_estimate && status != 'Paid' && total - paid - pending > 0.005;
 
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (canViewExpenses)
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ListTile(
-                leading: const Icon(
-                  Icons.payments_outlined,
-                  color: BriskersColors.expenses,
-                ),
-                title: Text(tr('viewExpenses')),
-                onTap: () => Navigator.pop(sheetContext, 'expenses'),
+                leading: Icon(Icons.edit_outlined, color: _estimate ? BriskersColors.estimates : BriskersColors.invoices),
+                title: Text(_estimate ? tr('editEstimate') : tr('editInvoice')),
+                onTap: () => Navigator.pop(sheetContext, 'edit'),
               ),
-            if (canDelete)
+              if (!_estimate)
+                ListTile(
+                  leading: const Icon(Icons.copy_outlined, color: BriskersColors.invoices),
+                  title: Text(tr('copyInvoice')),
+                  onTap: () => Navigator.pop(sheetContext, 'copy'),
+                ),
+              if (canExpenses)
+                ListTile(
+                  leading: const Icon(Icons.add_card_outlined, color: BriskersColors.expenses),
+                  title: Text(tr('addExpense')),
+                  onTap: () => Navigator.pop(sheetContext, 'add_expense'),
+                ),
+              if (canExpenses)
+                ListTile(
+                  leading: const Icon(Icons.payments_outlined, color: BriskersColors.expenses),
+                  title: Text(tr('viewExpenses')),
+                  onTap: () => Navigator.pop(sheetContext, 'expenses'),
+                ),
+              if (canPayment)
+                ListTile(
+                  leading: const Icon(Icons.credit_card_outlined, color: BriskersColors.invoices),
+                  title: Text(tr('addPayment')),
+                  onTap: () => Navigator.pop(sheetContext, 'payment'),
+                ),
+              if (!_estimate)
+                ListTile(
+                  leading: const Icon(Icons.warning_amber_rounded, color: Color(0xFFC62828)),
+                  title: Text(tr('vehicleFindings')),
+                  onTap: () => Navigator.pop(sheetContext, 'findings'),
+                ),
               ListTile(
-                leading: const Icon(
-                  Icons.delete_outline,
-                  color: Colors.red,
-                ),
-                title: Text(
-                  _estimate ? tr('deleteEstimate') : tr('deleteInvoice'),
-                  style: const TextStyle(color: Colors.red),
-                ),
-                onTap: () => Navigator.pop(sheetContext, 'delete'),
+                leading: Icon(Icons.visibility_outlined, color: _estimate ? BriskersColors.estimates : BriskersColors.invoices),
+                title: Text(tr('preview')),
+                onTap: () => Navigator.pop(sheetContext, 'preview'),
               ),
-            const SizedBox(height: 8),
-          ],
+              ListTile(
+                leading: Icon(Icons.outbox_outlined, color: _estimate ? BriskersColors.estimates : BriskersColors.invoices),
+                title: Text(tr('send')),
+                onTap: () => Navigator.pop(sheetContext, 'send'),
+              ),
+              if (canDelete) ...[
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.red),
+                  title: Text(_estimate ? tr('deleteEstimate') : tr('deleteInvoice'), style: const TextStyle(color: Colors.red)),
+                  onTap: () => Navigator.pop(sheetContext, 'delete'),
+                ),
+              ],
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );
 
-    if (!mounted) return;
+    if (!mounted || action == null) return;
     if (action == 'expenses') {
       await _showExpensesFromList(row);
     } else if (action == 'delete') {
       await _deleteDocument(row);
+    } else {
+      await _open(row, initialAction: action);
     }
   }
-
   Future<void> _showCloseInvoices() async {
     if (_estimate || !widget.isOwner) return;
 
