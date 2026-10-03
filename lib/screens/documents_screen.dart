@@ -401,6 +401,53 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     return DateFormat('MMM d, yyyy').format(date.toLocal());
   }
 
+  Future<void> _showDocumentActions(Map<String, dynamic> row) async {
+    final canViewExpenses = !_estimate && widget.canManageExpenses;
+    final canDelete = widget.isOwner;
+    if (!canViewExpenses && !canDelete) return;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (canViewExpenses)
+              ListTile(
+                leading: const Icon(
+                  Icons.payments_outlined,
+                  color: BriskersColors.expenses,
+                ),
+                title: Text(tr('viewExpenses')),
+                onTap: () => Navigator.pop(sheetContext, 'expenses'),
+              ),
+            if (canDelete)
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline,
+                  color: Colors.red,
+                ),
+                title: Text(
+                  _estimate ? tr('deleteEstimate') : tr('deleteInvoice'),
+                  style: const TextStyle(color: Colors.red),
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    if (action == 'expenses') {
+      await _showExpensesFromList(row);
+    } else if (action == 'delete') {
+      await _deleteDocument(row);
+    }
+  }
+
   Future<void> _showExpensesFromList(Map<String, dynamic> row) async {
     try {
       final expenses = await _api.documentExpenses(
@@ -697,6 +744,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: () => _open(row),
+                    onLongPress: (widget.isOwner ||
+                            (!_estimate && widget.canManageExpenses))
+                        ? () => _showDocumentActions(row)
+                        : null,
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
                       child: Row(
@@ -788,108 +839,44 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                           ),
                           const SizedBox(width: 8),
                           SizedBox(
-                            width: (widget.isOwner ||
-                                    (!_estimate && widget.canManageExpenses))
-                                ? 124
-                                : 96,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
+                            width: 98,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
-                                Expanded(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      FittedBox(
-                                        fit: BoxFit.scaleDown,
-                                        alignment: Alignment.centerRight,
-                                        child: Text(
-                                          _money(row['total_amount']),
-                                          style: const TextStyle(
-                                            fontSize: 16.5,
-                                            fontWeight: FontWeight.w900,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 5),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 10,
-                                          vertical: 4,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: color.withValues(alpha: 0.11),
-                                          borderRadius:
-                                              BorderRadius.circular(999),
-                                        ),
-                                        child: FittedBox(
-                                          fit: BoxFit.scaleDown,
-                                          child: Text(
-                                            statusLabel,
-                                            style: TextStyle(
-                                              color: color,
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (widget.isOwner ||
-                                    (!_estimate && widget.canManageExpenses))
-                                  SizedBox(
-                                    width: 28,
-                                    child: PopupMenuButton<String>(
-                                      padding: EdgeInsets.zero,
-                                      iconSize: 19,
-                                      tooltip: 'Document actions',
-                                      onSelected: (value) {
-                                        if (value == 'expenses') {
-                                          _showExpensesFromList(row);
-                                        }
-                                        if (value == 'delete') {
-                                          _deleteDocument(row);
-                                        }
-                                      },
-                                      itemBuilder: (_) => [
-                                        if (!_estimate &&
-                                            widget.canManageExpenses)
-                                          PopupMenuItem<String>(
-                                            value: 'expenses',
-                                            child: ListTile(
-                                              dense: true,
-                                              contentPadding: EdgeInsets.zero,
-                                              leading: const Icon(
-                                                Icons.payments_outlined,
-                                                color:
-                                                    BriskersColors.expenses,
-                                              ),
-                                              title: Text(
-                                                tr('viewExpenses'),
-                                              ),
-                                            ),
-                                          ),
-                                        if (widget.isOwner)
-                                          PopupMenuItem<String>(
-                                            value: 'delete',
-                                            child: ListTile(
-                                              dense: true,
-                                              contentPadding: EdgeInsets.zero,
-                                              leading: const Icon(
-                                                Icons.delete_outline,
-                                              ),
-                                              title: Text(
-                                                _estimate
-                                                    ? tr('deleteEstimate')
-                                                    : tr('deleteInvoice'),
-                                              ),
-                                            ),
-                                          ),
-                                      ],
+                                FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    _money(row['total_amount']),
+                                    style: const TextStyle(
+                                      fontSize: 16.5,
+                                      fontWeight: FontWeight.w900,
                                     ),
                                   ),
+                                ),
+                                const SizedBox(height: 5),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: color.withValues(alpha: 0.11),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      statusLabel,
+                                      style: TextStyle(
+                                        color: color,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
                           ),
