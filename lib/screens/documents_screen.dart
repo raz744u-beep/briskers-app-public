@@ -1077,7 +1077,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 return Card(
                   margin: const EdgeInsets.only(bottom: 9),
                   color: Color.alphaBlend(
-                    color.withValues(alpha: 0.075),
+                    color.withValues(alpha: 0.08),
                     Colors.white,
                   ),
                   child: InkWell(
