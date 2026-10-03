@@ -161,7 +161,6 @@ const Map<String, Map<String, String>> _translations = {
     'removeExtendedWarranty': 'Remove extended warranty?',
     'removeExtendedWarrantyBody':
         'Warranty company, authorization and payment-allocation details will be removed from this invoice.',
-    'remove': 'Remove',
     'selectOrAddCompany': 'Select or add company',
     'claimsLabel': 'Claims',
     'submitLabel': 'Submit',
@@ -524,7 +523,6 @@ const Map<String, Map<String, String>> _translations = {
     'removeExtendedWarranty': '¿Quitar la garantía extendida?',
     'removeExtendedWarrantyBody':
         'Se eliminarán de esta factura la compañía de garantía, la autorización y los detalles de distribución del pago.',
-    'remove': 'Quitar',
     'selectOrAddCompany': 'Seleccionar o agregar compañía',
     'claimsLabel': 'Reclamaciones',
     'submitLabel': 'Envío',
