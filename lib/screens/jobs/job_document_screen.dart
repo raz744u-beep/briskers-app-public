@@ -1193,7 +1193,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   Future<void> _enterWarrantyPayment() async {
     await _collapseWorkspaceHeader();
-    if (_estimate || _warrantyDetail['extended_warranty'] != true) return;
+    if (_estimate || _warrantyDetail['extended_warranty'] != true || _busy) {
+      return;
+    }
 
     List<Map<String, dynamic>> methods;
     try {
@@ -1203,9 +1205,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       return;
     }
 
-    if (!mounted) return;
-    if (methods.isEmpty) {
-      setState(() => _error = 'No payment methods are configured.');
+    if (!mounted || methods.isEmpty) {
+      if (mounted) setState(() => _error = tr('warrantyPaymentMethodMissing'));
       return;
     }
 
@@ -1215,40 +1216,44 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final remaining = total - finalized - pending;
     if (remaining <= 0.005) return;
 
-    final warrantyNet = _number(_warrantyDetail['terminal_amount']);
+    final warrantyNet = warrantyNet;
     if (warrantyNet <= 0.005) return;
 
     final amount = warrantyNet > remaining ? remaining : warrantyNet;
+    final surchargeRate = _number(_warrantyDetail['surcharge_rate']);
+    final wantsCheck = surchargeRate <= 0.000001;
 
-    String? cardMethodId;
-    for (final method in methods) {
-      final name = method['name']?.toString().toLowerCase() ?? '';
-      if (name.contains('credit') || name.contains('card')) {
-        cardMethodId = method['id']?.toString();
+    Map<String, dynamic>? method;
+    for (final candidate in methods) {
+      final name = candidate['name']?.toString().trim().toLowerCase() ?? '';
+      final matches = wantsCheck
+          ? name == 'check' || name.contains('check')
+          : name == 'credit card' ||
+              (name.contains('credit') && name.contains('card'));
+      if (matches) {
+        method = candidate;
         break;
       }
     }
 
-    final result = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (_) => _PaymentEntryDialog(
-        methods: methods,
-        initialAmount: amount,
-        initialMethodId: cardMethodId,
-        title: tr('warrantyPayment'),
-        saveLabel: tr('applyWarrantyPayment'),
-      ),
-    );
-    if (result == null) return;
+    if (method == null) {
+      setState(() => _error = tr('warrantyPaymentMethodMissing'));
+      return;
+    }
 
     await _run(() async {
       await _api.addPendingInvoicePayment(
         widget.businessId,
         widget.documentId,
-        amount: result['amount'] as num,
-        methodId: result['method_id'].toString(),
+        amount: amount,
+        methodId: method!['id'].toString(),
       );
     });
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(tr('warrantyPaymentApplied'))),
+    );
   }
 
   Future<void> _editPayment(Map<String, dynamic> payment) async {
@@ -3332,6 +3337,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         .toList();
     final shownPaid = finalizedPaid + pendingPaid;
     final safeBalance = balance < 0 ? 0 : balance;
+    final warrantyNet = warrantyNet;
+    final warrantyRate = _number(_warrantyDetail['surcharge_rate']);
+    final warrantyUsesCheck = warrantyRate <= 0.000001;
+    final warrantyPaymentAlreadyPresent = payments.any((payment) {
+      final amount = _number(payment['amount']);
+      final method =
+          payment['payment_method_name']?.toString().trim().toLowerCase() ?? '';
+      final amountMatches = (amount - warrantyNet).abs() < 0.005;
+      final methodMatches = warrantyUsesCheck
+          ? method == 'check' || method.contains('check')
+          : method == 'credit card' ||
+              (method.contains('credit') && method.contains('card'));
+      return amountMatches && methodMatches;
+    });
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -3372,8 +3391,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ),
           ),
           if (_warrantyDetail['extended_warranty'] == true &&
-              _number(_warrantyDetail['terminal_amount']) > 0.005 &&
-              safeBalance > 0.005) ...[
+              warrantyNet > 0.005 &&
+              safeBalance > 0.005 &&
+              !warrantyPaymentAlreadyPresent) ...[
             const SizedBox(height: 14),
             Card(
               margin: EdgeInsets.zero,
@@ -3400,7 +3420,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                         ),
                         Text(
                           _money(
-                            _number(_warrantyDetail['terminal_amount']) >
+                            warrantyNet >
                                     safeBalance
                                 ? safeBalance
                                 : _number(
