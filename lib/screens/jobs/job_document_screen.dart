@@ -11,6 +11,7 @@ import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/document_pdf_service.dart';
+import '../../services/gmail_compose_service.dart';
 import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
 import '../expenses/expense_detail_screen.dart';
@@ -3675,10 +3676,48 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     if (!confirmed) return;
 
-    await Printing.sharePdf(
-      bytes: bytes,
-      filename: DocumentPdfService.fileName(detail),
-    );
+    final filename = DocumentPdfService.fileName(detail);
+    final invoiceNumber =
+        detail['document_number']?.toString().trim() ?? '';
+    final customerName =
+        detail['customer_name']?.toString().trim() ?? '';
+    final vehicle =
+        detail['vehicle']?.toString().trim() ?? '';
+    final claim =
+        detail['claim_number']?.toString().trim() ?? '';
+    final authorization =
+        detail['authorization_number']?.toString().trim() ?? '';
+
+    final subject = invoiceNumber.isEmpty
+        ? 'Briskers Warranty Invoice'
+        : 'Briskers Invoice #$invoiceNumber - Warranty Claim';
+
+    final body = <String>[
+      'Please find the attached signed invoice for warranty processing.',
+      '',
+      if (customerName.isNotEmpty) 'Customer: $customerName',
+      if (vehicle.isNotEmpty) 'Vehicle: $vehicle',
+      if (claim.isNotEmpty) 'Claim #: $claim',
+      if (authorization.isNotEmpty)
+        'Authorization #: $authorization',
+      '',
+      'Briskers Foreign Auto Repair',
+    ].join('\n');
+
+    try {
+      await GmailComposeService.composePdf(
+        bytes: bytes,
+        filename: filename,
+        to: email,
+        subject: subject,
+        body: body,
+      );
+    } catch (_) {
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: filename,
+      );
+    }
   }
 
   Future<void> _addStandardNote() async {
