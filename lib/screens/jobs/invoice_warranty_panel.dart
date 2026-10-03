@@ -129,7 +129,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                             itemCount: filtered.length,
                             itemBuilder: (context, index) {
                               final company = filtered[index];
-                              final phone = formatUsPhone(
+                              final phone = formatWarrantyPhone(
                                 company['claims_phone']?.toString(),
                               );
                               final email =
@@ -197,7 +197,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                 controller: phone,
                 keyboardType: TextInputType.phone,
                 inputFormatters: const [
-                  UsPhoneTextInputFormatter(),
+                  WarrantyPhoneTextInputFormatter(),
                 ],
                 decoration: const InputDecoration(
                   labelText: 'Claims phone',
@@ -233,7 +233,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
     );
 
     final companyName = name.text.trim();
-    final claimsPhone = formatUsPhone(phone.text.trim());
+    final claimsPhone = formatWarrantyPhone(phone.text.trim());
     final submissionEmail = email.text.trim();
 
     name.dispose();
