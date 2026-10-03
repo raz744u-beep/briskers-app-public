@@ -2152,6 +2152,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               TextField(
                 controller: controller,
                 autofocus: true,
+                cursorColor: _estimate
+                    ? BriskersColors.estimates
+                    : BriskersColors.invoices,
                 minLines: 5,
                 maxLines: 10,
                 decoration: InputDecoration(
@@ -2160,6 +2163,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       ? tr('translateEnglishNotice')
                       : null,
                   border: const OutlineInputBorder(),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(
+                      color: _estimate
+                          ? BriskersColors.estimates
+                          : BriskersColors.invoices,
+                      width: 2,
+                    ),
+                  ),
                   alignLabelWithHint: true,
                 ),
               ),
@@ -2167,6 +2178,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _estimate
+                        ? BriskersColors.estimates
+                        : BriskersColors.invoices,
+                    foregroundColor: Colors.white,
+                  ),
                   onPressed: () =>
                       Navigator.pop(sheetContext, controller.text.trim()),
                   child: Text(tr('saveNotes')),
@@ -3307,6 +3324,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: BriskersColors.invoices,
+                  foregroundColor: Colors.white,
+                ),
                 onPressed: _busy ? null : _enterPayment,
                 icon: const Icon(Icons.add_card_outlined),
                 label: Text(tr('addPayment')),
