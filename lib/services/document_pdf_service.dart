@@ -191,6 +191,13 @@ class DocumentPdfService {
     final disclaimers = List<dynamic>.from(
       detail['disclaimers'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    final signatureBytes = detail['signature_bytes'];
+    final signatureCurrent = detail['signature_current'] == true;
+    final signerName = detail['signer_name']?.toString().trim() ?? '';
+    final signedAtRaw = detail['signed_at']?.toString() ?? '';
+    final signedAt = DateTime.tryParse(signedAtRaw);
+    final showSignature =
+        signatureCurrent && signatureBytes is Uint8List;
     final memo = detail['memo']?.toString().trim() ?? '';
 
     final findingNotes = List<dynamic>.from(
@@ -436,6 +443,14 @@ class DocumentPdfService {
             notes.join('\n'),
             minHeight: 44,
           ),
+          if (showSignature) ...[
+            pw.SizedBox(height: 10),
+            _signatureBox(
+              bytes: signatureBytes,
+              signerName: signerName,
+              signedAt: signedAt,
+            ),
+          ],
           pw.SizedBox(height: 14),
           pw.Center(
             child: pw.Text(
@@ -693,6 +708,81 @@ class DocumentPdfService {
           _totalRow(taxLabel, _money(tax)),
           pw.Divider(height: 10, color: PdfColors.grey600),
           _totalRow('Total', _money(total), bold: true),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _signatureBox({
+    required Uint8List bytes,
+    required String signerName,
+    required DateTime? signedAt,
+  }) {
+    final signature = pw.MemoryImage(bytes);
+    final dateText = signedAt == null
+        ? ''
+        : '${signedAt.month.toString().padLeft(2, '0')}/'
+          '${signedAt.day.toString().padLeft(2, '0')}/'
+          '${signedAt.year}';
+
+    return pw.Container(
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.grey600, width: 0.6),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          pw.Container(
+            color: PdfColors.grey200,
+            padding: const pw.EdgeInsets.symmetric(
+              horizontal: 8,
+              vertical: 5,
+            ),
+            child: pw.Text(
+              'Customer Signature',
+              style: const pw.TextStyle(
+                fontSize: 9.5,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+          ),
+          pw.Padding(
+            padding: const pw.EdgeInsets.fromLTRB(8, 8, 8, 7),
+            child: pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.end,
+              children: [
+                pw.Expanded(
+                  child: pw.SizedBox(
+                    height: 48,
+                    child: pw.Image(
+                      signature,
+                      fit: pw.BoxFit.contain,
+                      alignment: pw.Alignment.centerLeft,
+                    ),
+                  ),
+                ),
+                pw.SizedBox(width: 10),
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    if (signerName.isNotEmpty)
+                      pw.Text(
+                        signerName,
+                        style: const pw.TextStyle(
+                          fontSize: 8.8,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                    if (dateText.isNotEmpty)
+                      pw.Text(
+                        'Signed: $dateText',
+                        style: const pw.TextStyle(fontSize: 8.5),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
