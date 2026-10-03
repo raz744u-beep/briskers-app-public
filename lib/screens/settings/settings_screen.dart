@@ -18,6 +18,7 @@ import 'receipt_training_samples_screen.dart';
 import 'shop_info_settings_screen.dart';
 import 'tax_invoicing_settings_screen.dart';
 import 'warranty_payment_calculator_screen.dart';
+import 'warranty_workflow_settings_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({
@@ -94,6 +95,27 @@ class SettingsScreen extends StatelessWidget {
           ),
           if (roleCode == 'owner') ...[
             const Divider(),
+            ListTile(
+              leading: const Icon(
+                Icons.shield_outlined,
+                color: BriskersColors.invoices,
+              ),
+              title: const Text('Warranty & invoice notes'),
+              subtitle: const Text(
+                'Warranty companies, standard notes and disclaimer templates',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => WarrantyWorkflowSettingsScreen(
+                      businessId: businessId,
+                    ),
+                  ),
+                );
+              },
+            ),
             ListTile(
               leading: const Icon(
                 Icons.storefront,
