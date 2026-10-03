@@ -256,7 +256,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     );
   }
 
-  Future<void> _open(Map<String, dynamic> row) async {
+  Future<void> _open(
+    Map<String, dynamic> row, {
+    String? initialAction,
+  }) async {
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
@@ -265,6 +268,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           documentId: row['id'].toString(),
           isOwner: widget.isOwner,
           canManageExpenses: widget.canManageExpenses,
+          initialAction: initialAction,
         ),
       ),
     );
@@ -1039,10 +1043,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: () => _open(row),
-                    onLongPress: (widget.isOwner ||
-                            (!_estimate && widget.canManageExpenses))
-                        ? () => _showDocumentActions(row)
-                        : null,
+                    onLongPress: () => _showDocumentActions(row),
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
                       child: Row(
