@@ -222,6 +222,15 @@ const Map<String, Map<String, String>> _translations = {
     'addDisclaimer': 'Add disclaimer',
     'customDisclaimer': 'Custom disclaimer',
     'chooseDisclaimerTemplate': 'Choose a template or write a custom disclaimer.',
+    'selectSavedNote': 'Select a saved note to add to this invoice.',
+    'customerDisclaimer': 'Customer disclaimer',
+    'title': 'Title',
+    'disclaimerText': 'Disclaimer text',
+    'requireCustomerSignature': 'Require customer signature',
+    'disclaimerSignedInvoiceHelp':
+        'The disclaimer will be included in the signed invoice.',
+    'saveDisclaimer': 'Save disclaimer',
+    'ok': 'OK',
     'customerSignatureRequired': 'Customer signature required',
     'customerSignatureComplete': 'Customer signature complete',
     'signatureRequiredBeforeSubmission':
@@ -539,6 +548,16 @@ const Map<String, Map<String, String>> _translations = {
     'customDisclaimer': 'Aviso personalizado',
     'chooseDisclaimerTemplate':
         'Elige una plantilla o escribe un aviso personalizado.',
+    'selectSavedNote':
+        'Elige una nota guardada para agregarla a esta factura.',
+    'customerDisclaimer': 'Aviso al cliente',
+    'title': 'Título',
+    'disclaimerText': 'Texto del aviso',
+    'requireCustomerSignature': 'Requerir firma del cliente',
+    'disclaimerSignedInvoiceHelp':
+        'El aviso se incluirá en la factura firmada.',
+    'saveDisclaimer': 'Guardar aviso',
+    'ok': 'Aceptar',
     'customerSignatureRequired': 'Se requiere la firma del cliente',
     'customerSignatureComplete': 'Firma del cliente completada',
     'signatureRequiredBeforeSubmission':
