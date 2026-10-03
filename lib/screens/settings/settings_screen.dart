@@ -17,6 +17,7 @@ import 'payment_methods_settings_screen.dart';
 import 'receipt_training_samples_screen.dart';
 import 'shop_info_settings_screen.dart';
 import 'tax_invoicing_settings_screen.dart';
+import 'warranty_payment_calculator_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({
@@ -70,6 +71,23 @@ class SettingsScreen extends StatelessWidget {
                   builder: (_) => LocalSyncStatusScreen(
                     businessId: businessId,
                   ),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(
+              Icons.calculate_outlined,
+              color: BriskersColors.invoices,
+            ),
+            title: Text(tr('warrantyPaymentCalculator')),
+            subtitle: Text(tr('warrantyPaymentCalculatorSub')),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const WarrantyPaymentCalculatorScreen(),
                 ),
               );
             },
