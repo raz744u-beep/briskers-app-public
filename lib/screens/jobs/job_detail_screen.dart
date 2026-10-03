@@ -2839,7 +2839,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 contentPadding: EdgeInsets.zero,
                 controlAffinity: ListTileControlAffinity.leading,
                 title: const Text('Repair on this job'),
-                subtitle: const Text('Checked'),
+                subtitle: const Text(
+                  'Assigned to this job • resolves when the job is completed.',
+                ),
                 value: true,
                 onChanged: _busy
                     ? null
