@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 
@@ -91,11 +92,11 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                       controller: search,
                       autofocus: true,
                       onChanged: filter,
-                      decoration: const InputDecoration(
-                        labelText: 'Warranty company',
-                        hintText: 'Search or type a new company',
-                        prefixIcon: Icon(Icons.search),
-                        border: OutlineInputBorder(),
+                      decoration: InputDecoration(
+                        labelText: tr('warrantyCompany'),
+                        hintText: tr('searchOrTypeWarrantyCompany'),
+                        prefixIcon: const Icon(Icons.search),
+                        border: const OutlineInputBorder(),
                       ),
                     ),
                   ),
@@ -106,8 +107,11 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                     ),
                     title: Text(
                       search.text.trim().isEmpty
-                          ? 'Add new warranty company'
-                          : 'Add “${search.text.trim()}”',
+                          ? tr('addNewWarrantyCompany')
+                          : tr('addNamedCompany').replaceAll(
+                              '{name}',
+                              search.text.trim(),
+                            ),
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                     onTap: () async {
@@ -124,7 +128,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                   const Divider(height: 1),
                   Expanded(
                     child: filtered.isEmpty
-                        ? const Center(child: Text('No matching companies.'))
+                        ? Center(child: Text(tr('noMatchingCompanies')))
                         : ListView.builder(
                             itemCount: filtered.length,
                             itemBuilder: (context, index) {
@@ -180,7 +184,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
     final save = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Add warranty company'),
+        title: Text(tr('addWarrantyCompany')),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -188,8 +192,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
               TextField(
                 controller: name,
                 autofocus: initialName.isEmpty,
-                decoration: const InputDecoration(
-                  labelText: 'Company name',
+                decoration: InputDecoration(
+                  labelText: tr('companyName'),
                 ),
               ),
               const SizedBox(height: 10),
@@ -199,17 +203,17 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                 inputFormatters: const [
                   WarrantyPhoneTextInputFormatter(),
                 ],
-                decoration: const InputDecoration(
-                  labelText: 'Claims phone',
-                  hintText: '800-531-1925',
+                decoration: InputDecoration(
+                  labelText: tr('claimsPhone'),
+                  hintText: '1-800-531-1925',
                 ),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: email,
                 keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: 'Invoice submission email',
+                decoration: InputDecoration(
+                  labelText: tr('invoiceSubmissionEmail'),
                 ),
               ),
             ],
@@ -218,7 +222,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+            child: Text(tr('cancel')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -226,7 +230,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
               foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Add'),
+            child: Text(tr('add')),
           ),
         ],
       ),
@@ -298,11 +302,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: const Text('Remove extended warranty?'),
-            content: const Text(
-              'Warranty company, authorization and payment-allocation details '
-              'will be removed from this invoice.',
-            ),
+            title: Text(tr('removeExtendedWarranty')),
+            content: Text(tr('removeExtendedWarrantyBody')),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext, false),
@@ -314,7 +315,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                   foregroundColor: Colors.white,
                 ),
                 onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Remove'),
+                child: Text(tr('remove')),
               ),
             ],
           ),
@@ -399,9 +400,9 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
-                      'Extended Warranty',
-                      style: TextStyle(
+                    Text(
+                      tr('extendedWarranty'),
+                      style: const TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.w900,
                       ),
@@ -419,15 +420,15 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                         }
                       },
                       child: InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'Warranty company',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.shield_outlined),
-                          suffixIcon: Icon(Icons.chevron_right),
+                        decoration: InputDecoration(
+                          labelText: tr('warrantyCompany'),
+                          border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.shield_outlined),
+                          suffixIcon: const Icon(Icons.chevron_right),
                         ),
                         child: Text(
                           selectedName.isEmpty
-                              ? 'Select or add company'
+                              ? tr('selectOrAddCompany')
                               : selectedName,
                           style: TextStyle(
                             fontWeight: selectedName.isEmpty
@@ -454,20 +455,20 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                     TextField(
                       controller: claim,
                       textCapitalization: TextCapitalization.characters,
-                      decoration: const InputDecoration(
-                        labelText: 'Claim number (optional)',
-                        prefixIcon: Icon(Icons.assignment_outlined),
-                        border: OutlineInputBorder(),
+                      decoration: InputDecoration(
+                        labelText: tr('claimNumberOptional'),
+                        prefixIcon: const Icon(Icons.assignment_outlined),
+                        border: const OutlineInputBorder(),
                       ),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: authorization,
                       textCapitalization: TextCapitalization.characters,
-                      decoration: const InputDecoration(
-                        labelText: 'Authorization number',
-                        prefixIcon: Icon(Icons.verified_outlined),
-                        border: OutlineInputBorder(),
+                      decoration: InputDecoration(
+                        labelText: tr('authorizationNumber'),
+                        prefixIcon: const Icon(Icons.verified_outlined),
+                        border: const OutlineInputBorder(),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -483,12 +484,9 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    const Text(
-                      'The 3% processor surcharge does not count as shop '
-                      'revenue. Briskers will apply only the net warranty '
-                      'amount to the invoice and leave the difference in the '
-                      'customer balance.',
-                      style: TextStyle(
+                    Text(
+                      tr('warrantySurchargeExplanation'),
+                      style: const TextStyle(
                         fontSize: 13,
                         height: 1.35,
                         color: Color(0xFF667085),
@@ -513,7 +511,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                                   'approved': approved.text.trim(),
                                 },
                               ),
-                      child: const Text('Save warranty information'),
+                      child: Text(tr('saveWarrantyInformation')),
                     ),
                   ],
                 ),
@@ -602,10 +600,10 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                 visualDensity: VisualDensity.compact,
               ),
               const SizedBox(width: 4),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Extended warranty job',
-                  style: TextStyle(
+                  tr('extendedWarrantyJob'),
+                  style: const TextStyle(
                     fontSize: 15.5,
                     fontWeight: FontWeight.w800,
                   ),
@@ -629,13 +627,15 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
     final terminal = _number(widget.detail['terminal_amount']);
     final fee = _number(widget.detail['processor_fee']);
     final customer = _number(widget.detail['customer_responsibility']);
-    final phone = widget.detail['claims_phone']?.toString() ?? '';
+    final phone = formatWarrantyPhone(
+      widget.detail['claims_phone']?.toString(),
+    );
     final email = widget.detail['submission_email']?.toString() ?? '';
 
     final missing = <String>[
-      if (company.isEmpty) 'company',
-      if (auth.isEmpty) 'authorization #',
-      if (approved <= 0) 'approved amount',
+      if (company.isEmpty) tr('company'),
+      if (auth.isEmpty) tr('authorizationShort'),
+      if (approved <= 0) tr('approvedAmountLower'),
     ];
 
     return Container(
@@ -658,7 +658,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
               ),
             ),
             title: Text(
-              company.isEmpty ? 'Extended Warranty' : company,
+              company.isEmpty ? tr('extendedWarranty') : company,
               style: const TextStyle(
                 fontSize: 16.5,
                 fontWeight: FontWeight.w900,
@@ -666,8 +666,13 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
             ),
             subtitle: Text(
               missing.isEmpty
-                  ? 'Approved ${_money(approved)} • Customer ${_money(customer)}'
-                  : 'Missing: ${missing.join(', ')}',
+                  ? tr('approvedCustomerSummary')
+                      .replaceAll('{approved}', _money(approved))
+                      .replaceAll('{customer}', _money(customer))
+                  : tr('missingSummary').replaceAll(
+                      '{items}',
+                      missing.join(', '),
+                    ),
               style: TextStyle(
                 color: missing.isEmpty
                     ? BriskersColors.invoices
@@ -688,27 +693,27 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (claim.isNotEmpty)
-                    _summaryRow('Claim number', claim),
+                    _summaryRow(tr('claimNumber'), claim),
                   _summaryRow(
-                    'Authorization number',
-                    auth.isEmpty ? 'Missing' : auth,
+                    tr('authorizationNumber'),
+                    auth.isEmpty ? tr('missing') : auth,
                   ),
-                  if (phone.isNotEmpty) _summaryRow('Claims phone', phone),
-                  if (email.isNotEmpty) _summaryRow('Submission email', email),
+                  if (phone.isNotEmpty) _summaryRow(tr('claimsPhone'), phone),
+                  if (email.isNotEmpty) _summaryRow(tr('submissionEmail'), email),
                   const Divider(height: 18),
-                  _summaryRow('Approved amount', _money(approved)),
+                  _summaryRow(tr('approvedTotal'), _money(approved)),
                   _summaryRow(
-                    'Run warranty card for',
+                    tr('runWarrantyCardFor'),
                     _money(terminal),
                     strong: true,
                   ),
-                  _summaryRow('3% processor surcharge', _money(fee)),
+                  _summaryRow(tr('processorSurcharge3'), _money(fee)),
                   _summaryRow(
-                    'Warranty applied to invoice',
+                    tr('warrantyAppliedToInvoice'),
                     _money(terminal),
                   ),
                   _summaryRow(
-                    'Customer responsibility',
+                    tr('customerResponsibility'),
                     _money(customer),
                     strong: true,
                   ),
@@ -720,7 +725,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                           child: OutlinedButton.icon(
                             onPressed: _busy ? null : _disableWarranty,
                             icon: const Icon(Icons.close),
-                            label: const Text('Remove'),
+                            label: Text(tr('remove')),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -732,7 +737,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                             ),
                             onPressed: _busy ? null : _editWarranty,
                             icon: const Icon(Icons.edit_outlined),
-                            label: const Text('Edit'),
+                            label: Text(tr('edit')),
                           ),
                         ),
                       ],
