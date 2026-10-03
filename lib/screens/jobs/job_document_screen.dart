@@ -13,6 +13,7 @@ import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
+import 'customer_invoice_signature_screen.dart';
 import 'invoice_warranty_panel.dart';
 import 'job_detail_screen.dart';
 
@@ -45,6 +46,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Map<String, dynamic>? _detail;
   Map<String, dynamic> _identifixMeta = const {};
   Map<String, dynamic> _warrantyDetail = const {};
+  Map<String, dynamic> _signatureStatus = const {};
+  Map<String, dynamic> _submissionReadiness = const {};
   List<Map<String, dynamic>> _invoiceStyles = const [];
   List<Map<String, dynamic>> _openFindings = const [];
   num _defaultTaxRate = 0;
@@ -101,6 +104,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       List<Map<String, dynamic>> invoiceStyles = const [];
       List<Map<String, dynamic>> openFindings = const [];
       Map<String, dynamic> warrantyDetail = const {};
+      Map<String, dynamic> signatureStatus = const {};
+      Map<String, dynamic> submissionReadiness = const {};
       if (detail['kind']?.toString() == 'invoice') {
         invoiceStyles = await _api.invoiceStatusStyles(widget.businessId);
         try {
@@ -110,6 +115,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           );
         } catch (_) {
           warrantyDetail = const {};
+        }
+        try {
+          signatureStatus = await _api.documentSignatureStatus(
+            widget.businessId,
+            widget.documentId,
+          );
+        } catch (_) {
+          signatureStatus = const {};
+        }
+        try {
+          submissionReadiness = await _api.warrantySubmissionReadiness(
+            widget.businessId,
+            widget.documentId,
+          );
+        } catch (_) {
+          submissionReadiness = const {};
         }
         final vehicleId = detail['vehicle_id']?.toString() ?? '';
         if (vehicleId.isNotEmpty) {
@@ -150,6 +171,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _detail = detail;
         _identifixMeta = identifixMeta;
         _warrantyDetail = warrantyDetail;
+        _signatureStatus = signatureStatus;
+        _submissionReadiness = submissionReadiness;
         _invoiceStyles = invoiceStyles;
         _openFindings = openFindings;
         _defaultTaxRate =
@@ -943,11 +966,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     }
 
     try {
-      await _api.issueDocument(
-        widget.businessId,
-        widget.documentId,
-        expectedVersion: _version,
-      );
+      final currentStatus = _detail?['status']?.toString() ?? 'draft';
+      final currentNumber =
+          _detail?['document_number']?.toString().trim() ?? '';
+      if (currentStatus == 'draft' || currentNumber.isEmpty) {
+        await _api.issueDocument(
+          widget.businessId,
+          widget.documentId,
+          expectedVersion: _version,
+        );
+      }
       final detail = await _api.documentDetail(
         widget.businessId,
         widget.documentId,
