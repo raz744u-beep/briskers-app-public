@@ -261,6 +261,9 @@ class _CustomersScreenState extends State<CustomersScreen> {
                         ),
                         title: Text(
                           '${customer['display_name'] ?? ''}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                         subtitle: contact.isEmpty ? null : Text(contact),
                         trailing: Row(
@@ -274,7 +277,13 @@ class _CustomersScreenState extends State<CustomersScreen> {
                               ),
                               const SizedBox(width: 8),
                             ],
-                            Text('${customer['vehicle_count'] ?? 0} ${tr('cars')}'),
+                            Text(
+                              '${customer['vehicle_count'] ?? 0} ${tr('cars')}',
+                              style: const TextStyle(
+                                fontSize: 15.5,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                           ],
                         ),
                         onTap: () => _openCustomer(customer),
