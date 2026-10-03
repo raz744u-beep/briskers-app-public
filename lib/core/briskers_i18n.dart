@@ -302,6 +302,16 @@ const Map<String, Map<String, String>> _translations = {
     'warrantyPayment': 'Warranty payment',
     'warrantyPaymentHelp':
         'Uses the net warranty amount that applies to the invoice, not the processor surcharge.',
+    'warrantyPaymentApplied': 'Warranty payment applied.',
+    'warrantyPaymentMethodMissing':
+        'The required warranty payment method is not configured.',
+    'warrantyPaymentType': 'Warranty payment type',
+    'warrantyCheckOption': '0% — Check',
+    'warrantyCardOption': '{percent}% — Credit Card',
+    'warrantyCardSurchargeSetting': 'Warranty card surcharge',
+    'warrantyCardSurchargeSettingHelp':
+        'Used for warranty-company credit card payments. Check payments always use 0%.',
+    'saveWarrantySettings': 'Save warranty settings',
     'editPayment': 'Edit payment',
     'removePayment': 'Remove payment',
     'paymentOptions': 'Payment options',
@@ -668,6 +678,16 @@ const Map<String, Map<String, String>> _translations = {
     'warrantyPayment': 'Pago de garantía',
     'warrantyPaymentHelp':
         'Usa el monto neto de la garantía que se aplica a la factura, sin incluir el recargo del procesador.',
+    'warrantyPaymentApplied': 'Pago de garantía aplicado.',
+    'warrantyPaymentMethodMissing':
+        'El método de pago de garantía requerido no está configurado.',
+    'warrantyPaymentType': 'Tipo de pago de garantía',
+    'warrantyCheckOption': '0% — Cheque',
+    'warrantyCardOption': '{percent}% — Tarjeta de crédito',
+    'warrantyCardSurchargeSetting': 'Recargo de tarjeta de garantía',
+    'warrantyCardSurchargeSettingHelp':
+        'Se usa para pagos con tarjeta de crédito de la compañía de garantía. Los pagos con cheque siempre usan 0%.',
+    'saveWarrantySettings': 'Guardar configuración de garantía',
     'editPayment': 'Editar pago',
     'removePayment': 'Eliminar pago',
     'paymentOptions': 'Opciones de pago',
