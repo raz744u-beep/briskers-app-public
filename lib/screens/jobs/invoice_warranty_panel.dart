@@ -538,23 +538,42 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
     if (!_enabled) {
       return Container(
         color: Colors.white,
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        child: CheckboxListTile(
-          value: false,
-          enabled: !widget.readOnly && !_busy,
-          contentPadding: EdgeInsets.zero,
-          activeColor: BriskersColors.invoices,
-          controlAffinity: ListTileControlAffinity.leading,
-          title: const Text(
-            'Extended warranty job',
-            style: TextStyle(fontWeight: FontWeight.w800),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: widget.readOnly || _busy ? null : _enableWarranty,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Checkbox(
+                  value: false,
+                  onChanged: widget.readOnly || _busy
+                      ? null
+                      : (value) {
+                          if (value == true) _enableWarranty();
+                        },
+                  activeColor: BriskersColors.invoices,
+                  visualDensity: VisualDensity.compact,
+                ),
+                const SizedBox(width: 4),
+                const Expanded(
+                  child: Text(
+                    'Extended warranty job',
+                    style: TextStyle(
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const Icon(
+                  Icons.chevron_right,
+                  size: 22,
+                  color: Color(0xFF667085),
+                ),
+              ],
+            ),
           ),
-          subtitle: const Text(
-            'Enable warranty company, authorization and payment allocation.',
-          ),
-          onChanged: (value) {
-            if (value == true) _enableWarranty();
-          },
         ),
       );
     }
