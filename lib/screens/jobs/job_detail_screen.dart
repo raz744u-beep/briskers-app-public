@@ -10,6 +10,7 @@ import '../../core/employee_role_style.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/job_sync_service.dart';
+import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_work_findings_service.dart';
@@ -36,8 +37,7 @@ class JobDetailScreen extends StatefulWidget {
 
 class _JobDetailScreenState extends State<JobDetailScreen> {
   static const _api = BriskersApi();
-  static final Map<String, Future<String>> _findingPhotoUrlCache = {};
-  static final Map<String, DateTime> _findingPhotoUrlCacheCreated = {};
+  final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
   final OfflinePreInspectionService _offlineInspection =
       OfflinePreInspectionService();
   final OfflineWorkFindingsService _offlineWorkFindings =
@@ -130,6 +130,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           _error = null;
         });
         _modalRefresh?.call();
+        unawaited(_prefetchFindingPhotos(snapshot.findings));
       }
     } catch (_) {
       // The online load below can still succeed without a local snapshot.
@@ -379,6 +380,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         _error = null;
       });
       _modalRefresh?.call();
+      unawaited(_prefetchFindingPhotos(findings));
 
       unawaited(
         _persistOnlineJobSnapshot(statuses),
@@ -396,6 +398,43 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           _error = error.toString();
         }
       });
+    }
+  }
+
+  Future<void> _prefetchFindingPhotos(
+    List<Map<String, dynamic>> findings,
+  ) async {
+    final pending = <Future<File?>>[];
+
+    for (final finding in findings) {
+      final attachments = List<dynamic>.from(
+        finding['attachments'] ?? const <dynamic>[],
+      );
+
+      for (final raw in attachments) {
+        if (raw is! Map) continue;
+        final attachment = Map<String, dynamic>.from(raw);
+        final localPath =
+            attachment['local_file_path']?.toString() ?? '';
+        if (localPath.isNotEmpty && File(localPath).existsSync()) {
+          continue;
+        }
+
+        final bucket = attachment['bucket']?.toString() ?? '';
+        final key = attachment['key']?.toString() ?? '';
+        if (bucket.isEmpty || key.isEmpty) continue;
+
+        pending.add(_attachmentCache.getOrDownload(bucket, key));
+
+        if (pending.length >= 4) {
+          await Future.wait(pending);
+          pending.clear();
+        }
+      }
+    }
+
+    if (pending.isNotEmpty) {
+      await Future.wait(pending);
     }
   }
 
@@ -1865,15 +1904,20 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
     if (confirmed != true) return;
 
+    final bucket =
+        attachment['bucket']?.toString() ?? 'briskers-private';
+    final key = attachment['key']?.toString() ?? '';
+
     await _run(
       () => _api.deleteVehicleFindingPhoto(
         widget.businessId,
         finding['id'].toString(),
         attachmentId,
-        bucket: attachment['bucket']?.toString() ?? 'briskers-private',
-        key: attachment['key']?.toString() ?? '',
+        bucket: bucket,
+        key: key,
       ),
     );
+    await _attachmentCache.remove(bucket, key);
   }
 
   Future<void> _replaceFindingPhoto(
@@ -1922,13 +1966,17 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         bytes: await photo.readAsBytes(),
       );
       if (attachmentId.isNotEmpty) {
+        final bucket =
+            attachment['bucket']?.toString() ?? 'briskers-private';
+        final key = attachment['key']?.toString() ?? '';
         await _api.deleteVehicleFindingPhoto(
           widget.businessId,
           finding['id'].toString(),
           attachmentId,
-          bucket: attachment['bucket']?.toString() ?? 'briskers-private',
-          key: attachment['key']?.toString() ?? '',
+          bucket: bucket,
+          key: key,
         );
+        await _attachmentCache.remove(bucket, key);
       }
     });
   }
@@ -2431,130 +2479,64 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Future<void> _showFindingPhoto(
     Map<String, dynamic> attachment,
   ) async {
+    File? file;
+
     final localPath =
         attachment['local_file_path']?.toString() ?? '';
     if (localPath.isNotEmpty) {
-      final file = File(localPath);
-      if (file.existsSync()) {
-        if (!mounted) return;
-        await showDialog<void>(
-          context: context,
-          barrierColor: Colors.black87,
-          builder: (dialogContext) => Dialog(
-            insetPadding: const EdgeInsets.all(12),
-            backgroundColor: Colors.black,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: InteractiveViewer(
-                    minScale: 1,
-                    maxScale: 5,
-                    child: Center(
-                      child: Image.file(
-                        file,
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, _, _) => const Icon(
-                          Icons.broken_image_outlined,
-                          color: Colors.white70,
-                          size: 56,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 6,
-                  right: 6,
-                  child: IconButton.filled(
-                    tooltip: 'Close photo',
-                    onPressed: () =>
-                        Navigator.pop(dialogContext),
-                    icon: const Icon(Icons.close),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-        return;
+      final localFile = File(localPath);
+      if (localFile.existsSync()) {
+        file = localFile;
       }
     }
 
-    final bucket = attachment['bucket']?.toString() ?? '';
-    final key = attachment['key']?.toString() ?? '';
-    if (bucket.isEmpty || key.isEmpty) return;
+    if (file == null) {
+      final bucket = attachment['bucket']?.toString() ?? '';
+      final key = attachment['key']?.toString() ?? '';
+      if (bucket.isEmpty || key.isEmpty) return;
+      file = await _attachmentCache.getOrDownload(bucket, key);
+    }
 
-    try {
-      final url = await _api.signedAttachmentUrl(bucket, key);
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        barrierColor: Colors.black87,
-        builder: (dialogContext) => Dialog(
-          insetPadding: const EdgeInsets.all(12),
-          backgroundColor: Colors.black,
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: InteractiveViewer(
-                  minScale: 1,
-                  maxScale: 5,
-                  child: Center(
-                    child: Image.network(
-                      url,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => const Icon(
-                        Icons.broken_image_outlined,
-                        color: Colors.white70,
-                        size: 56,
-                      ),
+    if (file == null || !mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) => Dialog(
+        insetPadding: const EdgeInsets.all(12),
+        backgroundColor: Colors.black,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: InteractiveViewer(
+                minScale: 1,
+                maxScale: 5,
+                child: Center(
+                  child: Image.file(
+                    file!,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) => const Icon(
+                      Icons.broken_image_outlined,
+                      color: Colors.white70,
+                      size: 56,
                     ),
                   ),
                 ),
               ),
-              Positioned(
-                top: 6,
-                right: 6,
-                child: IconButton.filled(
-                  tooltip: 'Close photo',
-                  onPressed: () =>
-                      Navigator.pop(dialogContext),
-                  icon: const Icon(Icons.close),
-                ),
+            ),
+            Positioned(
+              top: 6,
+              right: 6,
+              child: IconButton.filled(
+                tooltip: 'Close photo',
+                onPressed: () => Navigator.pop(dialogContext),
+                icon: const Icon(Icons.close),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-      );
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    }
-  }
-
-  Future<String> _cachedFindingPhotoUrl(
-    String bucket,
-    String key,
-  ) {
-    final cacheKey = '$bucket::$key';
-    final cached = _findingPhotoUrlCache[cacheKey];
-    final createdAt = _findingPhotoUrlCacheCreated[cacheKey];
-
-    if (cached != null &&
-        createdAt != null &&
-        DateTime.now().difference(createdAt) < const Duration(minutes: 50)) {
-      return cached;
-    }
-
-    final future = _api.signedAttachmentUrl(bucket, key).catchError(
-      (Object error) {
-        _findingPhotoUrlCache.remove(cacheKey);
-        _findingPhotoUrlCacheCreated.remove(cacheKey);
-        throw error;
-      },
+      ),
     );
-    _findingPhotoUrlCache[cacheKey] = future;
-    _findingPhotoUrlCacheCreated[cacheKey] = DateTime.now();
-    return future;
   }
 
   Widget _findingPhotoThumbnail(
@@ -2685,21 +2667,28 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       );
     }
 
-    return FutureBuilder<String>(
-      future: _cachedFindingPhotoUrl(bucket, key),
+    return FutureBuilder<File?>(
+      future: _attachmentCache.getOrDownload(bucket, key),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        final cached = snapshot.data;
+        if (cached == null) {
           return controls(
-            const Center(
-              child: CircularProgressIndicator(strokeWidth: 2),
+            Center(
+              child: snapshot.connectionState == ConnectionState.waiting
+                  ? const CircularProgressIndicator(strokeWidth: 2)
+                  : const Icon(
+                      Icons.broken_image_outlined,
+                      color: Colors.deepOrange,
+                    ),
             ),
           );
         }
+
         return controls(
           ClipRRect(
             borderRadius: BorderRadius.circular(9),
-            child: Image.network(
-              snapshot.data!,
+            child: Image.file(
+              cached,
               width: 82,
               height: 82,
               fit: BoxFit.cover,
