@@ -565,7 +565,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
               children: [
                 Row(
                   children: [
-                    Expanded(
+                    Flexible(
                       child: Text(
                         tr('appointments'),
                         maxLines: 1,
@@ -575,13 +575,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                                     color: BriskersColors.appointments,
                                   ),
                       ),
-                    ),
-                    Text(
-                      '${tr('total')} $total',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: BriskersColors.appointments,
-                                  fontWeight: FontWeight.w700,
-                                ),
                     ),
                     if (_canManage && _onlineReady) ...[
                       const SizedBox(width: 8),
@@ -594,6 +587,14 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                         label: Text(tr('add')),
                       ),
                     ],
+                    const Spacer(),
+                    Text(
+                      '${tr('total')} $total',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: BriskersColors.appointments,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
