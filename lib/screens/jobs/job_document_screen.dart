@@ -2705,8 +2705,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       child: InkWell(
         onTap: _busy ? null : _showInvoiceFindings,
         child: Container(
-          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 7),
+          padding: const EdgeInsets.fromLTRB(10, 7, 8, 7),
           decoration: BoxDecoration(
             color: const Color(0xFFFFF1F0),
             borderRadius: BorderRadius.circular(12),
@@ -2718,7 +2718,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               const Icon(
                 Icons.warning_amber_rounded,
                 color: Color(0xFFC62828),
-                size: 28,
+                size: 23,
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -2729,7 +2729,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       '$count OPEN FINDING${count == 1 ? '' : 'S'}',
                       style: const TextStyle(
                         color: Color(0xFFC62828),
-                        fontSize: 15.5,
+                        fontSize: 13.5,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -2737,11 +2737,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       const SizedBox(height: 2),
                       Text(
                         firstBody,
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Color(0xFF26354D),
-                          fontSize: 13.5,
+                          fontSize: 12.5,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -2757,14 +2757,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 2),
-                    const Text(
-                      'Review before closing this invoice',
-                      style: TextStyle(
-                        color: Color(0xFF667085),
-                        fontSize: 12.5,
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -2906,7 +2898,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               : '${tr('date')}: $date',
           maxLines: 2,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 7),
         infoLine(
           Icons.receipt_long_outlined,
           job.isEmpty ? '—' : '${tr('jobLabel')} $job',
@@ -2920,7 +2912,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       child: LayoutBuilder(
         builder: (context, constraints) {
           if (constraints.maxWidth < 430) {
@@ -2928,9 +2920,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 customerInfo,
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 const Divider(height: 1, color: Color(0xFFD7E0E4)),
-                const SizedBox(height: 12),
+                const SizedBox(height: 7),
                 documentInfo,
               ],
             );
