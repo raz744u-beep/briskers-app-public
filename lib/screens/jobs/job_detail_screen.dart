@@ -4378,7 +4378,17 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final workSummary = currentVisit?['work_summary']?.toString().trim() ?? '';
     final unassigned = _job!['is_unassigned'] == true;
     final statusColor = colorFromHex(_job!['status_color']?.toString());
-    final activeFindings = _findings.where((finding) => finding['status']?.toString() != 'resolved').length;
+    final activeFindings = _findings.where((finding) {
+      final status = finding['status']?.toString() ?? 'open';
+      if (status == 'resolved') return false;
+
+      final repairJobId = finding['repair_job_id']?.toString() ?? '';
+      if (status == 'in_job' && repairJobId == widget.jobId) {
+        return false;
+      }
+
+      return true;
+    }).length;
 
     int? badge(int value) => value > 0 ? value : null;
     final complaintCount = complaint.isEmpty ? 0 : 1;
