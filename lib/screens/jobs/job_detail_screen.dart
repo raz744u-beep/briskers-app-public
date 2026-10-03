@@ -3044,10 +3044,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 Icons.document_scanner_outlined,
                 color: Color(0xFF6B7280),
               ),
-              title: Text(
-                'Import from Identifix',
-                style: TextStyle(color: Color(0xFF6B7280)),
-              ),
+              title: Text('Import from Identifix'),
             ),
           ),
         if (_canSeeFinancial)
@@ -4249,10 +4246,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                                     Icons.document_scanner_outlined,
                                     color: Color(0xFF6B7280),
                                   ),
-                                  title: Text(
-                                    'Import from Identifix',
-                                    style: TextStyle(color: Color(0xFF6B7280)),
-                                  ),
+                                  title: Text('Import from Identifix'),
                                   subtitle: Text('Scan or upload printed estimate'),
                                 ),
                               ),
