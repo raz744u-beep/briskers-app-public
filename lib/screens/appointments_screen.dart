@@ -566,14 +566,20 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 Row(
                   children: [
                     Flexible(
-                      child: Text(
-                        tr('appointments'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                    color: BriskersColors.appointments,
-                                  ),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          tr('appointments'),
+                          maxLines: 1,
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: BriskersColors.appointments,
+                              ),
+                        ),
                       ),
                     ),
                     if (_canManage && _onlineReady) ...[
