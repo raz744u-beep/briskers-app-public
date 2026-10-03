@@ -2969,6 +2969,244 @@ class BriskersApi {
     );
   }
 
+  Future<Map<String, dynamic>> documentWarrantyDetail(
+    String businessId,
+    String documentId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_document_warranty_detail',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> warrantyCompanies(
+    String businessId, {
+    bool includeInactive = false,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_warranty_companies',
+      params: {
+        'p_business_id': businessId,
+        'p_include_inactive': includeInactive,
+      },
+    );
+    return List<dynamic>.from(result as List)
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+  }
+
+  Future<String> createWarrantyCompany(
+    String businessId, {
+    required String name,
+    String? claimsPhone,
+    String? submissionEmail,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_create_warranty_company',
+      params: {
+        'p_business_id': businessId,
+        'p_name': name,
+        'p_claims_phone': claimsPhone,
+        'p_submission_email': submissionEmail,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> updateWarrantyCompany(
+    String businessId,
+    String companyId, {
+    required String name,
+    String? claimsPhone,
+    String? submissionEmail,
+    String? portalUrl,
+    String? notes,
+    bool active = true,
+  }) async {
+    await supabase.rpc(
+      'briskers_update_warranty_company',
+      params: {
+        'p_business_id': businessId,
+        'p_company_id': companyId,
+        'p_name': name,
+        'p_claims_phone': claimsPhone,
+        'p_submission_email': submissionEmail,
+        'p_portal_url': portalUrl,
+        'p_notes': notes,
+        'p_active': active,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> updateDocumentWarranty(
+    String businessId,
+    String documentId, {
+    required int expectedVersion,
+    required bool extendedWarranty,
+    String? warrantyCompanyId,
+    String? claimNumber,
+    String? authorizationNumber,
+    num? approvedAmount,
+    num surchargeRate = 0.03,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_update_document_warranty',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_expected_version': expectedVersion,
+        'p_extended_warranty': extendedWarranty,
+        'p_warranty_company_id': warrantyCompanyId,
+        'p_claim_number': claimNumber,
+        'p_authorization_number': authorizationNumber,
+        'p_approved_amount': approvedAmount,
+        'p_surcharge_rate': surchargeRate,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> documentNoteTemplates(
+    String businessId, {
+    bool includeInactive = false,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_document_note_templates',
+      params: {
+        'p_business_id': businessId,
+        'p_include_inactive': includeInactive,
+      },
+    );
+    return List<dynamic>.from(result as List)
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+  }
+
+  Future<String> saveDocumentNoteTemplate(
+    String businessId, {
+    String? templateId,
+    required String name,
+    required String body,
+    String templateType = 'standard',
+    bool showInQuickList = true,
+    bool active = true,
+    int sortOrder = 100,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_document_note_template',
+      params: {
+        'p_business_id': businessId,
+        'p_template_id': templateId,
+        'p_name': name,
+        'p_body': body,
+        'p_template_type': templateType,
+        'p_show_in_quick_list': showInQuickList,
+        'p_active': active,
+        'p_sort_order': sortOrder,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<List<Map<String, dynamic>>> disclaimerTemplates(
+    String businessId, {
+    bool includeInactive = false,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_disclaimer_templates',
+      params: {
+        'p_business_id': businessId,
+        'p_include_inactive': includeInactive,
+      },
+    );
+    return List<dynamic>.from(result as List)
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+  }
+
+  Future<String> saveDisclaimerTemplate(
+    String businessId, {
+    String? templateId,
+    required String name,
+    required String body,
+    bool signatureRequired = true,
+    bool active = true,
+    int sortOrder = 100,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_disclaimer_template',
+      params: {
+        'p_business_id': businessId,
+        'p_template_id': templateId,
+        'p_name': name,
+        'p_body': body,
+        'p_signature_required': signatureRequired,
+        'p_active': active,
+        'p_sort_order': sortOrder,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<List<Map<String, dynamic>>> documentDisclaimers(
+    String businessId,
+    String documentId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_document_disclaimers',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+      },
+    );
+    return List<dynamic>.from(result as List)
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+  }
+
+  Future<String> saveDocumentDisclaimer(
+    String businessId,
+    String documentId, {
+    String? disclaimerId,
+    String? templateId,
+    required String title,
+    required String body,
+    bool signatureRequired = true,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_save_document_disclaimer',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_disclaimer_id': disclaimerId,
+        'p_template_id': templateId,
+        'p_title': title,
+        'p_body': body,
+        'p_signature_required': signatureRequired,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<void> deleteDocumentDisclaimer(
+    String businessId,
+    String documentId,
+    String disclaimerId,
+  ) async {
+    await supabase.rpc(
+      'briskers_delete_document_disclaimer',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_disclaimer_id': disclaimerId,
+      },
+    );
+  }
+
   Future<void> updateDocumentLineV2(
     String businessId,
     String lineId, {
