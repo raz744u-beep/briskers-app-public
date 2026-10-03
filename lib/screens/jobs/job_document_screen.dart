@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
@@ -2293,6 +2295,29 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   ),
                 ),
               ),
+              if (!_estimate &&
+                  _warrantyDetail['extended_warranty'] == true)
+                ListTile(
+                  leading: const Icon(
+                    Icons.shield_outlined,
+                    color: BriskersColors.invoices,
+                  ),
+                  title: const Text(
+                    'Submit to warranty company',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: Text(
+                    _submissionReadiness['ready'] == true
+                        ? 'All required information is complete'
+                        : 'Checks VIN, mileage, authorization and signature',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      Navigator.pop(sheetContext, 'warranty_submit'),
+                ),
+              if (!_estimate &&
+                  _warrantyDetail['extended_warranty'] == true)
+                const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.email_outlined),
                 title: const Text('Email'),
@@ -2321,6 +2346,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
 
     if (!mounted || action == null) return;
+    if (action == 'warranty_submit') {
+      await _prepareWarrantySubmission();
+    }
     if (action == 'email') await _emailPdf();
     if (action == 'print') await _printPdf();
     if (action == 'share') await _sharePdf();
@@ -4094,6 +4122,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final signatureNeeded =
         _warrantyDetail['signature_required'] == true ||
             disclaimers.any((item) => item['signature_required'] == true);
+    final signatureCurrent = _signatureStatus['is_current'] == true;
+    final signerName = _signatureStatus['signer_name']?.toString() ?? '';
+    final signedAt = DateTime.tryParse(
+      _signatureStatus['signed_at']?.toString() ?? '',
+    );
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -4189,34 +4222,45 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ),
             if (signatureNeeded) ...[
               const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 9,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF7E8),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFF0D59D)),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(
-                      Icons.draw_outlined,
-                      color: Color(0xFFC66A00),
-                      size: 20,
+              Card(
+                margin: EdgeInsets.zero,
+                color: signatureCurrent
+                    ? const Color(0xFFEAF8EE)
+                    : const Color(0xFFFFF7E8),
+                child: ListTile(
+                  leading: Icon(
+                    signatureCurrent
+                        ? Icons.check_circle_outline
+                        : Icons.draw_outlined,
+                    color: signatureCurrent
+                        ? BriskersColors.invoices
+                        : const Color(0xFFC66A00),
+                  ),
+                  title: Text(
+                    signatureCurrent
+                        ? 'Customer signature complete'
+                        : 'Customer signature required',
+                    style: TextStyle(
+                      color: signatureCurrent
+                          ? BriskersColors.invoices
+                          : const Color(0xFF8A4B00),
+                      fontWeight: FontWeight.w900,
                     ),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Customer signature required before final submission.',
-                        style: TextStyle(
-                          color: Color(0xFF8A4B00),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
+                  subtitle: Text(
+                    signatureCurrent
+                        ? <String>[
+                            if (signerName.isNotEmpty) signerName,
+                            if (signedAt != null)
+                              DateFormat('MMM d, yyyy h:mm a')
+                                  .format(signedAt.toLocal()),
+                          ].join(' • ')
+                        : 'Required before final warranty/disclaimer submission.',
+                  ),
+                  trailing: TextButton(
+                    onPressed: _busy ? null : _captureCustomerSignature,
+                    child: Text(signatureCurrent ? 'Re-sign' : 'Sign'),
+                  ),
                 ),
               ),
             ],
