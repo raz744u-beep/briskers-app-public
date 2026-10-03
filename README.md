@@ -18,3 +18,4 @@ GitHub Actions builds a debug APK on every push to `main` and on manual workflow
 The workflow creates a clean Flutter Android shell, copies this app source into it, runs `flutter analyze`, runs tests, and builds `app-debug.apk`.
 
 The Supabase publishable key is intentionally client-side. No Supabase secret/service key is stored in this repository.
+<!-- Android build retry workflow refresh: 2026-10-03 -->
