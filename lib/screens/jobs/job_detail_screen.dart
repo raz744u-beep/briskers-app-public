@@ -946,14 +946,27 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               TextField(
                 controller: controller,
                 autofocus: true,
+                cursorColor: BriskersColors.jobs,
                 minLines: 4,
                 maxLines: 9,
-                decoration: InputDecoration(hintText: hint),
+                decoration: InputDecoration(
+                  hintText: hint,
+                  focusedBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(
+                      color: BriskersColors.jobs,
+                      width: 2,
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: BriskersColors.jobs,
+                    foregroundColor: Colors.white,
+                  ),
                   onPressed: () => Navigator.pop(sheetContext, controller.text.trim()),
                   child: const Text('Save'),
                 ),
