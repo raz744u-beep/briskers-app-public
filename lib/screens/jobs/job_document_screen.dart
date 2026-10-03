@@ -22,12 +22,14 @@ class JobDocumentScreen extends StatefulWidget {
     required this.documentId,
     required this.isOwner,
     this.canManageExpenses = false,
+    this.initialAction,
   });
 
   final String businessId;
   final String documentId;
   final bool isOwner;
   final bool canManageExpenses;
+  final String? initialAction;
 
   @override
   State<JobDocumentScreen> createState() => _JobDocumentScreenState();
@@ -46,6 +48,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   num _defaultTaxRate = 0;
   bool _loading = true;
   bool _busy = false;
+  bool _initialActionHandled = false;
   String? _error;
 
   bool get _estimate => _detail?['kind']?.toString() == 'estimate';
@@ -111,6 +114,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _loading = false;
         _error = null;
       });
+      if (!_initialActionHandled &&
+          (widget.initialAction?.trim().isNotEmpty ?? false)) {
+        _initialActionHandled = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _runInitialAction(widget.initialAction!);
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -127,6 +137,38 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   String _money(Object? raw) =>
       NumberFormat.currency(symbol: '\$').format(_number(raw));
+
+  Future<void> _runInitialAction(String action) async {
+    switch (action) {
+      case 'edit':
+        await _editDocumentHeader();
+        break;
+      case 'copy':
+        await _copyInvoice();
+        break;
+      case 'add_expense':
+        await _addInvoiceExpense();
+        break;
+      case 'expenses':
+        await _showInvoiceExpenses();
+        break;
+      case 'payment':
+        await _enterPayment();
+        break;
+      case 'findings':
+        await _showInvoiceFindings();
+        break;
+      case 'job':
+        await _openLinkedJob();
+        break;
+      case 'preview':
+        await _previewPdf();
+        break;
+      case 'send':
+        await _showSendMenu();
+        break;
+    }
+  }
 
   Future<void> _run(Future<void> Function() action) async {
     if (_busy) return;
