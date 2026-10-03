@@ -3858,7 +3858,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               children: [
                 Text(
                   tr('customerDisclaimer'),
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 21,
                     fontWeight: FontWeight.w900,
                   ),
@@ -3866,9 +3866,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: title,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: tr('title'),
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -3876,9 +3876,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   controller: body,
                   minLines: 5,
                   maxLines: 10,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: tr('disclaimerText'),
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                     alignLabelWithHint: true,
                   ),
                 ),
@@ -3892,7 +3892,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   ),
                   title: Text(
                     tr('requireCustomerSignature'),
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   subtitle: Text(
                     tr('disclaimerSignedInvoiceHelp'),
@@ -3953,7 +3953,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           shrinkWrap: true,
           padding: const EdgeInsets.only(bottom: 12),
           children: [
-            const ListTile(
+            ListTile(
               title: Text(
                 tr('addDisclaimer'),
                 style: const TextStyle(
