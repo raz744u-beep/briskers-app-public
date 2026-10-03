@@ -43,8 +43,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   Map<String, dynamic>? _detail;
   Map<String, dynamic> _identifixMeta = const {};
+  Map<String, dynamic> _warrantyDetail = const {};
   List<Map<String, dynamic>> _invoiceStyles = const [];
   List<Map<String, dynamic>> _openFindings = const [];
+  bool _warrantyExpanded = false;
   num _defaultTaxRate = 0;
   bool _loading = true;
   bool _busy = false;
@@ -98,8 +100,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       final taxSettings = await _api.taxSettings(widget.businessId);
       List<Map<String, dynamic>> invoiceStyles = const [];
       List<Map<String, dynamic>> openFindings = const [];
+      Map<String, dynamic> warrantyDetail = const {};
       if (detail['kind']?.toString() == 'invoice') {
         invoiceStyles = await _api.invoiceStatusStyles(widget.businessId);
+        try {
+          warrantyDetail = await _api.documentWarrantyDetail(
+            widget.businessId,
+            widget.documentId,
+          );
+        } catch (_) {
+          warrantyDetail = const {};
+        }
         final vehicleId = detail['vehicle_id']?.toString() ?? '';
         if (vehicleId.isNotEmpty) {
           try {
@@ -138,6 +149,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       setState(() {
         _detail = detail;
         _identifixMeta = identifixMeta;
+        _warrantyDetail = warrantyDetail;
         _invoiceStyles = invoiceStyles;
         _openFindings = openFindings;
         _defaultTaxRate =
@@ -940,7 +952,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         widget.businessId,
         widget.documentId,
       );
-      if (mounted) setState(() => _detail = detail);
+      if (!_estimate) {
+        final warranty = await _api.documentWarrantyDetail(
+          widget.businessId,
+          widget.documentId,
+        );
+        detail.addAll(warranty);
+        if (mounted) {
+          setState(() {
+            _detail = detail;
+            _warrantyDetail = warranty;
+          });
+        }
+      } else if (mounted) {
+        setState(() => _detail = detail);
+      }
       return detail;
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
