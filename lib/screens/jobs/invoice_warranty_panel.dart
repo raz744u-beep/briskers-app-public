@@ -33,8 +33,23 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
 
   bool _expanded = false;
   bool _busy = false;
+  late bool _localEnabled;
 
-  bool get _enabled => widget.detail['extended_warranty'] == true;
+  bool get _enabled => _localEnabled;
+
+  @override
+  void initState() {
+    super.initState();
+    _localEnabled = widget.detail['extended_warranty'] == true;
+  }
+
+  @override
+  void didUpdateWidget(covariant InvoiceWarrantyPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_busy) {
+      _localEnabled = widget.detail['extended_warranty'] == true;
+    }
+  }
 
   num _number(Object? raw) => num.tryParse(raw?.toString() ?? '') ?? 0;
 
@@ -239,7 +254,13 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
 
   Future<void> _enableWarranty() async {
     if (widget.readOnly || _busy) return;
-    setState(() => _busy = true);
+
+    setState(() {
+      _localEnabled = true;
+      _expanded = true;
+      _busy = true;
+    });
+
     try {
       await _api.updateDocumentWarranty(
         widget.businessId,
@@ -247,10 +268,21 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
         expectedVersion: widget.expectedVersion,
         extendedWarranty: true,
       );
+
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+
       await widget.onChanged();
-      if (mounted) setState(() => _expanded = true);
-    } finally {
-      if (mounted) setState(() => _busy = false);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _localEnabled = false;
+          _expanded = false;
+          _busy = false;
+        });
+      }
+      rethrow;
     }
   }
 
@@ -285,7 +317,11 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
 
     if (!confirmed) return;
 
-    setState(() => _busy = true);
+    setState(() {
+      _localEnabled = false;
+      _expanded = false;
+      _busy = true;
+    });
     try {
       await _api.updateDocumentWarranty(
         widget.businessId,
@@ -293,10 +329,16 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
         expectedVersion: widget.expectedVersion,
         extendedWarranty: false,
       );
-      await widget.onChanged();
-      if (mounted) setState(() => _expanded = false);
-    } finally {
       if (mounted) setState(() => _busy = false);
+      await widget.onChanged();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _localEnabled = true;
+          _busy = false;
+        });
+      }
+      rethrow;
     }
   }
 
