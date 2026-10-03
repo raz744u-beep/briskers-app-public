@@ -1216,7 +1216,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final remaining = total - finalized - pending;
     if (remaining <= 0.005) return;
 
-    final warrantyNet = warrantyNet;
+    final warrantyNet = _number(_warrantyDetail['terminal_amount']);
     if (warrantyNet <= 0.005) return;
 
     final amount = warrantyNet > remaining ? remaining : warrantyNet;
@@ -3337,7 +3337,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         .toList();
     final shownPaid = finalizedPaid + pendingPaid;
     final safeBalance = balance < 0 ? 0 : balance;
-    final warrantyNet = warrantyNet;
+    final warrantyNet = _number(_warrantyDetail['terminal_amount']);
     final warrantyRate = _number(_warrantyDetail['surcharge_rate']);
     final warrantyUsesCheck = warrantyRate <= 0.000001;
     final warrantyPaymentAlreadyPresent = payments.any((payment) {
@@ -3423,9 +3423,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                             warrantyNet >
                                     safeBalance
                                 ? safeBalance
-                                : _number(
-                                    _warrantyDetail['terminal_amount'],
-                                  ),
+                                : warrantyNet,
                           ),
                           style: const TextStyle(
                             color: BriskersColors.invoices,
