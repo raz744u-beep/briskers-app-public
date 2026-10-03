@@ -37,28 +37,31 @@ class _WarrantyWorkflowSettingsScreenState
 
   Future<void> _load() async {
     try {
-      final results = await Future.wait([
-        _api.warrantyCompanies(
-          widget.businessId,
-          includeInactive: true,
-        ),
-        _api.documentNoteTemplates(
-          widget.businessId,
-          includeInactive: true,
-        ),
-        _api.disclaimerTemplates(
-          widget.businessId,
-          includeInactive: true,
-        ),
-        _api.warrantyPaymentSettings(widget.businessId),
-      ]);
+      final companiesFuture = _api.warrantyCompanies(
+        widget.businessId,
+        includeInactive: true,
+      );
+      final notesFuture = _api.documentNoteTemplates(
+        widget.businessId,
+        includeInactive: true,
+      );
+      final disclaimersFuture = _api.disclaimerTemplates(
+        widget.businessId,
+        includeInactive: true,
+      );
+      final paymentSettingsFuture =
+          _api.warrantyPaymentSettings(widget.businessId);
+
+      final companies = await companiesFuture;
+      final notes = await notesFuture;
+      final disclaimers = await disclaimersFuture;
+      final paymentSettings = await paymentSettingsFuture;
 
       if (!mounted) return;
       setState(() {
-        _companies = results[0];
-        _notes = results[1];
-        _disclaimers = results[2];
-        final paymentSettings = results[3];
+        _companies = companies;
+        _notes = notes;
+        _disclaimers = disclaimers;
         _cardSurchargeRate = num.tryParse(
               paymentSettings['card_surcharge_rate']?.toString() ?? '',
             ) ??
