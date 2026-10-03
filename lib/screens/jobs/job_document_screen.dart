@@ -1191,6 +1191,66 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     });
   }
 
+  Future<void> _enterWarrantyPayment() async {
+    await _collapseWorkspaceHeader();
+    if (_estimate || _warrantyDetail['extended_warranty'] != true) return;
+
+    List<Map<String, dynamic>> methods;
+    try {
+      methods = await _paymentMethods();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+
+    if (!mounted) return;
+    if (methods.isEmpty) {
+      setState(() => _error = 'No payment methods are configured.');
+      return;
+    }
+
+    final finalized = _number(_detail?['paid_amount']);
+    final pending = _number(_detail?['pending_payment']);
+    final total = _number(_detail?['total_amount']);
+    final remaining = total - finalized - pending;
+    if (remaining <= 0.005) return;
+
+    final warrantyNet = _number(_warrantyDetail['terminal_amount']);
+    if (warrantyNet <= 0.005) return;
+
+    final amount = warrantyNet > remaining ? remaining : warrantyNet;
+
+    String? cardMethodId;
+    for (final method in methods) {
+      final name = method['name']?.toString().toLowerCase() ?? '';
+      if (name.contains('credit') || name.contains('card')) {
+        cardMethodId = method['id']?.toString();
+        break;
+      }
+    }
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => _PaymentEntryDialog(
+        methods: methods,
+        initialAmount: amount,
+        initialMethodId: cardMethodId,
+        title: tr('warrantyPayment'),
+        saveLabel: tr('applyWarrantyPayment'),
+      ),
+    );
+    if (result == null) return;
+
+    await _run(() async {
+      await _api.addPendingInvoicePayment(
+        widget.businessId,
+        widget.documentId,
+        amount: result['amount'] as num,
+        methodId: result['method_id'].toString(),
+      );
+    });
+  }
+
   Future<void> _editPayment(Map<String, dynamic> payment) async {
     if (_estimate || payment['state']?.toString() != 'pending') return;
 
@@ -3311,6 +3371,72 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
             ),
           ),
+          if (_warrantyDetail['extended_warranty'] == true &&
+              _number(_warrantyDetail['terminal_amount']) > 0.005 &&
+              safeBalance > 0.005) ...[
+            const SizedBox(height: 14),
+            Card(
+              margin: EdgeInsets.zero,
+              color: BriskersColors.invoices.withValues(alpha: 0.07),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.shield_outlined,
+                          color: BriskersColors.invoices,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            tr('warrantyPayment'),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          _money(
+                            _number(_warrantyDetail['terminal_amount']) >
+                                    safeBalance
+                                ? safeBalance
+                                : _number(
+                                    _warrantyDetail['terminal_amount'],
+                                  ),
+                          ),
+                          style: const TextStyle(
+                            color: BriskersColors.invoices,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      tr('warrantyPaymentHelp'),
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: Color(0xFF667085),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: BriskersColors.invoices,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: _busy ? null : _enterWarrantyPayment,
+                      icon: const Icon(Icons.add_card_outlined),
+                      label: Text(tr('applyWarrantyPayment')),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 18),
           Row(
             children: [
