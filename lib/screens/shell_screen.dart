@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
+import '../core/employee_role_style.dart';
 import '../services/briskers_api.dart';
 import '../widgets/briskers_page_header.dart';
 import 'appointments_screen.dart';
@@ -124,6 +125,7 @@ class _ShellScreenState extends State<ShellScreen> {
   @override
   Widget build(BuildContext context) {
     final activeColor = _sectionColors[_index];
+    final roleStyle = employeeRoleStyle(_roleLabel);
     final pageTitles = [tr('dashboard'), tr('customers'), tr('appointments'), tr('jobs'), tr('more')];
     final pages = [
       DashboardScreen(
@@ -177,13 +179,13 @@ class _ShellScreenState extends State<ShellScreen> {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: activeColor.withValues(alpha: 0.14),
+                    color: roleStyle.color.withValues(alpha: 0.14),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
                     _roleLabel,
                     style: TextStyle(
-                      color: activeColor,
+                      color: roleStyle.color,
                       fontWeight: FontWeight.w700,
                       fontSize: 11,
                     ),
