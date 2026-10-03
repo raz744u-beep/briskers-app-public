@@ -754,7 +754,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           CircleAvatar(
-                            radius: 25,
+                            radius: 21,
                             backgroundColor: color.withValues(alpha: 0.12),
                             child: Icon(
                               _estimate
@@ -763,10 +763,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                       row['status_icon']?.toString(),
                                     ),
                               color: color,
-                              size: 27,
+                              size: 23,
                             ),
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -805,26 +805,31 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                   ],
                                 ),
                                 const SizedBox(height: 3),
-                                Text(
-                                  <String>[
-                                    if (vehicle.isNotEmpty) vehicle,
-                                    if (jobNumber.isNotEmpty)
-                                      '${tr('jobLabel')} $jobNumber',
-                                  ].join(' • '),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w500,
+                                if (vehicle.isNotEmpty)
+                                  Text(
+                                    vehicle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
-                                ),
-                                if (documentDate.isNotEmpty) ...[
+                                if (jobNumber.isNotEmpty ||
+                                    documentDate.isNotEmpty) ...[
                                   const SizedBox(height: 3),
                                   Text(
-                                    documentDate,
+                                    <String>[
+                                      if (jobNumber.isNotEmpty)
+                                        '${tr('jobLabel')} $jobNumber',
+                                      if (documentDate.isNotEmpty)
+                                        documentDate,
+                                    ].join(' • '),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
                                       color: Theme.of(context)
                                           .colorScheme
