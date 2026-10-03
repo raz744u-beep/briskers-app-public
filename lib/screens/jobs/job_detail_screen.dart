@@ -3273,17 +3273,27 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           return Card(
             margin: const EdgeInsets.only(bottom: 8),
             child: ListTile(
+              contentPadding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+              minVerticalPadding: 6,
               leading: CircleAvatar(
+                radius: 20,
                 backgroundColor:
                     const Color(0xFFC62828).withValues(alpha: 0.10),
                 child: const Icon(
                   Icons.north_east,
                   color: Color(0xFFC62828),
+                  size: 22,
                 ),
               ),
               title: Text(
                 vendor.isEmpty ? 'Expense' : vendor,
-                style: const TextStyle(fontWeight: FontWeight.w800),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 16,
+                  height: 1.15,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               subtitle: Text(
                 <String>[
@@ -3300,6 +3310,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 ].join('\n'),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 14,
+                  height: 1.25,
+                ),
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -3308,6 +3322,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     '-${_money(expense['amount'])}',
                     style: const TextStyle(
                       color: Color(0xFFC62828),
+                      fontSize: 16,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
