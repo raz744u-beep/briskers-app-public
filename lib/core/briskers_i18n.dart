@@ -299,6 +299,10 @@ const Map<String, Map<String, String>> _translations = {
     'payments': 'Payments',
     'noPaymentsYet': 'No payments entered yet.',
     'addPayment': 'Add Payment',
+    'applyWarrantyPayment': 'Apply warranty payment',
+    'warrantyPayment': 'Warranty payment',
+    'warrantyPaymentHelp':
+        'Uses the net warranty amount that applies to the invoice, not the processor surcharge.',
     'editPayment': 'Edit payment',
     'removePayment': 'Remove payment',
     'paymentOptions': 'Payment options',
@@ -662,6 +666,10 @@ const Map<String, Map<String, String>> _translations = {
     'payments': 'Pagos',
     'noPaymentsYet': 'Todavía no hay pagos registrados.',
     'addPayment': 'Agregar pago',
+    'applyWarrantyPayment': 'Aplicar pago de garantía',
+    'warrantyPayment': 'Pago de garantía',
+    'warrantyPaymentHelp':
+        'Usa el monto neto de la garantía que se aplica a la factura, sin incluir el recargo del procesador.',
     'editPayment': 'Editar pago',
     'removePayment': 'Eliminar pago',
     'paymentOptions': 'Opciones de pago',
