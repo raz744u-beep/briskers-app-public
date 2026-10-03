@@ -3207,6 +3207,106 @@ class BriskersApi {
     );
   }
 
+  Future<Map<String, dynamic>> registerDocumentSignature(
+    String businessId,
+    String documentId, {
+    required String signerName,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_register_document_signature',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_signer_name': signerName,
+        'p_original_filename': 'customer-signature.png',
+        'p_mime_type': 'image/png',
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<void> uploadDocumentSignature(
+    String businessId,
+    String documentId, {
+    required String signerName,
+    required Uint8List bytes,
+  }) async {
+    final registration = await registerDocumentSignature(
+      businessId,
+      documentId,
+      signerName: signerName,
+    );
+
+    final bucket = registration['bucket'].toString();
+    final key = registration['key'].toString();
+    final attachmentId = registration['attachment_id'].toString();
+    final authorizationId = registration['authorization_id'].toString();
+
+    await supabase.storage.from(bucket).uploadBinary(
+      key,
+      bytes,
+      fileOptions: const FileOptions(
+        contentType: 'image/png',
+        upsert: true,
+      ),
+    );
+
+    await supabase.rpc(
+      'briskers_finalize_attachment',
+      params: {
+        'p_business_id': businessId,
+        'p_attachment_id': attachmentId,
+        'p_byte_size': bytes.length,
+      },
+    );
+
+    await supabase.rpc(
+      'briskers_finalize_document_signature',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_authorization_id': authorizationId,
+        'p_attachment_id': attachmentId,
+        'p_signer_name': signerName,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> documentSignatureStatus(
+    String businessId,
+    String documentId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_document_signature_status',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> warrantySubmissionReadiness(
+    String businessId,
+    String documentId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_warranty_submission_readiness',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Uint8List> downloadAttachment(
+    String bucket,
+    String key,
+  ) async {
+    return supabase.storage.from(bucket).download(key);
+  }
+
   Future<void> updateDocumentLineV2(
     String businessId,
     String lineId, {
