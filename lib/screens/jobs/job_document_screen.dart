@@ -46,6 +46,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   final _catalogSync = CatalogSyncService();
   final ImagePicker _picker = ImagePicker();
   final ScrollController _workspaceHeaderController = ScrollController();
+  final TextEditingController _notesController = TextEditingController();
+  final FocusNode _notesFocusNode = FocusNode();
 
   Map<String, dynamic>? _detail;
   Map<String, dynamic> _identifixMeta = const {};
@@ -58,6 +60,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   bool _loading = true;
   bool _busy = false;
   bool _initialActionHandled = false;
+  bool _notesDirty = false;
   String? _error;
 
   bool get _estimate => _detail?['kind']?.toString() == 'estimate';
@@ -78,6 +81,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   @override
   void dispose() {
     _workspaceHeaderController.dispose();
+    _notesController.dispose();
+    _notesFocusNode.dispose();
     super.dispose();
   }
 
@@ -190,6 +195,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       if (!mounted) return;
       setState(() {
         _detail = detail;
+        if (!_notesDirty && !_notesFocusNode.hasFocus) {
+          _notesController.text = detail['memo']?.toString() ?? '';
+        }
         _identifixMeta = identifixMeta;
         _warrantyDetail = warrantyDetail;
         _signatureStatus = signatureStatus;
@@ -4261,8 +4269,30 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
   }
 
+  Future<void> _saveInlineNotes() async {
+    if (_readOnly || _busy || !_notesDirty) return;
+    final value = _notesController.text.trim();
+    final translatedValue = await _translateManualNote(value);
+    if (translatedValue == null || !mounted) return;
+
+    await _run(
+      () => _api.updateDocumentNotes(
+        widget.businessId,
+        widget.documentId,
+        expectedVersion: _version,
+        memo: translatedValue.isEmpty ? null : translatedValue,
+      ),
+    );
+
+    if (mounted && _error == null) {
+      setState(() {
+        _notesDirty = false;
+        _notesController.text = translatedValue;
+      });
+    }
+  }
+
   Widget _notesTab() {
-    final memo = _detail?['memo']?.toString().trim() ?? '';
     final disclaimers = List<dynamic>.from(
       _warrantyDetail['disclaimers'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
@@ -4280,49 +4310,63 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _estimate ? tr('estimateNotes') : tr('invoiceNotes'),
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
+          TextField(
+            controller: _notesController,
+            focusNode: _notesFocusNode,
+            readOnly: _readOnly,
+            minLines: 5,
+            maxLines: 10,
+            keyboardType: TextInputType.multiline,
+            textCapitalization: TextCapitalization.sentences,
+            onChanged: (_) {
+              if (!_notesDirty) {
+                setState(() => _notesDirty = true);
+              }
+            },
+            decoration: InputDecoration(
+              labelText: _estimate ? tr('estimateNotes') : tr('invoiceNotes'),
+              hintText: _estimate
+                  ? tr('noEstimateNotes')
+                  : tr('noInvoiceNotes'),
+              alignLabelWithHint: true,
+              filled: true,
+              fillColor: const Color(0xFFF5F8F7),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: Color(0xFFE0E7E5)),
               ),
-              if (!_readOnly)
-                TextButton.icon(
-                  onPressed: _busy ? null : _editNotes,
-                  icon: const Icon(Icons.edit_outlined),
-                  label: Text(tr('edit')),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: Color(0xFFE0E7E5)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(
+                  color: _estimate
+                      ? BriskersColors.estimates
+                      : BriskersColors.invoices,
+                  width: 2,
                 ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Container(
-            constraints: const BoxConstraints(minHeight: 130),
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF5F8F7),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFE0E7E5)),
-            ),
-            child: Text(
-              memo.isEmpty
-                  ? (_estimate
-                      ? tr('noEstimateNotes')
-                      : tr('noInvoiceNotes'))
-                  : memo,
-              style: TextStyle(
-                fontSize: 15,
-                height: 1.4,
-                color: memo.isEmpty
-                    ? Theme.of(context).colorScheme.onSurfaceVariant
-                    : const Color(0xFF182239),
               ),
             ),
           ),
+          if (!_readOnly && _notesDirty) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: _estimate
+                      ? BriskersColors.estimates
+                      : BriskersColors.invoices,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: _busy ? null : _saveInlineNotes,
+                icon: const Icon(Icons.check),
+                label: Text(tr('saveNotes')),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           if (!_readOnly)
             OutlinedButton.icon(
