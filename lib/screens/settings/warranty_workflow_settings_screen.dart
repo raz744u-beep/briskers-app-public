@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 
@@ -26,6 +27,7 @@ class _WarrantyWorkflowSettingsScreenState
   List<Map<String, dynamic>> _companies = const [];
   List<Map<String, dynamic>> _notes = const [];
   List<Map<String, dynamic>> _disclaimers = const [];
+  num _cardSurchargeRate = 0.03;
 
   @override
   void initState() {
@@ -48,6 +50,7 @@ class _WarrantyWorkflowSettingsScreenState
           widget.businessId,
           includeInactive: true,
         ),
+        _api.warrantyPaymentSettings(widget.businessId),
       ]);
 
       if (!mounted) return;
@@ -55,6 +58,11 @@ class _WarrantyWorkflowSettingsScreenState
         _companies = results[0];
         _notes = results[1];
         _disclaimers = results[2];
+        final paymentSettings = results[3];
+        _cardSurchargeRate = num.tryParse(
+              paymentSettings['card_surcharge_rate']?.toString() ?? '',
+            ) ??
+            0.03;
         _loading = false;
         _error = null;
       });
@@ -495,6 +503,54 @@ class _WarrantyWorkflowSettingsScreenState
     await _load();
   }
 
+  Future<void> _editWarrantyCardSurcharge() async {
+    final percent = TextEditingController(
+      text: (_cardSurchargeRate * 100).toStringAsFixed(
+        (_cardSurchargeRate * 100) % 1 == 0 ? 0 : 2,
+      ),
+    );
+
+    final save = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(tr('warrantyCardSurchargeSetting')),
+        content: TextField(
+          controller: percent,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            suffixText: '%',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(tr('cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: BriskersColors.invoices,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(tr('saveWarrantySettings')),
+          ),
+        ],
+      ),
+    );
+
+    final raw = num.tryParse(percent.text.trim());
+    percent.dispose();
+    if (save != true || raw == null || raw < 0 || raw > 25) return;
+
+    await _api.updateWarrantyPaymentSettings(
+      widget.businessId,
+      cardSurchargeRate: raw / 100,
+    );
+    await _load();
+  }
+
   Widget _sectionHeader(
     String title,
     String subtitle,
@@ -543,6 +599,26 @@ class _WarrantyWorkflowSettingsScreenState
                         ),
                       ),
                     ),
+                  ListTile(
+                    leading: const Icon(
+                      Icons.percent,
+                      color: BriskersColors.invoices,
+                    ),
+                    title: Text(
+                      tr('warrantyCardSurchargeSetting'),
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    subtitle: Text(tr('warrantyCardSurchargeSettingHelp')),
+                    trailing: Text(
+                      '${(_cardSurchargeRate * 100).toStringAsFixed((_cardSurchargeRate * 100) % 1 == 0 ? 0 : 2)}%',
+                      style: const TextStyle(
+                        color: BriskersColors.invoices,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    onTap: _editWarrantyCardSurcharge,
+                  ),
+                  const Divider(height: 24),
                   _sectionHeader(
                     'Warranty companies',
                     'Claims phone and invoice submission email',
