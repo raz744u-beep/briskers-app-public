@@ -2983,6 +2983,30 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> warrantyPaymentSettings(
+    String businessId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_warranty_payment_settings',
+      params: {'p_business_id': businessId},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> updateWarrantyPaymentSettings(
+    String businessId, {
+    required num cardSurchargeRate,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_update_warranty_payment_settings',
+      params: {
+        'p_business_id': businessId,
+        'p_card_surcharge_rate': cardSurchargeRate,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<List<Map<String, dynamic>>> warrantyCompanies(
     String businessId, {
     bool includeInactive = false,
