@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 
 class WarrantyWorkflowSettingsScreen extends StatefulWidget {
@@ -71,7 +72,7 @@ class _WarrantyWorkflowSettingsScreenState
       text: company?['name']?.toString() ?? '',
     );
     final phone = TextEditingController(
-      text: company?['claims_phone']?.toString() ?? '',
+      text: formatUsPhone(company?['claims_phone']?.toString()),
     );
     final email = TextEditingController(
       text: company?['submission_email']?.toString() ?? '',
@@ -122,8 +123,12 @@ class _WarrantyWorkflowSettingsScreenState
                 TextField(
                   controller: phone,
                   keyboardType: TextInputType.phone,
+                  inputFormatters: const [
+                    UsPhoneTextInputFormatter(),
+                  ],
                   decoration: const InputDecoration(
                     labelText: 'Claims phone',
+                    hintText: '800-531-1925',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -183,7 +188,7 @@ class _WarrantyWorkflowSettingsScreenState
     );
 
     final companyName = name.text.trim();
-    final claimsPhone = phone.text.trim();
+    final claimsPhone = formatUsPhone(phone.text.trim());
     final submissionEmail = email.text.trim();
     final portalUrl = portal.text.trim();
     final noteText = notes.text.trim();
@@ -566,7 +571,9 @@ class _WarrantyWorkflowSettingsScreenState
                           <String>[
                             if ((company['claims_phone']?.toString() ?? '')
                                 .isNotEmpty)
-                              company['claims_phone'].toString(),
+                              formatUsPhone(
+                                company['claims_phone']?.toString(),
+                              ),
                             if ((company['submission_email']?.toString() ?? '')
                                 .isNotEmpty)
                               company['submission_email'].toString(),
