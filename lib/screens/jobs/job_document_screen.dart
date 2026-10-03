@@ -47,7 +47,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Map<String, dynamic> _warrantyDetail = const {};
   List<Map<String, dynamic>> _invoiceStyles = const [];
   List<Map<String, dynamic>> _openFindings = const [];
-  bool _warrantyExpanded = false;
   num _defaultTaxRate = 0;
   bool _loading = true;
   bool _busy = false;
