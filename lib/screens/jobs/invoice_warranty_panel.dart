@@ -36,6 +36,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
   bool _expanded = false;
   bool _busy = false;
   late bool _localEnabled;
+  num _cardSurchargeRate = 0.03;
 
   bool get _enabled => _localEnabled;
 
@@ -43,6 +44,20 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
   void initState() {
     super.initState();
     _localEnabled = widget.detail['extended_warranty'] == true;
+    _loadWarrantyPaymentSettings();
+  }
+
+  Future<void> _loadWarrantyPaymentSettings() async {
+    try {
+      final settings = await _api.warrantyPaymentSettings(widget.businessId);
+      final rate = num.tryParse(
+            settings['card_surcharge_rate']?.toString() ?? '',
+          ) ??
+          0.03;
+      if (mounted) setState(() => _cardSurchargeRate = rate);
+    } catch (_) {
+      // Keep the safe 3% default if settings are temporarily unavailable.
+    }
   }
 
   @override
@@ -378,6 +393,12 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
             ? _number(widget.detail['approved_amount']).toStringAsFixed(2)
             : '',
       );
+      num selectedRate = _number(widget.detail['surcharge_rate']);
+      if (selectedRate <= 0) {
+        selectedRate = 0;
+      } else {
+        selectedRate = _cardSurchargeRate;
+      }
 
       final result = await showModalBottomSheet<Map<String, dynamic>>(
         context: context,
@@ -484,6 +505,38 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                       ),
                     ),
                     const SizedBox(height: 10),
+                    DropdownButtonFormField<num>(
+                      value: selectedRate,
+                      decoration: InputDecoration(
+                        labelText: tr('warrantyPaymentType'),
+                        prefixIcon: const Icon(Icons.account_balance_wallet_outlined),
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: [
+                        DropdownMenuItem<num>(
+                          value: 0,
+                          child: Text(tr('warrantyCheckOption')),
+                        ),
+                        DropdownMenuItem<num>(
+                          value: _cardSurchargeRate,
+                          child: Text(
+                            tr('warrantyCardOption').replaceAll(
+                              '{percent}',
+                              (_cardSurchargeRate * 100)
+                                  .toStringAsFixed(
+                                    (_cardSurchargeRate * 100) % 1 == 0 ? 0 : 2,
+                                  ),
+                            ),
+                          ),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setSheetState(() => selectedRate = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 10),
                     Text(
                       tr('warrantySurchargeExplanation'),
                       style: const TextStyle(
@@ -509,6 +562,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                                   'authorization':
                                       authorization.text.trim(),
                                   'approved': approved.text.trim(),
+                                  'surcharge_rate': selectedRate,
                                 },
                               ),
                       child: Text(tr('saveWarrantyInformation')),
@@ -544,7 +598,9 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                 ? null
                 : result['authorization']?.toString(),
         approvedAmount: approvedAmount,
-        surchargeRate: 0.03,
+        surchargeRate:
+            num.tryParse(result['surcharge_rate']?.toString() ?? '') ??
+                _cardSurchargeRate,
       );
       await widget.onChanged();
     } finally {
@@ -707,7 +763,10 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                     _money(terminal),
                     strong: true,
                   ),
-                  _summaryRow(tr('processorSurcharge3'), _money(fee)),
+                  _summaryRow(
+                    '${(_number(widget.detail['surcharge_rate']) * 100).toStringAsFixed((_number(widget.detail['surcharge_rate']) * 100) % 1 == 0 ? 0 : 2)}% ${tr('threePercentSurcharge').replaceFirst('3% ', '')}',
+                    _money(fee),
+                  ),
                   _summaryRow(
                     tr('warrantyAppliedToInvoice'),
                     _money(terminal),
