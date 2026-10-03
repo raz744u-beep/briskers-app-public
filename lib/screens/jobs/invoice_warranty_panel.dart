@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 
 class InvoiceWarrantyPanel extends StatefulWidget {
@@ -128,8 +129,9 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                             itemCount: filtered.length,
                             itemBuilder: (context, index) {
                               final company = filtered[index];
-                              final phone =
-                                  company['claims_phone']?.toString() ?? '';
+                              final phone = formatUsPhone(
+                                company['claims_phone']?.toString(),
+                              );
                               final email =
                                   company['submission_email']?.toString() ?? '';
                               return ListTile(
@@ -194,8 +196,12 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
               TextField(
                 controller: phone,
                 keyboardType: TextInputType.phone,
+                inputFormatters: const [
+                  UsPhoneTextInputFormatter(),
+                ],
                 decoration: const InputDecoration(
                   labelText: 'Claims phone',
+                  hintText: '800-531-1925',
                 ),
               ),
               const SizedBox(height: 10),
@@ -227,7 +233,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
     );
 
     final companyName = name.text.trim();
-    final claimsPhone = phone.text.trim();
+    final claimsPhone = formatUsPhone(phone.text.trim());
     final submissionEmail = email.text.trim();
 
     name.dispose();
