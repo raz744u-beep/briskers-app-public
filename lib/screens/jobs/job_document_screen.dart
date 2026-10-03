@@ -988,10 +988,28 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           widget.documentId,
         );
         detail.addAll(warranty);
+
+        final signature = await _api.documentSignatureStatus(
+          widget.businessId,
+          widget.documentId,
+        );
+        final bucket = signature['bucket']?.toString() ?? '';
+        final key = signature['key']?.toString() ?? '';
+        if (signature['is_current'] == true &&
+            bucket.isNotEmpty &&
+            key.isNotEmpty) {
+          detail['signature_bytes'] =
+              await _api.downloadAttachment(bucket, key);
+          detail['signer_name'] = signature['signer_name'];
+          detail['signed_at'] = signature['signed_at'];
+          detail['signature_current'] = true;
+        }
+
         if (mounted) {
           setState(() {
             _detail = detail;
             _warrantyDetail = warranty;
+            _signatureStatus = signature;
           });
         }
       } else if (mounted) {
