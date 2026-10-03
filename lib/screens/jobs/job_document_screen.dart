@@ -1793,7 +1793,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('OK'),
+              child: Text(tr('ok')),
             ),
           ],
         ),
@@ -3762,15 +3762,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           shrinkWrap: true,
           padding: const EdgeInsets.only(bottom: 12),
           children: [
-            const ListTile(
+            ListTile(
               title: Text(
-                'Add standard note',
-                style: TextStyle(
+                tr('addStandardNote'),
+                style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              subtitle: Text('Select a saved note to add to this invoice.'),
+              subtitle: Text(tr('selectSavedNote')),
             ),
             const Divider(height: 1),
             ...templates.map(
@@ -3856,8 +3856,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
-                  'Customer disclaimer',
+                Text(
+                  tr('customerDisclaimer'),
                   style: TextStyle(
                     fontSize: 21,
                     fontWeight: FontWeight.w900,
@@ -3867,7 +3867,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 TextField(
                   controller: title,
                   decoration: const InputDecoration(
-                    labelText: 'Title',
+                    labelText: tr('title'),
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -3877,7 +3877,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   minLines: 5,
                   maxLines: 10,
                   decoration: const InputDecoration(
-                    labelText: 'Disclaimer text',
+                    labelText: tr('disclaimerText'),
                     border: OutlineInputBorder(),
                     alignLabelWithHint: true,
                   ),
@@ -3890,12 +3890,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   onChanged: (value) => setSheetState(
                     () => signatureRequired = value == true,
                   ),
-                  title: const Text(
-                    'Require customer signature',
+                  title: Text(
+                    tr('requireCustomerSignature'),
                     style: TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  subtitle: const Text(
-                    'The disclaimer will be included in the signed invoice.',
+                  subtitle: Text(
+                    tr('disclaimerSignedInvoiceHelp'),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -3918,7 +3918,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       },
                     );
                   },
-                  child: const Text('Save disclaimer'),
+                  child: Text(tr('saveDisclaimer')),
                 ),
               ],
             ),
