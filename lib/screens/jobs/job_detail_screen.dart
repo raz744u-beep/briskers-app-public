@@ -36,6 +36,8 @@ class JobDetailScreen extends StatefulWidget {
 
 class _JobDetailScreenState extends State<JobDetailScreen> {
   static const _api = BriskersApi();
+  static final Map<String, Future<String>> _findingPhotoUrlCache = {};
+  static final Map<String, DateTime> _findingPhotoUrlCacheCreated = {};
   final OfflinePreInspectionService _offlineInspection =
       OfflinePreInspectionService();
   final OfflineWorkFindingsService _offlineWorkFindings =
@@ -2529,6 +2531,32 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
+  Future<String> _cachedFindingPhotoUrl(
+    String bucket,
+    String key,
+  ) {
+    final cacheKey = '$bucket::$key';
+    final cached = _findingPhotoUrlCache[cacheKey];
+    final createdAt = _findingPhotoUrlCacheCreated[cacheKey];
+
+    if (cached != null &&
+        createdAt != null &&
+        DateTime.now().difference(createdAt) < const Duration(minutes: 50)) {
+      return cached;
+    }
+
+    final future = _api.signedAttachmentUrl(bucket, key).catchError(
+      (Object error) {
+        _findingPhotoUrlCache.remove(cacheKey);
+        _findingPhotoUrlCacheCreated.remove(cacheKey);
+        throw error;
+      },
+    );
+    _findingPhotoUrlCache[cacheKey] = future;
+    _findingPhotoUrlCacheCreated[cacheKey] = DateTime.now();
+    return future;
+  }
+
   Widget _findingPhotoThumbnail(
     Map<String, dynamic> finding,
     Map<String, dynamic> attachment,
@@ -2658,7 +2686,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
 
     return FutureBuilder<String>(
-      future: _api.signedAttachmentUrl(bucket, key),
+      future: _cachedFindingPhotoUrl(bucket, key),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return controls(
