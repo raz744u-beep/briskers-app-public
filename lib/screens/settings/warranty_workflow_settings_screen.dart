@@ -72,7 +72,7 @@ class _WarrantyWorkflowSettingsScreenState
       text: company?['name']?.toString() ?? '',
     );
     final phone = TextEditingController(
-      text: formatUsPhone(company?['claims_phone']?.toString()),
+      text: formatWarrantyPhone(company?['claims_phone']?.toString()),
     );
     final email = TextEditingController(
       text: company?['submission_email']?.toString() ?? '',
@@ -124,7 +124,7 @@ class _WarrantyWorkflowSettingsScreenState
                   controller: phone,
                   keyboardType: TextInputType.phone,
                   inputFormatters: const [
-                    UsPhoneTextInputFormatter(),
+                    WarrantyPhoneTextInputFormatter(),
                   ],
                   decoration: const InputDecoration(
                     labelText: 'Claims phone',
@@ -188,7 +188,7 @@ class _WarrantyWorkflowSettingsScreenState
     );
 
     final companyName = name.text.trim();
-    final claimsPhone = formatUsPhone(phone.text.trim());
+    final claimsPhone = formatWarrantyPhone(phone.text.trim());
     final submissionEmail = email.text.trim();
     final portalUrl = portal.text.trim();
     final noteText = notes.text.trim();
@@ -571,7 +571,7 @@ class _WarrantyWorkflowSettingsScreenState
                           <String>[
                             if ((company['claims_phone']?.toString() ?? '')
                                 .isNotEmpty)
-                              formatUsPhone(
+                              formatWarrantyPhone(
                                 company['claims_phone']?.toString(),
                               ),
                             if ((company['submission_email']?.toString() ?? '')
