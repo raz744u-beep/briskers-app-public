@@ -419,7 +419,32 @@ jobs:
         run: |
           VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
-          flutter build apk --release --build-name "$VERSION" --build-number "$BUILD_NUMBER"
+
+          # Native-asset downloads (notably sqlite3) occasionally arrive
+          # corrupted from the upstream CDN. Clean only generated/native
+          # build state and retry the release build a few times.
+          for attempt in 1 2 3; do
+            echo "Android release build attempt $attempt of 3"
+
+            rm -rf .dart_tool/hooks_runner
+            rm -rf build/native_assets
+            rm -rf build/.dart_tool
+
+            if flutter build apk --release               --build-name "$VERSION"               --build-number "$BUILD_NUMBER"; then
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              echo "Build failed; clearing transient native asset caches before retry..."
+              find "$PUB_CACHE" -type d -path "*/sqlite3-*/android*" -prune -exec rm -rf {} + 2>/dev/null || true
+              find "$PUB_CACHE" -type f -name "libsqlite3*.so" -delete 2>/dev/null || true
+              sleep 8
+              flutter pub get
+            fi
+          done
+
+          echo "Android release build failed after 3 attempts."
+          exit 1
 
       - name: Verify APK is signed
         working-directory: generated
