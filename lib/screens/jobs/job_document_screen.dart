@@ -3856,6 +3856,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   Widget _notesTab() {
     final memo = _detail?['memo']?.toString().trim() ?? '';
+    final disclaimers = List<dynamic>.from(
+      _warrantyDetail['disclaimers'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    final signatureNeeded =
+        _warrantyDetail['signature_required'] == true ||
+            disclaimers.any((item) => item['signature_required'] == true);
+
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
@@ -3904,7 +3911,85 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
+          if (!_readOnly)
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _addStandardNote,
+              icon: const Icon(Icons.playlist_add_outlined),
+              label: const Text('Add standard note'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _estimate
+                    ? BriskersColors.estimates
+                    : BriskersColors.invoices,
+                alignment: Alignment.centerLeft,
+              ),
+            ),
+          if (!_estimate) ...[
+            const SizedBox(height: 10),
+            Card(
+              margin: EdgeInsets.zero,
+              color: const Color(0xFFF7F8FA),
+              child: ListTile(
+                leading: Icon(
+                  disclaimers.isEmpty
+                      ? Icons.info_outline
+                      : signatureNeeded
+                          ? Icons.draw_outlined
+                          : Icons.description_outlined,
+                  color: signatureNeeded
+                      ? const Color(0xFFC66A00)
+                      : BriskersColors.invoices,
+                ),
+                title: const Text(
+                  'Disclaimer',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: Text(
+                  disclaimers.isEmpty
+                      ? 'None'
+                      : disclaimers.length == 1
+                          ? disclaimers.first['title']?.toString() ?? '1 disclaimer'
+                          : '${disclaimers.length} disclaimers',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _showDisclaimers,
+              ),
+            ),
+            if (signatureNeeded) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7E8),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFF0D59D)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.draw_outlined,
+                      color: Color(0xFFC66A00),
+                      size: 20,
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Customer signature required before final submission.',
+                        style: TextStyle(
+                          color: Color(0xFF8A4B00),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+          const SizedBox(height: 10),
           Text(
             tr('notesPdfHelp'),
             style: TextStyle(
