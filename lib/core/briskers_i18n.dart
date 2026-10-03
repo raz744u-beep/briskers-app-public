@@ -132,6 +132,22 @@ const Map<String, Map<String, String>> _translations = {
         'Accounts, categories, payees, quick and recurring transactions',
     'paymentMethods': 'Payment Methods',
     'paymentMethodsSub': 'Cash, cards, Zelle and other accepted methods',
+    'warrantyPaymentCalculator': 'Warranty payment calculator',
+    'warrantyPaymentCalculatorSub':
+        'Calculate the card amount so a 3% surcharge stays within the approved total',
+    'approvedWarrantyPayment': 'Approved warranty payment',
+    'approvedWarrantyPaymentHelp':
+        'Enter the total amount approved by the warranty company.',
+    'approvedTotal': 'Approved total',
+    'runCardFor': 'Run card for',
+    'threePercentSurcharge': '3% surcharge',
+    'finalChargedTotal': 'Final charged total',
+    'underApprovedLimit': 'Under approved limit',
+    'copyAmount': 'Copy amount',
+    'warrantyAmountCopied': 'Card amount copied.',
+    'warrantyCalculatorFormulaHelp':
+        'Formula: approved total ÷ 1.03. The result is adjusted to the nearest cent without exceeding the approved total after the 3% surcharge.',
+    'clear': 'Clear',
     'notifications': 'Notifications',
     'notificationsSub':
         'Customer and employee notification options — coming next',
@@ -414,6 +430,22 @@ const Map<String, Map<String, String>> _translations = {
         'Cuentas, categorías, proveedores, transacciones rápidas y recurrentes',
     'paymentMethods': 'Métodos de pago',
     'paymentMethodsSub': 'Efectivo, tarjetas, Zelle y otros métodos aceptados',
+    'warrantyPaymentCalculator': 'Calculadora de pago de garantía',
+    'warrantyPaymentCalculatorSub':
+        'Calcula el monto de la tarjeta para que el recargo del 3% no exceda el total aprobado',
+    'approvedWarrantyPayment': 'Pago de garantía aprobado',
+    'approvedWarrantyPaymentHelp':
+        'Ingresa el monto total aprobado por la compañía de garantía.',
+    'approvedTotal': 'Total aprobado',
+    'runCardFor': 'Procesar la tarjeta por',
+    'threePercentSurcharge': 'Recargo del 3%',
+    'finalChargedTotal': 'Total final cobrado',
+    'underApprovedLimit': 'Por debajo del límite aprobado',
+    'copyAmount': 'Copiar monto',
+    'warrantyAmountCopied': 'Monto de la tarjeta copiado.',
+    'warrantyCalculatorFormulaHelp':
+        'Fórmula: total aprobado ÷ 1.03. El resultado se ajusta al centavo más cercano sin exceder el total aprobado después del recargo del 3%.',
+    'clear': 'Borrar',
     'notifications': 'Notificaciones',
     'notificationsSub':
         'Opciones de notificación para clientes y empleados — próximamente',
