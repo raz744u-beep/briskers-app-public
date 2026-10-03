@@ -20,7 +20,7 @@ class LocalAttachmentCache {
     final file = await _cacheFile(bucket, key);
     if (await _isUsable(file)) return file;
 
-    final cacheKey = '${bucket}::${key}';
+    final cacheKey = '$bucket::$key';
     final existing = _inFlight[cacheKey];
     if (existing != null) return existing;
 
@@ -107,9 +107,9 @@ class LocalAttachmentCache {
     );
 
     final extension = _extensionFromKey(key);
-    final hash = _stableHash('${bucket}::${key}');
+    final hash = _stableHash('$bucket::$key');
 
-    return File('${directory.path}/${hash}${extension}');
+    return File('${directory.path}/$hash$extension');
   }
 
   Future<bool> _isUsable(File file) async {
