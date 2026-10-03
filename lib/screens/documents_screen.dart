@@ -448,6 +448,233 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
   }
 
+  Future<void> _showCloseInvoices() async {
+    if (_estimate || !widget.isOwner) return;
+
+    final eligible = (_rows ?? const <Map<String, dynamic>>[])
+        .where((row) => row['display_status']?.toString() == 'Pending Close')
+        .toList();
+
+    if (eligible.isEmpty) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Close invoices'),
+          content: const Text('There are no invoices ready to close right now.'),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final selected = <String>{
+      for (final row in eligible) row['id']?.toString() ?? '',
+    }..remove('');
+
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          final selectedRows = eligible
+              .where((row) => selected.contains(row['id']?.toString() ?? ''))
+              .toList();
+          final selectedTotal = selectedRows.fold<num>(
+            0,
+            (sum, row) =>
+                sum +
+                (num.tryParse(row['total_amount']?.toString() ?? '') ?? 0),
+          );
+          final allSelected = selected.length == eligible.length;
+
+          return SafeArea(
+            child: SizedBox(
+              height: MediaQuery.sizeOf(sheetContext).height * 0.78,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 8, 4),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Close invoices',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.pop(sheetContext, false),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 0, 16, 10),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Only fully paid invoices that are ready to close are shown here.',
+                      ),
+                    ),
+                  ),
+                  CheckboxListTile(
+                    value: allSelected,
+                    onChanged: (value) {
+                      setSheetState(() {
+                        selected.clear();
+                        if (value == true) {
+                          selected.addAll(
+                            eligible
+                                .map((row) => row['id']?.toString() ?? '')
+                                .where((id) => id.isNotEmpty),
+                          );
+                        }
+                      });
+                    },
+                    title: Text(
+                      'Select all (${eligible.length})',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    secondary: Text(
+                      _money(selectedTotal),
+                      style: const TextStyle(
+                        color: BriskersColors.invoices,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: eligible.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final row = eligible[index];
+                        final id = row['id']?.toString() ?? '';
+                        final number = row['document_number']?.toString() ?? '';
+                        final customer = row['customer_name']?.toString() ?? '';
+                        final vehicle = row['vehicle']?.toString() ?? '';
+                        return CheckboxListTile(
+                          value: selected.contains(id),
+                          onChanged: id.isEmpty
+                              ? null
+                              : (value) {
+                                  setSheetState(() {
+                                    if (value == true) {
+                                      selected.add(id);
+                                    } else {
+                                      selected.remove(id);
+                                    }
+                                  });
+                                },
+                          title: Text(
+                            <String>[
+                              if (number.isNotEmpty)
+                                number.toUpperCase().startsWith('I-')
+                                    ? number
+                                    : 'I-$number',
+                              customer,
+                            ].where((value) => value.isNotEmpty).join('  '),
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          subtitle: Text(vehicle),
+                          secondary: Text(
+                            _money(row['total_amount']),
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${selected.length} selected • ${_money(selectedTotal)}',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: BriskersColors.invoices,
+                          ),
+                          onPressed: selected.isEmpty
+                              ? null
+                              : () => Navigator.pop(sheetContext, true),
+                          icon: const Icon(Icons.lock_outline),
+                          label: const Text('Close selected'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    if (confirmed != true || selected.isEmpty || !mounted) return;
+
+    final ok = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Close selected invoices?'),
+            content: Text(
+              'This will finalize ${selected.length} selected invoice'
+              '${selected.length == 1 ? '' : 's'}.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: BriskersColors.invoices,
+                ),
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Close invoices'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!ok) return;
+
+    try {
+      for (final id in selected) {
+        await _api.finalizePendingInvoicePayment(widget.businessId, id);
+      }
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${selected.length} invoice${selected.length == 1 ? '' : 's'} closed.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error.toString());
+    }
+  }
+
   Future<void> _showExpensesFromList(Map<String, dynamic> row) async {
     try {
       final expenses = await _api.documentExpenses(
@@ -538,19 +765,52 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                             color: expenseColor,
                           ),
                         ),
-                        title: Text(vendor),
-                        subtitle: Text(
-                          <String>[
-                            scopeLabel,
-                            if (category.isNotEmpty) category,
-                            if (date.isNotEmpty) date,
-                          ].join(' • '),
+                        title: Text(
+                          vendor,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (category.isNotEmpty)
+                              Text(
+                                category,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 15.5,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ),
+                            Text(
+                              <String>[
+                                if (scopeLabel.isNotEmpty) scopeLabel,
+                                if (date.isNotEmpty) date,
+                              ].join(' • '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 14.5,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                            ),
+                          ],
                         ),
                         trailing: Text(
                           '${income ? '+' : '-'}${_money(expense['amount'])}',
                           style: TextStyle(
                             color: expenseColor,
-                            fontWeight: FontWeight.w800,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
                           ),
                         ),
                         onTap: id.isEmpty
@@ -608,7 +868,20 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         color: accent,
                       ),
                 ),
-                const SizedBox(width: 8),
+                const Spacer(),
+                if (_rows != null)
+                  Text(
+                    '${tr('total')} ${_rows!.length}',
+                    style: TextStyle(
+                      color: accent,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
                 PopupMenuButton<String>(
                                 tooltip: 'Filter $_title',
                                 onSelected: (value) => setState(
@@ -685,15 +958,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                   ),
                                 ),
                               ),
-                const Spacer(),
-                if (_rows != null)
-                  Text(
-                    '${tr('total')} ${_rows!.length}',
-                    style: TextStyle(
-                      color: accent,
-                      fontWeight: FontWeight.w800,
+                if (!_estimate && widget.isOwner) ...[
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: BriskersColors.invoices,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                     ),
+                    onPressed: _showCloseInvoices,
+                    icon: const Icon(Icons.lock_outline, size: 18),
+                    label: const Text('Close invoices'),
                   ),
+                ],
               ],
             ),
             if (_error != null)
