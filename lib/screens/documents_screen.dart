@@ -741,6 +741,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 9),
+                  color: color.withValues(alpha: 0.06),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: () => _open(row),
@@ -753,20 +754,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          CircleAvatar(
-                            radius: 21,
-                            backgroundColor: color.withValues(alpha: 0.12),
-                            child: Icon(
-                              _estimate
-                                  ? Icons.request_quote_outlined
-                                  : invoiceStatusIcon(
-                                      row['status_icon']?.toString(),
-                                    ),
-                              color: color,
-                              size: 23,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
