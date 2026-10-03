@@ -172,6 +172,25 @@ class DocumentPdfService {
         detail['authorization_number']?.toString().trim() ?? '';
     final warrantyMessage =
         detail['warranty_message']?.toString().trim() ?? '';
+    final extendedWarranty = detail['extended_warranty'] == true;
+    final warrantyCompany =
+        detail['warranty_company_name']?.toString().trim() ?? '';
+    final warrantyApproved =
+        num.tryParse(detail['approved_amount']?.toString() ?? '') ?? 0;
+    final warrantyTerminal =
+        num.tryParse(detail['terminal_amount']?.toString() ?? '') ?? 0;
+    final warrantyProcessorFee =
+        num.tryParse(detail['processor_fee']?.toString() ?? '') ?? 0;
+    final warrantyNetApplied =
+        num.tryParse(detail['net_applied']?.toString() ?? '') ?? 0;
+    final customerResponsibility =
+        num.tryParse(
+          detail['customer_responsibility']?.toString() ?? '',
+        ) ??
+        0;
+    final disclaimers = List<dynamic>.from(
+      detail['disclaimers'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
     final memo = detail['memo']?.toString().trim() ?? '';
 
     final findingNotes = List<dynamic>.from(
@@ -379,6 +398,17 @@ class DocumentPdfService {
               ),
             ],
           ),
+          if (extendedWarranty) ...[
+            pw.SizedBox(height: 10),
+            _warrantyAllocationBox(
+              company: warrantyCompany,
+              approved: warrantyApproved,
+              terminal: warrantyTerminal,
+              processorFee: warrantyProcessorFee,
+              netApplied: warrantyNetApplied,
+              customerResponsibility: customerResponsibility,
+            ),
+          ],
           if (warrantyMessage.isNotEmpty) ...[
             pw.SizedBox(height: 10),
             _fullWidthSection(
@@ -387,7 +417,20 @@ class DocumentPdfService {
               minHeight: 46,
             ),
           ],
-          pw.SizedBox(height: 10),
+          if (disclaimers.isNotEmpty) ...[
+            pw.SizedBox(height: 10),
+            ...disclaimers.expand(
+              (item) => [
+                _fullWidthSection(
+                  'Customer Acknowledgment — '
+                  '${item['title']?.toString().trim() ?? 'Disclaimer'}',
+                  item['body']?.toString().trim() ?? '',
+                  minHeight: 42,
+                ),
+                pw.SizedBox(height: 8),
+              ],
+            ),
+          ],
           _fullWidthSection(
             'Notes',
             notes.join('\n'),
@@ -650,6 +693,87 @@ class DocumentPdfService {
           _totalRow(taxLabel, _money(tax)),
           pw.Divider(height: 10, color: PdfColors.grey600),
           _totalRow('Total', _money(total), bold: true),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _warrantyAllocationBox({
+    required String company,
+    required num approved,
+    required num terminal,
+    required num processorFee,
+    required num netApplied,
+    required num customerResponsibility,
+  }) {
+    pw.Widget row(String label, num value, {bool bold = false}) {
+      return pw.Padding(
+        padding: const pw.EdgeInsets.only(bottom: 3),
+        child: pw.Row(
+          children: [
+            pw.Expanded(
+              child: pw.Text(
+                label,
+                style: pw.TextStyle(
+                  fontSize: 8.8,
+                  fontWeight:
+                      bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+                ),
+              ),
+            ),
+            pw.Text(
+              _money(value),
+              style: pw.TextStyle(
+                fontSize: bold ? 10 : 8.8,
+                fontWeight:
+                    bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return pw.Container(
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.grey600, width: 0.6),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          pw.Container(
+            color: PdfColors.grey200,
+            padding: const pw.EdgeInsets.symmetric(
+              horizontal: 8,
+              vertical: 5,
+            ),
+            child: pw.Text(
+              company.isEmpty
+                  ? 'Extended Warranty Payment Allocation'
+                  : 'Extended Warranty — $company',
+              style: const pw.TextStyle(
+                fontSize: 9.5,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+          ),
+          pw.Padding(
+            padding: const pw.EdgeInsets.fromLTRB(8, 7, 8, 7),
+            child: pw.Column(
+              children: [
+                row('Approved warranty amount', approved),
+                row('Run warranty card for', terminal, bold: true),
+                row('Processor surcharge (not shop revenue)', processorFee),
+                row('Warranty applied to invoice', netApplied),
+                pw.Divider(height: 8, color: PdfColors.grey500),
+                row(
+                  'Customer responsibility',
+                  customerResponsibility,
+                  bold: true,
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
