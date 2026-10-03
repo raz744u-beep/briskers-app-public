@@ -506,7 +506,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                     ),
                     const SizedBox(height: 10),
                     DropdownButtonFormField<num>(
-                      value: selectedRate,
+                      initialValue: selectedRate,
                       decoration: InputDecoration(
                         labelText: tr('warrantyPaymentType'),
                         prefixIcon: const Icon(Icons.account_balance_wallet_outlined),
