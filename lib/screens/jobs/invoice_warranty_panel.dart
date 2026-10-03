@@ -395,7 +395,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                         <String>[
                           if (phone.isNotEmpty) 'Claims: \$phone',
                           if (email.isNotEmpty) 'Submit: \$email',
-                        ].join('\\n'),
+                        ].join('\n'),
                         style: const TextStyle(
                           fontSize: 13,
                           color: Color(0xFF667085),
@@ -429,7 +429,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                           const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(
                         labelText: 'Approved warranty amount',
-                        prefixText: '\\$ ',
+                        prefixText: '\$ ',
                         prefixIcon: Icon(Icons.payments_outlined),
                         border: OutlineInputBorder(),
                       ),
