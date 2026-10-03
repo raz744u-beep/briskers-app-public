@@ -529,6 +529,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     ),
                   ),
                   CheckboxListTile(
+                    activeColor: BriskersColors.invoices,
+                    checkColor: Colors.white,
                     value: allSelected,
                     onChanged: (value) {
                       setSheetState(() {
@@ -566,6 +568,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         final customer = row['customer_name']?.toString() ?? '';
                         final vehicle = row['vehicle']?.toString() ?? '';
                         return CheckboxListTile(
+                          activeColor: BriskersColors.invoices,
+                          checkColor: Colors.white,
                           value: selected.contains(id),
                           onChanged: id.isEmpty
                               ? null
@@ -1020,7 +1024,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 9),
-                  color: color.withValues(alpha: 0.06),
+                  color: color.withValues(alpha: 0.035),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: () => _open(row),
