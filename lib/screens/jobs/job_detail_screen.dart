@@ -864,18 +864,33 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
+          cursorColor: BriskersColors.jobs,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'Hours',
             suffixText: 'hr',
+            focusedBorder: OutlineInputBorder(
+              borderSide: const BorderSide(
+                color: BriskersColors.jobs,
+                width: 2,
+              ),
+              borderRadius: BorderRadius.circular(4),
+            ),
           ),
         ),
         actions: [
           TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: BriskersColors.jobs,
+            ),
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: BriskersColors.jobs,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () {
               final hours = num.tryParse(controller.text.trim());
               if (hours != null && hours >= 0) {
