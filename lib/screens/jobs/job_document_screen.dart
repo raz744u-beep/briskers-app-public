@@ -45,6 +45,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   final _localCatalog = LocalCatalogRepository();
   final _catalogSync = CatalogSyncService();
   final ImagePicker _picker = ImagePicker();
+  final ScrollController _workspaceHeaderController = ScrollController();
 
   Map<String, dynamic>? _detail;
   Map<String, dynamic> _identifixMeta = const {};
@@ -72,6 +73,23 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _workspaceHeaderController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _collapseWorkspaceHeader() async {
+    if (!_workspaceHeaderController.hasClients) return;
+    final position = _workspaceHeaderController.position;
+    if (position.maxScrollExtent <= 0) return;
+    await _workspaceHeaderController.animateTo(
+      position.maxScrollExtent,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   bool _findingNeedsInvoiceAttention(
@@ -1121,6 +1139,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _enterPayment() async {
+    await _collapseWorkspaceHeader();
     if (_estimate) return;
 
     List<Map<String, dynamic>> methods;
@@ -2916,14 +2935,92 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           if (constraints.maxWidth < 430) {
+            final compactCustomer = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                infoLine(
+                  Icons.person_outline,
+                  customer.isEmpty ? 'Customer' : customer,
+                  bold: true,
+                  maxLines: 2,
+                  problemFlag: _detail?['customer_problem_flag'] == true,
+                ),
+                if (phone.isNotEmpty) ...[
+                  const SizedBox(height: 7),
+                  infoLine(
+                    Icons.phone_outlined,
+                    formatUsPhone(phone),
+                    maxLines: 1,
+                  ),
+                ],
+              ],
+            );
+
+            final compactVehicle = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                infoLine(
+                  Icons.directions_car_outlined,
+                  vehicleMileage.isEmpty ? 'No vehicle' : vehicleMileage,
+                  maxLines: 2,
+                ),
+                if (vin.isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 30),
+                    child: Text(
+                      'VIN: $vin',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: Color(0xFF405064),
+                        height: 1.15,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            );
+
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                customerInfo,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: compactCustomer),
+                    const SizedBox(width: 14),
+                    Expanded(child: compactVehicle),
+                  ],
+                ),
                 const SizedBox(height: 8),
                 const Divider(height: 1, color: Color(0xFFD7E0E4)),
                 const SizedBox(height: 7),
-                documentInfo,
+                Row(
+                  children: [
+                    Expanded(
+                      child: infoLine(
+                        Icons.calendar_month_outlined,
+                        date.isEmpty ? '${tr('date')}: —' : date,
+                        maxLines: 1,
+                      ),
+                    ),
+                    if (job.isNotEmpty) ...[
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: infoLine(
+                          Icons.receipt_long_outlined,
+                          '${tr('jobLabel')} $job',
+                          maxLines: 1,
+                          onTap: _openLinkedJob,
+                          valueColor: _accent,
+                          underline: true,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ],
             );
           }
@@ -3712,6 +3809,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _addStandardNote() async {
+    await _collapseWorkspaceHeader();
     if (_readOnly || _busy) return;
 
     List<Map<String, dynamic>> templates;
@@ -3922,6 +4020,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _addDisclaimer() async {
+    await _collapseWorkspaceHeader();
     if (_estimate || _readOnly || _busy) return;
 
     List<Map<String, dynamic>> templates = const [];
@@ -4565,65 +4664,54 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ),
           ],
         ),
-        body: Column(
-          children: [
-            _customerHeader(),
-            if (!_estimate)
-              InvoiceWarrantyPanel(
-                businessId: widget.businessId,
-                documentId: widget.documentId,
-                expectedVersion: _version,
-                invoiceTotal: total,
-                detail: _warrantyDetail,
-                readOnly: _readOnly,
-                onChanged: _load,
-              ),
-            _openFindingsBanner(),
-            if (_estimate && _converted) _convertedInvoiceBanner(),
-            Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                border: Border(
-                  top: BorderSide(color: Color(0xFFE4E9EB)),
-                  bottom: BorderSide(color: Color(0xFFE4E9EB)),
-                ),
-              ),
-              child: TabBar(
-                indicatorColor: _accent,
-                indicatorWeight: 3,
-                labelColor: _accent,
-                unselectedLabelColor: const Color(0xFF26354D),
-                labelStyle: const TextStyle(
-                  fontSize: 15.5,
-                  fontWeight: FontWeight.w800,
-                ),
-                tabs: [
-                  Tab(text: tr('itemsTab')),
-                  if (!_estimate) Tab(text: tr('paymentTab')),
-                  Tab(text: tr('notesTab')),
+        body: NestedScrollView(
+          controller: _workspaceHeaderController,
+          headerSliverBuilder: (context, innerBoxIsScrolled) => [
+            SliverToBoxAdapter(
+              child: Column(
+                children: [
+                  _customerHeader(),
+                  if (!_estimate)
+                    InvoiceWarrantyPanel(
+                      businessId: widget.businessId,
+                      documentId: widget.documentId,
+                      expectedVersion: _version,
+                      invoiceTotal: total,
+                      detail: _warrantyDetail,
+                      readOnly: _readOnly,
+                      onChanged: _load,
+                    ),
+                  _openFindingsBanner(),
+                  if (_estimate && _converted) _convertedInvoiceBanner(),
                 ],
               ),
             ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _itemsTab(
-                    lines,
-                    shownPaid: shownPaid,
-                    balance: balance,
-                  ),
-                  if (!_estimate)
-                    _paymentTab(
-                      total: total,
-                      finalizedPaid: finalizedPaid,
-                      pendingPaid: pendingPaid,
-                      balance: balance,
-                    ),
-                  _notesTab(),
-                ],
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: _DocumentTabsHeaderDelegate(
+                accent: _accent,
+                isEstimate: _estimate,
+                onTap: (_) => _collapseWorkspaceHeader(),
               ),
             ),
           ],
+          body: TabBarView(
+            children: [
+              _itemsTab(
+                lines,
+                shownPaid: shownPaid,
+                balance: balance,
+              ),
+              if (!_estimate)
+                _paymentTab(
+                  total: total,
+                  finalizedPaid: finalizedPaid,
+                  pendingPaid: pendingPaid,
+                  balance: balance,
+                ),
+              _notesTab(),
+            ],
+          ),
         ),
         bottomNavigationBar: SafeArea(
           top: false,
@@ -4642,6 +4730,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   onTap: _readOnly || _busy
                       ? null
                       : () async {
+                          await _collapseWorkspaceHeader();
                           final action =
                               await showModalBottomSheet<String>(
                             context: context,
@@ -4708,6 +4797,67 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         ),
       ),
     );
+  }
+}
+
+class _DocumentTabsHeaderDelegate
+    extends SliverPersistentHeaderDelegate {
+  _DocumentTabsHeaderDelegate({
+    required this.accent,
+    required this.isEstimate,
+    required this.onTap,
+  });
+
+  final Color accent;
+  final bool isEstimate;
+  final ValueChanged<int> onTap;
+
+  @override
+  double get minExtent => 52;
+
+  @override
+  double get maxExtent => 52;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Material(
+      elevation: overlapsContent ? 1 : 0,
+      color: Colors.white,
+      child: Container(
+        decoration: const BoxDecoration(
+          border: Border(
+            top: BorderSide(color: Color(0xFFE4E9EB)),
+            bottom: BorderSide(color: Color(0xFFE4E9EB)),
+          ),
+        ),
+        child: TabBar(
+          onTap: onTap,
+          indicatorColor: accent,
+          indicatorWeight: 3,
+          labelColor: accent,
+          unselectedLabelColor: const Color(0xFF26354D),
+          labelStyle: const TextStyle(
+            fontSize: 15.5,
+            fontWeight: FontWeight.w800,
+          ),
+          tabs: [
+            Tab(text: tr('itemsTab')),
+            if (!isEstimate) Tab(text: tr('paymentTab')),
+            Tab(text: tr('notesTab')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _DocumentTabsHeaderDelegate oldDelegate) {
+    return oldDelegate.accent != accent ||
+        oldDelegate.isEstimate != isEstimate;
   }
 }
 
