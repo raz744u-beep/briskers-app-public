@@ -3403,6 +3403,457 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
   }
 
+  Future<void> _addStandardNote() async {
+    if (_readOnly || _busy) return;
+
+    List<Map<String, dynamic>> templates;
+    try {
+      templates = await _api.documentNoteTemplates(widget.businessId);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+
+    if (!mounted) return;
+
+    if (templates.isEmpty) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Standard notes'),
+          content: const Text(
+            'No standard note templates are configured yet.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.only(bottom: 12),
+          children: [
+            const ListTile(
+              title: Text(
+                'Add standard note',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              subtitle: Text('Select a saved note to add to this invoice.'),
+            ),
+            const Divider(height: 1),
+            ...templates.map(
+              (template) => ListTile(
+                leading: Icon(
+                  template['template_type']?.toString() == 'warranty'
+                      ? Icons.verified_outlined
+                      : Icons.notes_outlined,
+                  color: _estimate
+                      ? BriskersColors.estimates
+                      : BriskersColors.invoices,
+                ),
+                title: Text(
+                  template['name']?.toString() ?? '',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(
+                  template['body']?.toString() ?? '',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () => Navigator.pop(sheetContext, template),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (selected == null) return;
+
+    final body = selected['body']?.toString().trim() ?? '';
+    if (body.isEmpty) return;
+
+    final current = _detail?['memo']?.toString().trim() ?? '';
+    final combined = current.isEmpty
+        ? body
+        : current.contains(body)
+            ? current
+            : '$current\n\n$body';
+
+    await _run(
+      () => _api.updateDocumentNotes(
+        widget.businessId,
+        widget.documentId,
+        expectedVersion: _version,
+        memo: combined,
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>?> _editDisclaimerSheet({
+    Map<String, dynamic>? initial,
+    Map<String, dynamic>? template,
+  }) async {
+    final title = TextEditingController(
+      text: initial?['title']?.toString() ??
+          template?['name']?.toString() ??
+          '',
+    );
+    final body = TextEditingController(
+      text: initial?['body']?.toString() ??
+          template?['body']?.toString() ??
+          '',
+    );
+    var signatureRequired =
+        initial?['signature_required'] == true ||
+            (initial == null && template?['signature_required'] != false);
+
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              0,
+              16,
+              MediaQuery.viewInsetsOf(sheetContext).bottom + 18,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Customer disclaimer',
+                  style: TextStyle(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: title,
+                  decoration: const InputDecoration(
+                    labelText: 'Title',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: body,
+                  minLines: 5,
+                  maxLines: 10,
+                  decoration: const InputDecoration(
+                    labelText: 'Disclaimer text',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: BriskersColors.invoices,
+                  value: signatureRequired,
+                  onChanged: (value) => setSheetState(
+                    () => signatureRequired = value == true,
+                  ),
+                  title: const Text(
+                    'Require customer signature',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: const Text(
+                    'The disclaimer will be included in the signed invoice.',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: BriskersColors.invoices,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  onPressed: () {
+                    final t = title.text.trim();
+                    final b = body.text.trim();
+                    if (t.isEmpty || b.isEmpty) return;
+                    Navigator.pop(
+                      sheetContext,
+                      {
+                        'title': t,
+                        'body': b,
+                        'signature_required': signatureRequired,
+                      },
+                    );
+                  },
+                  child: const Text('Save disclaimer'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    title.dispose();
+    body.dispose();
+    return result;
+  }
+
+  Future<void> _addDisclaimer() async {
+    if (_estimate || _readOnly || _busy) return;
+
+    List<Map<String, dynamic>> templates = const [];
+    try {
+      templates = await _api.disclaimerTemplates(widget.businessId);
+    } catch (_) {
+      templates = const [];
+    }
+
+    if (!mounted) return;
+
+    final choice = await showModalBottomSheet<Map<String, dynamic>?>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.only(bottom: 12),
+          children: [
+            const ListTile(
+              title: Text(
+                'Add disclaimer',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              subtitle: Text(
+                'Choose a template or write a custom disclaimer.',
+              ),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.edit_note_outlined,
+                color: BriskersColors.invoices,
+              ),
+              title: const Text('Custom disclaimer'),
+              onTap: () => Navigator.pop(sheetContext, <String, dynamic>{}),
+            ),
+            if (templates.isNotEmpty) const Divider(height: 1),
+            ...templates.map(
+              (template) => ListTile(
+                leading: Icon(
+                  template['signature_required'] == true
+                      ? Icons.draw_outlined
+                      : Icons.info_outline,
+                  color: BriskersColors.invoices,
+                ),
+                title: Text(
+                  template['name']?.toString() ?? '',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(
+                  template['body']?.toString() ?? '',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () => Navigator.pop(sheetContext, template),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (choice == null) return;
+
+    final edited = await _editDisclaimerSheet(
+      template: choice.isEmpty ? null : choice,
+    );
+    if (edited == null) return;
+
+    await _api.saveDocumentDisclaimer(
+      widget.businessId,
+      widget.documentId,
+      templateId: choice['id']?.toString(),
+      title: edited['title'].toString(),
+      body: edited['body'].toString(),
+      signatureRequired: edited['signature_required'] == true,
+    );
+    await _load();
+  }
+
+  Future<void> _editDisclaimer(Map<String, dynamic> disclaimer) async {
+    if (_estimate || _readOnly || _busy) return;
+
+    final edited = await _editDisclaimerSheet(initial: disclaimer);
+    if (edited == null) return;
+
+    await _api.saveDocumentDisclaimer(
+      widget.businessId,
+      widget.documentId,
+      disclaimerId: disclaimer['id']?.toString(),
+      templateId: disclaimer['template_id']?.toString(),
+      title: edited['title'].toString(),
+      body: edited['body'].toString(),
+      signatureRequired: edited['signature_required'] == true,
+    );
+    await _load();
+  }
+
+  Future<void> _deleteDisclaimer(Map<String, dynamic> disclaimer) async {
+    if (_estimate || _readOnly || _busy) return;
+
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Remove disclaimer?'),
+            content: Text(
+              disclaimer['title']?.toString() ??
+                  'Remove this disclaimer from the invoice?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Remove'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed) return;
+
+    await _api.deleteDocumentDisclaimer(
+      widget.businessId,
+      widget.documentId,
+      disclaimer['id'].toString(),
+    );
+    await _load();
+  }
+
+  Future<void> _showDisclaimers() async {
+    if (_estimate) return;
+
+    final disclaimers = List<dynamic>.from(
+      _warrantyDetail['disclaimers'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(sheetContext).height * 0.72,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 8, 6),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Invoice disclaimers',
+                        style: TextStyle(
+                          fontSize: 21,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    if (!_readOnly)
+                      IconButton(
+                        tooltip: 'Add disclaimer',
+                        onPressed: () {
+                          Navigator.pop(sheetContext);
+                          _addDisclaimer();
+                        },
+                        icon: const Icon(
+                          Icons.add_circle_outline,
+                          color: BriskersColors.invoices,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: disclaimers.isEmpty
+                    ? const Center(
+                        child: Text('No disclaimer on this invoice.'),
+                      )
+                    : ListView.separated(
+                        itemCount: disclaimers.length,
+                        separatorBuilder: (_, _) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final disclaimer = disclaimers[index];
+                          return ListTile(
+                            leading: Icon(
+                              disclaimer['signature_required'] == true
+                                  ? Icons.draw_outlined
+                                  : Icons.info_outline,
+                              color: disclaimer['signature_required'] == true
+                                  ? const Color(0xFFC66A00)
+                                  : BriskersColors.invoices,
+                            ),
+                            title: Text(
+                              disclaimer['title']?.toString() ?? '',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            subtitle: Text(
+                              disclaimer['body']?.toString() ?? '',
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onTap: _readOnly
+                                ? null
+                                : () {
+                                    Navigator.pop(sheetContext);
+                                    _editDisclaimer(disclaimer);
+                                  },
+                            trailing: _readOnly
+                                ? null
+                                : IconButton(
+                                    tooltip: 'Remove disclaimer',
+                                    onPressed: () {
+                                      Navigator.pop(sheetContext);
+                                      _deleteDisclaimer(disclaimer);
+                                    },
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      color: Colors.red,
+                                    ),
+                                  ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _notesTab() {
     final memo = _detail?['memo']?.toString().trim() ?? '';
     return RefreshIndicator(
