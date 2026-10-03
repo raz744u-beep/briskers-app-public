@@ -1032,7 +1032,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 9),
-                  color: color.withValues(alpha: 0.035),
+                  color: Color.alphaBlend(
+                    color.withValues(alpha: 0.025),
+                    Colors.white,
+                  ),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: () => _open(row),
