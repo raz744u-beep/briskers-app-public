@@ -4730,12 +4730,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   onTap: _readOnly || _busy
                       ? null
                       : () async {
-                          final sheetOwnerContext = context;
                           await _collapseWorkspaceHeader();
-                          if (!sheetOwnerContext.mounted) return;
+                          if (!context.mounted) return;
                           final action =
                               await showModalBottomSheet<String>(
-                            context: sheetOwnerContext,
+                            context: context,
                             showDragHandle: true,
                             builder: (sheetContext) => SafeArea(
                               child: Column(
