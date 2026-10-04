@@ -485,7 +485,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           initialDirection: direction,
           quickTemplate: quickTemplate,
           allowRecurring: _allowRecurring,
-          canDeleteTransaction: widget.roleCode == 'owner', // Owner-only destructive action.
         ),
       ),
     );
@@ -597,6 +596,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           businessId: widget.businessId,
           transactionId: id,
           allowRecurring: _allowRecurring,
+          canDeleteTransaction: widget.roleCode == 'owner',
         ),
       ),
     );
