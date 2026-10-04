@@ -15,6 +15,7 @@ class InvoiceWarrantyPanel extends StatefulWidget {
     required this.invoiceTotal,
     required this.detail,
     required this.onChanged,
+    required this.paymentProcessed,
     this.readOnly = false,
   });
 
@@ -24,6 +25,7 @@ class InvoiceWarrantyPanel extends StatefulWidget {
   final num invoiceTotal;
   final Map<String, dynamic> detail;
   final Future<void> Function() onChanged;
+  final bool paymentProcessed;
   final bool readOnly;
 
   @override
@@ -713,12 +715,60 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                 color: BriskersColors.invoices,
               ),
             ),
-            title: Text(
-              company.isEmpty ? tr('extendedWarranty') : company,
-              style: const TextStyle(
-                fontSize: 16.5,
-                fontWeight: FontWeight.w900,
-              ),
+            title: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    company.isEmpty ? tr('extendedWarranty') : company,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 16.5,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: widget.paymentProcessed
+                        ? const Color(0xFFEAF8EE)
+                        : const Color(0xFFFFECEC),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        widget.paymentProcessed
+                            ? Icons.check
+                            : Icons.close,
+                        size: 13,
+                        color: widget.paymentProcessed
+                            ? const Color(0xFF0C9A43)
+                            : const Color(0xFFC62828),
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        widget.paymentProcessed
+                            ? tr('paid')
+                            : tr('unpaid'),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: widget.paymentProcessed
+                              ? const Color(0xFF0C9A43)
+                              : const Color(0xFFC62828),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
             subtitle: Text(
               missing.isEmpty
