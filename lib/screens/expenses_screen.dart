@@ -759,12 +759,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               sum + (num.tryParse(item['amount']?.toString() ?? '') ?? 0),
         );
 
-    final visible = _transactions
-        .where(
-          (x) =>
-              _filter == 'all' || x['direction']?.toString() == _filter,
-        )
-        .toList();
+    final visible = _transactions;
 
     return Scaffold(
       appBar: AppBar(
@@ -787,6 +782,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
+                controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
                 children: [
                   if (_showFinancialSummary)
@@ -939,22 +935,89 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  SegmentedButton<String>(
-                    segments: [
-                      ButtonSegment(value: 'all', label: Text(tr('all'))),
-                      ButtonSegment(
-                        value: 'expense',
-                        label: Text(tr('expenses')),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Transactions',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
                       ),
-                      const ButtonSegment(
-                        value: 'income',
-                        label: Text('Income'),
+                      OutlinedButton(
+                        onPressed: _chooseDirection,
+                        child: Text(
+                          _filter == 'all'
+                              ? tr('all')
+                              : _filter == 'income'
+                                  ? 'Income'
+                                  : tr('expenses'),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      OutlinedButton.icon(
+                        onPressed: _chooseDateRange,
+                        icon: const Icon(
+                          Icons.calendar_today_outlined,
+                          size: 17,
+                        ),
+                        label: Text(_rangeLabel),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton.outlined(
+                        tooltip: 'Transaction filters',
+                        onPressed: _showAdvancedFilters,
+                        icon: Icon(
+                          Icons.filter_alt_outlined,
+                          color: _accountFilterId != null ||
+                                  _categoryFilterId != null ||
+                                  _counterpartyFilterId != null
+                              ? BriskersColors.invoices
+                              : null,
+                        ),
                       ),
                     ],
-                    selected: {_filter},
-                    onSelectionChanged: (value) =>
-                        setState(() => _filter = value.first),
                   ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _searchController,
+                    onChanged: (value) {
+                      setState(() {});
+                      _searchChanged(value);
+                    },
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText:
+                          'Search description, payee, customer, invoice, amount…',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _searchController.text.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Clear search',
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() {});
+                                _load();
+                              },
+                              icon: const Icon(Icons.close),
+                            ),
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  if (_searchController.text.trim().isNotEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 5, left: 4),
+                      child: Text(
+                        'Search checks all transaction history.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ),
                   if (_error != null) ...[
                     const SizedBox(height: 10),
                     Text(
@@ -1121,6 +1184,25 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         ),
                       );
                     }),
+                  if (_loadingMore)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 18),
+                      child: Center(
+                        child: CircularProgressIndicator(),
+                      ),
+                    )
+                  else if (!_hasMore && visible.isNotEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                        child: Text(
+                          'No more transactions',
+                          style: TextStyle(
+                            color: Color(0xFF667085),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
