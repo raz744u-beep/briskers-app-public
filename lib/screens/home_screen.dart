@@ -7,6 +7,8 @@ import 'customers/new_customer_screen.dart';
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
+    required this.customersExpanded,
+    required this.customersDrawer,
     required this.onCustomersTap,
     required this.onAppointmentsTap,
     required this.onJobsTap,
@@ -16,6 +18,8 @@ class HomeScreen extends StatefulWidget {
     required this.roleCode,
   });
 
+  final bool customersExpanded;
+  final Widget customersDrawer;
   final VoidCallback onCustomersTap;
   final VoidCallback onAppointmentsTap;
   final VoidCallback onJobsTap;
@@ -143,28 +147,19 @@ class _HomeScreenState extends State<HomeScreen> {
             const _NeedsAttentionPanel(),
             const SizedBox(height: 8),
             _HomeTiles(
+              customersExpanded: _customersExpanded,
+              customersDrawer: _CustomersDrawer(
+                onView: widget.onCustomersTap,
+                onNew: () async {
+                  await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => NewCustomerScreen(businessId: widget.businessId)));
+                },
+              ),
               onCustomersTap: () => setState(() => _customersExpanded = !_customersExpanded),
               onAppointmentsTap: widget.onAppointmentsTap,
               onJobsTap: widget.onJobsTap,
               onInvoicesTap: widget.onInvoicesTap,
               onMoreTap: widget.onMoreTap,
             ),
-            if (_customersExpanded) ...[
-              const SizedBox(height: 6),
-              _CustomersDrawer(
-                onView: widget.onCustomersTap,
-                onNew: () async {
-                  await Navigator.push<bool>(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => NewCustomerScreen(
-                        businessId: widget.businessId,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ],
             const SizedBox(height: 24),
           ],
         ),
@@ -314,6 +309,10 @@ class _HomeTiles extends StatelessWidget {
             _tile('Appointments', '0 Today', Icons.calendar_month_outlined,
                 BriskersColors.appointments, onAppointmentsTap),
           ),
+          if (customersExpanded) ...[
+            const SizedBox(height: 5),
+            customersDrawer,
+          ],
           const SizedBox(height: 5),
           row(
             _tile('Estimates', '0 Open', Icons.request_quote_outlined,
