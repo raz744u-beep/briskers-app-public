@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
+import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
 import 'new_vehicle_screen.dart';
 
@@ -142,6 +143,9 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    const roundedInput = OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(18)),
+    );
     return Scaffold(
       appBar: AppBar(title: const Text('New customer')),
       body: ListView(
@@ -150,7 +154,7 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
           TextField(
             controller: _name,
             textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(labelText: 'Name *'),
+            decoration: const InputDecoration(labelText: 'Name *', border: roundedInput, enabledBorder: roundedInput, focusedBorder: roundedInput),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -163,6 +167,9 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
             decoration: const InputDecoration(
               labelText: 'Phone',
               hintText: '504-555-1234',
+              border: roundedInput,
+              enabledBorder: roundedInput,
+              focusedBorder: roundedInput,
             ),
           ),
           const SizedBox(height: 12),
@@ -170,7 +177,7 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
             controller: _email,
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
-            decoration: const InputDecoration(labelText: 'Email'),
+            decoration: const InputDecoration(labelText: 'Email', border: roundedInput, enabledBorder: roundedInput, focusedBorder: roundedInput),
           ),
           const SizedBox(height: 10),
           Card(
@@ -198,6 +205,7 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
           ],
           const SizedBox(height: 16),
           FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: BriskersColors.customers, foregroundColor: Colors.white),
             onPressed: _busy ? null : _save,
             child: Text(_busy ? 'Saving...' : 'Save customer & add vehicle'),
           ),
