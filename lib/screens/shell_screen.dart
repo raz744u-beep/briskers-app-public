@@ -43,7 +43,6 @@ class _ShellScreenState extends State<ShellScreen> {
   ];
 
   int _index = 0;
-  int _todayRefreshToken = 0;
   int _customersRefreshToken = 0;
   int _jobsRefreshToken = 0;
   Map<String, dynamic> _navCounts = const {
@@ -97,7 +96,6 @@ class _ShellScreenState extends State<ShellScreen> {
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _index = index;
-      if (index == 0) _todayRefreshToken++;
       if (index == 1) _customersRefreshToken++;
       if (index == 3) _jobsRefreshToken++;
     });
