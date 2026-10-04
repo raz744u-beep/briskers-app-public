@@ -3211,6 +3211,46 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
+  Future<void> _showJobExpenseActions(String transactionId) async {
+    if (!_canManage || transactionId.isEmpty) return;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit expense'),
+              onTap: () => Navigator.pop(sheetContext, 'edit'),
+            ),
+            if (_owner) ...[
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline,
+                  color: Colors.red,
+                ),
+                title: const Text(
+                  'Delete expense',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+            ],
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted || action == null) return;
+    if (action == 'edit') await _editJobExpense(transactionId);
+    if (action == 'delete') await _deleteJobExpense(transactionId);
+  }
+
   Widget _jobExpenseThumbnail(Map<String, dynamic> attachment) {
     const size = 52.0;
     final bucket = attachment['bucket']?.toString() ?? '';
@@ -3346,30 +3386,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                  if (_canManage)
-                    PopupMenuButton<String>(
-                      tooltip: 'Expense actions',
-                      onSelected: (value) async {
-                        if (value == 'edit') await _editJobExpense(id);
-                        if (value == 'delete') await _deleteJobExpense(id);
-                      },
-                      itemBuilder: (_) => [
-                        const PopupMenuItem(
-                          value: 'edit',
-                          child: Text('Edit expense'),
-                        ),
-                        if (_owner)
-                          const PopupMenuItem(
-                            value: 'delete',
-                            child: Text('Delete expense'),
-                          ),
-                      ],
-                    )
-                  else
-                    const Icon(Icons.chevron_right),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.chevron_right),
                 ],
               ),
               onTap: id.isEmpty ? null : () => _openExpense(id),
+              onLongPress: id.isEmpty || !_canManage
+                  ? null
+                  : () => _showJobExpenseActions(id),
             ),
           );
         }),
