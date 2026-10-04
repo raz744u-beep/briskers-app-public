@@ -4779,6 +4779,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ],
             ),
           ),
+        ),
         body: NestedScrollView(
           controller: _workspaceHeaderController,
           headerSliverBuilder: (context, innerBoxIsScrolled) => [
