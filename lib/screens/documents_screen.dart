@@ -898,6 +898,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final accent = _estimate ? BriskersColors.estimates : BriskersColors.invoices;
 
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
         toolbarHeight: 68,
         title: BriskersPageTitle(title: _title, logoHeight: 40),
