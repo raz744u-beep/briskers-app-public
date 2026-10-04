@@ -248,6 +248,30 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   String _money(Object? raw) =>
       NumberFormat.currency(symbol: '\$').format(_number(raw));
 
+  bool _warrantyPaymentProcessed() {
+    if (_warrantyDetail['extended_warranty'] != true) return false;
+
+    final terminalAmount = _number(_warrantyDetail['terminal_amount']);
+    if (terminalAmount <= 0.005) return false;
+
+    final surchargeRate = _number(_warrantyDetail['surcharge_rate']);
+    final usesCheck = surchargeRate <= 0.000001;
+    final payments = List<dynamic>.from(_detail?['payments'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map));
+
+    return payments.any((payment) {
+      final amount = _number(payment['amount']);
+      final method =
+          payment['payment_method_name']?.toString().trim().toLowerCase() ?? '';
+      final amountMatches = (amount - terminalAmount).abs() < 0.005;
+      final methodMatches = usesCheck
+          ? method == 'check' || method.contains('check')
+          : method == 'credit card' ||
+              (method.contains('credit') && method.contains('card'));
+      return amountMatches && methodMatches;
+    });
+  }
+
   String _paymentDate(Object? raw) {
     final value = raw?.toString().trim() ?? '';
     if (value.isEmpty) return '';
@@ -4842,6 +4866,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       invoiceTotal: total,
                       detail: _warrantyDetail,
                       readOnly: _readOnly,
+                      paymentProcessed: _warrantyPaymentProcessed(),
                       onChanged: _load,
                     ),
                   _openFindingsBanner(),
