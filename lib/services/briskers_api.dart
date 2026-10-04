@@ -1281,6 +1281,40 @@ class BriskersApi {
         .toList();
   }
 
+  Future<List<Map<String, dynamic>>> transactionsPaged(
+    String businessId, {
+    int limit = 50,
+    int offset = 0,
+    DateTime? startDate,
+    DateTime? endDate,
+    String? search,
+    String? direction,
+    String? accountId,
+    String? categoryId,
+    String? counterpartyId,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_list_transactions_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_limit': limit,
+        'p_offset': offset,
+        'p_start_date':
+            startDate?.toIso8601String().split('T').first,
+        'p_end_date':
+            endDate?.toIso8601String().split('T').first,
+        'p_search': search,
+        'p_direction': direction,
+        'p_account_id': accountId,
+        'p_category_id': categoryId,
+        'p_counterparty_id': counterpartyId,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
   Future<Map<String, dynamic>> transactionDetail(
     String businessId,
     String transactionId,
