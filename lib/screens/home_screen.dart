@@ -7,8 +7,6 @@ import 'customers/new_customer_screen.dart';
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
-    required this.customersExpanded,
-    required this.customersDrawer,
     required this.onCustomersTap,
     required this.onAppointmentsTap,
     required this.onJobsTap,
@@ -18,8 +16,6 @@ class HomeScreen extends StatefulWidget {
     required this.roleCode,
   });
 
-  final bool customersExpanded;
-  final Widget customersDrawer;
   final VoidCallback onCustomersTap;
   final VoidCallback onAppointmentsTap;
   final VoidCallback onJobsTap;
@@ -220,6 +216,8 @@ class _NeedsAttentionPanel extends StatelessWidget {
 
 class _HomeTiles extends StatelessWidget {
   const _HomeTiles({
+    required this.customersExpanded,
+    required this.customersDrawer,
     required this.onCustomersTap,
     required this.onAppointmentsTap,
     required this.onJobsTap,
@@ -227,6 +225,8 @@ class _HomeTiles extends StatelessWidget {
     required this.onMoreTap,
   });
 
+  final bool customersExpanded;
+  final Widget customersDrawer;
   final VoidCallback onCustomersTap;
   final VoidCallback onAppointmentsTap;
   final VoidCallback onJobsTap;
