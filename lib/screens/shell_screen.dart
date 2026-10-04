@@ -129,6 +129,7 @@ class _ShellScreenState extends State<ShellScreen> {
   @override
   Widget build(BuildContext context) {
     final activeColor = _sectionColors[_index];
+    final isHome = _index == 0;
     final roleStyle = employeeRoleStyle(_roleLabel);
     final pageTitles = [tr('dashboard'), tr('customers'), tr('appointments'), tr('jobs'), tr('invoices'), tr('more')];
     final pages = [
@@ -169,7 +170,7 @@ class _ShellScreenState extends State<ShellScreen> {
     ];
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: isHome ? null : AppBar(
         backgroundColor: activeColor.withValues(alpha: 0.08),
         titleSpacing: 10,
         toolbarHeight: 78,
