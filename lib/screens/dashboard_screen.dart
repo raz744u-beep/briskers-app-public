@@ -1673,7 +1673,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Column(
       children: [
-        calendarHeader(),
         Expanded(
           child: RefreshIndicator(
             onRefresh: _load,
@@ -1681,6 +1680,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               controller: _dashboardScrollController,
               padding: const EdgeInsets.fromLTRB(14, 6, 14, 90),
               children: [
+                _homeHeader(),
+                const SizedBox(height: 6),
+                _needsAttention(),
+                const SizedBox(height: 10),
+                calendarHeader(),
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
