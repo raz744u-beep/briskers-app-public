@@ -3,7 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     required this.onCustomersTap,
@@ -11,6 +11,8 @@ class HomeScreen extends StatelessWidget {
     required this.onJobsTap,
     required this.onInvoicesTap,
     required this.onMoreTap,
+    required this.businessId,
+    required this.roleCode,
   });
 
   final VoidCallback onCustomersTap;
@@ -18,6 +20,15 @@ class HomeScreen extends StatelessWidget {
   final VoidCallback onJobsTap;
   final VoidCallback onInvoicesTap;
   final VoidCallback onMoreTap;
+  final String businessId;
+  final String roleCode;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  bool _customersExpanded = false;
 
   String _greeting() {
     final hour = DateTime.now().hour;
@@ -131,12 +142,19 @@ class HomeScreen extends StatelessWidget {
             const _NeedsAttentionPanel(),
             const SizedBox(height: 8),
             _HomeTiles(
-              onCustomersTap: onCustomersTap,
-              onAppointmentsTap: onAppointmentsTap,
-              onJobsTap: onJobsTap,
-              onInvoicesTap: onInvoicesTap,
-              onMoreTap: onMoreTap,
+              onCustomersTap: () => setState(() => _customersExpanded = !_customersExpanded),
+              onAppointmentsTap: widget.onAppointmentsTap,
+              onJobsTap: widget.onJobsTap,
+              onInvoicesTap: widget.onInvoicesTap,
+              onMoreTap: widget.onMoreTap,
             ),
+            if (_customersExpanded) ...[
+              const SizedBox(height: 6),
+              _CustomersDrawer(
+                onView: widget.onCustomersTap,
+                onNew: () => Navigator.pushNamed(context, '/home/new-customer'),
+              ),
+            ],
             const SizedBox(height: 24),
           ],
         ),
@@ -307,6 +325,32 @@ class _HomeTiles extends StatelessWidget {
             _tile('Chat', '0 Unread', Icons.chat_bubble_outline,
                 BriskersColors.chat, onMoreTap),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+
+class _CustomersDrawer extends StatelessWidget {
+  const _CustomersDrawer({required this.onView, required this.onNew});
+  final VoidCallback onView;
+  final VoidCallback onNew;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: BriskersColors.customers.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Expanded(child: TextButton.icon(onPressed: onView, icon: const Icon(Icons.people_outline), label: const Text('View Customers'))),
+          const SizedBox(width: 6),
+          Expanded(child: FilledButton.tonalIcon(onPressed: onNew, icon: const Icon(Icons.person_add_alt_1), label: const Text('New Customer'))),
         ],
       ),
     );
