@@ -781,6 +781,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     final attachments = List<dynamic>.from(detail['attachments'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _preloadAttachments(attachments);
+    });
     final counterparty = detail['counterparty']?.toString() ??
         (income ? 'Income' : 'Expense');
     final category = detail['category']?.toString() ?? '';
