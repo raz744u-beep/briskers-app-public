@@ -681,7 +681,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     if (!mounted) return;
 
     final editable = detail['editable'] == true;
-    final deletable = detail['deletable'] == true;
+    final deletable = _owner && detail['deletable'] == true;
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -902,12 +902,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           logoHeight: 40,
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: FloatingActionButton(
         onPressed: _importing ? null : _showAddMenu,
         backgroundColor: BriskersColors.expenses,
         foregroundColor: Colors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('Transaction'),
+        tooltip: 'Add transaction',
+        child: const Icon(Icons.add),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -1067,17 +1067,19 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     ),
                   ],
                   const SizedBox(height: 12),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Transactions',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   Row(
                     children: [
-                      const Expanded(
-                        child: Text(
-                          'Transactions',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
                       OutlinedButton(
                         onPressed: _chooseDirection,
                         child: Text(
@@ -1088,7 +1090,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                   : tr('expenses'),
                         ),
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 8),
                       OutlinedButton.icon(
                         onPressed: _chooseDateRange,
                         icon: const Icon(
@@ -1097,7 +1099,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         ),
                         label: Text(_rangeLabel),
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: 8),
                       IconButton.outlined(
                         tooltip: 'Transaction filters',
                         onPressed: _showAdvancedFilters,
@@ -1121,8 +1123,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     },
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
-                      hintText:
-                          'Search description, payee, customer, invoice, amount…',
+                      hintText: 'Search transactions…',
                       prefixIcon: const Icon(Icons.search),
                       suffixIcon: _searchController.text.isEmpty
                           ? null
