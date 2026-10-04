@@ -20,14 +20,14 @@ class HomeScreen extends StatelessWidget {
       child: SafeArea(
         bottom: false,
         child: SizedBox(
-          height: 190,
+          height: 158,
           child: Stack(
             fit: StackFit.expand,
             children: [
               Positioned(
                 right: -12,
-                top: 36,
-                width: 245,
+                top: 22,
+                width: 230,
                 child: Opacity(
                   opacity: 0.20,
                   child: Image.asset(
@@ -37,7 +37,7 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(18, 10, 14, 12),
+                padding: const EdgeInsets.fromLTRB(18, 8, 14, 6),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -67,7 +67,7 @@ class HomeScreen extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const Spacer(),
+                    const SizedBox(height: 8),
                     Text(
                       '${_greeting()}, Raz',
                       style: const TextStyle(
