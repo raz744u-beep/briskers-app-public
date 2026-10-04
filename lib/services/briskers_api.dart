@@ -1933,6 +1933,31 @@ class BriskersApi {
     );
   }
 
+  Future<void> archiveExpensePhotoForReplace(
+    String businessId,
+    String transactionId,
+    String attachmentId, {
+    required String bucket,
+    required String key,
+  }) async {
+    await supabase.rpc(
+      'briskers_archive_expense_attachment_for_replace',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+        'p_attachment_id': attachmentId,
+      },
+    );
+
+    if (key.isNotEmpty) {
+      try {
+        await supabase.storage.from(bucket).remove([key]);
+      } catch (_) {
+        // The database record is already archived. Storage cleanup can retry.
+      }
+    }
+  }
+
   Future<List<Map<String, dynamic>>> assignableEmployees(
     String businessId,
   ) async {
