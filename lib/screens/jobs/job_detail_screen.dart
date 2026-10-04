@@ -25,11 +25,13 @@ class JobDetailScreen extends StatefulWidget {
     required this.businessId,
     required this.jobId,
     required this.roleCode,
+    this.bottomNavigationBar,
   });
 
   final String businessId;
   final String jobId;
   final String roleCode;
+  final Widget? bottomNavigationBar;
 
   @override
   State<JobDetailScreen> createState() => _JobDetailScreenState();
@@ -4484,6 +4486,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           PopupMenuButton<String>(tooltip: 'Job menu', onSelected: (value) { if (value == 'refresh') _load(); }, itemBuilder: (_) => const [PopupMenuItem(value: 'refresh', child: Text('Refresh'))]),
         ],
       ),
+      bottomNavigationBar: widget.bottomNavigationBar,
       floatingActionButton: (_canEditFindings || _canManage) ? FloatingActionButton.extended(
         onPressed: _busy ? null : _showNewMenu, backgroundColor: BriskersColors.jobs, foregroundColor: Colors.white, icon: const Icon(Icons.add), label: const Text('New', style: TextStyle(fontWeight: FontWeight.w800)),
       ) : null,
