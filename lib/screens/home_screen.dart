@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
+import 'customers/new_customer_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -152,7 +153,16 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 6),
               _CustomersDrawer(
                 onView: widget.onCustomersTap,
-                onNew: () => Navigator.pushNamed(context, '/home/new-customer'),
+                onNew: () async {
+                  await Navigator.push<bool>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => NewCustomerScreen(
+                        businessId: widget.businessId,
+                      ),
+                    ),
+                  );
+                },
               ),
             ],
             const SizedBox(height: 24),
