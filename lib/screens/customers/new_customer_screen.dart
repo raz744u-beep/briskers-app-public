@@ -145,6 +145,7 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
   Widget build(BuildContext context) {
     const roundedInput = OutlineInputBorder(
       borderRadius: BorderRadius.all(Radius.circular(18)),
+      borderSide: BorderSide(color: Color(0xFFB8C0CC)),
     );
     return Scaffold(
       appBar: AppBar(title: const Text('New customer')),
@@ -205,7 +206,11 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
           ],
           const SizedBox(height: 16),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: BriskersColors.customers, foregroundColor: Colors.white),
+            style: FilledButton.styleFrom(
+              backgroundColor: BriskersColors.customers,
+              foregroundColor: Colors.white,
+              textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+            ),
             onPressed: _busy ? null : _save,
             child: Text(_busy ? 'Saving...' : 'Save customer & add vehicle'),
           ),
