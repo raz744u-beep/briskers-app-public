@@ -168,6 +168,8 @@ class _ShellScreenState extends State<ShellScreen> {
               onJobsTap: () => _goTo(3),
               onInvoicesTap: () => _goTo(4),
               onMoreTap: () => _goTo(5),
+              businessId: widget.businessId,
+              roleCode: widget.roleCode,
             );
           case 1:
             return CustomersScreen(
