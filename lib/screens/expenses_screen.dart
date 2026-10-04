@@ -602,6 +602,138 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     await _load();
   }
 
+  Future<void> _editTransactionFromList(String transactionId) async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExpenseEntryScreen(
+          businessId: widget.businessId,
+          editTransactionId: transactionId,
+          allowRecurring: _allowRecurring,
+        ),
+      ),
+    );
+    if (changed == true && mounted) await _load();
+  }
+
+  Future<void> _copyTransactionFromList(String transactionId) async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExpenseEntryScreen(
+          businessId: widget.businessId,
+          copyTransactionId: transactionId,
+          allowRecurring: _allowRecurring,
+        ),
+      ),
+    );
+    if (changed == true && mounted) await _load();
+  }
+
+  Future<void> _deleteTransactionFromList(String transactionId) async {
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Delete transaction?'),
+            content: const Text(
+              'The transaction will disappear from normal views but remain in the audit history.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.error,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed) return;
+
+    try {
+      await _api.voidManualTransaction(widget.businessId, transactionId);
+      if (mounted) await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<void> _showTransactionActions(
+    Map<String, dynamic> transaction,
+  ) async {
+    final id = transaction['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+
+    Map<String, dynamic> detail;
+    try {
+      detail = await _api.transactionDetail(widget.businessId, id);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return;
+    }
+    if (!mounted) return;
+
+    final editable = detail['editable'] == true;
+    final deletable = detail['deletable'] == true;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.visibility_outlined),
+              title: const Text('View transaction'),
+              onTap: () => Navigator.pop(sheetContext, 'view'),
+            ),
+            if (editable)
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit transaction'),
+                onTap: () => Navigator.pop(sheetContext, 'edit'),
+              ),
+            if (editable)
+              ListTile(
+                leading: const Icon(Icons.copy_outlined),
+                title: const Text('Copy transaction'),
+                onTap: () => Navigator.pop(sheetContext, 'copy'),
+              ),
+            if (deletable) ...[
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline,
+                  color: Colors.red,
+                ),
+                title: const Text(
+                  'Delete transaction',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+            ],
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted || action == null) return;
+    if (action == 'view') await _openTransaction(transaction);
+    if (action == 'edit') await _editTransactionFromList(id);
+    if (action == 'copy') await _copyTransactionFromList(id);
+    if (action == 'delete') await _deleteTransactionFromList(id);
+  }
+
   String _photoKey(String filename) {
     final lower = filename.toLowerCase();
     if (lower.endsWith('.jpeg')) {
@@ -1078,6 +1210,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
                           onTap: () => _openTransaction(transaction),
+                          onLongPress: () => _showTransactionActions(transaction),
                           child: Padding(
                             padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
                             child: Row(
