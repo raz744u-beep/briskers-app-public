@@ -6,14 +6,11 @@ import '../core/briskers_i18n.dart';
 import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import '../widgets/job_compact_card.dart';
-import 'appointments/appointment_create_screen.dart';
 import 'customers/customer_detail_screen.dart';
 import 'documents_screen.dart';
-import 'expenses/expense_entry_screen.dart';
 import 'expenses_screen.dart';
 import 'jobs/job_detail_screen.dart';
 import 'jobs/job_document_screen.dart';
-import 'settings/expense_settings_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({
@@ -59,9 +56,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       widget.roleCode == 'owner' ||
       widget.roleCode == 'manager' ||
       widget.roleCode == 'office';
-
-  bool get _allowRecurring =>
-      widget.roleCode == 'owner' || widget.roleCode == 'manager';
 
   String _friendlyDashboardError(Object error) {
     final text = error.toString().toLowerCase();
@@ -1182,123 +1176,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
 
-  Future<Map<String, dynamic>?> _pickDashboardCustomer(String title) async {
-    List<Map<String, dynamic>> rows;
-    try {
-      rows = await _api.customers(widget.businessId, limit: 50);
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-      return null;
-    }
-    if (!mounted) return null;
-
-    final searchController = TextEditingController();
-    var results = List<Map<String, dynamic>>.from(rows);
-    var searching = false;
-
-    final selected = await showModalBottomSheet<Map<String, dynamic>>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) {
-          Future<void> search(String value) async {
-            setSheetState(() => searching = true);
-            try {
-              final found = await _api.customers(
-                widget.businessId,
-                search: value.trim().isEmpty ? null : value.trim(),
-                limit: 50,
-              );
-              if (sheetContext.mounted) {
-                setSheetState(() {
-                  results = found;
-                  searching = false;
-                });
-              }
-            } catch (_) {
-              if (sheetContext.mounted) {
-                setSheetState(() => searching = false);
-              }
-            }
-          }
-
-          return SafeArea(
-            top: false,
-            child: SizedBox(
-              height: MediaQuery.sizeOf(sheetContext).height * 0.72,
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                    child: Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: TextField(
-                      controller: searchController,
-                      autofocus: true,
-                      textInputAction: TextInputAction.search,
-                      onSubmitted: search,
-                      decoration: InputDecoration(
-                        labelText: 'Customer',
-                        hintText: 'Search by customer name',
-                        prefixIcon: const Icon(Icons.search),
-                        suffixIcon: IconButton(
-                          tooltip: 'Search',
-                          onPressed: () => search(searchController.text),
-                          icon: const Icon(Icons.arrow_forward),
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (searching)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8),
-                      child: LinearProgressIndicator(),
-                    ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: results.isEmpty
-                        ? const Center(child: Text('No customers found.'))
-                        : ListView.separated(
-                            itemCount: results.length,
-                            separatorBuilder: (_, _) =>
-                                const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final customer = results[index];
-                              return ListTile(
-                                leading: const CircleAvatar(
-                                  child: Icon(Icons.person_outline),
-                                ),
-                                title: Text(
-                                  customer['display_name']?.toString() ?? '',
-                                ),
-                                subtitle: Text(
-                                  '${customer['vehicle_count'] ?? 0} vehicle(s)',
-                                ),
-                                onTap: () =>
-                                    Navigator.pop(sheetContext, customer),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-    searchController.dispose();
-    return selected;
-  }
 
   Future<void> _openExpenses() async {
     await Navigator.push<void>(
