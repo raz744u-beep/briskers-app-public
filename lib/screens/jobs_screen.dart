@@ -21,12 +21,14 @@ class JobsScreen extends StatefulWidget {
     required this.roleCode,
     this.refreshToken = 0,
     this.onJobsChanged,
+    this.jobDetailBottomNavigationBar,
   });
 
   final String businessId;
   final String roleCode;
   final int refreshToken;
   final VoidCallback? onJobsChanged;
+  final Widget? jobDetailBottomNavigationBar;
 
   @override
   State<JobsScreen> createState() => _JobsScreenState();
@@ -205,6 +207,7 @@ class _JobsScreenState extends State<JobsScreen> {
           businessId: widget.businessId,
           jobId: job['id'].toString(),
           roleCode: widget.roleCode,
+          bottomNavigationBar: widget.jobDetailBottomNavigationBar,
         ),
       ),
     );
