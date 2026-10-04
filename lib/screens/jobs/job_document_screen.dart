@@ -73,6 +73,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Color get _accent =>
       _estimate ? BriskersColors.estimates : BriskersColors.jobs;
 
+  Color get _documentActionColor =>
+      _estimate ? BriskersColors.estimates : BriskersColors.invoices;
+
   @override
   void initState() {
     super.initState();
@@ -446,6 +449,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 child: const Text('Close'),
               ),
               FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: BriskersColors.expenses,
+                  foregroundColor: Colors.white,
+                ),
                 onPressed: () {
                   Navigator.pop(dialogContext);
                   _addInvoiceExpense();
@@ -768,6 +775,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       showDragHandle: true,
       builder: (_) => _EditLineDialog(
         line: line,
+        accent: _documentActionColor,
         title: 'Add item to invoice',
         saveLabel: 'Add to Invoice',
         lockCatalogFields: true,
@@ -804,6 +812,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       context: context,
       builder: (_) => _CustomLineDialog(
         defaultTaxRate: _defaultTaxRate,
+        accent: _documentActionColor,
       ),
     );
     if (result == null) return;
@@ -840,6 +849,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       showDragHandle: true,
       builder: (_) => _EditLineDialog(
         line: line,
+        accent: _documentActionColor,
         title: tr('editInvoiceItem'),
         saveLabel: tr('saveChanges'),
         lockCatalogFields: line['item_id'] != null,
@@ -872,7 +882,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
-      builder: (_) => const _DiscountDialog(),
+      builder: (_) => _DiscountDialog(
+        accent: _documentActionColor,
+      ),
     );
     if (result == null) return;
     final translatedResult = await _translateManualEntry(result);
@@ -898,7 +910,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
-      builder: (_) => _DiscountDialog(line: line),
+      builder: (_) => _DiscountDialog(
+        line: line,
+        accent: _documentActionColor,
+      ),
     );
     if (result == null) return;
     final translatedResult = await _translateManualEntry(result);
@@ -1395,6 +1410,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             child: Text(tr('cancel')),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('Remove'),
           ),
@@ -1697,6 +1716,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                   child: Text(tr('cancel')),
                                 ),
                                 FilledButton(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: _documentActionColor,
+                                    foregroundColor: Colors.white,
+                                  ),
                                   onPressed: () =>
                                       Navigator.pop(dialogContext, true),
                                   child: const Text('Save'),
@@ -1775,6 +1798,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _documentActionColor,
+                      foregroundColor: Colors.white,
+                    ),
                     onPressed: customerId.isEmpty
                         ? null
                         : () => Navigator.pop(sheetContext, true),
@@ -1892,6 +1919,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               child: Text(tr('cancel')),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: BriskersColors.invoices,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () => Navigator.pop(dialogContext, true),
               child: const Text('Copy invoice'),
             ),
@@ -1959,6 +1990,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           ),
           actions: [
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: _documentActionColor,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () => Navigator.pop(dialogContext),
               child: const Text('OK'),
             ),
@@ -1981,6 +2016,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             child: Text(tr('cancel')),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('Delete invoice'),
           ),
@@ -2021,6 +2060,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           ),
           actions: [
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: _documentActionColor,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () => Navigator.pop(dialogContext),
               child: const Text('OK'),
             ),
@@ -2078,6 +2121,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             content: Text(error.toString()),
             actions: [
               FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: _documentActionColor,
+                  foregroundColor: Colors.white,
+                ),
                 onPressed: () => Navigator.pop(dialogContext),
                 child: const Text('OK'),
               ),
@@ -2209,6 +2256,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _documentActionColor,
+                        foregroundColor: Colors.white,
+                      ),
                       onPressed: () {
                         if (controller.text.trim().isNotEmpty) {
                           Navigator.pop(sheetContext, true);
@@ -3986,6 +4037,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           content: Text(tr('noStandardNoteTemplates')),
           actions: [
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: _documentActionColor,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () => Navigator.pop(dialogContext),
               child: const Text('OK'),
             ),
@@ -4291,6 +4346,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 child: const Text('Cancel'),
               ),
               FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.error,
+                  foregroundColor: Colors.white,
+                ),
                 onPressed: () => Navigator.pop(dialogContext, true),
                 child: const Text('Remove'),
               ),
@@ -5166,9 +5225,11 @@ class _AmountRow extends StatelessWidget {
 class _CustomLineDialog extends StatefulWidget {
   const _CustomLineDialog({
     required this.defaultTaxRate,
+    required this.accent,
   });
 
   final num defaultTaxRate;
+  final Color accent;
 
   @override
   State<_CustomLineDialog> createState() => _CustomLineDialogState();
@@ -5342,6 +5403,10 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
           child: Text(tr('cancel')),
         ),
         FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: widget.accent,
+            foregroundColor: Colors.white,
+          ),
           onPressed: _save,
           child: Text(tr('add')),
         ),
@@ -5353,6 +5418,7 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
 class _EditLineDialog extends StatefulWidget {
   const _EditLineDialog({
     required this.line,
+    required this.accent,
     this.title = 'Edit item',
     this.saveLabel = 'Save',
     this.lockCatalogFields = false,
@@ -5360,6 +5426,7 @@ class _EditLineDialog extends StatefulWidget {
   });
 
   final Map<String, dynamic> line;
+  final Color accent;
   final String title;
   final String saveLabel;
   final bool lockCatalogFields;
@@ -5665,6 +5732,10 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                     Expanded(
                       flex: 2,
                       child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: widget.accent,
+                          foregroundColor: Colors.white,
+                        ),
                         onPressed: _save,
                         icon: const Icon(Icons.check),
                         label: Text(widget.saveLabel),
@@ -5682,8 +5753,12 @@ class _EditLineDialogState extends State<_EditLineDialog> {
 }
 
 class _DiscountDialog extends StatefulWidget {
-  const _DiscountDialog({this.line});
+  const _DiscountDialog({
+    required this.accent,
+    this.line,
+  });
 
+  final Color accent;
   final Map<String, dynamic>? line;
 
   @override
@@ -5911,6 +5986,10 @@ class _DiscountDialogState extends State<_DiscountDialog> {
                     Expanded(
                       flex: 2,
                       child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: widget.accent,
+                          foregroundColor: Colors.white,
+                        ),
                         onPressed: _save,
                         icon: const Icon(Icons.check),
                         label: Text(
@@ -6003,6 +6082,12 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
             decoration: InputDecoration(
               labelText: tr('paymentAmount'),
               prefixText: '\$ ',
+              focusedBorder: const OutlineInputBorder(
+                borderSide: BorderSide(
+                  color: BriskersColors.invoices,
+                  width: 2,
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 12),
@@ -6010,6 +6095,12 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
             initialValue: _methodId,
             decoration: InputDecoration(
               labelText: tr('paymentMethod'),
+              focusedBorder: const OutlineInputBorder(
+                borderSide: BorderSide(
+                  color: BriskersColors.invoices,
+                  width: 2,
+                ),
+              ),
             ),
             items: widget.methods
                 .map(
@@ -6034,10 +6125,17 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
       ),
       actions: [
         TextButton(
+          style: TextButton.styleFrom(
+            foregroundColor: BriskersColors.invoices,
+          ),
           onPressed: () => Navigator.pop(context),
           child: Text(tr('cancel')),
         ),
         FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: BriskersColors.invoices,
+            foregroundColor: Colors.white,
+          ),
           onPressed: _save,
           child: Text(widget.saveLabel),
         ),
