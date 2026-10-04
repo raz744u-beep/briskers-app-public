@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../core/briskers_colors.dart';
+
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
@@ -115,6 +117,8 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 8),
             const _NeedsAttentionPanel(),
             const SizedBox(height: 12),
+            const _HomeTiles(),
+            const SizedBox(height: 24),
           ],
         ),
       ),
@@ -164,6 +168,108 @@ class _NeedsAttentionPanel extends StatelessWidget {
               const SizedBox(height: 58, child: VerticalDivider(width: 1)),
               item(Icons.chat_bubble_outline, '0', 'Unread\nMessages'),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+class _HomeTiles extends StatelessWidget {
+  const _HomeTiles();
+
+  Widget _tile(
+    String label,
+    String subtitle,
+    IconData icon,
+    Color color,
+  ) {
+    return Container(
+      height: 94,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 34),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF101828),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF667085),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right, color: color),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget row(Widget left, Widget right) => Row(
+          children: [
+            Expanded(child: left),
+            const SizedBox(width: 10),
+            Expanded(child: right),
+          ],
+        );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        children: [
+          row(
+            _tile('Customers', '0 Total', Icons.people_outline,
+                BriskersColors.customers),
+            _tile('Appointments', '0 Today', Icons.calendar_month_outlined,
+                BriskersColors.appointments),
+          ),
+          const SizedBox(height: 10),
+          row(
+            _tile('Estimates', '0 Open', Icons.request_quote_outlined,
+                BriskersColors.estimates),
+            _tile('Invoices', '0 Open', Icons.receipt_long_outlined,
+                BriskersColors.invoices),
+          ),
+          const SizedBox(height: 10),
+          row(
+            _tile('Jobs', '0 In Progress', Icons.build_outlined,
+                BriskersColors.jobs),
+            _tile('Expenses', '0 Today', Icons.payments_outlined,
+                BriskersColors.expenses),
+          ),
+          const SizedBox(height: 10),
+          row(
+            _tile('Reports', 'View Reports', Icons.bar_chart_outlined,
+                BriskersColors.reports),
+            _tile('Chat', '0 Unread', Icons.chat_bubble_outline,
+                BriskersColors.chat),
           ),
         ],
       ),
