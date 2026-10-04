@@ -192,6 +192,133 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _homeTile({
+    required String label,
+    required IconData icon,
+    required Color color,
+    int? count,
+    VoidCallback? onTap,
+  }) {
+    return Material(
+      color: color.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: SizedBox(
+          height: 108,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 13, 12, 11),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, color: color, size: 34),
+                const Spacer(),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    if ((count ?? 0) > 0)
+                      Badge(
+                        backgroundColor: const Color(0xFFC62828),
+                        label: Text('$count'),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _phaseTwoTiles(int appointmentsCount, int activeJobsCount) {
+    Widget row(Widget left, Widget right) => Row(
+          children: [
+            Expanded(child: left),
+            const SizedBox(width: 10),
+            Expanded(child: right),
+          ],
+        );
+
+    return Column(
+      children: [
+        row(
+          _homeTile(
+            label: tr('customers'),
+            icon: Icons.people_outline,
+            color: BriskersColors.customers,
+            onTap: widget.onCustomersTap,
+          ),
+          _homeTile(
+            label: tr('appointments'),
+            icon: Icons.calendar_month_outlined,
+            color: BriskersColors.appointments,
+            count: appointmentsCount,
+            onTap: widget.onAppointmentsTap,
+          ),
+        ),
+        const SizedBox(height: 10),
+        row(
+          _homeTile(
+            label: tr('estimates'),
+            icon: Icons.request_quote_outlined,
+            color: BriskersColors.estimates,
+            count: _estimateAttention,
+            onTap: () => _openDocuments('estimate'),
+          ),
+          _homeTile(
+            label: tr('invoices'),
+            icon: Icons.receipt_long_outlined,
+            color: BriskersColors.invoices,
+            count: _invoiceAttention,
+            onTap: () => _openDocuments('invoice'),
+          ),
+        ),
+        const SizedBox(height: 10),
+        row(
+          _homeTile(
+            label: tr('jobs'),
+            icon: Icons.build_outlined,
+            color: BriskersColors.jobs,
+            count: activeJobsCount,
+            onTap: _toggleJobs,
+          ),
+          _homeTile(
+            label: tr('expenses'),
+            icon: Icons.payments_outlined,
+            color: BriskersColors.expenses,
+            onTap: _openExpenses,
+          ),
+        ),
+        const SizedBox(height: 10),
+        row(
+          _homeTile(
+            label: 'Reports',
+            icon: Icons.bar_chart_outlined,
+            color: BriskersColors.reports,
+          ),
+          _homeTile(
+            label: 'Chat',
+            icon: Icons.chat_bubble_outline,
+            color: BriskersColors.chat,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _needsAttention() {
     Widget item(IconData icon, String label, int count) => Expanded(
           child: Column(
@@ -1686,66 +1813,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 10),
                 calendarHeader(),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _DashboardActionTile(
-                        label: tr('estimates'),
-                        attentionCount: _estimateAttention,
-                        icon: Icons.request_quote_outlined,
-                        color: BriskersColors.estimates,
-                        expanded: _expandedAction == 'estimate',
-                        onExpand: () => _toggleAction('estimate'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _DashboardActionTile(
-                        label: tr('invoices'),
-                        attentionCount: _invoiceAttention,
-                        icon: Icons.receipt_long_outlined,
-                        color: BriskersColors.invoices,
-                        expanded: _expandedAction == 'invoice',
-                        onExpand: () => _toggleAction('invoice'),
-                      ),
-                    ),
-                  ],
-                ),
-                if (_expandedAction == 'estimate' ||
-                    _expandedAction == 'invoice') ...[
-                  const SizedBox(height: 8),
-                  actionDrawer(_expandedAction!),
-                ],
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _DashboardActionTile(
-                        label: tr('appointments'),
-                        attentionCount: appointments.length,
-                        icon: Icons.calendar_month_outlined,
-                        color: BriskersColors.appointments,
-                        expanded: _expandedAction == 'appointment',
-                        onExpand: () => _toggleAction('appointment'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _DashboardActionTile(
-                        label: tr('expenses'),
-                        icon: Icons.payments_outlined,
-                        color: _dashboardExpensesColor,
-                        expanded: _expandedAction == 'expense',
-                        onExpand: () => _toggleAction('expense'),
-                      ),
-                    ),
-                  ],
-                ),
-                if (_expandedAction == 'appointment' ||
-                    _expandedAction == 'expense') ...[
-                  const SizedBox(height: 8),
-                  actionDrawer(_expandedAction!),
-                ],
+                _phaseTwoTiles(appointments.length, activeJobs.length),
                 if (_error != null) ...[
                   const SizedBox(height: 10),
                   Text(
