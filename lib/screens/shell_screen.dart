@@ -57,7 +57,6 @@ class _ShellScreenState extends State<ShellScreen> {
   void initState() {
     super.initState();
     _businessName = widget.businessName;
-    _refreshNavCounts();
   }
 
   String get _customersViewedKey =>
@@ -103,8 +102,6 @@ class _ShellScreenState extends State<ShellScreen> {
     });
     if (index == 1) {
       _markCustomersViewed();
-    } else {
-      _refreshNavCounts();
     }
   }
 
