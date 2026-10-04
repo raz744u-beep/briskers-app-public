@@ -346,20 +346,56 @@ class _CustomersDrawer extends StatelessWidget {
   final VoidCallback onView;
   final VoidCallback onNew;
 
+  Widget _action(
+    String label,
+    IconData icon,
+    VoidCallback onTap, {
+    bool divider = true,
+  }) {
+    return Column(
+      children: [
+        ListTile(
+          dense: true,
+          minVerticalPadding: 8,
+          leading: Icon(icon, color: BriskersColors.customers),
+          title: Text(
+            label,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right, size: 22),
+          onTap: onTap,
+        ),
+        if (divider)
+          Divider(
+            height: 1,
+            indent: 52,
+            color: BriskersColors.customers.withValues(alpha: 0.22),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(8),
+      margin: const EdgeInsets.symmetric(horizontal: 2),
       decoration: BoxDecoration(
-        color: BriskersColors.customers.withValues(alpha: 0.07),
+        color: BriskersColors.customers.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Row(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
         children: [
-          Expanded(child: TextButton.icon(onPressed: onView, icon: const Icon(Icons.people_outline), label: const Text('View Customers'))),
-          const SizedBox(width: 6),
-          Expanded(child: FilledButton.tonalIcon(onPressed: onNew, icon: const Icon(Icons.person_add_alt_1), label: const Text('New Customer'))),
+          _action('View Customers', Icons.people_outline, onView),
+          _action(
+            'New Customer',
+            Icons.person_add_alt_1,
+            onNew,
+            divider: false,
+          ),
         ],
       ),
     );
