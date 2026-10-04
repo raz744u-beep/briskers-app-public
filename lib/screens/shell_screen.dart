@@ -158,7 +158,7 @@ class _ShellScreenState extends State<ShellScreen> {
         key: ValueKey('invoices-$_invoicesRefreshToken'),
         businessId: widget.businessId,
         kind: 'invoice',
-        roleCode: widget.roleCode,
+        isOwner: widget.roleCode == 'owner',
       ),
       MoreScreen(
         businessId: widget.businessId,
