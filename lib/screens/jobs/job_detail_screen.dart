@@ -2566,6 +2566,54 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         (bucket.isNotEmpty && key.isNotEmpty)
                     ? () => _showFindingPhoto(attachment)
                     : null,
+                onLongPress: attachment['can_delete'] == true
+                    ? () async {
+                        final action = await showModalBottomSheet<String>(
+                          context: context,
+                          showDragHandle: true,
+                          builder: (sheetContext) => SafeArea(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ListTile(
+                                  leading:
+                                      const Icon(Icons.sync_alt_outlined),
+                                  title: const Text('Replace photo'),
+                                  onTap: () =>
+                                      Navigator.pop(sheetContext, 'replace'),
+                                ),
+                                ListTile(
+                                  leading: Icon(
+                                    Icons.delete_outline,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .error,
+                                  ),
+                                  title: Text(
+                                    'Delete photo',
+                                    style: TextStyle(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .error,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  onTap: () =>
+                                      Navigator.pop(sheetContext, 'delete'),
+                                ),
+                                const SizedBox(height: 8),
+                              ],
+                            ),
+                          ),
+                        );
+                        if (!mounted || action == null) return;
+                        if (action == 'replace') {
+                          await _replaceFindingPhoto(finding, attachment);
+                        } else if (action == 'delete') {
+                          await _deleteFindingPhoto(finding, attachment);
+                        }
+                      }
+                    : null,
                 child: image,
               ),
               if (waiting)
@@ -2584,51 +2632,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         color: Colors.white,
                         size: 15,
                       ),
-                    ),
-                  ),
-                ),
-              if (attachment['can_delete'] == true)
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: Material(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(12),
-                    child: PopupMenuButton<String>(
-                      padding: EdgeInsets.zero,
-                      iconSize: 18,
-                      color:
-                          Theme.of(context).colorScheme.surface,
-                      tooltip: 'Photo actions',
-                      icon: const Icon(
-                        Icons.more_vert,
-                        color: Colors.white,
-                        size: 18,
-                      ),
-                      onSelected: (value) {
-                        if (value == 'replace') {
-                          _replaceFindingPhoto(
-                            finding,
-                            attachment,
-                          );
-                        }
-                        if (value == 'delete') {
-                          _deleteFindingPhoto(
-                            finding,
-                            attachment,
-                          );
-                        }
-                      },
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(
-                          value: 'replace',
-                          child: Text('Replace photo'),
-                        ),
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Text('Delete photo'),
-                        ),
-                      ],
                     ),
                   ),
                 ),
