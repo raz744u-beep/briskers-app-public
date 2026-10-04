@@ -90,8 +90,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (!_workspaceHeaderController.hasClients) return;
     final position = _workspaceHeaderController.position;
     if (position.maxScrollExtent <= 0) return;
+    final target = position.maxScrollExtent;
+    if ((position.pixels - target).abs() < 0.5) return;
     await _workspaceHeaderController.animateTo(
-      position.maxScrollExtent,
+      target,
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
     );
@@ -4415,12 +4417,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
         children: [
+          Text(
+            _estimate ? tr('estimateNotes') : tr('invoiceNotes'),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 8),
           TextField(
             controller: _notesController,
             focusNode: _notesFocusNode,
             readOnly: _readOnly,
-            minLines: 5,
-            maxLines: 10,
+            minLines: 3,
+            maxLines: 7,
             keyboardType: TextInputType.multiline,
             textCapitalization: TextCapitalization.sentences,
             onChanged: (_) {
@@ -4429,20 +4438,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               }
             },
             decoration: InputDecoration(
-              labelText: _estimate ? tr('estimateNotes') : tr('invoiceNotes'),
               hintText: _estimate
                   ? tr('noEstimateNotes')
                   : tr('noInvoiceNotes'),
               alignLabelWithHint: true,
               filled: true,
-              fillColor: const Color(0xFFF5F8F7),
+              fillColor: const Color(0xFFF8FAFA),
+              contentPadding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Color(0xFFE0E7E5)),
+                borderSide: const BorderSide(color: Color(0xFFD8E0DE)),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Color(0xFFE0E7E5)),
+                borderSide: const BorderSide(color: Color(0xFFD8E0DE)),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
