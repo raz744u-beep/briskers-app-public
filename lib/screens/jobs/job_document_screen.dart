@@ -46,6 +46,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   final _catalogSync = CatalogSyncService();
   final ImagePicker _picker = ImagePicker();
   final ScrollController _workspaceHeaderController = ScrollController();
+  final GlobalKey _workspaceHeaderKey = GlobalKey();
   final TextEditingController _notesController = TextEditingController();
   final FocusNode _notesFocusNode = FocusNode();
 
@@ -88,10 +89,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   Future<void> _collapseWorkspaceHeader() async {
     if (!_workspaceHeaderController.hasClients) return;
+
+    final headerContext = _workspaceHeaderKey.currentContext;
+    final headerBox = headerContext?.findRenderObject() as RenderBox?;
+    final headerHeight = headerBox?.size.height ?? 0;
+    if (headerHeight <= 0) return;
+
     final position = _workspaceHeaderController.position;
-    if (position.maxScrollExtent <= 0) return;
-    final target = position.maxScrollExtent;
-    if ((position.pixels - target).abs() < 0.5) return;
+    final target = headerHeight.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+
+    // Only collapse the shared header. Never use maxScrollExtent here:
+    // NestedScrollView's max extent also includes the active tab's content.
+    if (position.pixels >= target - 0.5) return;
+
     await _workspaceHeaderController.animateTo(
       target,
       duration: const Duration(milliseconds: 220),
@@ -4816,8 +4829,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           controller: _workspaceHeaderController,
           headerSliverBuilder: (context, innerBoxIsScrolled) => [
             SliverToBoxAdapter(
-              child: Column(
-                children: [
+              child: Container(
+                key: _workspaceHeaderKey,
+                child: Column(
+                  children: [
                   _customerHeader(),
                   if (!_estimate)
                     InvoiceWarrantyPanel(
@@ -4831,7 +4846,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                     ),
                   _openFindingsBanner(),
                   if (_estimate && _converted) _convertedInvoiceBanner(),
-                ],
+                  ],
+                ),
               ),
             ),
             SliverPersistentHeader(
