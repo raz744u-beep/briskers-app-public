@@ -485,6 +485,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           initialDirection: direction,
           quickTemplate: quickTemplate,
           allowRecurring: _allowRecurring,
+          canDeleteTransaction: widget.roleCode == 'owner',
         ),
       ),
     );
