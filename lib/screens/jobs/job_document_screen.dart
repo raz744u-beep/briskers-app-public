@@ -1256,6 +1256,42 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
   }
 
+  Future<void> _showPaymentContextMenu(
+    Map<String, dynamic> payment,
+  ) async {
+    if (_busy || payment['state']?.toString() != 'pending') return;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: Text(tr('editPayment')),
+              onTap: () => Navigator.pop(sheetContext, 'edit'),
+            ),
+            if (widget.isOwner)
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: Text(tr('removePayment')),
+                onTap: () => Navigator.pop(sheetContext, 'remove'),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (action == 'edit') {
+      await _editPayment(payment);
+    } else if (action == 'remove') {
+      await _deletePayment(payment);
+    }
+  }
+
   Future<void> _editPayment(Map<String, dynamic> payment) async {
     if (_estimate || payment['state']?.toString() != 'pending') return;
 
@@ -3497,7 +3533,40 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                         final payment = payments[index];
                         final editable =
                             payment['state']?.toString() == 'pending';
+                        final methodName =
+                            payment['payment_method_name']?.toString() ??
+                                tr('paymentSection');
+                        final paymentAmount = _number(payment['amount']);
+                        final methodLower = methodName.trim().toLowerCase();
+                        final warrantyMethodMatches = warrantyUsesCheck
+                            ? methodLower == 'check' ||
+                                methodLower.contains('check')
+                            : methodLower == 'credit card' ||
+                                (methodLower.contains('credit') &&
+                                    methodLower.contains('card'));
+                        final warrantyAmountMatches =
+                            (paymentAmount - warrantyNet).abs() < 0.005;
+                        final isWarrantyPayment =
+                            _warrantyDetail['extended_warranty'] == true &&
+                                warrantyMethodMatches &&
+                                warrantyAmountMatches;
+                        final warrantyCompany = _warrantyDetail[
+                                    'warranty_company_name']
+                                ?.toString()
+                                .trim() ??
+                            '';
+                        final companyFirstWord = warrantyCompany.isEmpty
+                            ? tr('warrantyPayment')
+                            : warrantyCompany.split(RegExp(r'\\s+')).first;
+                        final source =
+                            isWarrantyPayment ? companyFirstWord : 'customer';
+
                         return ListTile(
+                          contentPadding:
+                              const EdgeInsets.fromLTRB(16, 0, 8, 0),
+                          onLongPress: editable && !_busy
+                              ? () => _showPaymentContextMenu(payment)
+                              : null,
                           leading: CircleAvatar(
                             backgroundColor:
                                 const Color(0xFF0C9A43).withValues(alpha: 0.10),
@@ -3507,57 +3576,23 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                             ),
                           ),
                           title: Text(
-                            payment['payment_method_name']?.toString() ??
-                                tr('paymentSection'),
-                            style: const TextStyle(fontWeight: FontWeight.w700),
+                            '$methodName - $source',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w400,
+                            ),
                           ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _money(payment['amount']),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                ),
+                          trailing: Padding(
+                            padding: const EdgeInsets.only(right: 2),
+                            child: Text(
+                              _money(paymentAmount),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w400,
                               ),
-                              if (editable && !_busy) ...[
-                                const SizedBox(width: 4),
-                                PopupMenuButton<String>(
-                                  tooltip: tr('paymentOptions'),
-                                  onSelected: (value) {
-                                    if (value == 'edit') _editPayment(payment);
-                                    if (value == 'remove') {
-                                      _deletePayment(payment);
-                                    }
-                                  },
-                                  itemBuilder: (_) => [
-                                    PopupMenuItem(
-                                      value: 'edit',
-                                      child: ListTile(
-                                        dense: true,
-                                        contentPadding: EdgeInsets.zero,
-                                        leading: const Icon(
-                                          Icons.edit_outlined,
-                                        ),
-                                        title: Text(tr('editPayment')),
-                                      ),
-                                    ),
-                                    if (widget.isOwner)
-                                      PopupMenuItem(
-                                        value: 'remove',
-                                        child: ListTile(
-                                          dense: true,
-                                          contentPadding: EdgeInsets.zero,
-                                          leading: const Icon(
-                                            Icons.delete_outline,
-                                          ),
-                                          title: Text(tr('removePayment')),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ],
-                            ],
+                            ),
                           ),
                         );
                       },
