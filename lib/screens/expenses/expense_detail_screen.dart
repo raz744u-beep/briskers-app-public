@@ -142,9 +142,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   Future<void> _replaceReceipt(
     Map<String, dynamic> attachment,
   ) async {
-    if (!_canDeleteRecords ||
-        _uploading ||
-        _deletingAttachmentId != null) {
+    final editable = _detail?['editable'] == true;
+    if (!editable || _uploading || _deletingAttachmentId != null) {
       return;
     }
 
@@ -201,7 +200,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
       final attachmentId = attachment['attachment_id']?.toString() ?? '';
       if (attachmentId.isNotEmpty) {
-        await _api.deleteExpensePhoto(
+        await _api.archiveExpensePhotoForReplace(
           widget.businessId,
           widget.transactionId,
           attachmentId,
