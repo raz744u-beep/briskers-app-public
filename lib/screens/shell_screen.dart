@@ -9,7 +9,7 @@ import '../services/briskers_api.dart';
 import '../widgets/briskers_page_header.dart';
 import 'appointments_screen.dart';
 import 'customers/customers_screen.dart';
-import 'dashboard_screen.dart';
+import 'home_screen.dart';
 import 'jobs_screen.dart';
 import 'more_screen.dart';
 import 'documents_screen.dart';
@@ -132,14 +132,7 @@ class _ShellScreenState extends State<ShellScreen> {
       return _lazyPages.putIfAbsent(index, () {
         switch (index) {
           case 0:
-            return DashboardScreen(
-              businessId: widget.businessId,
-              roleCode: widget.roleCode,
-              refreshToken: _todayRefreshToken,
-              onCustomersTap: () => _goTo(1),
-              onAppointmentsTap: () => _goTo(2),
-              onJobsChanged: _refreshNavCounts,
-            );
+            return const HomeScreen();
           case 1:
             return CustomersScreen(
               businessId: widget.businessId,
