@@ -90,24 +90,113 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     return NumberFormat.currency(symbol: '\$').format(value);
   }
 
+  DateTime _dateOnly(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
+  DateTime? get _rangeStartDate {
+    if (_searchController.text.trim().isNotEmpty) return null;
+    final today = _dateOnly(DateTime.now());
+    switch (_dateRange) {
+      case '30d':
+        return today.subtract(const Duration(days: 29));
+      case '60d':
+        return today.subtract(const Duration(days: 59));
+      case '90d':
+        return today.subtract(const Duration(days: 89));
+      case '6m':
+        return DateTime(today.year, today.month - 6, today.day);
+      case '1y':
+        return DateTime(today.year - 1, today.month, today.day);
+      case 'custom':
+        return _customStartDate;
+      case 'all':
+      default:
+        return null;
+    }
+  }
+
+  DateTime? get _rangeEndDate {
+    if (_searchController.text.trim().isNotEmpty) return null;
+    if (_dateRange == 'all') return null;
+    if (_dateRange == 'custom') return _customEndDate;
+    return _dateOnly(DateTime.now());
+  }
+
+  String get _rangeLabel {
+    switch (_dateRange) {
+      case '30d':
+        return '30 days';
+      case '60d':
+        return '60 days';
+      case '90d':
+        return '90 days';
+      case '6m':
+        return '6 months';
+      case '1y':
+        return '1 year';
+      case 'custom':
+        if (_customStartDate != null && _customEndDate != null) {
+          final start = DateFormat('MMM d').format(_customStartDate!);
+          final end = DateFormat('MMM d').format(_customEndDate!);
+          return '$start–$end';
+        }
+        return 'Custom';
+      case 'all':
+      default:
+        return 'All history';
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchTransactions({
+    required int offset,
+  }) {
+    return _api.transactionsPaged(
+      widget.businessId,
+      limit: _pageSize,
+      offset: offset,
+      startDate: _rangeStartDate,
+      endDate: _rangeEndDate,
+      search: _searchController.text.trim().isEmpty
+          ? null
+          : _searchController.text.trim(),
+      direction: _filter == 'all' ? null : _filter,
+      accountId: _accountFilterId,
+      categoryId: _categoryFilterId,
+      counterpartyId: _counterpartyFilterId,
+    );
+  }
+
   Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
     try {
       final results = await Future.wait<dynamic>([
-        _api.transactions(widget.businessId, limit: 1000),
+        _fetchTransactions(offset: 0),
         _api.transactionOptions(widget.businessId),
       ]);
       final rows = List<Map<String, dynamic>>.from(results[0] as List);
       final options = Map<String, dynamic>.from(results[1] as Map);
-      final quick = List<dynamic>.from(options['quick_templates'] ?? const [])
-          .map((raw) => Map<String, dynamic>.from(raw as Map))
-          .toList();
 
       if (!mounted) return;
       setState(() {
         _transactions = rows;
-        _quickTemplates = quick;
+        _hasMore = rows.length == _pageSize;
+        _quickTemplates = List<dynamic>.from(
+          options['quick_templates'] ?? const [],
+        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        _accounts = List<dynamic>.from(
+          options['accounts'] ?? const [],
+        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        _categories = List<dynamic>.from(
+          options['categories'] ?? const [],
+        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        _counterparties = List<dynamic>.from(
+          options['counterparties'] ?? const [],
+        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
         _loading = false;
-        _error = null;
       });
     } catch (error) {
       if (!mounted) return;
@@ -116,6 +205,272 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         _error = error.toString();
       });
     }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loading || _loadingMore || !_hasMore) return;
+    setState(() => _loadingMore = true);
+    try {
+      final rows = await _fetchTransactions(offset: _transactions.length);
+      if (!mounted) return;
+      setState(() {
+        _transactions = [..._transactions, ...rows];
+        _hasMore = rows.length == _pageSize;
+        _loadingMore = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingMore = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  void _searchChanged(String _) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), _load);
+  }
+
+  Future<void> _chooseDirection() async {
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final option in const [
+              ('all', 'All'),
+              ('expense', 'Expenses'),
+              ('income', 'Income'),
+            ])
+              ListTile(
+                title: Text(option.$2),
+                trailing: _filter == option.$1
+                    ? const Icon(Icons.check)
+                    : null,
+                onTap: () => Navigator.pop(sheetContext, option.$1),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (selected == null || selected == _filter) return;
+    setState(() => _filter = selected);
+    await _load();
+  }
+
+  Future<void> _chooseDateRange() async {
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text(
+                'Select date range',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            for (final option in const [
+              ('30d', 'Last 30 days'),
+              ('60d', 'Last 60 days'),
+              ('90d', 'Last 90 days'),
+              ('6m', 'Last 6 months'),
+              ('1y', 'Last 1 year'),
+              ('custom', 'Custom date range'),
+              ('all', 'All history'),
+            ])
+              ListTile(
+                title: Text(option.$2),
+                trailing: _dateRange == option.$1
+                    ? const Icon(
+                        Icons.check,
+                        color: BriskersColors.invoices,
+                      )
+                    : option.$1 == 'custom'
+                        ? const Icon(Icons.chevron_right)
+                        : null,
+                onTap: () => Navigator.pop(sheetContext, option.$1),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (selected == null) return;
+
+    if (selected == 'custom') {
+      if (!mounted) return;
+      final now = DateTime.now();
+      final picked = await showDateRangePicker(
+        context: context,
+        firstDate: DateTime(now.year - 10),
+        lastDate: now,
+        initialDateRange: _customStartDate != null && _customEndDate != null
+            ? DateTimeRange(
+                start: _customStartDate!,
+                end: _customEndDate!,
+              )
+            : DateTimeRange(
+                start: now.subtract(const Duration(days: 30)),
+                end: now,
+              ),
+      );
+      if (picked == null) return;
+      _customStartDate = _dateOnly(picked.start);
+      _customEndDate = _dateOnly(picked.end);
+    }
+
+    if (!mounted) return;
+    setState(() => _dateRange = selected);
+    await _load();
+  }
+
+  Future<void> _showAdvancedFilters() async {
+    var accountId = _accountFilterId;
+    var categoryId = _categoryFilterId;
+    var counterpartyId = _counterpartyFilterId;
+
+    final applied = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              0,
+              16,
+              MediaQuery.viewInsetsOf(sheetContext).bottom + 18,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Transaction filters',
+                  style: TextStyle(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                DropdownButtonFormField<String?>(
+                  initialValue: accountId,
+                  decoration: const InputDecoration(
+                    labelText: 'Account',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('All accounts'),
+                    ),
+                    ..._accounts.map(
+                      (item) => DropdownMenuItem<String?>(
+                        value: item['id']?.toString(),
+                        child: Text(item['name']?.toString() ?? ''),
+                      ),
+                    ),
+                  ],
+                  onChanged: (value) =>
+                      setSheetState(() => accountId = value),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String?>(
+                  initialValue: categoryId,
+                  decoration: const InputDecoration(
+                    labelText: 'Category',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('All categories'),
+                    ),
+                    ..._categories.map(
+                      (item) => DropdownMenuItem<String?>(
+                        value: item['id']?.toString(),
+                        child: Text(item['name']?.toString() ?? ''),
+                      ),
+                    ),
+                  ],
+                  onChanged: (value) =>
+                      setSheetState(() => categoryId = value),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String?>(
+                  initialValue: counterpartyId,
+                  decoration: const InputDecoration(
+                    labelText: 'Payee',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('All payees'),
+                    ),
+                    ..._counterparties.map(
+                      (item) => DropdownMenuItem<String?>(
+                        value: item['id']?.toString(),
+                        child: Text(item['name']?.toString() ?? ''),
+                      ),
+                    ),
+                  ],
+                  onChanged: (value) =>
+                      setSheetState(() => counterpartyId = value),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          setSheetState(() {
+                            accountId = null;
+                            categoryId = null;
+                            counterpartyId = null;
+                          });
+                        },
+                        child: const Text('Clear'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: BriskersColors.invoices,
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: () =>
+                            Navigator.pop(sheetContext, true),
+                        child: const Text('Apply'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (applied != true) return;
+    setState(() {
+      _accountFilterId = accountId;
+      _categoryFilterId = categoryId;
+      _counterpartyFilterId = counterpartyId;
+    });
+    await _load();
   }
 
   Future<void> _addTransaction(
