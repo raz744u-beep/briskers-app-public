@@ -186,45 +186,45 @@ class _HomeTiles extends StatelessWidget {
     Color color,
   ) {
     return Container(
-      height: 94,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      height: 78,
+      padding: const EdgeInsets.fromLTRB(12, 8, 9, 7),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.11),
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 34),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF101828),
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
+          Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF101828),
+            ),
+          ),
+          const Spacer(),
+          Row(
+            children: [
+              Icon(icon, color: color, size: 28),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
                   subtitle,
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
                   style: const TextStyle(
-                    fontSize: 13,
+                    fontSize: 12.5,
                     color: Color(0xFF667085),
                   ),
                 ),
-              ],
-            ),
+              ),
+              Icon(Icons.chevron_right, color: color, size: 23),
+            ],
           ),
-          Icon(Icons.chevron_right, color: color),
         ],
       ),
     );
@@ -250,21 +250,21 @@ class _HomeTiles extends StatelessWidget {
             _tile('Appointments', '0 Today', Icons.calendar_month_outlined,
                 BriskersColors.appointments),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 7),
           row(
             _tile('Estimates', '0 Open', Icons.request_quote_outlined,
                 BriskersColors.estimates),
             _tile('Invoices', '0 Open', Icons.receipt_long_outlined,
                 BriskersColors.invoices),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 7),
           row(
             _tile('Jobs', '0 In Progress', Icons.build_outlined,
                 BriskersColors.jobs),
             _tile('Expenses', '0 Today', Icons.payments_outlined,
                 BriskersColors.expenses),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 7),
           row(
             _tile('Reports', 'View Reports', Icons.bar_chart_outlined,
                 BriskersColors.reports),
