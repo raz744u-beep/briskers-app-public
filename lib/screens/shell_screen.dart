@@ -46,7 +46,6 @@ class _ShellScreenState extends State<ShellScreen> {
   int _todayRefreshToken = 0;
   int _customersRefreshToken = 0;
   int _jobsRefreshToken = 0;
-  int _invoicesRefreshToken = 0;
   Map<String, dynamic> _navCounts = const {
     'customers': 0,
     'appointments': 0,
@@ -101,7 +100,6 @@ class _ShellScreenState extends State<ShellScreen> {
       if (index == 0) _todayRefreshToken++;
       if (index == 1) _customersRefreshToken++;
       if (index == 3) _jobsRefreshToken++;
-      if (index == 4) _invoicesRefreshToken++;
     });
     if (index == 1) {
       _markCustomersViewed();
@@ -131,7 +129,7 @@ class _ShellScreenState extends State<ShellScreen> {
     final activeColor = _sectionColors[_index];
     final isHome = _index == 0;
     final roleStyle = employeeRoleStyle(_roleLabel);
-    final pageTitles = [tr('dashboard'), tr('customers'), tr('appointments'), tr('jobs'), tr('invoices'), tr('more')];
+    final pageTitles = ['Home', tr('customers'), tr('appointments'), tr('jobs'), tr('invoices'), tr('more')];
     final pages = [
       DashboardScreen(
         businessId: widget.businessId,
@@ -156,7 +154,6 @@ class _ShellScreenState extends State<ShellScreen> {
         onJobsChanged: _refreshNavCounts,
       ),
       DocumentsScreen(
-        key: ValueKey('invoices-$_invoicesRefreshToken'),
         businessId: widget.businessId,
         kind: 'invoice',
         isOwner: widget.roleCode == 'owner',
@@ -239,7 +236,7 @@ class _ShellScreenState extends State<ShellScreen> {
             NavigationDestination(
               icon: const Icon(Icons.dashboard_outlined),
               selectedIcon: const Icon(Icons.dashboard),
-              label: tr('dashboard'),
+              label: 'Home',
             ),
             NavigationDestination(
               icon: _navIcon(Icons.people_outline, 'customers'),
