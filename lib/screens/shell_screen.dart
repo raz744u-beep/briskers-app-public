@@ -120,6 +120,38 @@ class _ShellScreenState extends State<ShellScreen> {
     );
   }
 
+  Widget _shellNavigationBar() {
+    final activeColor = _sectionColors[_index];
+    return Theme(
+      data: Theme.of(context).copyWith(
+        navigationBarTheme: NavigationBarThemeData(
+          height: 70,
+          backgroundColor: Colors.white,
+          elevation: 4,
+          indicatorColor: activeColor.withValues(alpha: 0.16),
+        ),
+      ),
+      child: NavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (index) {
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          }
+          _goTo(index);
+        },
+        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+        destinations: [
+          const NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
+          NavigationDestination(icon: _navIcon(Icons.people_outline, 'customers'), selectedIcon: _navIcon(Icons.people, 'customers'), label: tr('customers')),
+          NavigationDestination(icon: _navIcon(Icons.calendar_month_outlined, 'appointments'), selectedIcon: _navIcon(Icons.calendar_month, 'appointments'), label: tr('schedule')),
+          NavigationDestination(icon: _navIcon(Icons.build_outlined, 'jobs'), selectedIcon: _navIcon(Icons.build, 'jobs'), label: tr('jobs')),
+          NavigationDestination(icon: _navIcon(Icons.receipt_long_outlined, 'invoices'), selectedIcon: _navIcon(Icons.receipt_long, 'invoices'), label: tr('invoices')),
+          const NavigationDestination(icon: Icon(Icons.more_horiz), selectedIcon: Icon(Icons.more_horiz), label: 'More'),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeColor = _sectionColors[_index];
@@ -153,6 +185,7 @@ class _ShellScreenState extends State<ShellScreen> {
               roleCode: widget.roleCode,
               refreshToken: _jobsRefreshToken,
               onJobsChanged: _refreshNavCounts,
+              jobDetailBottomNavigationBar: _shellNavigationBar(),
             );
           case 4:
             return DocumentsScreen(
