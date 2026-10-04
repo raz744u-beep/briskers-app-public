@@ -82,25 +82,26 @@ class HomeScreen extends StatelessWidget {
                         color: Color(0xFF667085),
                       ),
                     ),
-                    const Align(
-                      alignment: Alignment.centerRight,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.wb_sunny_outlined,
-                            size: 20,
-                            color: Color(0xFFF4B400),
+                    const SizedBox(height: 4),
+                    const Row(
+                      children: [
+                        Icon(
+                          Icons.wb_sunny_outlined,
+                          size: 19,
+                          color: Color(0xFFF4B400),
+                        ),
+                        SizedBox(width: 5),
+                        Text(
+                          'Weather',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
                           ),
-                          SizedBox(width: 5),
-                          Text(
-                            'Weather',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                        Spacer(),
+                        // Reserved for operational weather messages such as
+                        // "Rain expected after 3 PM".
+                        SizedBox.shrink(),
+                      ],
                     ),
                   ],
                 ),
