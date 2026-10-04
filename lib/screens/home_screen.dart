@@ -116,7 +116,7 @@ class HomeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const _NeedsAttentionPanel(),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             const _HomeTiles(),
             const SizedBox(height: 24),
           ],
@@ -186,8 +186,8 @@ class _HomeTiles extends StatelessWidget {
     Color color,
   ) {
     return Container(
-      height: 78,
-      padding: const EdgeInsets.fromLTRB(12, 8, 9, 7),
+      height: 71,
+      padding: const EdgeInsets.fromLTRB(12, 6, 9, 5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.11),
         borderRadius: BorderRadius.circular(16),
@@ -250,21 +250,21 @@ class _HomeTiles extends StatelessWidget {
             _tile('Appointments', '0 Today', Icons.calendar_month_outlined,
                 BriskersColors.appointments),
           ),
-          const SizedBox(height: 7),
+          const SizedBox(height: 5),
           row(
             _tile('Estimates', '0 Open', Icons.request_quote_outlined,
                 BriskersColors.estimates),
             _tile('Invoices', '0 Open', Icons.receipt_long_outlined,
                 BriskersColors.invoices),
           ),
-          const SizedBox(height: 7),
+          const SizedBox(height: 5),
           row(
             _tile('Jobs', '0 In Progress', Icons.build_outlined,
                 BriskersColors.jobs),
             _tile('Expenses', '0 Today', Icons.payments_outlined,
                 BriskersColors.expenses),
           ),
-          const SizedBox(height: 7),
+          const SizedBox(height: 5),
           row(
             _tile('Reports', 'View Reports', Icons.bar_chart_outlined,
                 BriskersColors.reports),
