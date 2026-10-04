@@ -1356,10 +1356,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     final _ = _askBriskers;
 
-    if (_data == null && _error == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
     final appointments = List<dynamic>.from(
       _data?['appointments'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
