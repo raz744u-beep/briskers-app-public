@@ -33,6 +33,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   String? _deletingAttachmentId;
   bool _busy = false;
   String? _error;
+  final Map<String, Future<String>> _attachmentUrls = {};
 
   @override
   void initState() {
@@ -67,6 +68,31 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     }
   }
 
+  String _attachmentCacheKey(Map<String, dynamic> attachment) {
+    final bucket = attachment['bucket']?.toString() ?? 'briskers-private';
+    final key = attachment['key']?.toString() ?? '';
+    return '$bucket|$key';
+  }
+
+  Future<String> _attachmentUrl(Map<String, dynamic> attachment) {
+    final cacheKey = _attachmentCacheKey(attachment);
+    return _attachmentUrls.putIfAbsent(
+      cacheKey,
+      () => _api.signedAttachmentUrl(
+        attachment['bucket']?.toString() ?? 'briskers-private',
+        attachment['key']?.toString() ?? '',
+      ),
+    );
+  }
+
+  void _preloadAttachments(List<Map<String, dynamic>> attachments) {
+    for (final attachment in attachments) {
+      _attachmentUrl(attachment).then((url) {
+        if (!mounted) return;
+        precacheImage(NetworkImage(url), context);
+      }).catchError((_) {});
+    }
+  }
   String _money(Object? raw) {
     final value = num.tryParse(raw?.toString() ?? '') ?? 0;
     return NumberFormat.currency(symbol: '\$').format(value);
