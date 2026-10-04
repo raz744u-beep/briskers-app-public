@@ -1353,24 +1353,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Keep the temporarily disconnected dashboard features reachable while
-    // this diagnostic build isolates Home rendering and navigation.
-    final diagnosticKeepAlive = <Object?>[
-      _data,
-      _error,
-      _showDashboardCalendar,
-      _askBriskers,
-      _activeJobCard,
-    ];
-    assert(diagnosticKeepAlive.isNotEmpty);
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(14, 6, 14, 90),
-      children: [
-        _homeHeader(),
-        const SizedBox(height: 12),
-        _phaseTwoTiles(0, 0),
-      ],
+    return const ColoredBox(
+      color: Colors.white,
+      child: Center(
+        child: Text(
+          'HOME TEST',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.w800,
+            color: Colors.black,
+          ),
+        ),
+      ),
     );
   }
 }
