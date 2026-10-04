@@ -4,7 +4,20 @@ import 'package:intl/intl.dart';
 import '../core/briskers_colors.dart';
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({
+    super.key,
+    required this.onCustomersTap,
+    required this.onAppointmentsTap,
+    required this.onJobsTap,
+    required this.onInvoicesTap,
+    required this.onMoreTap,
+  });
+
+  final VoidCallback onCustomersTap;
+  final VoidCallback onAppointmentsTap;
+  final VoidCallback onJobsTap;
+  final VoidCallback onInvoicesTap;
+  final VoidCallback onMoreTap;
 
   String _greeting() {
     final hour = DateTime.now().hour;
@@ -117,7 +130,13 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 8),
             const _NeedsAttentionPanel(),
             const SizedBox(height: 8),
-            const _HomeTiles(),
+            _HomeTiles(
+              onCustomersTap: onCustomersTap,
+              onAppointmentsTap: onAppointmentsTap,
+              onJobsTap: onJobsTap,
+              onInvoicesTap: onInvoicesTap,
+              onMoreTap: onMoreTap,
+            ),
             const SizedBox(height: 24),
           ],
         ),
@@ -177,15 +196,31 @@ class _NeedsAttentionPanel extends StatelessWidget {
 
 
 class _HomeTiles extends StatelessWidget {
-  const _HomeTiles();
+  const _HomeTiles({
+    required this.onCustomersTap,
+    required this.onAppointmentsTap,
+    required this.onJobsTap,
+    required this.onInvoicesTap,
+    required this.onMoreTap,
+  });
+
+  final VoidCallback onCustomersTap;
+  final VoidCallback onAppointmentsTap;
+  final VoidCallback onJobsTap;
+  final VoidCallback onInvoicesTap;
+  final VoidCallback onMoreTap;
 
   Widget _tile(
     String label,
     String subtitle,
     IconData icon,
     Color color,
+    VoidCallback onTap,
   ) {
-    return Container(
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Container(
       height: 71,
       padding: const EdgeInsets.fromLTRB(12, 6, 9, 5),
       decoration: BoxDecoration(
@@ -227,6 +262,7 @@ class _HomeTiles extends StatelessWidget {
           ),
         ],
       ),
+      ),
     );
   }
 
@@ -246,30 +282,30 @@ class _HomeTiles extends StatelessWidget {
         children: [
           row(
             _tile('Customers', '0 Total', Icons.people_outline,
-                BriskersColors.customers),
+                BriskersColors.customers, onCustomersTap),
             _tile('Appointments', '0 Today', Icons.calendar_month_outlined,
-                BriskersColors.appointments),
+                BriskersColors.appointments, onAppointmentsTap),
           ),
           const SizedBox(height: 5),
           row(
             _tile('Estimates', '0 Open', Icons.request_quote_outlined,
-                BriskersColors.estimates),
+                BriskersColors.estimates, onMoreTap),
             _tile('Invoices', '0 Open', Icons.receipt_long_outlined,
-                BriskersColors.invoices),
+                BriskersColors.invoices, onInvoicesTap),
           ),
           const SizedBox(height: 5),
           row(
             _tile('Jobs', '0 In Progress', Icons.build_outlined,
-                BriskersColors.jobs),
+                BriskersColors.jobs, onJobsTap),
             _tile('Expenses', '0 Today', Icons.payments_outlined,
-                BriskersColors.expenses),
+                BriskersColors.expenses, onMoreTap),
           ),
           const SizedBox(height: 5),
           row(
             _tile('Reports', 'View Reports', Icons.bar_chart_outlined,
-                BriskersColors.reports),
+                BriskersColors.reports, onMoreTap),
             _tile('Chat', '0 Unread', Icons.chat_bubble_outline,
-                BriskersColors.chat),
+                BriskersColors.chat, onMoreTap),
           ),
         ],
       ),
