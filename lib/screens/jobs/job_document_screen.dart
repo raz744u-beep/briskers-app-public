@@ -4589,6 +4589,108 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
   }
 
+  Future<void> _showDocumentHeaderActions() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!_readOnly)
+                ListTile(
+                  leading: const Icon(Icons.edit_outlined),
+                  title: Text(
+                    _estimate ? tr('editEstimate') : tr('editInvoice'),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, 'edit'),
+                ),
+              if (!_estimate)
+                ListTile(
+                  leading: const Icon(Icons.copy_outlined),
+                  title: Text(tr('copyInvoice')),
+                  onTap: () => Navigator.pop(sheetContext, 'copy'),
+                ),
+              if (!_estimate)
+                ListTile(
+                  leading: const Icon(Icons.car_repair_outlined),
+                  title: Text(tr('vehicleFindings')),
+                  onTap: () => Navigator.pop(sheetContext, 'findings'),
+                ),
+              if (!_estimate && _canManageInvoiceExpenses)
+                ListTile(
+                  leading: const Icon(Icons.payments_outlined),
+                  title: Text(tr('viewExpenses')),
+                  onTap: () => Navigator.pop(sheetContext, 'expenses'),
+                ),
+              if (!_estimate && _canManageInvoiceExpenses)
+                ListTile(
+                  leading: const Icon(Icons.add_card_outlined),
+                  title: Text(tr('addExpense')),
+                  onTap: () => Navigator.pop(sheetContext, 'add_expense'),
+                ),
+              ListTile(
+                leading: const Icon(Icons.refresh),
+                title: Text(tr('refresh')),
+                onTap: () => Navigator.pop(sheetContext, 'refresh'),
+              ),
+              if (_estimate && !_converted)
+                ListTile(
+                  leading: const Icon(Icons.receipt_long_outlined),
+                  title: Text(tr('createInvoice')),
+                  onTap: () => Navigator.pop(sheetContext, 'convert'),
+                ),
+              if (widget.isOwner && (!_estimate || !_converted)) ...[
+                const Divider(height: 1),
+                ListTile(
+                  leading: Icon(
+                    Icons.delete_outline,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  title: Text(
+                    _estimate ? tr('deleteEstimate') : tr('deleteInvoice'),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, 'delete'),
+                ),
+              ],
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'refresh':
+        await _load();
+      case 'convert':
+        await _convertEstimate();
+      case 'edit':
+        await _editDocumentHeader();
+      case 'copy':
+        await _copyInvoice();
+      case 'findings':
+        await _showInvoiceFindings();
+      case 'expenses':
+        await _showInvoiceExpenses();
+      case 'add_expense':
+        await _addInvoiceExpense();
+      case 'delete':
+        if (_estimate) {
+          await _deleteEstimate();
+        } else {
+          await _deleteOrVoidInvoice();
+        }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -4645,8 +4747,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           foregroundColor: Colors.white,
           elevation: 1,
           titleSpacing: 0,
-          title: Row(
-            children: [
+          title: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onLongPress: _showDocumentHeaderActions,
+            child: Row(
+              children: [
               Expanded(
                 child: SizedBox(
                   width: double.infinity,
@@ -4671,125 +4776,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
               const SizedBox(width: 8),
               _statusPill(statusLabel, code: statusCode),
-            ],
-          ),
-          actions: [
-            PopupMenuButton<String>(
-              tooltip: 'More actions',
-              icon: const Icon(Icons.more_vert),
-              onSelected: (value) {
-                if (value == 'refresh') _load();
-                if (value == 'convert') _convertEstimate();
-                if (value == 'edit') _editDocumentHeader();
-                if (value == 'copy') _copyInvoice();
-                if (value == 'findings') _showInvoiceFindings();
-                if (value == 'expenses') _showInvoiceExpenses();
-                if (value == 'add_expense') _addInvoiceExpense();
-                if (value == 'delete') {
-                  if (_estimate) {
-                    _deleteEstimate();
-                  } else {
-                    _deleteOrVoidInvoice();
-                  }
-                }
-              },
-              itemBuilder: (context) => [
-                if (!_readOnly)
-                  PopupMenuItem(
-                    value: 'edit',
-                    child: ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.edit_outlined),
-                      title: Text(
-                        _estimate ? tr('editEstimate') : tr('editInvoice'),
-                      ),
-                    ),
-                  ),
-                if (!_estimate)
-                  PopupMenuItem(
-                    value: 'copy',
-                    child: ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.copy_outlined),
-                      title: Text(tr('copyInvoice')),
-                    ),
-                  ),
-                if (!_estimate)
-                  PopupMenuItem(
-                    value: 'findings',
-                    child: ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.car_repair_outlined),
-                      title: Text(tr('vehicleFindings')),
-                    ),
-                  ),
-                if (!_estimate && _canManageInvoiceExpenses)
-                  PopupMenuItem(
-                    value: 'expenses',
-                    child: ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.payments_outlined),
-                      title: Text(tr('viewExpenses')),
-                    ),
-                  ),
-                if (!_estimate && _canManageInvoiceExpenses)
-                  PopupMenuItem(
-                    value: 'add_expense',
-                    child: ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.add_card_outlined),
-                      title: Text(tr('addExpense')),
-                    ),
-                  ),
-                PopupMenuItem(
-                  value: 'refresh',
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.refresh),
-                    title: Text(tr('refresh')),
-                  ),
-                ),
-                if (_estimate && !_converted)
-                  PopupMenuItem(
-                    value: 'convert',
-                    child: ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.receipt_long_outlined),
-                      title: Text(tr('createInvoice')),
-                    ),
-                  ),
-                if (widget.isOwner && (!_estimate || !_converted))
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(
-                        Icons.delete_outline,
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                      title: Text(
-                        _estimate
-                            ? tr('deleteEstimate')
-                            : tr('deleteInvoice'),
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
               ],
             ),
-          ],
-        ),
+          ),
         body: NestedScrollView(
           controller: _workspaceHeaderController,
           headerSliverBuilder: (context, innerBoxIsScrolled) => [
