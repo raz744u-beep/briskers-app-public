@@ -12,11 +12,13 @@ class ExpenseDetailScreen extends StatefulWidget {
     required this.businessId,
     required this.transactionId,
     this.allowRecurring = true,
+    this.canDeleteTransaction = true,
   });
 
   final String businessId;
   final String transactionId;
   final bool allowRecurring;
+  final bool canDeleteTransaction;
 
   @override
   State<ExpenseDetailScreen> createState() => _ExpenseDetailScreenState();
@@ -696,7 +698,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   Future<void> _handleMenu(String value) async {
     if (value == 'edit') await _edit();
     if (value == 'copy') await _copy();
-    if (value == 'delete') await _delete();
+    if (value == 'delete' && widget.canDeleteTransaction) await _delete();
   }
 
   Widget _receiptThumbnail(Map<String, dynamic> attachment) {
@@ -777,7 +779,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
     final income = detail['direction']?.toString() == 'income';
     final editable = detail['editable'] == true;
-    final deletable = detail['deletable'] == true;
+    final deletable = widget.canDeleteTransaction && detail['deletable'] == true;
     final attachments = List<dynamic>.from(detail['attachments'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
