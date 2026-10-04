@@ -245,10 +245,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
   Future<void> _openAttachment(Map<String, dynamic> attachment) async {
     try {
-      final url = await _api.signedAttachmentUrl(
-        attachment['bucket']?.toString() ?? 'briskers-private',
-        attachment['key']?.toString() ?? '',
-      );
+      final url = await _attachmentUrl(attachment);
       if (!mounted) return;
       final editable = _detail?['editable'] == true;
       await showDialog<void>(
@@ -721,7 +718,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     }
 
     return FutureBuilder<String>(
-      future: _api.signedAttachmentUrl(bucket, key),
+      future: _attachmentUrl(attachment),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return Container(
