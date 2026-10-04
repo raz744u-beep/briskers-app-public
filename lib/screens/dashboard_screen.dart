@@ -39,7 +39,6 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   static const _api = BriskersApi();
-  static const _dashboardExpensesColor = Color(0xFFC62828);
 
   Map<String, dynamic>? _data;
   List<Map<String, dynamic>> _statuses = const [];
@@ -47,7 +46,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _busyJobId;
   bool _aiBusy = false;
   bool _activeJobsExpanded = false;
-  String? _expandedAction;
   final ScrollController _dashboardScrollController = ScrollController();
   final GlobalKey _jobsSectionKey = GlobalKey();
   double? _jobsRestoreOffset;
@@ -1302,77 +1300,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return selected;
   }
 
-  Future<void> _createDashboardDocument(String kind) async {
-    final customer = await _pickDashboardCustomer(
-      kind == 'estimate' ? 'New estimate' : 'New invoice',
-    );
-    if (customer == null || !mounted) return;
-
-    final customerId = customer['id']?.toString() ?? '';
-    if (customerId.isEmpty) return;
-    final vehicle = await _resolveAiVehicle(customerId);
-    if (!mounted) return;
-
-    try {
-      final documentId = kind == 'estimate'
-          ? await _api.createQuickEstimate(
-              widget.businessId,
-              customerId: customerId,
-              vehicleId: vehicle?['id']?.toString(),
-            )
-          : await _api.createQuickInvoice(
-              widget.businessId,
-              customerId: customerId,
-              vehicleId: vehicle?['id']?.toString(),
-            );
-      if (!mounted) return;
-      await Navigator.push<void>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => JobDocumentScreen(
-            businessId: widget.businessId,
-            documentId: documentId,
-            isOwner: widget.roleCode == 'owner',
-          ),
-        ),
-      );
-      await _load();
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    }
-  }
-
-  Future<void> _createDashboardAppointment() async {
-    final customer = await _pickDashboardCustomer('New appointment');
-    if (customer == null || !mounted) return;
-    final customerId = customer['id']?.toString() ?? '';
-    if (customerId.isEmpty) return;
-
-    try {
-      final detail = await _api.customerDetail(
-        widget.businessId,
-        customerId,
-      );
-      if (!mounted) return;
-      final changed = await Navigator.push<bool>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => AppointmentCreateScreen(
-            businessId: widget.businessId,
-            customerId: customerId,
-            customerName: customer['display_name']?.toString() ?? 'Customer',
-            vehicles: List<dynamic>.from(detail['vehicles'] ?? const []),
-          ),
-        ),
-      );
-      if (changed == true) {
-        await _load();
-      }
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    }
-  }
-
   Future<void> _openExpenses() async {
     await Navigator.push<void>(
       context,
@@ -1380,107 +1307,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (_) => ExpensesScreen(
           businessId: widget.businessId,
           roleCode: widget.roleCode,
-        ),
-      ),
-    );
-    await _load();
-  }
-
-  Future<void> _addGeneralExpense() async {
-    final changed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ExpenseEntryScreen(
-          businessId: widget.businessId,
-          initialDirection: 'expense',
-          allowRecurring: _allowRecurring,
-        ),
-      ),
-    );
-    if (changed == true) await _load();
-  }
-
-  Future<void> _quickGeneralExpense() async {
-    try {
-      final data = await _api.transactionOptions(widget.businessId);
-      final quick = List<dynamic>.from(data['quick_templates'] ?? const [])
-          .map((raw) => Map<String, dynamic>.from(raw as Map))
-          .where((row) => row['direction']?.toString() == 'expense')
-          .toList();
-      if (!mounted) return;
-      if (quick.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'No expense quick transactions are defined yet. Add them in Settings.',
-            ),
-          ),
-        );
-        return;
-      }
-
-      final selected = await showModalBottomSheet<Map<String, dynamic>>(
-        context: context,
-        showDragHandle: true,
-        builder: (sheetContext) => SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              const ListTile(
-                title: Text(
-                  'Quick general expense',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-                subtitle: Text('No job or invoice will be linked.'),
-              ),
-              ...quick.map(
-                (item) => ListTile(
-                  leading: const Icon(
-                    Icons.bolt,
-                    color: BriskersColors.expenses,
-                  ),
-                  title: Text(item['name']?.toString() ?? ''),
-                  subtitle: Text(
-                    <String>[
-                      if ((item['vendor']?.toString() ?? '').isNotEmpty)
-                        item['vendor'].toString(),
-                      item['category']?.toString() ?? '',
-                      item['account']?.toString() ?? '',
-                    ].where((value) => value.isNotEmpty).join(' • '),
-                  ),
-                  onTap: () => Navigator.pop(sheetContext, item),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (selected == null || !mounted) return;
-
-      final changed = await Navigator.push<bool>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ExpenseEntryScreen(
-            businessId: widget.businessId,
-            initialDirection: 'expense',
-            quickTemplate: selected,
-            allowRecurring: _allowRecurring,
-          ),
-        ),
-      );
-      if (changed == true) await _load();
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    }
-  }
-
-  Future<void> _openRecurringTransactions() async {
-    if (!_allowRecurring) return;
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => RecurringTransactionsScreen(
-          businessId: widget.businessId,
         ),
       ),
     );
@@ -1510,7 +1336,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ? _dashboardScrollController.offset
         : 0;
     setState(() {
-      _expandedAction = null;
       _activeJobsExpanded = true;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
