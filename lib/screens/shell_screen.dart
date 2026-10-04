@@ -12,6 +12,7 @@ import 'customers/customers_screen.dart';
 import 'dashboard_screen.dart';
 import 'jobs_screen.dart';
 import 'more_screen.dart';
+import 'documents_screen.dart';
 
 class ShellScreen extends StatefulWidget {
   const ShellScreen({
@@ -37,6 +38,7 @@ class _ShellScreenState extends State<ShellScreen> {
     BriskersColors.customers,
     BriskersColors.schedule,
     BriskersColors.jobs,
+    BriskersColors.invoices,
     BriskersColors.more,
   ];
 
@@ -44,6 +46,7 @@ class _ShellScreenState extends State<ShellScreen> {
   int _todayRefreshToken = 0;
   int _customersRefreshToken = 0;
   int _jobsRefreshToken = 0;
+  int _invoicesRefreshToken = 0;
   Map<String, dynamic> _navCounts = const {
     'customers': 0,
     'appointments': 0,
@@ -98,6 +101,7 @@ class _ShellScreenState extends State<ShellScreen> {
       if (index == 0) _todayRefreshToken++;
       if (index == 1) _customersRefreshToken++;
       if (index == 3) _jobsRefreshToken++;
+      if (index == 4) _invoicesRefreshToken++;
     });
     if (index == 1) {
       _markCustomersViewed();
@@ -126,7 +130,7 @@ class _ShellScreenState extends State<ShellScreen> {
   Widget build(BuildContext context) {
     final activeColor = _sectionColors[_index];
     final roleStyle = employeeRoleStyle(_roleLabel);
-    final pageTitles = [tr('dashboard'), tr('customers'), tr('appointments'), tr('jobs'), tr('more')];
+    final pageTitles = [tr('dashboard'), tr('customers'), tr('appointments'), tr('jobs'), tr('invoices'), tr('more')];
     final pages = [
       DashboardScreen(
         businessId: widget.businessId,
@@ -149,6 +153,12 @@ class _ShellScreenState extends State<ShellScreen> {
         roleCode: widget.roleCode,
         refreshToken: _jobsRefreshToken,
         onJobsChanged: _refreshNavCounts,
+      ),
+      DocumentsScreen(
+        key: ValueKey('invoices-$_invoicesRefreshToken'),
+        businessId: widget.businessId,
+        kind: 'invoice',
+        roleCode: widget.roleCode,
       ),
       MoreScreen(
         businessId: widget.businessId,
@@ -253,6 +263,11 @@ class _ShellScreenState extends State<ShellScreen> {
                 'jobs',
               ),
               label: tr('jobs'),
+            ),
+            NavigationDestination(
+              icon: const Icon(Icons.receipt_long_outlined),
+              selectedIcon: const Icon(Icons.receipt_long),
+              label: tr('invoices'),
             ),
             NavigationDestination(
               icon: const Icon(Icons.more_horiz),
