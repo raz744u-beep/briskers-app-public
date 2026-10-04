@@ -52,6 +52,7 @@ class _ShellScreenState extends State<ShellScreen> {
     'jobs': 0,
   };
   late String _businessName;
+  final Map<int, Widget> _lazyPages = {};
 
   @override
   void initState() {
@@ -127,41 +128,54 @@ class _ShellScreenState extends State<ShellScreen> {
     final isHome = _index == 0;
     final roleStyle = employeeRoleStyle(_roleLabel);
     final pageTitles = ['Home', tr('customers'), tr('appointments'), tr('jobs'), tr('invoices'), tr('more')];
-    final pages = [
-      DashboardScreen(
-        businessId: widget.businessId,
-        roleCode: widget.roleCode,
-        refreshToken: _todayRefreshToken,
-        onCustomersTap: () => _goTo(1),
-        onAppointmentsTap: () => _goTo(2),
-        onJobsChanged: _refreshNavCounts,
-      ),
-      CustomersScreen(
-        businessId: widget.businessId,
-        refreshToken: _customersRefreshToken,
-      ),
-      AppointmentsScreen(
-        businessId: widget.businessId,
-        roleCode: widget.roleCode,
-      ),
-      JobsScreen(
-        businessId: widget.businessId,
-        roleCode: widget.roleCode,
-        refreshToken: _jobsRefreshToken,
-        onJobsChanged: _refreshNavCounts,
-      ),
-      DocumentsScreen(
-        businessId: widget.businessId,
-        kind: 'invoice',
-        isOwner: widget.roleCode == 'owner',
-      ),
-      MoreScreen(
-        businessId: widget.businessId,
-        businessName: _businessName,
-        roleCode: widget.roleCode,
-        onBusinessNameChanged: (name) => setState(() => _businessName = name),
-      ),
-    ];
+    Widget buildPage(int index) {
+      return _lazyPages.putIfAbsent(index, () {
+        switch (index) {
+          case 0:
+            return DashboardScreen(
+              businessId: widget.businessId,
+              roleCode: widget.roleCode,
+              refreshToken: _todayRefreshToken,
+              onCustomersTap: () => _goTo(1),
+              onAppointmentsTap: () => _goTo(2),
+              onJobsChanged: _refreshNavCounts,
+            );
+          case 1:
+            return CustomersScreen(
+              businessId: widget.businessId,
+              refreshToken: _customersRefreshToken,
+            );
+          case 2:
+            return AppointmentsScreen(
+              businessId: widget.businessId,
+              roleCode: widget.roleCode,
+            );
+          case 3:
+            return JobsScreen(
+              businessId: widget.businessId,
+              roleCode: widget.roleCode,
+              refreshToken: _jobsRefreshToken,
+              onJobsChanged: _refreshNavCounts,
+            );
+          case 4:
+            return DocumentsScreen(
+              businessId: widget.businessId,
+              kind: 'invoice',
+              isOwner: widget.roleCode == 'owner',
+            );
+          default:
+            return MoreScreen(
+              businessId: widget.businessId,
+              businessName: _businessName,
+              roleCode: widget.roleCode,
+              onBusinessNameChanged: (name) =>
+                  setState(() => _businessName = name),
+            );
+        }
+      });
+    }
+
+    final currentPage = buildPage(_index);
 
     return Scaffold(
       appBar: isHome ? null : AppBar(
@@ -200,7 +214,7 @@ class _ShellScreenState extends State<ShellScreen> {
             ),
         ],
       ),
-      body: IndexedStack(index: _index, children: pages),
+      body: currentPage,
       bottomNavigationBar: Theme(
         data: Theme.of(context).copyWith(
           navigationBarTheme: NavigationBarThemeData(
