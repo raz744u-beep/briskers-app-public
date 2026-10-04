@@ -20,5 +20,6 @@ class BriskersColors {
 
   static const expenses = Color(0xFFEF4444);
   static const reports = Color(0xFF3949AB);
+  static const chat = Color(0xFF00838F);
   static const settings = Color(0xFF5E35B1);
 }
