@@ -130,7 +130,13 @@ class _ShellScreenState extends State<ShellScreen> {
       return _lazyPages.putIfAbsent(index, () {
         switch (index) {
           case 0:
-            return const HomeScreen();
+            return HomeScreen(
+              onCustomersTap: () => _goTo(1),
+              onAppointmentsTap: () => _goTo(2),
+              onJobsTap: () => _goTo(3),
+              onInvoicesTap: () => _goTo(4),
+              onMoreTap: () => _goTo(5),
+            );
           case 1:
             return CustomersScreen(
               businessId: widget.businessId,
