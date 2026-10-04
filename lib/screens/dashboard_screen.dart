@@ -1487,4 +1487,322 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await _load();
   }
 
+  Future<void> _toggleJobs() async {
+    if (_activeJobsExpanded) {
+      final restore = _jobsRestoreOffset;
+      setState(() => _activeJobsExpanded = false);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      if (restore != null && _dashboardScrollController.hasClients) {
+        final target = restore.clamp(
+          0.0,
+          _dashboardScrollController.position.maxScrollExtent,
+        );
+        await _dashboardScrollController.animateTo(
+          target,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOut,
+        );
+      }
+      return;
+    }
+
+    _jobsRestoreOffset = _dashboardScrollController.hasClients
+        ? _dashboardScrollController.offset
+        : 0;
+    setState(() {
+      _expandedAction = null;
+      _activeJobsExpanded = true;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final contextForJobs = _jobsSectionKey.currentContext;
+      if (contextForJobs != null) {
+        Scrollable.ensureVisible(
+          contextForJobs,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOut,
+          alignment: 0,
+        );
+      }
+    });
+  }
+
+  Future<void> _openJob(String jobId) async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDetailScreen(
+          businessId: widget.businessId,
+          jobId: jobId,
+          roleCode: widget.roleCode,
+        ),
+      ),
+    );
+    await _load();
+    widget.onJobsChanged?.call();
+  }
+
+
+  Future<void> _changeJobStatus(
+    Map<String, dynamic> job,
+    String statusCode,
+  ) async {
+    if (!_canManage || statusCode == job['status']?.toString()) return;
+
+    final id = job['id'].toString();
+    setState(() => _busyJobId = id);
+
+    try {
+      await _api.changeJobStatus(
+        widget.businessId,
+        id,
+        statusCode,
+      );
+      await _load();
+      widget.onJobsChanged?.call();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busyJobId = null);
+    }
+  }
+
+  Widget _todayStatusControl(Map<String, dynamic> job) {
+    final color = colorFromHex(job['status_color']?.toString());
+    final label = jobStatusLabel(job['status']?.toString(), job['status_name']?.toString() ?? 'Status');
+    final busy = _busyJobId == job['id']?.toString();
+
+    final child = Container(
+      constraints: const BoxConstraints(maxWidth: 155),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.65)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (busy)
+            SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: color,
+              ),
+            )
+          else
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+          if (_canManage && !busy) ...[
+            const SizedBox(width: 3),
+            Icon(Icons.chevron_right, size: 15, color: color),
+          ],
+        ],
+      ),
+    );
+
+    if (!_canManage || busy) return child;
+
+    return PopupMenuButton<String>(
+      tooltip: tr('changeStatus'),
+      padding: EdgeInsets.zero,
+      onSelected: (value) => _changeJobStatus(job, value),
+      itemBuilder: (context) => _statuses.map((status) {
+        final itemColor = colorFromHex(status['color_hex']?.toString());
+        return PopupMenuItem<String>(
+          value: status['code']?.toString(),
+          child: Row(
+            children: [
+              Icon(
+                jobStatusIcon(status['icon_key']?.toString()),
+                color: itemColor,
+              ),
+              const SizedBox(width: 10),
+              Text(status['name']?.toString() ?? ''),
+            ],
+          ),
+        );
+      }).toList(),
+      child: child,
+    );
+  }
+
+  Widget _activeJobCard(Map<String, dynamic> job) => JobCompactCard(
+        job: job,
+        statusControl: _todayStatusControl(job),
+        onOpen: () => _openJob(job['id'].toString()),
+        canOpen: _busyJobId != job['id']?.toString(),
+      );
+
+
+  @override
+  Widget build(BuildContext context) {
+    final _ = _askBriskers;
+
+    if (_data == null && _error == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final appointments = List<dynamic>.from(
+      _data?['appointments'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+
+    final activeJobs = List<dynamic>.from(
+      _data?['active_jobs'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+
+    Widget calendarHeader() {
+      return Material(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: _showDashboardCalendar,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 8),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.calendar_month_outlined,
+                  color: BriskersColors.today,
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: SizedBox(
+                    height: 38,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        MaterialLocalizations.of(context).formatFullDate(_selectedDay),
+                        maxLines: 1,
+                        softWrap: false,
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                ),
+                if (!_sameDay(_selectedDay, DateTime.now()))
+                  TextButton(
+                    onPressed: () => _selectDashboardDay(DateTime.now()),
+                    child: Text(tr('today')),
+                  ),
+                const Icon(Icons.keyboard_arrow_down),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
+              controller: _dashboardScrollController,
+              padding: const EdgeInsets.fromLTRB(14, 6, 14, 90),
+              children: [
+                _homeHeader(),
+                const SizedBox(height: 6),
+                _needsAttention(),
+                const SizedBox(height: 10),
+                calendarHeader(),
+                const SizedBox(height: 8),
+                _phaseTwoTiles(appointments.length, activeJobs.length),
+                if (_error != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                Container(
+                  key: _jobsSectionKey,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: _toggleJobs,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 5),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.build_outlined,
+                              color: BriskersColors.jobs,
+                            ),
+                            const SizedBox(width: 7),
+                            Text(
+                              tr('activeJobs'),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: BriskersColors.jobs,
+                                  ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '${activeJobs.length}',
+                              style: const TextStyle(
+                                color: BriskersColors.jobs,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              _activeJobsExpanded
+                                  ? Icons.keyboard_arrow_up
+                                  : Icons.keyboard_arrow_down,
+                              color: BriskersColors.jobs,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (_activeJobsExpanded) ...[
+                  const SizedBox(height: 7),
+                  if (activeJobs.isEmpty)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text('No active jobs right now.'),
+                      ),
+                    )
+                  else
+                    ...activeJobs.map(_activeJobCard),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
 
