@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -30,13 +31,30 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   static const _api = BriskersApi();
   static const _expenseIqChannel = MethodChannel('com.briskers/expenseiq');
 
+  static const int _pageSize = 50;
+  final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
+
   List<Map<String, dynamic>> _transactions = const [];
   List<Map<String, dynamic>> _quickTemplates = const [];
+  List<Map<String, dynamic>> _accounts = const [];
+  List<Map<String, dynamic>> _categories = const [];
+  List<Map<String, dynamic>> _counterparties = const [];
+
   bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = true;
   bool _importing = false;
   int _importDone = 0;
   int _importTotal = 0;
   String _filter = 'all';
+  String _dateRange = '30d';
+  DateTime? _customStartDate;
+  DateTime? _customEndDate;
+  String? _accountFilterId;
+  String? _categoryFilterId;
+  String? _counterpartyFilterId;
+  Timer? _searchDebounce;
   String? _error;
 
   bool get _owner => widget.roleCode == 'owner';
@@ -48,7 +66,23 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_handleScroll);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _handleScroll() {
+    if (_scrollController.hasClients &&
+        _scrollController.position.extentAfter < 500) {
+      _loadMore();
+    }
   }
 
   String _money(Object? raw) {
