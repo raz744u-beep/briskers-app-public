@@ -12,7 +12,7 @@ class ExpenseDetailScreen extends StatefulWidget {
     required this.businessId,
     required this.transactionId,
     this.allowRecurring = true,
-    this.canDeleteTransaction = true,
+    this.canDeleteTransaction = false,
   });
 
   final String businessId;
