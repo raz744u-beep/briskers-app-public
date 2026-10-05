@@ -35,7 +35,6 @@ class _IdentifixEstimateImportScreenState
   final ImagePicker _picker = ImagePicker();
 
   bool get _handwritten => widget.sourceType == 'handwritten';
-  String get _sourceLabel => _handwritten ? 'handwritten' : 'Identifix';
 
   XFile? _sourceFile;
   Uint8List? _sourceBytes;
@@ -234,21 +233,21 @@ class _IdentifixEstimateImportScreenState
 
   Widget _initialView() {
     if (_reading) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(32),
+          padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               CircularProgressIndicator(),
-              SizedBox(height: 18),
+              const SizedBox(height: 18),
               Text(
                 _handwritten
                     ? 'Reading handwritten estimate...'
                     : 'Reading Identifix estimate...',
-                style: TextStyle(fontWeight: FontWeight.w700),
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
-              SizedBox(height: 7),
+              const SizedBox(height: 7),
               Text(
                 'Briskers is extracting the estimate lines, part numbers, quantities and prices.',
                 textAlign: TextAlign.center,
