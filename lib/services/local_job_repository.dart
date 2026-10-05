@@ -154,6 +154,27 @@ class LocalJobRepository {
     return row.read<int>('count');
   }
 
+  Stream<int> watchJobCount(
+    String businessId, {
+    String? status,
+  }) {
+    final where = <String>['business_id = ?'];
+    final variables = <Variable<Object>>[Variable<String>(businessId)];
+    if (status != null && status.isNotEmpty) {
+      where.add('status = ?');
+      variables.add(Variable<String>(status));
+    }
+
+    return _database
+        .customSelect(
+          'SELECT COUNT(*) AS count FROM local_jobs WHERE ${where.join(' AND ')}',
+          variables: variables,
+          readsFrom: {_database.localJobs},
+        )
+        .watchSingle()
+        .map((row) => row.read<int>('count'));
+  }
+
   Future<Map<String, int>> jobStatusCounts(String businessId) async {
     final rows = await _database.customSelect(
       '''
