@@ -9,14 +9,14 @@ class BriskersApi {
   const BriskersApi();
 
   Future<List<Map<String, dynamic>>> myBusinesses() async {
-    final result = await supabase.rpc('briskers_my_businesses');
+    final result = await networkSupabase.rpc('briskers_my_businesses');
     return (result as List<dynamic>)
         .map((row) => Map<String, dynamic>.from(row as Map))
         .toList();
   }
 
   Future<List<String>> myPermissions(String businessId) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_my_permissions',
       params: {'p_business_id': businessId},
     );
@@ -30,7 +30,7 @@ class BriskersApi {
     int? afterCursor,
     int limit = 250,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_sync_pull_jobs_v1',
       params: {
         'p_business_id': businessId,
@@ -49,7 +49,7 @@ class BriskersApi {
     String? notes,
     num? odometer,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_sync_save_preinspection_v1',
       params: {
         'p_business_id': businessId,
@@ -71,7 +71,7 @@ class BriskersApi {
     required String mimeType,
     String? note,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_sync_register_preinspection_photo_v1',
       params: {
         'p_business_id': businessId,
@@ -94,7 +94,7 @@ class BriskersApi {
     required Uint8List bytes,
   }) async {
     try {
-      await supabase.storage.from(bucket).uploadBinary(
+      await networkSupabase.storage.from(bucket).uploadBinary(
         key,
         bytes,
         fileOptions: FileOptions(contentType: mimeType, upsert: false),
@@ -107,7 +107,7 @@ class BriskersApi {
       if (!alreadyExists) rethrow;
     }
 
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
@@ -121,7 +121,7 @@ class BriskersApi {
     String businessId,
     String jobId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_current_visit_sync_v1',
       params: {
         'p_business_id': businessId,
@@ -137,7 +137,7 @@ class BriskersApi {
     String vehicleId, {
     bool includeResolved = true,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_vehicle_findings_sync_v1',
       params: {
         'p_business_id': businessId,
@@ -157,7 +157,7 @@ class BriskersApi {
     required int? expectedRowVersion,
     required String workSummary,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_sync_save_work_summary_v1',
       params: {
         'p_business_id': businessId,
@@ -177,7 +177,7 @@ class BriskersApi {
     required String body,
     bool includeOnInvoice = false,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_sync_create_finding_v1',
       params: {
         'p_business_id': businessId,
@@ -197,7 +197,7 @@ class BriskersApi {
     required int? expectedRowVersion,
     required String body,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_sync_update_finding_v1',
       params: {
         'p_business_id': businessId,
@@ -217,7 +217,7 @@ class BriskersApi {
     required String filename,
     required String mimeType,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_sync_register_finding_photo_v1',
       params: {
         'p_business_id': businessId,
@@ -236,7 +236,7 @@ class BriskersApi {
     String? afterCustomerId,
     int limit = 250,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_sync_pull_customers_vehicles_v1',
       params: {
         'p_business_id': businessId,
@@ -254,7 +254,7 @@ class BriskersApi {
     String? afterAppointmentId,
     int limit = 250,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_sync_pull_appointments_v1',
       params: {
         'p_business_id': businessId,
@@ -272,7 +272,7 @@ class BriskersApi {
     required String operationId,
     required int? expectedRowVersion,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_sync_check_in_appointment_v1',
       params: {
         'p_business_id': businessId,
@@ -287,7 +287,7 @@ class BriskersApi {
   Future<Map<String, dynamic>> kioskSettings(
     String businessId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_kiosk_settings_v1',
       params: {'p_business_id': businessId},
     );
@@ -298,7 +298,7 @@ class BriskersApi {
     String businessId,
     String phone,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_kiosk_lookup_customer_v1',
       params: {
         'p_business_id': businessId,
@@ -312,7 +312,7 @@ class BriskersApi {
     String businessId,
     String disclaimerText,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_kiosk_disclaimer_v1',
       params: {
         'p_business_id': businessId,
@@ -337,7 +337,7 @@ class BriskersApi {
     required int disclaimerVersion,
     required DateTime acceptedAtDevice,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_kiosk_register_walkin_v1',
       params: {
         'p_business_id': businessId,
@@ -364,7 +364,7 @@ class BriskersApi {
     String command,
   ) async {
     try {
-      final result = await supabase.functions.invoke(
+      final result = await networkSupabase.functions.invoke(
         'briskers-ai-command',
         body: {
           'business_id': businessId,
@@ -387,7 +387,7 @@ class BriskersApi {
     List<String> texts,
   ) async {
     try {
-      final result = await supabase.functions.invoke(
+      final result = await networkSupabase.functions.invoke(
         'manual-text-translate',
         body: {
           'business_id': businessId,
@@ -414,7 +414,7 @@ class BriskersApi {
     DateTime month,
   ) async {
     final first = DateTime(month.year, month.month, 1);
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_calendar_event_days',
       params: {
         'p_business_id': businessId,
@@ -430,7 +430,7 @@ class BriskersApi {
     String businessId,
     String day,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_nav_counts',
       params: {
         'p_business_id': businessId,
@@ -444,7 +444,7 @@ class BriskersApi {
     String businessId, {
     int limit = 25,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_needs_attention',
       params: {
         'p_business_id': businessId,
@@ -459,7 +459,7 @@ class BriskersApi {
     String day, {
     DateTime? customersSince,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_attention_counts',
       params: {
         'p_business_id': businessId,
@@ -475,7 +475,7 @@ class BriskersApi {
     int afterVersion = 0,
     int limit = 500,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_sync_pull_documents',
       params: {
         'p_business_id': businessId,
@@ -490,7 +490,7 @@ class BriskersApi {
     String businessId, {
     required String kind,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_list_documents_v2',
       params: {
         'p_business_id': businessId,
@@ -503,7 +503,7 @@ class BriskersApi {
   }
 
   Future<Map<String, dynamic>> dashboard(String businessId, String day) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_dashboard',
       params: {'p_business_id': businessId, 'p_day': day},
     );
@@ -511,7 +511,7 @@ class BriskersApi {
   }
 
   Future<int> customerTotal(String businessId) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_customer_total',
       params: {'p_business_id': businessId},
     );
@@ -524,7 +524,7 @@ class BriskersApi {
     int limit = 100,
     int offset = 0,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_list_customers',
       params: {
         'p_business_id': businessId,
@@ -539,7 +539,7 @@ class BriskersApi {
     if (rows.isEmpty) return rows;
 
     final ids = rows.map((row) => row['id']?.toString()).whereType<String>().toList();
-    final flagsRaw = await supabase.rpc(
+    final flagsRaw = await networkSupabase.rpc(
       'briskers_customer_problem_flags',
       params: {
         'p_business_id': businessId,
@@ -565,7 +565,7 @@ class BriskersApi {
     required bool flagged,
     String? note,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_set_customer_problem_flag',
       params: {
         'p_business_id': businessId,
@@ -582,7 +582,7 @@ class BriskersApi {
     String? phone,
     String? email,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_customer',
       params: {
         'p_business_id': businessId,
@@ -598,7 +598,7 @@ class BriskersApi {
     String businessId,
     String customerId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_customer_detail',
       params: {
         'p_business_id': businessId,
@@ -613,7 +613,7 @@ class BriskersApi {
     String businessId,
     String customerId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_customer_appointments',
       params: {
         'p_business_id': businessId,
@@ -629,7 +629,7 @@ class BriskersApi {
     String businessId,
     String customerId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_customer_service_history',
       params: {
         'p_business_id': businessId,
@@ -645,7 +645,7 @@ class BriskersApi {
     String businessId,
     String customerId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_customer_financial_history',
       params: {
         'p_business_id': businessId,
@@ -660,7 +660,7 @@ class BriskersApi {
     String customerId,
   ) async {
     try {
-      final result = await supabase.rpc(
+      final result = await networkSupabase.rpc(
         'briskers_customer_account_context',
         params: {
           'p_business_id': businessId,
@@ -679,7 +679,7 @@ class BriskersApi {
     String action,
   ) async {
     try {
-      final result = await supabase.functions.invoke(
+      final result = await networkSupabase.functions.invoke(
         'customer-account-admin',
         body: {
           'business_id': businessId,
@@ -707,7 +707,7 @@ class BriskersApi {
     String? email,
   }) async {
     try {
-      final result = await supabase.functions.invoke(
+      final result = await networkSupabase.functions.invoke(
         'customer-account-admin',
         body: {
           'business_id': businessId,
@@ -734,7 +734,7 @@ class BriskersApi {
     String businessId,
     String customerId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_list_customer_notes',
       params: {
         'p_business_id': businessId,
@@ -751,7 +751,7 @@ class BriskersApi {
     String noteId, {
     required String body,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_customer_note',
       params: {
         'p_business_id': businessId,
@@ -766,7 +766,7 @@ class BriskersApi {
     String noteId,
   ) async {
     try {
-      await supabase.functions.invoke(
+      await networkSupabase.functions.invoke(
         'customer-note-admin',
         body: {
           'business_id': businessId,
@@ -790,7 +790,7 @@ class BriskersApi {
     String attachmentId,
   ) async {
     try {
-      await supabase.functions.invoke(
+      await networkSupabase.functions.invoke(
         'customer-note-admin',
         body: {
           'business_id': businessId,
@@ -815,7 +815,7 @@ class BriskersApi {
     String customerId, {
     String? body,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_customer_note',
       params: {
         'p_business_id': businessId,
@@ -832,7 +832,7 @@ class BriskersApi {
     required String filename,
     required String mimeType,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_register_customer_note_photo',
       params: {
         'p_business_id': businessId,
@@ -861,13 +861,13 @@ class BriskersApi {
     final key = registration['key'].toString();
     final attachmentId = registration['attachment_id'].toString();
 
-    await supabase.storage.from(bucket).uploadBinary(
+    await networkSupabase.storage.from(bucket).uploadBinary(
       key,
       bytes,
       fileOptions: FileOptions(contentType: mimeType, upsert: false),
     );
 
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
@@ -878,36 +878,36 @@ class BriskersApi {
   }
 
   Future<Map<String, dynamic>?> jobPreInspection(String businessId, String jobId) async {
-    final result = await supabase.rpc('briskers_job_pre_inspection', params: {'p_business_id': businessId, 'p_job_id': jobId});
+    final result = await networkSupabase.rpc('briskers_job_pre_inspection', params: {'p_business_id': businessId, 'p_job_id': jobId});
     if (result == null) return null;
     return Map<String, dynamic>.from(result as Map);
   }
 
   Future<String> saveJobPreInspection(String businessId, String jobId, {String? notes, num? odometer}) async {
-    final result = await supabase.rpc('briskers_save_job_pre_inspection', params: {'p_business_id': businessId, 'p_job_id': jobId, 'p_notes': notes, 'p_odometer': odometer});
+    final result = await networkSupabase.rpc('briskers_save_job_pre_inspection', params: {'p_business_id': businessId, 'p_job_id': jobId, 'p_notes': notes, 'p_odometer': odometer});
     return result.toString();
   }
 
   Future<void> uploadJobPreInspectionPhoto(String businessId, String jobId, {required String filename, required String mimeType, required Uint8List bytes, String? note}) async {
-    final raw = await supabase.rpc('briskers_register_preinspection_photo', params: {'p_business_id': businessId, 'p_job_id': jobId, 'p_original_filename': filename, 'p_mime_type': mimeType, 'p_note': note});
+    final raw = await networkSupabase.rpc('briskers_register_preinspection_photo', params: {'p_business_id': businessId, 'p_job_id': jobId, 'p_original_filename': filename, 'p_mime_type': mimeType, 'p_note': note});
     final registration = Map<String, dynamic>.from(raw as Map);
     final bucket = registration['bucket'].toString();
     final key = registration['key'].toString();
     final attachmentId = registration['attachment_id'].toString();
-    await supabase.storage.from(bucket).uploadBinary(key, bytes, fileOptions: FileOptions(contentType: mimeType, upsert: false));
-    await supabase.rpc('briskers_finalize_attachment', params: {'p_business_id': businessId, 'p_attachment_id': attachmentId, 'p_byte_size': bytes.length});
+    await networkSupabase.storage.from(bucket).uploadBinary(key, bytes, fileOptions: FileOptions(contentType: mimeType, upsert: false));
+    await networkSupabase.rpc('briskers_finalize_attachment', params: {'p_business_id': businessId, 'p_attachment_id': attachmentId, 'p_byte_size': bytes.length});
   }
 
   Future<void> updateJobPreInspectionPhotoNote(String businessId, String photoId, String note) async {
-    await supabase.rpc('briskers_update_preinspection_photo_note', params: {'p_business_id': businessId, 'p_photo_id': photoId, 'p_note': note});
+    await networkSupabase.rpc('briskers_update_preinspection_photo_note', params: {'p_business_id': businessId, 'p_photo_id': photoId, 'p_note': note});
   }
 
   Future<void> deleteJobPreInspectionPhoto(String businessId, String photoId) async {
-    await supabase.rpc('briskers_delete_preinspection_photo', params: {'p_business_id': businessId, 'p_photo_id': photoId});
+    await networkSupabase.rpc('briskers_delete_preinspection_photo', params: {'p_business_id': businessId, 'p_photo_id': photoId});
   }
 
   Future<String> signedAttachmentUrl(String bucket, String key) {
-    return supabase.storage.from(bucket).createSignedUrl(key, 3600);
+    return networkSupabase.storage.from(bucket).createSignedUrl(key, 3600);
   }
 
   Future<String> createVehicle(
@@ -922,7 +922,7 @@ class BriskersApi {
     num? mileage,
     String? color,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_vehicle_v3',
       params: {
         'p_business_id': businessId,
@@ -952,7 +952,7 @@ class BriskersApi {
     num? mileage,
     String? color,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_update_vehicle',
       params: {
         'p_business_id': businessId,
@@ -972,7 +972,7 @@ class BriskersApi {
 
 
   Future<Map<String, dynamic>> taxSettings(String businessId) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_tax_settings',
       params: {'p_business_id': businessId},
     );
@@ -984,7 +984,7 @@ class BriskersApi {
     required num salesTaxRate,
     String? invoiceWarrantyMessage,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_update_tax_settings_v2',
       params: {
         'p_business_id': businessId,
@@ -996,7 +996,7 @@ class BriskersApi {
   }
 
   Future<Map<String, dynamic>> businessSettings(String businessId) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_business_settings',
       params: {'p_business_id': businessId},
     );
@@ -1016,7 +1016,7 @@ class BriskersApi {
     String? facebookPageUrl,
     String? aboutService,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_update_business_settings',
       params: {
         'p_business_id': businessId,
@@ -1039,7 +1039,7 @@ class BriskersApi {
     String businessId, {
     bool includeInactive = false,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_list_employee_positions',
       params: {
         'p_business_id': businessId,
@@ -1057,7 +1057,7 @@ class BriskersApi {
     required String name,
     required bool active,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_employee_position',
       params: {
         'p_business_id': businessId,
@@ -1073,7 +1073,7 @@ class BriskersApi {
     String businessId,
     String positionId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_employee_position',
       params: {
         'p_business_id': businessId,
@@ -1085,7 +1085,7 @@ class BriskersApi {
   Future<List<Map<String, dynamic>>> employeesSettings(
     String businessId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_list_employees_settings',
       params: {'p_business_id': businessId},
     );
@@ -1098,7 +1098,7 @@ class BriskersApi {
     String businessId,
     String employeeId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_employee_settings_detail',
       params: {
         'p_business_id': businessId,
@@ -1112,7 +1112,7 @@ class BriskersApi {
     String businessId,
     String employeeId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_reveal_employee_ssn',
       params: {
         'p_business_id': businessId,
@@ -1137,7 +1137,7 @@ class BriskersApi {
     required bool active,
     String? ssn,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_employee_settings',
       params: {
         'p_business_id': businessId,
@@ -1162,7 +1162,7 @@ class BriskersApi {
     String businessId,
     String employeeId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_employee',
       params: {
         'p_business_id': businessId,
@@ -1177,7 +1177,7 @@ class BriskersApi {
     required String email,
   }) async {
     try {
-      final result = await supabase.functions.invoke(
+      final result = await networkSupabase.functions.invoke(
         'employee-account-admin',
         body: {
           'business_id': businessId,
@@ -1204,7 +1204,7 @@ class BriskersApi {
     required String password,
   }) async {
     try {
-      final result = await supabase.functions.invoke(
+      final result = await networkSupabase.functions.invoke(
         'employee-account-admin',
         body: {
           'business_id': businessId,
@@ -1233,7 +1233,7 @@ class BriskersApi {
     required String title,
     String? description,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_job',
       params: {
         'p_business_id': businessId,
@@ -1250,7 +1250,7 @@ class BriskersApi {
     String businessId,
     String jobId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_job_detail',
       params: {
         'p_business_id': businessId,
@@ -1264,7 +1264,7 @@ class BriskersApi {
     String businessId,
     String jobId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_job_profitability',
       params: {
         'p_business_id': businessId,
@@ -1278,7 +1278,7 @@ class BriskersApi {
     String businessId, {
     bool directOnly = false,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_expense_options',
       params: {
         'p_business_id': businessId,
@@ -1289,7 +1289,7 @@ class BriskersApi {
   }
 
   Future<Map<String, dynamic>> transactionOptions(String businessId) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_transaction_options',
       params: {'p_business_id': businessId},
     );
@@ -1300,7 +1300,7 @@ class BriskersApi {
     String businessId, {
     int limit = 500,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_list_transactions',
       params: {'p_business_id': businessId, 'p_limit': limit},
     );
@@ -1321,7 +1321,7 @@ class BriskersApi {
     String? categoryId,
     String? counterpartyId,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_list_transactions_v2',
       params: {
         'p_business_id': businessId,
@@ -1347,7 +1347,7 @@ class BriskersApi {
     String businessId,
     String transactionId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_transaction_detail',
       params: {
         'p_business_id': businessId,
@@ -1370,7 +1370,7 @@ class BriskersApi {
     String? counterpartyName,
     String? remarks,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_manual_transaction',
       params: {
         'p_business_id': businessId,
@@ -1403,7 +1403,7 @@ class BriskersApi {
     String? counterpartyName,
     String? remarks,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_manual_transaction',
       params: {
         'p_business_id': businessId,
@@ -1426,7 +1426,7 @@ class BriskersApi {
     String businessId,
     String transactionId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_void_manual_transaction',
       params: {
         'p_business_id': businessId,
@@ -1436,7 +1436,7 @@ class BriskersApi {
   }
 
   Future<Map<String, dynamic>> transactionSettings(String businessId) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_transaction_settings',
       params: {'p_business_id': businessId},
     );
@@ -1450,7 +1450,7 @@ class BriskersApi {
     required String normalDirection,
     required bool active,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_transaction_category',
       params: {
         'p_business_id': businessId,
@@ -1467,7 +1467,7 @@ class BriskersApi {
     String businessId,
     String categoryId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_transaction_category',
       params: {
         'p_business_id': businessId,
@@ -1484,7 +1484,7 @@ class BriskersApi {
     String? defaultCategoryId,
     num defaultSurchargePercent = 0,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_counterparty',
       params: {
         'p_business_id': businessId,
@@ -1494,7 +1494,7 @@ class BriskersApi {
       },
     );
     final id = result.toString();
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_set_counterparty_default_category',
       params: {
         'p_business_id': businessId,
@@ -1502,7 +1502,7 @@ class BriskersApi {
         'p_category_id': defaultCategoryId,
       },
     );
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_set_counterparty_surcharge',
       params: {
         'p_business_id': businessId,
@@ -1517,7 +1517,7 @@ class BriskersApi {
     String businessId,
     String counterpartyId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_counterparty',
       params: {
         'p_business_id': businessId,
@@ -1538,7 +1538,7 @@ class BriskersApi {
     int sortOrder = 0,
     bool active = true,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_quick_transaction',
       params: {
         'p_business_id': businessId,
@@ -1560,7 +1560,7 @@ class BriskersApi {
     String businessId,
     String templateId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_quick_transaction',
       params: {
         'p_business_id': businessId,
@@ -1572,7 +1572,7 @@ class BriskersApi {
   Future<List<Map<String, dynamic>>> recurringTransactions(
     String businessId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_recurring_transactions',
       params: {'p_business_id': businessId},
     );
@@ -1597,7 +1597,7 @@ class BriskersApi {
     DateTime? endDate,
     bool isRepeating = true,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_recurring_transaction',
       params: {
         'p_business_id': businessId,
@@ -1623,14 +1623,14 @@ class BriskersApi {
     String businessId,
     String ruleId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_stop_recurring_transaction',
       params: {'p_business_id': businessId, 'p_rule_id': ruleId},
     );
   }
 
   Future<Map<String, dynamic>> expenseSettings(String businessId) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_expense_settings',
       params: {'p_business_id': businessId},
     );
@@ -1645,7 +1645,7 @@ class BriskersApi {
     required bool active,
     required bool isDefaultExpense,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_financial_account',
       params: {
         'p_business_id': businessId,
@@ -1663,7 +1663,7 @@ class BriskersApi {
     String businessId,
     String accountId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_financial_account',
       params: {
         'p_business_id': businessId,
@@ -1678,7 +1678,7 @@ class BriskersApi {
     required String name,
     required bool active,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_expense_category',
       params: {
         'p_business_id': businessId,
@@ -1702,7 +1702,7 @@ class BriskersApi {
     String? vendorName,
     String? remarks,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_expense_v2',
       params: {
         'p_business_id': businessId,
@@ -1723,7 +1723,7 @@ class BriskersApi {
     String businessId, {
     int limit = 200,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_list_expenses',
       params: {
         'p_business_id': businessId,
@@ -1739,7 +1739,7 @@ class BriskersApi {
     String businessId,
     String documentId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_document_related_expenses_v1',
       params: {
         'p_business_id': businessId,
@@ -1755,7 +1755,7 @@ class BriskersApi {
     String businessId,
     String transactionId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_expense_detail',
       params: {
         'p_business_id': businessId,
@@ -1768,7 +1768,7 @@ class BriskersApi {
   Future<List<Map<String, dynamic>>> expenseReceiptImportCandidates(
     String businessId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_expense_receipt_import_candidates',
       params: {'p_business_id': businessId},
     );
@@ -1783,7 +1783,7 @@ class BriskersApi {
     required String filename,
     required String mimeType,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_register_expense_photo',
       params: {
         'p_business_id': businessId,
@@ -1812,13 +1812,13 @@ class BriskersApi {
     final key = registration['key'].toString();
     final attachmentId = registration['attachment_id'].toString();
 
-    await supabase.storage.from(bucket).uploadBinary(
+    await networkSupabase.storage.from(bucket).uploadBinary(
       key,
       bytes,
       fileOptions: FileOptions(contentType: mimeType, upsert: false),
     );
 
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
@@ -1835,7 +1835,7 @@ class BriskersApi {
     String? vendorId,
   }) async {
     try {
-      final result = await supabase.functions.invoke(
+      final result = await networkSupabase.functions.invoke(
         'receipt-parse',
         body: {
           'business_id': businessId,
@@ -1861,7 +1861,7 @@ class BriskersApi {
     String transactionId,
     Map<String, dynamic> extraction,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_apply_expense_receipt_extraction_v1',
       params: {
         'p_business_id': businessId,
@@ -1875,7 +1875,7 @@ class BriskersApi {
   Future<List<Map<String, dynamic>>> receiptTrainingSamples(
     String businessId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_list_receipt_training_samples_v1',
       params: {'p_business_id': businessId},
     );
@@ -1891,7 +1891,7 @@ class BriskersApi {
     required String mimeType,
     required Uint8List bytes,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_register_receipt_training_sample_v1',
       params: {
         'p_business_id': businessId,
@@ -1905,13 +1905,13 @@ class BriskersApi {
     final key = registration['key'].toString();
     final attachmentId = registration['attachment_id'].toString();
 
-    await supabase.storage.from(bucket).uploadBinary(
+    await networkSupabase.storage.from(bucket).uploadBinary(
       key,
       bytes,
       fileOptions: FileOptions(contentType: mimeType, upsert: false),
     );
 
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
@@ -1928,10 +1928,10 @@ class BriskersApi {
     required String key,
   }) async {
     if (key.isNotEmpty) {
-      await supabase.storage.from(bucket).remove([key]);
+      await networkSupabase.storage.from(bucket).remove([key]);
     }
 
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_receipt_training_sample_v1',
       params: {
         'p_business_id': businessId,
@@ -1948,10 +1948,10 @@ class BriskersApi {
     required String key,
   }) async {
     if (key.isNotEmpty) {
-      await supabase.storage.from(bucket).remove([key]);
+      await networkSupabase.storage.from(bucket).remove([key]);
     }
 
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_archive_expense_attachment',
       params: {
         'p_business_id': businessId,
@@ -1968,7 +1968,7 @@ class BriskersApi {
     required String bucket,
     required String key,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_archive_expense_attachment_for_replace',
       params: {
         'p_business_id': businessId,
@@ -1979,7 +1979,7 @@ class BriskersApi {
 
     if (key.isNotEmpty) {
       try {
-        await supabase.storage.from(bucket).remove([key]);
+        await networkSupabase.storage.from(bucket).remove([key]);
       } catch (_) {
         // The database record is already archived. Storage cleanup can retry.
       }
@@ -1989,7 +1989,7 @@ class BriskersApi {
   Future<List<Map<String, dynamic>>> assignableEmployees(
     String businessId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_assignable_employees',
       params: {'p_business_id': businessId},
     );
@@ -2003,7 +2003,7 @@ class BriskersApi {
     String jobId,
     String employeeId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_set_primary_job_employee',
       params: {
         'p_business_id': businessId,
@@ -2017,7 +2017,7 @@ class BriskersApi {
     String businessId,
     String jobId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_clear_job_assignments',
       params: {
         'p_business_id': businessId,
@@ -2030,7 +2030,7 @@ class BriskersApi {
     String businessId, {
     String? status,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_list_jobs_v2',
       params: {
         'p_business_id': businessId,
@@ -2046,7 +2046,7 @@ class BriskersApi {
     String businessId, {
     bool includeInactive = false,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_job_statuses',
       params: {
         'p_business_id': businessId,
@@ -2061,7 +2061,7 @@ class BriskersApi {
   Future<List<Map<String, dynamic>>> invoiceStatusStyles(
     String businessId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_invoice_status_styles',
       params: {'p_business_id': businessId},
     );
@@ -2078,7 +2078,7 @@ class BriskersApi {
     required String iconKey,
     required int sortOrder,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_invoice_status_style',
       params: {
         'p_business_id': businessId,
@@ -2101,7 +2101,7 @@ class BriskersApi {
     required bool active,
     required int sortOrder,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_job_status',
       params: {
         'p_business_id': businessId,
@@ -2120,7 +2120,7 @@ class BriskersApi {
     String businessId,
     String statusId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_job_status',
       params: {
         'p_business_id': businessId,
@@ -2138,7 +2138,7 @@ class BriskersApi {
     String? requestedWork,
     required num plannedHours,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_job_v2',
       params: {
         'p_business_id': businessId,
@@ -2157,7 +2157,7 @@ class BriskersApi {
     String jobId, {
     String? workSummary,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_current_visit_work_summary',
       params: {
         'p_business_id': businessId,
@@ -2173,7 +2173,7 @@ class BriskersApi {
     String statusCode, {
     String? note,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_change_job_status',
       params: {
         'p_business_id': businessId,
@@ -2188,7 +2188,7 @@ class BriskersApi {
     String businessId,
     String jobId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_request_job_assignment',
       params: {
         'p_business_id': businessId,
@@ -2203,7 +2203,7 @@ class BriskersApi {
     String requestId, {
     required bool approve,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_decide_job_assignment_request',
       params: {
         'p_business_id': businessId,
@@ -2218,7 +2218,7 @@ class BriskersApi {
     DateTime? from,
     DateTime? to,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_list_appointments',
       params: {
         'p_business_id': businessId,
@@ -2242,7 +2242,7 @@ class BriskersApi {
     required DateTime endsAt,
     String? employeeId,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_appointment',
       params: {
         'p_business_id': businessId,
@@ -2263,7 +2263,7 @@ class BriskersApi {
     String appointmentId,
     String status,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_set_appointment_status',
       params: {
         'p_business_id': businessId,
@@ -2277,7 +2277,7 @@ class BriskersApi {
     String businessId,
     String appointmentId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_cancel_appointment',
       params: {
         'p_business_id': businessId,
@@ -2290,7 +2290,7 @@ class BriskersApi {
     String businessId,
     String appointmentId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_appointment',
       params: {
         'p_business_id': businessId,
@@ -2309,7 +2309,7 @@ class BriskersApi {
     required DateTime endsAt,
     String? employeeId,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_appointment',
       params: {
         'p_business_id': businessId,
@@ -2329,7 +2329,7 @@ class BriskersApi {
     String businessId,
     String appointmentId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_check_in_appointment',
       params: {
         'p_business_id': businessId,
@@ -2344,7 +2344,7 @@ class BriskersApi {
     String vehicleId, {
     bool includeResolved = true,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_vehicle_findings',
       params: {
         'p_business_id': businessId,
@@ -2364,7 +2364,7 @@ class BriskersApi {
     required String body,
     bool includeOnInvoice = false,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_vehicle_finding_for_vehicle',
       params: {
         'p_business_id': businessId,
@@ -2382,7 +2382,7 @@ class BriskersApi {
     String findingId, {
     required String body,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_vehicle_finding',
       params: {
         'p_business_id': businessId,
@@ -2398,7 +2398,7 @@ class BriskersApi {
     required String body,
     bool includeOnInvoice = false,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_vehicle_finding',
       params: {
         'p_business_id': businessId,
@@ -2416,7 +2416,7 @@ class BriskersApi {
     required String filename,
     required String mimeType,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_register_finding_photo',
       params: {
         'p_business_id': businessId,
@@ -2445,13 +2445,13 @@ class BriskersApi {
     final key = registration['key'].toString();
     final attachmentId = registration['attachment_id'].toString();
 
-    await supabase.storage.from(bucket).uploadBinary(
+    await networkSupabase.storage.from(bucket).uploadBinary(
       key,
       bytes,
       fileOptions: FileOptions(contentType: mimeType, upsert: false),
     );
 
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
@@ -2469,10 +2469,10 @@ class BriskersApi {
     required String key,
   }) async {
     if (key.isNotEmpty) {
-      await supabase.storage.from(bucket).remove([key]);
+      await networkSupabase.storage.from(bucket).remove([key]);
     }
 
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_archive_finding_attachment',
       params: {
         'p_business_id': businessId,
@@ -2487,7 +2487,7 @@ class BriskersApi {
     String findingId,
     bool include,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_set_vehicle_finding_invoice_flag',
       params: {
         'p_business_id': businessId,
@@ -2502,7 +2502,7 @@ class BriskersApi {
     String findingId,
     String jobId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_add_finding_to_job',
       params: {
         'p_business_id': businessId,
@@ -2517,7 +2517,7 @@ class BriskersApi {
     String findingId,
     String jobId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_remove_finding_from_job',
       params: {
         'p_business_id': businessId,
@@ -2532,7 +2532,7 @@ class BriskersApi {
     String findingId,
     String jobId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_resolve_vehicle_finding',
       params: {
         'p_business_id': businessId,
@@ -2546,7 +2546,7 @@ class BriskersApi {
     String businessId,
     String findingId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_reopen_vehicle_finding',
       params: {
         'p_business_id': businessId,
@@ -2559,7 +2559,7 @@ class BriskersApi {
     String businessId,
     String findingId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_vehicle_finding',
       params: {
         'p_business_id': businessId,
@@ -2575,7 +2575,7 @@ class BriskersApi {
     String sourceType = 'identifix',
   }) async {
     try {
-      final result = await supabase.functions.invoke(
+      final result = await networkSupabase.functions.invoke(
         'identifix-estimate-parse',
         body: {
           'business_id': businessId,
@@ -2606,7 +2606,7 @@ class BriskersApi {
     final payload = Map<String, dynamic>.from(extraction)
       ..['_source_system'] =
           sourceType == 'handwritten' ? 'handwritten' : 'identifix';
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_identifix_estimate',
       params: {
         'p_business_id': businessId,
@@ -2626,7 +2626,7 @@ class BriskersApi {
     required num importedUnitPrice,
   }) async {
     try {
-      final result = await supabase.functions.invoke(
+      final result = await networkSupabase.functions.invoke(
         'part-price-verify',
         body: {
           'business_id': businessId,
@@ -2655,7 +2655,7 @@ class BriskersApi {
     String lineId, {
     required String note,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_apply_part_price_verification',
       params: {
         'p_business_id': businessId,
@@ -2674,7 +2674,7 @@ class BriskersApi {
     String businessId,
     String documentId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_identifix_pricing_status',
       params: {
         'p_business_id': businessId,
@@ -2690,7 +2690,7 @@ class BriskersApi {
     required String filename,
     required String mimeType,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_register_document_source_image',
       params: {
         'p_business_id': businessId,
@@ -2719,13 +2719,13 @@ class BriskersApi {
     final key = registration['key'].toString();
     final attachmentId = registration['attachment_id'].toString();
 
-    await supabase.storage.from(bucket).uploadBinary(
+    await networkSupabase.storage.from(bucket).uploadBinary(
       key,
       bytes,
       fileOptions: FileOptions(contentType: mimeType, upsert: false),
     );
 
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
@@ -2739,7 +2739,7 @@ class BriskersApi {
     String businessId,
     String jobId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_estimate',
       params: {
         'p_business_id': businessId,
@@ -2753,7 +2753,7 @@ class BriskersApi {
     String businessId,
     String jobId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_invoice',
       params: {
         'p_business_id': businessId,
@@ -2767,7 +2767,7 @@ class BriskersApi {
     String businessId,
     String estimateId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_convert_estimate',
       params: {
         'p_business_id': businessId,
@@ -2781,7 +2781,7 @@ class BriskersApi {
     String businessId,
     String jobId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_job_documents',
       params: {
         'p_business_id': businessId,
@@ -2797,7 +2797,7 @@ class BriskersApi {
     String businessId,
     String documentId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_document_detail',
       params: {
         'p_business_id': businessId,
@@ -2811,7 +2811,7 @@ class BriskersApi {
     String businessId, {
     bool includeInactive = true,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_item_categories',
       params: {
         'p_business_id': businessId,
@@ -2830,7 +2830,7 @@ class BriskersApi {
     required bool active,
     required int sortOrder,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_item_category',
       params: {
         'p_business_id': businessId,
@@ -2847,7 +2847,7 @@ class BriskersApi {
     String businessId, {
     bool includeInactive = true,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_payment_methods_settings',
       params: {
         'p_business_id': businessId,
@@ -2866,7 +2866,7 @@ class BriskersApi {
     required bool active,
     required int sortOrder,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_payment_method',
       params: {
         'p_business_id': businessId,
@@ -2884,7 +2884,7 @@ class BriskersApi {
     String? search,
     bool includeInactive = true,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_catalog_items_settings',
       params: {
         'p_business_id': businessId,
@@ -2911,7 +2911,7 @@ class BriskersApi {
     String? barcode,
     required bool active,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_catalog_item',
       params: {
         'p_business_id': businessId,
@@ -2935,7 +2935,7 @@ class BriskersApi {
     String businessId, {
     String? search,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_catalog_items_for_sale',
       params: {
         'p_business_id': businessId,
@@ -2953,7 +2953,7 @@ class BriskersApi {
     required int expectedVersion,
     String? memo,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_document_notes',
       params: {
         'p_business_id': businessId,
@@ -2970,7 +2970,7 @@ class BriskersApi {
     String? vehicleId,
     DateTime? documentDate,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_quick_invoice',
       params: {
         'p_business_id': businessId,
@@ -2992,7 +2992,7 @@ class BriskersApi {
     String? vehicleId,
     DateTime? documentDate,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_quick_estimate',
       params: {
         'p_business_id': businessId,
@@ -3015,7 +3015,7 @@ class BriskersApi {
     String? vehicleId,
     required DateTime documentDate,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_document_header',
       params: {
         'p_business_id': businessId,
@@ -3033,7 +3033,7 @@ class BriskersApi {
     String documentId, {
     num? odometer,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_document_mileage',
       params: {
         'p_business_id': businessId,
@@ -3050,7 +3050,7 @@ class BriskersApi {
     String? claimNumber,
     String? authorizationNumber,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_document_claim_info',
       params: {
         'p_business_id': businessId,
@@ -3066,7 +3066,7 @@ class BriskersApi {
     String businessId,
     String documentId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_document_warranty_detail',
       params: {
         'p_business_id': businessId,
@@ -3079,7 +3079,7 @@ class BriskersApi {
   Future<Map<String, dynamic>> warrantyPaymentSettings(
     String businessId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_warranty_payment_settings',
       params: {'p_business_id': businessId},
     );
@@ -3090,7 +3090,7 @@ class BriskersApi {
     String businessId, {
     required num cardSurchargeRate,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_update_warranty_payment_settings',
       params: {
         'p_business_id': businessId,
@@ -3104,7 +3104,7 @@ class BriskersApi {
     String businessId, {
     bool includeInactive = false,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_warranty_companies',
       params: {
         'p_business_id': businessId,
@@ -3122,7 +3122,7 @@ class BriskersApi {
     String? claimsPhone,
     String? submissionEmail,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_warranty_company',
       params: {
         'p_business_id': businessId,
@@ -3144,7 +3144,7 @@ class BriskersApi {
     String? notes,
     bool active = true,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_warranty_company',
       params: {
         'p_business_id': businessId,
@@ -3170,7 +3170,7 @@ class BriskersApi {
     num? approvedAmount,
     num surchargeRate = 0.03,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_update_document_warranty',
       params: {
         'p_business_id': businessId,
@@ -3191,7 +3191,7 @@ class BriskersApi {
     String businessId, {
     bool includeInactive = false,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_document_note_templates',
       params: {
         'p_business_id': businessId,
@@ -3213,7 +3213,7 @@ class BriskersApi {
     bool active = true,
     int sortOrder = 100,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_document_note_template',
       params: {
         'p_business_id': businessId,
@@ -3233,7 +3233,7 @@ class BriskersApi {
     String businessId, {
     bool includeInactive = false,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_disclaimer_templates',
       params: {
         'p_business_id': businessId,
@@ -3254,7 +3254,7 @@ class BriskersApi {
     bool active = true,
     int sortOrder = 100,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_disclaimer_template',
       params: {
         'p_business_id': businessId,
@@ -3273,7 +3273,7 @@ class BriskersApi {
     String businessId,
     String documentId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_document_disclaimers',
       params: {
         'p_business_id': businessId,
@@ -3294,7 +3294,7 @@ class BriskersApi {
     required String body,
     bool signatureRequired = true,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_save_document_disclaimer',
       params: {
         'p_business_id': businessId,
@@ -3314,7 +3314,7 @@ class BriskersApi {
     String documentId,
     String disclaimerId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_document_disclaimer',
       params: {
         'p_business_id': businessId,
@@ -3329,7 +3329,7 @@ class BriskersApi {
     String documentId, {
     required String signerName,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_register_document_signature',
       params: {
         'p_business_id': businessId,
@@ -3359,7 +3359,7 @@ class BriskersApi {
     final attachmentId = registration['attachment_id'].toString();
     final authorizationId = registration['authorization_id'].toString();
 
-    await supabase.storage.from(bucket).uploadBinary(
+    await networkSupabase.storage.from(bucket).uploadBinary(
       key,
       bytes,
       fileOptions: const FileOptions(
@@ -3368,7 +3368,7 @@ class BriskersApi {
       ),
     );
 
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
@@ -3377,7 +3377,7 @@ class BriskersApi {
       },
     );
 
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_finalize_document_signature',
       params: {
         'p_business_id': businessId,
@@ -3393,7 +3393,7 @@ class BriskersApi {
     String businessId,
     String documentId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_document_signature_status',
       params: {
         'p_business_id': businessId,
@@ -3407,7 +3407,7 @@ class BriskersApi {
     String businessId,
     String documentId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_warranty_submission_readiness',
       params: {
         'p_business_id': businessId,
@@ -3421,7 +3421,7 @@ class BriskersApi {
     String bucket,
     String key,
   ) async {
-    return supabase.storage.from(bucket).download(key);
+    return networkSupabase.storage.from(bucket).download(key);
   }
 
   Future<void> updateDocumentLineV2(
@@ -3435,7 +3435,7 @@ class BriskersApi {
     String? description,
     required String lineKind,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_document_line_v2',
       params: {
         'p_business_id': businessId,
@@ -3456,7 +3456,7 @@ class BriskersApi {
     String lineId, {
     required int expectedVersion,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_copy_document_line',
       params: {
         'p_business_id': businessId,
@@ -3473,7 +3473,7 @@ class BriskersApi {
     required int expectedVersion,
     required String direction,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_move_document_line',
       params: {
         'p_business_id': businessId,
@@ -3489,7 +3489,7 @@ class BriskersApi {
     String invoiceId, {
     bool copyNotes = false,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_copy_invoice',
       params: {
         'p_business_id': businessId,
@@ -3504,7 +3504,7 @@ class BriskersApi {
     String businessId,
     String invoiceId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_draft_invoice',
       params: {
         'p_business_id': businessId,
@@ -3517,7 +3517,7 @@ class BriskersApi {
     String businessId,
     String estimateId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_estimate',
       params: {
         'p_business_id': businessId,
@@ -3530,7 +3530,7 @@ class BriskersApi {
     String businessId,
     String invoiceId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_void_invoice',
       params: {
         'p_business_id': businessId,
@@ -3545,7 +3545,7 @@ class BriskersApi {
     required String body,
     bool includeOnInvoice = true,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_create_invoice_finding',
       params: {
         'p_business_id': businessId,
@@ -3562,7 +3562,7 @@ class BriskersApi {
     String findingId,
     String invoiceId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_resolve_vehicle_finding_by_invoice',
       params: {
         'p_business_id': businessId,
@@ -3582,7 +3582,7 @@ class BriskersApi {
     required String timing,
     String? description,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_add_document_discount',
       params: {
         'p_business_id': businessId,
@@ -3608,7 +3608,7 @@ class BriskersApi {
     required String timing,
     String? description,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_document_discount',
       params: {
         'p_business_id': businessId,
@@ -3635,7 +3635,7 @@ class BriskersApi {
     String? itemId,
     String lineKind = 'item',
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_add_document_line',
       params: {
         'p_business_id': businessId,
@@ -3661,7 +3661,7 @@ class BriskersApi {
     required num taxRate,
     String? description,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_document_line',
       params: {
         'p_business_id': businessId,
@@ -3680,7 +3680,7 @@ class BriskersApi {
     String lineId, {
     required int expectedVersion,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_document_line',
       params: {
         'p_business_id': businessId,
@@ -3695,7 +3695,7 @@ class BriskersApi {
     String documentId, {
     required int expectedVersion,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_issue_document',
       params: {
         'p_business_id': businessId,
@@ -3707,7 +3707,7 @@ class BriskersApi {
   }
 
   Future<Map<String, dynamic>> paymentOptions(String businessId) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_payment_options',
       params: {'p_business_id': businessId},
     );
@@ -3720,7 +3720,7 @@ class BriskersApi {
     required num amount,
     required String methodId,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_set_pending_invoice_payment',
       params: {
         'p_business_id': businessId,
@@ -3738,7 +3738,7 @@ class BriskersApi {
     required num amount,
     required String methodId,
   }) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_add_pending_invoice_payment',
       params: {
         'p_business_id': businessId,
@@ -3756,7 +3756,7 @@ class BriskersApi {
     required num amount,
     required String methodId,
   }) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_update_pending_invoice_payment',
       params: {
         'p_business_id': businessId,
@@ -3771,7 +3771,7 @@ class BriskersApi {
     String businessId,
     String paymentId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_delete_pending_invoice_payment',
       params: {
         'p_business_id': businessId,
@@ -3784,7 +3784,7 @@ class BriskersApi {
     String businessId,
     String invoiceId,
   ) async {
-    final result = await supabase.rpc(
+    final result = await networkSupabase.rpc(
       'briskers_finalize_pending_invoice_payment',
       params: {
         'p_business_id': businessId,
@@ -3798,7 +3798,7 @@ class BriskersApi {
     String businessId,
     String invoiceId,
   ) async {
-    await supabase.rpc(
+    await networkSupabase.rpc(
       'briskers_close_invoice',
       params: {
         'p_business_id': businessId,
