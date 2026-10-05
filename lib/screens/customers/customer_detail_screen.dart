@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
@@ -50,8 +51,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
 
   Future<void> _load() async {
     var localShown = false;
+    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
-    try {
+    if (!forceOnline) try {
       final local = await _localCustomers.customerDetail(
         widget.businessId,
         widget.customerId,
@@ -93,7 +95,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       if (!mounted) return;
       setState(() {
         _onlineReady = false;
-        if (localShown) {
+        if (localShown && !forceOnline) {
           _showingLocal = true;
           _error = null;
         } else {
