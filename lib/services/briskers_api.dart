@@ -1813,6 +1813,7 @@ class BriskersApi {
           'business_id': businessId,
           'vendor_id': vendorId,
           'mime_type': mimeType,
+          'source_type': sourceType,
           'image_base64': base64Encode(bytes),
         },
       );
@@ -2544,6 +2545,7 @@ class BriskersApi {
     String businessId,
     Uint8List bytes, {
     String mimeType = 'image/jpeg',
+    String sourceType = 'identifix',
   }) async {
     try {
       final result = await supabase.functions.invoke(
@@ -2570,14 +2572,18 @@ class BriskersApi {
   Future<Map<String, dynamic>> createIdentifixEstimate(
     String businessId,
     String jobId,
-    Map<String, dynamic> extraction,
-  ) async {
+    Map<String, dynamic> extraction, {
+    String sourceType = 'identifix',
+  }) async {
+    final payload = Map<String, dynamic>.from(extraction)
+      ..['_source_system'] =
+          sourceType == 'handwritten' ? 'handwritten' : 'identifix';
     final result = await supabase.rpc(
       'briskers_create_identifix_estimate',
       params: {
         'p_business_id': businessId,
         'p_job_id': jobId,
-        'p_extraction': extraction,
+        'p_extraction': payload,
       },
     );
     return Map<String, dynamic>.from(result as Map);
