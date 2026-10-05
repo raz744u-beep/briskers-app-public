@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart';
 
 import '../local/local_database_provider.dart';
@@ -12,6 +14,10 @@ class DocumentIndexSyncService {
         _repository = repository ?? LocalDocumentRepository();
 
   static const _scope = 'documents';
+  static final StreamController<String> _syncEvents =
+      StreamController<String>.broadcast();
+
+  static Stream<String> get syncEvents => _syncEvents.stream;
   final BriskersApi _api;
   final LocalDocumentRepository _repository;
 
@@ -78,6 +84,7 @@ class DocumentIndexSyncService {
       }
       cursor = next;
     }
+    _syncEvents.add(businessId);
   }
 
   Future<void> refreshBestEffort(String businessId) async {
