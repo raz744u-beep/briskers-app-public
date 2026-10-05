@@ -239,7 +239,7 @@ class _IdentifixEstimateImportScreenState
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(),
+              const CircularProgressIndicator(),
               const SizedBox(height: 18),
               Text(
                 _handwritten
@@ -248,7 +248,7 @@ class _IdentifixEstimateImportScreenState
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 7),
-              Text(
+              const Text(
                 'Briskers is extracting the estimate lines, part numbers, quantities and prices.',
                 textAlign: TextAlign.center,
               ),
