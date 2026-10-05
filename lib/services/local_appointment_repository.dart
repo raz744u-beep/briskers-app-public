@@ -89,6 +89,53 @@ class LocalAppointmentRepository {
     return rows.map(_mapRow).toList();
   }
 
+  Future<int> confirmedTodayCount(String businessId) async {
+    final now = DateTime.now();
+    final startLocal = DateTime(now.year, now.month, now.day);
+    final endLocal = startLocal.add(const Duration(days: 1));
+    final row = await _database.customSelect(
+      '''
+      SELECT COUNT(*) AS count
+      FROM local_appointments
+      WHERE business_id = ?
+        AND status = 'confirmed'
+        AND starts_at >= ?
+        AND starts_at < ?
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<DateTime>(startLocal.toUtc()),
+        Variable<DateTime>(endLocal.toUtc()),
+      ],
+    ).getSingle();
+    return row.read<int>('count');
+  }
+
+  Stream<int> watchConfirmedTodayCount(String businessId) {
+    final now = DateTime.now();
+    final startLocal = DateTime(now.year, now.month, now.day);
+    final endLocal = startLocal.add(const Duration(days: 1));
+    return _database
+        .customSelect(
+          '''
+          SELECT COUNT(*) AS count
+          FROM local_appointments
+          WHERE business_id = ?
+            AND status = 'confirmed'
+            AND starts_at >= ?
+            AND starts_at < ?
+          ''',
+          variables: [
+            Variable<String>(businessId),
+            Variable<DateTime>(startLocal.toUtc()),
+            Variable<DateTime>(endLocal.toUtc()),
+          ],
+          readsFrom: {_database.localAppointments},
+        )
+        .watchSingle()
+        .map((row) => row.read<int>('count'));
+  }
+
   Future<List<Map<String, dynamic>>> appointmentsForPhone(
     String businessId,
     String phoneDigits,
