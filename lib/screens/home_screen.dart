@@ -17,6 +17,7 @@ class HomeScreen extends StatefulWidget {
     required this.jobsCount,
     this.appointmentsCount = 0,
     this.customersNewCount = 0,
+    this.estimatesOpenCount = 0,
   });
 
   final VoidCallback onCustomersTap;
@@ -29,6 +30,7 @@ class HomeScreen extends StatefulWidget {
   final int jobsCount;
   final int appointmentsCount;
   final int customersNewCount;
+  final int estimatesOpenCount;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -164,6 +166,7 @@ class _HomeScreenState extends State<HomeScreen> {
               jobsCount: widget.jobsCount,
               appointmentsCount: widget.appointmentsCount,
               customersNewCount: widget.customersNewCount,
+              estimatesOpenCount: widget.estimatesOpenCount,
             ),
             const SizedBox(height: 24),
           ],
@@ -235,6 +238,7 @@ class _HomeTiles extends StatelessWidget {
     required this.jobsCount,
     required this.appointmentsCount,
     required this.customersNewCount,
+    required this.estimatesOpenCount,
   });
 
   final bool customersExpanded;
@@ -247,6 +251,7 @@ class _HomeTiles extends StatelessWidget {
   final int jobsCount;
   final int appointmentsCount;
   final int customersNewCount;
+  final int estimatesOpenCount;
 
   Widget _tile(
     String label,
@@ -330,7 +335,7 @@ class _HomeTiles extends StatelessWidget {
           ],
           const SizedBox(height: 5),
           row(
-            _tile('Estimates', '0 Open', Icons.request_quote_outlined,
+            _tile('Estimates', '$estimatesOpenCount Open', Icons.request_quote_outlined,
                 BriskersColors.estimates, onMoreTap),
             _tile('Invoices', '0 Open', Icons.receipt_long_outlined,
                 BriskersColors.invoices, onInvoicesTap),
