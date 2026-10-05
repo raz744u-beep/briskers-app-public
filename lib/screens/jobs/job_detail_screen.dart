@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
 import '../../core/employee_role_style.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
@@ -114,8 +115,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   Future<void> _load() async {
     var localShown = false;
+    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
-    try {
+    if (!forceOnline) try {
       final snapshot = await _localJobs.jobDetail(
         widget.businessId,
         widget.jobId,
@@ -393,7 +395,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       setState(() {
         _loading = false;
         _onlineReady = false;
-        if (localShown) {
+        if (localShown && !forceOnline) {
           _showingLocal = true;
           _error = null;
         } else {
