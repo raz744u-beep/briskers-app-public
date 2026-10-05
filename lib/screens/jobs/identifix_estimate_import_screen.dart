@@ -14,12 +14,14 @@ class IdentifixEstimateImportScreen extends StatefulWidget {
     required this.jobId,
     required this.customerName,
     required this.vehicle,
+    this.sourceType = 'identifix',
   });
 
   final String businessId;
   final String jobId;
   final String customerName;
   final String vehicle;
+  final String sourceType;
 
   @override
   State<IdentifixEstimateImportScreen> createState() =>
@@ -31,6 +33,9 @@ class _IdentifixEstimateImportScreenState
   static const _api = BriskersApi();
 
   final ImagePicker _picker = ImagePicker();
+
+  bool get _handwritten => widget.sourceType == 'handwritten';
+  String get _sourceLabel => _handwritten ? 'handwritten' : 'Identifix';
 
   XFile? _sourceFile;
   Uint8List? _sourceBytes;
@@ -93,6 +98,7 @@ class _IdentifixEstimateImportScreenState
         widget.businessId,
         bytes,
         mimeType: _mimeType,
+        sourceType: widget.sourceType,
       );
       if (!mounted) return;
       setState(() {
@@ -146,6 +152,7 @@ class _IdentifixEstimateImportScreenState
         widget.businessId,
         widget.jobId,
         extraction,
+        sourceType: widget.sourceType,
       );
       final documentId = created['document_id']?.toString() ?? '';
       if (documentId.isEmpty) {
@@ -236,7 +243,9 @@ class _IdentifixEstimateImportScreenState
               CircularProgressIndicator(),
               SizedBox(height: 18),
               Text(
-                'Reading Identifix estimate...',
+                _handwritten
+                    ? 'Reading handwritten estimate...'
+                    : 'Reading Identifix estimate...',
                 style: TextStyle(fontWeight: FontWeight.w700),
               ),
               SizedBox(height: 7),
@@ -263,15 +272,20 @@ class _IdentifixEstimateImportScreenState
           ),
         ),
         const SizedBox(height: 18),
-        const Text(
-          'Import estimate from Identifix',
+        Text(
+          _handwritten
+              ? 'Scan handwritten estimate'
+              : 'Import estimate from Identifix',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 8),
         Text(
-          'This estimate will be linked to ${widget.customerName} and this job. '
-          'Scan the complete printed Identifix estimate, then review the extracted lines.',
+          _handwritten
+              ? 'This estimate will be linked to ${widget.customerName} and this job. '
+                  'Scan the complete handwritten estimate, then review every extracted line before creating it.'
+              : 'This estimate will be linked to ${widget.customerName} and this job. '
+                  'Scan the complete printed Identifix estimate, then review the extracted lines.',
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 24),
@@ -282,7 +296,9 @@ class _IdentifixEstimateImportScreenState
           ),
           onPressed: () => _pick(ImageSource.camera),
           icon: const Icon(Icons.camera_alt_outlined),
-          label: const Text('Scan printed estimate'),
+          label: Text(
+            _handwritten ? 'Scan handwritten estimate' : 'Scan printed estimate',
+          ),
         ),
         const SizedBox(height: 10),
         OutlinedButton.icon(
@@ -384,7 +400,7 @@ class _IdentifixEstimateImportScreenState
                 ),
                 const SizedBox(height: 10),
                 _PreviewRow(
-                  label: 'Identifix estimate',
+                  label: _handwritten ? 'Source estimate' : 'Identifix estimate',
                   value: extraction['estimate_number']?.toString() ?? '—',
                 ),
                 _PreviewRow(
