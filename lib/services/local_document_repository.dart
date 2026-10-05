@@ -28,8 +28,8 @@ class LocalDocumentRepository {
           '''
           INSERT OR REPLACE INTO local_documents (
             id, business_id, job_id, customer_id, kind, document_number,
-            status, converted, total, created_at, server_updated_at, row_version, sync_state
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+            status, display_status_code, converted, total, created_at, server_updated_at, row_version, sync_state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
           ''',
           [
             id,
@@ -39,6 +39,7 @@ class LocalDocumentRepository {
             document['kind']?.toString() ?? 'invoice',
             _text(document['document_number']),
             _text(document['status']),
+            _text(document['display_status_code']),
             document['converted'] == true ? 1 : 0,
             _double(document['total']) ?? 0,
             _unix(_date(document['created_at'])),
@@ -62,14 +63,15 @@ class LocalDocumentRepository {
           '''
           INSERT INTO local_documents (
             id, business_id, job_id, customer_id, kind, document_number,
-            status, converted, total, created_at, server_updated_at, row_version, sync_state
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+            status, display_status_code, converted, total, created_at, server_updated_at, row_version, sync_state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
           ON CONFLICT(id) DO UPDATE SET
             job_id=excluded.job_id,
             customer_id=excluded.customer_id,
             kind=excluded.kind,
             document_number=excluded.document_number,
             status=excluded.status,
+            display_status_code=excluded.display_status_code,
             converted=excluded.converted,
             total=excluded.total,
             created_at=excluded.created_at,
@@ -83,6 +85,7 @@ class LocalDocumentRepository {
             _text(document['customer_id']),
             document['kind']?.toString() ?? 'invoice',
             _text(document['document_number']), _text(document['status']),
+            _text(document['display_status_code']),
             document['converted'] == true ? 1 : 0,
             _double(document['total_amount'] ?? document['total']) ?? 0,
             _unix(_date(document['created_at'])),
@@ -119,6 +122,39 @@ class LocalDocumentRepository {
             AND kind = 'estimate'
             AND converted = 0
             AND lower(COALESCE(status, '')) NOT IN ('accepted', 'declined', 'expired', 'void')
+          ''',
+          variables: [Variable<String>(businessId)],
+          readsFrom: {_database.localDocuments},
+        )
+        .watchSingle()
+        .map((row) => row.read<int>('count'));
+  }
+
+  Future<int> openInvoiceCount(String businessId) async {
+    final row = await _database.customSelect(
+      '''
+      SELECT COUNT(*) AS count
+      FROM local_documents
+      WHERE business_id = ?
+        AND kind = 'invoice'
+        AND lower(COALESCE(display_status_code, 'open'))
+            NOT IN ('paid', 'void')
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).getSingle();
+    return row.read<int>('count');
+  }
+
+  Stream<int> watchOpenInvoiceCount(String businessId) {
+    return _database
+        .customSelect(
+          '''
+          SELECT COUNT(*) AS count
+          FROM local_documents
+          WHERE business_id = ?
+            AND kind = 'invoice'
+            AND lower(COALESCE(display_status_code, 'open'))
+                NOT IN ('paid', 'void')
           ''',
           variables: [Variable<String>(businessId)],
           readsFrom: {_database.localDocuments},
