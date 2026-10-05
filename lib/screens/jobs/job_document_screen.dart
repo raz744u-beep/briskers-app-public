@@ -1950,6 +1950,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           documentId: newId!,
           isOwner: widget.isOwner,
           canManageExpenses: widget.canManageExpenses,
+          initialAction: 'edit',
         ),
       ),
     );
@@ -4907,6 +4908,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ],
             ),
           ),
+          actions: [
+            if (!_readOnly)
+              IconButton(
+                tooltip: _estimate ? tr('editEstimate') : tr('editInvoice'),
+                onPressed: _busy ? null : _editDocumentHeader,
+                icon: const Icon(Icons.edit_outlined),
+              ),
+          ],
         ),
         body: NestedScrollView(
           controller: _workspaceHeaderController,
