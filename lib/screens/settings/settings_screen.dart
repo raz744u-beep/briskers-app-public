@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/briskers_i18n.dart';
+import '../../core/connection_mode.dart';
 import '../../widgets/briskers_page_header.dart';
 import '../kiosk/kiosk_checkin_screen.dart';
 import 'catalog_settings_screen.dart';
@@ -33,6 +34,60 @@ class SettingsScreen extends StatelessWidget {
   final String businessName;
   final String roleCode;
   final ValueChanged<String>? onBusinessNameChanged;
+
+  Future<void> _chooseConnectionMode(BuildContext context) async {
+    final controller = BriskersConnectionModeController.instance;
+    final selected = await showModalBottomSheet<BriskersConnectionMode>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text(
+                'Connection Mode',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+              ),
+              subtitle: Text(
+                'Temporary testing control. Auto is the normal production mode.',
+              ),
+            ),
+            for (final mode in BriskersConnectionMode.values)
+              RadioListTile<BriskersConnectionMode>(
+                value: mode,
+                groupValue: controller.mode,
+                title: Text(
+                  switch (mode) {
+                    BriskersConnectionMode.auto => 'Auto',
+                    BriskersConnectionMode.online => 'Force Online',
+                    BriskersConnectionMode.offline => 'Force Offline',
+                  },
+                ),
+                subtitle: Text(
+                  switch (mode) {
+                    BriskersConnectionMode.auto =>
+                      'Use local data first and sync online when available.',
+                    BriskersConnectionMode.online =>
+                      'Require server calls so online/API problems are visible.',
+                    BriskersConnectionMode.offline =>
+                      'Block Briskers server calls and test only local/offline behavior.',
+                  },
+                ),
+                onChanged: (value) => Navigator.pop(sheetContext, value),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (selected == null) return;
+    await controller.setMode(selected);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Connection mode: ${controller.label}')),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -76,6 +131,28 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
+          if (roleCode == 'owner' || roleCode == 'office')
+            AnimatedBuilder(
+              animation: BriskersConnectionModeController.instance,
+              builder: (context, _) {
+                final controller =
+                    BriskersConnectionModeController.instance;
+                final icon = switch (controller.mode) {
+                  BriskersConnectionMode.auto => Icons.sync_alt,
+                  BriskersConnectionMode.online => Icons.cloud_done_outlined,
+                  BriskersConnectionMode.offline => Icons.cloud_off_outlined,
+                };
+                return ListTile(
+                  leading: Icon(icon, color: BriskersColors.settings),
+                  title: const Text('Connection Mode'),
+                  subtitle: Text(
+                    '${controller.label} • temporary testing control',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _chooseConnectionMode(context),
+                );
+              },
+            ),
           ListTile(
             leading: const Icon(
               Icons.calculate_outlined,
