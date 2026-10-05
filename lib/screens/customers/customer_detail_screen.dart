@@ -596,6 +596,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     CustomerServiceHistorySection(
                       businessId: widget.businessId,
                       customerId: widget.customerId,
+                      vehicles: vehicles,
                     ),
                     const SizedBox(height: 18),
                     CustomerAccountSection(
