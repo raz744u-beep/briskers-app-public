@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
+import '../core/connection_mode.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
@@ -65,8 +66,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   Future<void> _load() async {
     var localAvailable = false;
+    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
-    try {
+    if (!forceOnline) try {
       final localRows =
           await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim());
       final bootstrapped =
@@ -127,7 +129,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       if (!mounted) return;
       setState(() {
         _onlineReady = false;
-        if (localAvailable) {
+        if (localAvailable && !forceOnline) {
           _showingLocal = true;
           _error = null;
         } else {
