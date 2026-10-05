@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -55,24 +57,27 @@ class _ShellScreenState extends State<ShellScreen> {
   final Map<int, Widget> _lazyPages = {};
   final LocalJobRepository _localJobs = LocalJobRepository();
   int _homeJobsCount = 0;
+  StreamSubscription<int>? _homeJobsCountSubscription;
 
   @override
   void initState() {
     super.initState();
     _businessName = widget.businessName;
-    _loadLocalHomeJobsCount();
-  }
-
-  Future<void> _loadLocalHomeJobsCount() async {
-    try {
-      final rows = await _localJobs.listJobs(widget.businessId, limit: 500);
-      final count = rows.where((job) => job['status']?.toString() == 'in_progress').length;
-      if (!mounted) return;
+    _homeJobsCountSubscription = _localJobs
+        .watchJobCount(widget.businessId, status: 'in_progress')
+        .listen((count) {
+      if (!mounted || count == _homeJobsCount) return;
       setState(() {
         _homeJobsCount = count;
         _lazyPages.remove(0);
       });
-    } catch (_) {}
+    });
+  }
+
+  @override
+  void dispose() {
+    _homeJobsCountSubscription?.cancel();
+    super.dispose();
   }
 
   String get _customersViewedKey =>
@@ -205,7 +210,6 @@ class _ShellScreenState extends State<ShellScreen> {
               refreshToken: _jobsRefreshToken,
               onJobsChanged: () {
                 _refreshNavCounts();
-                _loadLocalHomeJobsCount();
               },
               jobDetailBottomNavigationBar: _shellNavigationBar(),
             );
