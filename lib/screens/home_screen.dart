@@ -1347,6 +1347,7 @@ class _HomeTiles extends StatelessWidget {
                     softWrap: false,
                     style: const TextStyle(
                       fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
                       color: Color(0xFF667085),
                     ),
                   ),
