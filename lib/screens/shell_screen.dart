@@ -67,6 +67,7 @@ class _ShellScreenState extends State<ShellScreen> {
   int _homeAppointmentsCount = 0;
   int _homeCustomersNewCount = 0;
   int _homeEstimatesOpenCount = 0;
+  int _homeInvoicesOpenCount = 0;
   StreamSubscription<int>? _homeJobsCountSubscription;
   StreamSubscription<String>? _homeJobsSyncSubscription;
   StreamSubscription<int>? _homeAppointmentsCountSubscription;
@@ -74,6 +75,7 @@ class _ShellScreenState extends State<ShellScreen> {
   StreamSubscription<int>? _homeCustomersTableSubscription;
   StreamSubscription<String>? _homeCustomersSyncSubscription;
   StreamSubscription<int>? _homeEstimatesCountSubscription;
+  StreamSubscription<int>? _homeInvoicesCountSubscription;
   StreamSubscription<String>? _homeDocumentsSyncSubscription;
 
   @override
@@ -114,10 +116,15 @@ class _ShellScreenState extends State<ShellScreen> {
     _homeEstimatesCountSubscription = _localDocuments
         .watchOpenEstimateCount(widget.businessId)
         .listen(_applyHomeEstimatesCount);
+    _refreshHomeInvoicesCount();
+    _homeInvoicesCountSubscription = _localDocuments
+        .watchOpenInvoiceCount(widget.businessId)
+        .listen(_applyHomeInvoicesCount);
     _homeDocumentsSyncSubscription =
         DocumentIndexSyncService.syncEvents.listen((businessId) {
       if (businessId == widget.businessId) {
         _refreshHomeEstimatesCount();
+        _refreshHomeInvoicesCount();
       }
     });
   }
@@ -198,6 +205,18 @@ class _ShellScreenState extends State<ShellScreen> {
     } catch (_) {}
   }
 
+  void _applyHomeInvoicesCount(int count) {
+    if (!mounted || count == _homeInvoicesOpenCount) return;
+    setState(() => _homeInvoicesOpenCount = count);
+  }
+
+  Future<void> _refreshHomeInvoicesCount() async {
+    try {
+      final count = await _localDocuments.openInvoiceCount(widget.businessId);
+      _applyHomeInvoicesCount(count);
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     _homeJobsCountSubscription?.cancel();
@@ -207,6 +226,7 @@ class _ShellScreenState extends State<ShellScreen> {
     _homeCustomersTableSubscription?.cancel();
     _homeCustomersSyncSubscription?.cancel();
     _homeEstimatesCountSubscription?.cancel();
+    _homeInvoicesCountSubscription?.cancel();
     _homeDocumentsSyncSubscription?.cancel();
     super.dispose();
   }
@@ -303,6 +323,7 @@ class _ShellScreenState extends State<ShellScreen> {
           appointmentsCount: _homeAppointmentsCount,
           customersNewCount: _homeCustomersNewCount,
           estimatesOpenCount: _homeEstimatesOpenCount,
+          invoicesOpenCount: _homeInvoicesOpenCount,
         );
       }
       return _lazyPages.putIfAbsent(index, () {
