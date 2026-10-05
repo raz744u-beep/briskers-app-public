@@ -91,6 +91,7 @@ class _ShellScreenState extends State<ShellScreen> {
         _refreshHomeAppointmentsCount();
       }
     });
+    unawaited(_refreshNavCounts());
   }
 
   void _applyHomeJobsCount(int count) {
@@ -156,7 +157,12 @@ class _ShellScreenState extends State<ShellScreen> {
         customersSince: customersSince,
       );
       if (!mounted) return;
-      setState(() => _navCounts = counts);
+      final customerCount =
+          int.tryParse(counts['customers']?.toString() ?? '') ?? 0;
+      setState(() {
+        _navCounts = Map<String, dynamic>.from(_navCounts)
+          ..['customers'] = customerCount;
+      });
     } catch (_) {}
   }
 
@@ -252,6 +258,8 @@ class _ShellScreenState extends State<ShellScreen> {
           roleCode: widget.roleCode,
           jobsCount: _homeJobsCount,
           appointmentsCount: _homeAppointmentsCount,
+          customersNewCount:
+              int.tryParse(_navCounts['customers']?.toString() ?? '') ?? 0,
         );
       }
       return _lazyPages.putIfAbsent(index, () {
