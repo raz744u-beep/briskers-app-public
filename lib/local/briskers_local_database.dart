@@ -326,6 +326,7 @@ class LocalDocuments extends Table {
   TextColumn get kind => text()();
   TextColumn get documentNumber => text().nullable()();
   TextColumn get status => text().nullable()();
+  TextColumn get displayStatusCode => text().nullable()();
   BoolColumn get converted => boolean().withDefault(const Constant(false))();
   RealColumn get total => real().withDefault(const Constant(0))();
   DateTimeColumn get createdAt => dateTime().nullable()();
@@ -393,7 +394,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 12;
+  int get schemaVersion => 13;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -480,6 +481,12 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
             await migrator.addColumn(
               localDocuments,
               localDocuments.converted,
+            );
+          }
+          if (from < 13) {
+            await migrator.addColumn(
+              localDocuments,
+              localDocuments.displayStatusCode,
             );
           }
         },
