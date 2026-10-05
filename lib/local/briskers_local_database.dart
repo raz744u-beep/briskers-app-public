@@ -51,6 +51,7 @@ class LocalCustomers extends Table {
   TextColumn get problemFlagNote => text().nullable()();
   TextColumn get contactsJson =>
       text().withDefault(const Constant('[]'))();
+  DateTimeColumn get createdAt => dateTime().nullable()();
   DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
   IntColumn get rowVersion => integer().nullable()();
   TextColumn get syncState =>
@@ -391,7 +392,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -467,6 +468,12 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
             await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_number ON local_documents (business_id, document_number)');
             await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_job ON local_documents (business_id, job_id)');
             await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_customer ON local_documents (business_id, customer_id)');
+          }
+          if (from < 11) {
+            await migrator.addColumn(
+              localCustomers,
+              localCustomers.createdAt,
+            );
           }
         },
       );
