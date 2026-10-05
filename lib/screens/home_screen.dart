@@ -16,6 +16,7 @@ class HomeScreen extends StatefulWidget {
     required this.roleCode,
     required this.jobsCount,
     this.appointmentsCount = 0,
+    this.customersNewCount = 0,
   });
 
   final VoidCallback onCustomersTap;
@@ -27,6 +28,7 @@ class HomeScreen extends StatefulWidget {
   final String roleCode;
   final int jobsCount;
   final int appointmentsCount;
+  final int customersNewCount;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -161,6 +163,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onMoreTap: widget.onMoreTap,
               jobsCount: widget.jobsCount,
               appointmentsCount: widget.appointmentsCount,
+              customersNewCount: widget.customersNewCount,
             ),
             const SizedBox(height: 24),
           ],
@@ -231,6 +234,7 @@ class _HomeTiles extends StatelessWidget {
     required this.onMoreTap,
     required this.jobsCount,
     required this.appointmentsCount,
+    required this.customersNewCount,
   });
 
   final bool customersExpanded;
@@ -242,6 +246,7 @@ class _HomeTiles extends StatelessWidget {
   final VoidCallback onMoreTap;
   final int jobsCount;
   final int appointmentsCount;
+  final int customersNewCount;
 
   Widget _tile(
     String label,
@@ -314,7 +319,7 @@ class _HomeTiles extends StatelessWidget {
       child: Column(
         children: [
           row(
-            _tile('Customers', '0 Total', Icons.people_outline,
+            _tile('Customers', '$customersNewCount New', Icons.people_outline,
                 BriskersColors.customers, onCustomersTap),
             _tile('Appointments', '$appointmentsCount Today', Icons.calendar_month_outlined,
                 BriskersColors.appointments, onAppointmentsTap),
