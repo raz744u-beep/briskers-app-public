@@ -8,7 +8,9 @@ import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
 import '../services/briskers_api.dart';
+import '../services/appointment_sync_service.dart';
 import '../services/job_sync_service.dart';
+import '../services/local_appointment_repository.dart';
 import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
 import 'appointments_screen.dart';
@@ -57,9 +59,14 @@ class _ShellScreenState extends State<ShellScreen> {
   late String _businessName;
   final Map<int, Widget> _lazyPages = {};
   final LocalJobRepository _localJobs = LocalJobRepository();
+  final LocalAppointmentRepository _localAppointments =
+      LocalAppointmentRepository();
   int _homeJobsCount = 0;
+  int _homeAppointmentsCount = 0;
   StreamSubscription<int>? _homeJobsCountSubscription;
   StreamSubscription<String>? _homeJobsSyncSubscription;
+  StreamSubscription<int>? _homeAppointmentsCountSubscription;
+  StreamSubscription<String>? _homeAppointmentsSyncSubscription;
 
   @override
   void initState() {
@@ -72,6 +79,16 @@ class _ShellScreenState extends State<ShellScreen> {
     _homeJobsSyncSubscription = JobSyncService.syncEvents.listen((businessId) {
       if (businessId == widget.businessId) {
         _refreshHomeJobsCount();
+      }
+    });
+    _refreshHomeAppointmentsCount();
+    _homeAppointmentsCountSubscription = _localAppointments
+        .watchConfirmedTodayCount(widget.businessId)
+        .listen(_applyHomeAppointmentsCount);
+    _homeAppointmentsSyncSubscription =
+        AppointmentSyncService.syncEvents.listen((businessId) {
+      if (businessId == widget.businessId) {
+        _refreshHomeAppointmentsCount();
       }
     });
   }
@@ -95,10 +112,32 @@ class _ShellScreenState extends State<ShellScreen> {
     } catch (_) {}
   }
 
+  void _applyHomeAppointmentsCount(int count) {
+    if (!mounted) return;
+    final navCount =
+        int.tryParse(_navCounts['appointments']?.toString() ?? '') ?? 0;
+    if (count == _homeAppointmentsCount && count == navCount) return;
+    setState(() {
+      _homeAppointmentsCount = count;
+      _navCounts = Map<String, dynamic>.from(_navCounts)
+        ..['appointments'] = count;
+    });
+  }
+
+  Future<void> _refreshHomeAppointmentsCount() async {
+    try {
+      final count =
+          await _localAppointments.confirmedTodayCount(widget.businessId);
+      _applyHomeAppointmentsCount(count);
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     _homeJobsCountSubscription?.cancel();
     _homeJobsSyncSubscription?.cancel();
+    _homeAppointmentsCountSubscription?.cancel();
+    _homeAppointmentsSyncSubscription?.cancel();
     super.dispose();
   }
 
@@ -212,6 +251,7 @@ class _ShellScreenState extends State<ShellScreen> {
           businessId: widget.businessId,
           roleCode: widget.roleCode,
           jobsCount: _homeJobsCount,
+          appointmentsCount: _homeAppointmentsCount,
         );
       }
       return _lazyPages.putIfAbsent(index, () {
