@@ -175,6 +175,35 @@ class LocalJobRepository {
         .map((row) => row.read<int>('count'));
   }
 
+  Future<int> activeJobCount(String businessId) async {
+    final row = await _database.customSelect(
+      '''
+      SELECT COUNT(*) AS count
+      FROM local_jobs
+      WHERE business_id = ?
+        AND status NOT IN ('completed', 'cancelled')
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).getSingle();
+    return row.read<int>('count');
+  }
+
+  Stream<int> watchActiveJobCount(String businessId) {
+    return _database
+        .customSelect(
+          '''
+          SELECT COUNT(*) AS count
+          FROM local_jobs
+          WHERE business_id = ?
+            AND status NOT IN ('completed', 'cancelled')
+          ''',
+          variables: [Variable<String>(businessId)],
+          readsFrom: {_database.localJobs},
+        )
+        .watchSingle()
+        .map((row) => row.read<int>('count'));
+  }
+
   Future<Map<String, int>> jobStatusCounts(String businessId) async {
     final rows = await _database.customSelect(
       '''
