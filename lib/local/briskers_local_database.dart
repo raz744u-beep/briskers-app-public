@@ -394,7 +394,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -487,6 +487,11 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
             await migrator.addColumn(
               localDocuments,
               localDocuments.displayStatusCode,
+            );
+          }
+          if (from < 14) {
+            await customStatement(
+              "UPDATE local_sync_states SET last_server_cursor = 0 WHERE scope = 'documents'",
             );
           }
         },
