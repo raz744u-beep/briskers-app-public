@@ -102,7 +102,7 @@ class LocalDocumentRepository {
       WHERE business_id = ?
         AND kind = 'estimate'
         AND converted = 0
-        AND COALESCE(status, '') NOT IN ('Declined', 'Expired', 'Void')
+        AND lower(COALESCE(status, '')) NOT IN ('accepted', 'declined', 'expired', 'void')
       ''',
       variables: [Variable<String>(businessId)],
     ).getSingle();
@@ -118,7 +118,7 @@ class LocalDocumentRepository {
           WHERE business_id = ?
             AND kind = 'estimate'
             AND converted = 0
-            AND COALESCE(status, '') NOT IN ('Declined', 'Expired', 'Void')
+            AND lower(COALESCE(status, '')) NOT IN ('accepted', 'declined', 'expired', 'void')
           ''',
           variables: [Variable<String>(businessId)],
           readsFrom: {_database.localDocuments},
