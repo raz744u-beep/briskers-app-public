@@ -6,6 +6,7 @@ import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
 import '../services/briskers_api.dart';
+import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
 import 'appointments_screen.dart';
 import 'customers/customers_screen.dart';
@@ -52,11 +53,26 @@ class _ShellScreenState extends State<ShellScreen> {
   };
   late String _businessName;
   final Map<int, Widget> _lazyPages = {};
+  final LocalJobRepository _localJobs = LocalJobRepository();
+  int _homeJobsCount = 0;
 
   @override
   void initState() {
     super.initState();
     _businessName = widget.businessName;
+    _loadLocalHomeJobsCount();
+  }
+
+  Future<void> _loadLocalHomeJobsCount() async {
+    try {
+      final rows = await _localJobs.listJobs(widget.businessId, limit: 500);
+      final count = rows.where((job) => job['status']?.toString() == 'in_progress').length;
+      if (!mounted) return;
+      setState(() {
+        _homeJobsCount = count;
+        _lazyPages.remove(0);
+      });
+    } catch (_) {}
   }
 
   String get _customersViewedKey =>
@@ -170,6 +186,7 @@ class _ShellScreenState extends State<ShellScreen> {
               onMoreTap: () => _goTo(5),
               businessId: widget.businessId,
               roleCode: widget.roleCode,
+              jobsCount: _homeJobsCount,
             );
           case 1:
             return CustomersScreen(
@@ -186,7 +203,10 @@ class _ShellScreenState extends State<ShellScreen> {
               businessId: widget.businessId,
               roleCode: widget.roleCode,
               refreshToken: _jobsRefreshToken,
-              onJobsChanged: _refreshNavCounts,
+              onJobsChanged: () {
+                _refreshNavCounts();
+                _loadLocalHomeJobsCount();
+              },
               jobDetailBottomNavigationBar: _shellNavigationBar(),
             );
           case 4:
