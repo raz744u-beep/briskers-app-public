@@ -8,6 +8,7 @@ import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
 import '../services/briskers_api.dart';
+import '../services/job_sync_service.dart';
 import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
 import 'appointments_screen.dart';
@@ -58,25 +59,42 @@ class _ShellScreenState extends State<ShellScreen> {
   final LocalJobRepository _localJobs = LocalJobRepository();
   int _homeJobsCount = 0;
   StreamSubscription<int>? _homeJobsCountSubscription;
+  StreamSubscription<String>? _homeJobsSyncSubscription;
 
   @override
   void initState() {
     super.initState();
     _businessName = widget.businessName;
+    _refreshHomeJobsCount();
     _homeJobsCountSubscription = _localJobs
         .watchJobCount(widget.businessId, status: 'in_progress')
-        .listen((count) {
-      if (!mounted || count == _homeJobsCount) return;
-      setState(() {
-        _homeJobsCount = count;
-        _lazyPages.remove(0);
-      });
+        .listen(_applyHomeJobsCount);
+    _homeJobsSyncSubscription = JobSyncService.syncEvents.listen((businessId) {
+      if (businessId == widget.businessId) {
+        _refreshHomeJobsCount();
+      }
     });
+  }
+
+  void _applyHomeJobsCount(int count) {
+    if (!mounted || count == _homeJobsCount) return;
+    setState(() => _homeJobsCount = count);
+  }
+
+  Future<void> _refreshHomeJobsCount() async {
+    try {
+      final count = await _localJobs.jobCount(
+        widget.businessId,
+        status: 'in_progress',
+      );
+      _applyHomeJobsCount(count);
+    } catch (_) {}
   }
 
   @override
   void dispose() {
     _homeJobsCountSubscription?.cancel();
+    _homeJobsSyncSubscription?.cancel();
     super.dispose();
   }
 
@@ -180,19 +198,20 @@ class _ShellScreenState extends State<ShellScreen> {
     final roleStyle = employeeRoleStyle(_roleLabel);
     final pageTitles = ['Home', tr('customers'), tr('appointments'), tr('jobs'), tr('invoices'), tr('more')];
     Widget buildPage(int index) {
+      if (index == 0) {
+        return HomeScreen(
+          onCustomersTap: () => _goTo(1),
+          onAppointmentsTap: () => _goTo(2),
+          onJobsTap: () => _goTo(3),
+          onInvoicesTap: () => _goTo(4),
+          onMoreTap: () => _goTo(5),
+          businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          jobsCount: _homeJobsCount,
+        );
+      }
       return _lazyPages.putIfAbsent(index, () {
         switch (index) {
-          case 0:
-            return HomeScreen(
-              onCustomersTap: () => _goTo(1),
-              onAppointmentsTap: () => _goTo(2),
-              onJobsTap: () => _goTo(3),
-              onInvoicesTap: () => _goTo(4),
-              onMoreTap: () => _goTo(5),
-              businessId: widget.businessId,
-              roleCode: widget.roleCode,
-              jobsCount: _homeJobsCount,
-            );
           case 1:
             return CustomersScreen(
               businessId: widget.businessId,
