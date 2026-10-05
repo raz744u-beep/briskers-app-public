@@ -45,6 +45,7 @@ class _JobsScreenState extends State<JobsScreen> {
   List<Map<String, dynamic>> _statuses = const [];
   String? _selectedStatus;
   final TextEditingController _search = TextEditingController();
+  Timer? _searchDebounce;
   int _totalCount = 0;
   Map<String, int> _statusCounts = const {};
   List<Map<String, dynamic>> _documentMatches = const [];
@@ -66,6 +67,7 @@ class _JobsScreenState extends State<JobsScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _search.dispose();
     super.dispose();
   }
@@ -179,6 +181,16 @@ class _JobsScreenState extends State<JobsScreen> {
     }
   }
 
+
+  void _searchChanged() {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 300),
+      () {
+        if (mounted) _load();
+      },
+    );
+  }
 
   Future<void> _openDocument(Map<String, dynamic> document) async {
     final id = document['id']?.toString() ?? '';
@@ -480,13 +492,14 @@ class _JobsScreenState extends State<JobsScreen> {
                 const SizedBox(height: 8),
                 SearchBar(
                   controller: _search,
-                  hintText: 'Search customer, job, vehicle, VIN or plate',
+                  hintText: 'Search job, customer, vehicle, VIN, plate or invoice #',
                   leading: const Icon(Icons.search),
                   trailing: [
                     if (_search.text.isNotEmpty)
                       IconButton(
                         tooltip: 'Clear',
                         onPressed: () {
+                                _searchDebounce?.cancel();
                                 _search.clear();
                                 setState(() {});
                                 _load();
@@ -496,7 +509,7 @@ class _JobsScreenState extends State<JobsScreen> {
                   ],
                   onChanged: (_) {
                     setState(() {});
-                    _load();
+                    _searchChanged();
                   },
                 ),
 
