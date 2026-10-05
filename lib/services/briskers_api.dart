@@ -627,6 +627,20 @@ class BriskersApi {
         .toList();
   }
 
+  Future<Map<String, dynamic>> customerFinancialHistory(
+    String businessId,
+    String customerId,
+  ) async {
+    final result = await supabase.rpc(
+      'briskers_customer_financial_history',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>?> customerAccountContext(
     String businessId,
     String customerId,
