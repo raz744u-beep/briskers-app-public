@@ -50,6 +50,13 @@ class _HomeScreenState extends State<HomeScreen> {
   final LocalJobRepository _localJobs = LocalJobRepository();
 
   String? _expandedSection;
+  final Map<String, GlobalKey> _drawerKeys = {
+    'customers': GlobalKey(),
+    'appointments': GlobalKey(),
+    'estimates': GlobalKey(),
+    'invoices': GlobalKey(),
+    'expenses': GlobalKey(),
+  };
 
   bool get _canManage =>
       widget.roleCode == 'owner' ||
@@ -67,8 +74,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _toggleSection(String section) {
+    final opening = _expandedSection != section;
     setState(() {
-      _expandedSection = _expandedSection == section ? null : section;
+      _expandedSection = opening ? section : null;
+    });
+
+    if (!opening) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final drawerContext = _drawerKeys[section]?.currentContext;
+      if (drawerContext == null) return;
+      Scrollable.ensureVisible(
+        drawerContext,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+        alignment: 0.52,
+      );
     });
   }
 
@@ -547,7 +568,9 @@ class _HomeScreenState extends State<HomeScreen> {
             _HomeTiles(
               expandedSection: _expandedSection,
               onToggle: _toggleSection,
-              customersDrawer: _ActionDrawer(
+              customersDrawer: KeyedSubtree(
+                key: _drawerKeys['customers'],
+                child: _ActionDrawer(
                 color: BriskersColors.customers,
                 actions: [
                   _DrawerAction(
@@ -570,8 +593,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     },
                   ),
                 ],
+                ),
               ),
-              appointmentsDrawer: _ActionDrawer(
+              appointmentsDrawer: KeyedSubtree(
+                key: _drawerKeys['appointments'],
+                child: _ActionDrawer(
                 color: BriskersColors.appointments,
                 actions: [
                   _DrawerAction(
@@ -586,8 +612,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       onTap: _newAppointment,
                     ),
                 ],
+                ),
               ),
-              estimatesDrawer: _ActionDrawer(
+              estimatesDrawer: KeyedSubtree(
+                key: _drawerKeys['estimates'],
+                child: _ActionDrawer(
                 color: BriskersColors.estimates,
                 actions: [
                   if (_canManage)
@@ -614,8 +643,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     onTap: _viewEstimates,
                   ),
                 ],
+                ),
               ),
-              invoicesDrawer: _ActionDrawer(
+              invoicesDrawer: KeyedSubtree(
+                key: _drawerKeys['invoices'],
+                child: _ActionDrawer(
                 color: BriskersColors.invoices,
                 actions: [
                   if (_canManage)
@@ -630,8 +662,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     onTap: widget.onInvoicesTap,
                   ),
                 ],
+                ),
               ),
-              expensesDrawer: _ActionDrawer(
+              expensesDrawer: KeyedSubtree(
+                key: _drawerKeys['expenses'],
+                child: _ActionDrawer(
                 color: BriskersColors.expenses,
                 actions: [
                   if (_canManage)
@@ -658,6 +693,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     onTap: _viewExpenses,
                   ),
                 ],
+                ),
               ),
               onJobsTap: widget.onJobsTap,
               onMoreTap: widget.onMoreTap,
