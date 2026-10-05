@@ -3161,6 +3161,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           transactionId: transactionId,
           allowRecurring:
               widget.roleCode == 'owner' || widget.roleCode == 'manager',
+          canDeleteTransaction: widget.roleCode == 'owner',
         ),
       ),
     );
