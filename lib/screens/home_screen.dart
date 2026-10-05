@@ -327,7 +327,7 @@ class _HomeTiles extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           row(
-            _tile('Jobs', '$jobsCount In Progress', Icons.build_outlined,
+            _tile('Jobs', '$jobsCount Active', Icons.build_outlined,
                 BriskersColors.jobs, onJobsTap),
             _tile('Expenses', '0 Today', Icons.payments_outlined,
                 BriskersColors.expenses, onMoreTap),
