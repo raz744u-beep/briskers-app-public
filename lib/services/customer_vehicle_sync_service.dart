@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
@@ -14,6 +15,10 @@ class CustomerVehicleSyncService {
         _database = database ?? localDatabase;
 
   static const _scope = 'customers_vehicles';
+  static final StreamController<String> _syncEvents =
+      StreamController<String>.broadcast();
+
+  static Stream<String> get syncEvents => _syncEvents.stream;
 
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
@@ -43,6 +48,7 @@ class CustomerVehicleSyncService {
 
     if (!bootstrapped) {
       await _bootstrap(businessId);
+      _syncEvents.add(businessId);
       return;
     }
 
@@ -66,6 +72,7 @@ class CustomerVehicleSyncService {
               error: null,
             );
           });
+          _syncEvents.add(businessId);
           return;
         }
 
@@ -109,6 +116,7 @@ class CustomerVehicleSyncService {
 
         pageCursor = nextCursor;
       }
+      _syncEvents.add(businessId);
     } catch (error) {
       await _writeSyncState(
         businessId,
@@ -229,9 +237,9 @@ class CustomerVehicleSyncService {
         email, phone, list_email, list_phone,
         billing_address_json, taxable,
         problem_flag, problem_flag_note, contacts_json,
-        server_updated_at, row_version, sync_state
+        created_at, server_updated_at, row_version, sync_state
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced'
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced'
       )
       ON CONFLICT(id) DO UPDATE SET
         business_id=excluded.business_id,
@@ -246,6 +254,7 @@ class CustomerVehicleSyncService {
         problem_flag=excluded.problem_flag,
         problem_flag_note=excluded.problem_flag_note,
         contacts_json=excluded.contacts_json,
+        created_at=coalesce(local_customers.created_at, excluded.created_at),
         server_updated_at=excluded.server_updated_at,
         row_version=excluded.row_version,
         sync_state='synced'
@@ -268,6 +277,7 @@ class CustomerVehicleSyncService {
         customer['problem_flag'] == true ? 1 : 0,
         _text(customer['problem_flag_note']),
         jsonEncode(contacts),
+        _unix(_date(customer['created_at'])),
         _unix(_date(customer['updated_at'])),
         _int(customer['row_version']),
       ],
