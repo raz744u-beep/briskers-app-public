@@ -13,6 +13,7 @@ import 'jobs/blank_invoice_setup_screen.dart';
 import 'jobs/estimate_job_setup_screen.dart';
 import 'jobs/identifix_estimate_import_screen.dart';
 import 'jobs/job_document_screen.dart';
+import 'jobs/job_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -53,6 +54,9 @@ class _HomeScreenState extends State<HomeScreen> {
   final LocalJobRepository _localJobs = LocalJobRepository();
 
   String? _expandedSection;
+  Map<String, dynamic> _attention = const {};
+  bool _attentionLoading = false;
+
   final Map<String, GlobalKey> _drawerKeys = {
     'customers': GlobalKey(),
     'appointments': GlobalKey(),
@@ -61,6 +65,24 @@ class _HomeScreenState extends State<HomeScreen> {
     'expenses': GlobalKey(),
   };
 
+  @override
+  void initState() {
+    super.initState();
+    _loadAttention();
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.roleCode != widget.roleCode ||
+        oldWidget.jobsCount != widget.jobsCount ||
+        oldWidget.appointmentsCount != widget.appointmentsCount ||
+        oldWidget.invoicesOpenCount != widget.invoicesOpenCount) {
+      _loadAttention();
+    }
+  }
+
   bool get _canManage =>
       widget.roleCode == 'owner' ||
       widget.roleCode == 'manager' ||
@@ -68,6 +90,308 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool get _allowRecurring =>
       widget.roleCode == 'owner' || widget.roleCode == 'manager';
+
+  int _attentionCount(String key) {
+    final counts = _attention['counts'];
+    if (counts is! Map) return 0;
+    return int.tryParse(counts[key]?.toString() ?? '') ?? 0;
+  }
+
+  List<Map<String, dynamic>> _attentionItems(String key) {
+    final raw = _attention[key];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
+  Future<void> _loadAttention() async {
+    if (_attentionLoading) return;
+    _attentionLoading = true;
+    try {
+      final data = await _api.needsAttention(widget.businessId);
+      if (!mounted) return;
+      setState(() => _attention = data);
+    } catch (_) {
+      // Keep the last good snapshot so Home remains usable offline.
+    } finally {
+      _attentionLoading = false;
+    }
+  }
+
+  String _attentionTitle(String key) {
+    switch (key) {
+      case 'appointment_requests':
+        return 'Appointment Requests';
+      case 'pending_close_invoices':
+        return 'Pending Close Invoices';
+      case 'unassigned_jobs':
+        return 'Unassigned Jobs';
+      case 'unread_messages':
+        return 'Unread Messages';
+      default:
+        return 'Needs Attention';
+    }
+  }
+
+  IconData _attentionIcon(String key) {
+    switch (key) {
+      case 'appointment_requests':
+        return Icons.calendar_month_outlined;
+      case 'pending_close_invoices':
+        return Icons.receipt_long_outlined;
+      case 'unassigned_jobs':
+        return Icons.build_outlined;
+      case 'unread_messages':
+        return Icons.chat_bubble_outline;
+      default:
+        return Icons.warning_amber_rounded;
+    }
+  }
+
+  Future<void> _openAttentionJob(Map<String, dynamic> item) async {
+    final id = item['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDetailScreen(
+          businessId: widget.businessId,
+          jobId: id,
+          roleCode: widget.roleCode,
+        ),
+      ),
+    );
+    await _loadAttention();
+  }
+
+  Future<void> _showAttentionCategory(String key) async {
+    if (key == 'unread_messages') {
+      final count = _attentionCount(key);
+      if (count <= 0) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Chat read/unread tracking will be connected when the Chat section is built.',
+            ),
+          ),
+        );
+        return;
+      }
+      widget.onMoreTap();
+      return;
+    }
+
+    final items = _attentionItems(key);
+    if (items.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No ${_attentionTitle(key).toLowerCase()} right now.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(sheetContext).height * 0.72,
+          child: Column(
+            children: [
+              ListTile(
+                leading: Icon(_attentionIcon(key)),
+                title: Text(
+                  _attentionTitle(key),
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                trailing: Text(
+                  '${_attentionCount(key)}',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: items.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (_, index) {
+                    final item = items[index];
+
+                    if (key == 'appointment_requests') {
+                      final customer =
+                          item['customer_name']?.toString() ?? 'Customer';
+                      final vehicle = item['vehicle']?.toString() ?? '';
+                      final description =
+                          item['description']?.toString() ?? '';
+                      final preferred = DateTime.tryParse(
+                        item['preferred_start']?.toString() ?? '',
+                      )?.toLocal();
+                      final date = preferred == null
+                          ? ''
+                          : DateFormat('MMM d, yyyy • h:mm a')
+                              .format(preferred);
+                      return ListTile(
+                        leading: const Icon(Icons.pending_actions_outlined),
+                        title: Text(customer),
+                        subtitle: Text(
+                          <String>[
+                            if (vehicle.isNotEmpty) vehicle,
+                            if (date.isNotEmpty) date,
+                            if (description.isNotEmpty) description,
+                          ].join(' • '),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          widget.onAppointmentsTap();
+                        },
+                      );
+                    }
+
+                    if (key == 'pending_close_invoices') {
+                      final number =
+                          item['document_number']?.toString() ?? '';
+                      final customer =
+                          item['customer_name']?.toString() ?? 'Customer';
+                      final vehicle = item['vehicle']?.toString() ?? '';
+                      final job = item['job_number']?.toString() ?? '';
+                      return ListTile(
+                        leading: const Icon(
+                          Icons.receipt_long_outlined,
+                          color: BriskersColors.invoices,
+                        ),
+                        title: Text(
+                          number.isEmpty ? 'Invoice' : 'Invoice #$number',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          <String>[
+                            customer,
+                            if (vehicle.isNotEmpty) vehicle,
+                            if (job.isNotEmpty) 'Job $job',
+                          ].join(' • '),
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () async {
+                          Navigator.pop(sheetContext);
+                          final id = item['id']?.toString() ?? '';
+                          if (id.isNotEmpty) await _openDocument(id);
+                        },
+                      );
+                    }
+
+                    final number = item['job_number']?.toString() ?? '';
+                    final customer =
+                        item['customer_name']?.toString() ?? 'Customer';
+                    final vehicle = item['vehicle']?.toString() ?? '';
+                    final title = item['title']?.toString() ?? '';
+                    return ListTile(
+                      leading: const Icon(
+                        Icons.build_outlined,
+                        color: BriskersColors.jobs,
+                      ),
+                      title: Text(
+                        <String>[
+                          if (number.isNotEmpty) number,
+                          customer,
+                        ].join(' • '),
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      subtitle: Text(
+                        <String>[
+                          if (vehicle.isNotEmpty) vehicle,
+                          if (title.isNotEmpty) title,
+                        ].join(' • '),
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () async {
+                        Navigator.pop(sheetContext);
+                        await _openAttentionJob(item);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showAllAttention() async {
+    final categories = <String>[
+      'appointment_requests',
+      'pending_close_invoices',
+      'unassigned_jobs',
+      'unread_messages',
+    ];
+
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text(
+                'Needs Attention',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            ...categories.map(
+              (key) => ListTile(
+                leading: Icon(_attentionIcon(key)),
+                title: Text(_attentionTitle(key)),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${_attentionCount(key)}',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        color: _attentionCount(key) > 0
+                            ? const Color(0xFFC62828)
+                            : const Color(0xFF667085),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
+                onTap: () => Navigator.pop(sheetContext, key),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted || selected == null) return;
+    await _showAttentionCategory(selected);
+  }
 
   String _greeting() {
     final hour = DateTime.now().hour;
@@ -252,6 +576,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+    await _loadAttention();
   }
 
   Future<void> _createEstimate() async {
@@ -638,7 +963,25 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            const _NeedsAttentionPanel(),
+            _NeedsAttentionPanel(
+              appointmentRequests:
+                  _attentionCount('appointment_requests'),
+              pendingCloseInvoices:
+                  _attentionCount('pending_close_invoices'),
+              unassignedJobs:
+                  _attentionCount('unassigned_jobs'),
+              unreadMessages:
+                  _attentionCount('unread_messages'),
+              onAppointmentRequests: () =>
+                  _showAttentionCategory('appointment_requests'),
+              onPendingCloseInvoices: () =>
+                  _showAttentionCategory('pending_close_invoices'),
+              onUnassignedJobs: () =>
+                  _showAttentionCategory('unassigned_jobs'),
+              onUnreadMessages: () =>
+                  _showAttentionCategory('unread_messages'),
+              onViewAll: _showAllAttention,
+            ),
             const SizedBox(height: 8),
             _HomeTiles(
               expandedSection: _expandedSection,
@@ -787,31 +1130,73 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class _NeedsAttentionPanel extends StatelessWidget {
-  const _NeedsAttentionPanel();
+  const _NeedsAttentionPanel({
+    required this.appointmentRequests,
+    required this.pendingCloseInvoices,
+    required this.unassignedJobs,
+    required this.unreadMessages,
+    required this.onAppointmentRequests,
+    required this.onPendingCloseInvoices,
+    required this.onUnassignedJobs,
+    required this.onUnreadMessages,
+    required this.onViewAll,
+  });
+
+  final int appointmentRequests;
+  final int pendingCloseInvoices;
+  final int unassignedJobs;
+  final int unreadMessages;
+  final VoidCallback onAppointmentRequests;
+  final VoidCallback onPendingCloseInvoices;
+  final VoidCallback onUnassignedJobs;
+  final VoidCallback onUnreadMessages;
+  final VoidCallback onViewAll;
 
   @override
   Widget build(BuildContext context) {
-    Widget item(IconData icon, String count, String label) => Expanded(
-          child: Column(
-            children: [
-              Icon(icon, size: 24, color: const Color(0xFF344054)),
-              const SizedBox(height: 3),
-              Text(
-                count,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
+    Widget item(
+      IconData icon,
+      int count,
+      String label,
+      VoidCallback onTap,
+    ) =>
+        Expanded(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Column(
+                children: [
+                  Icon(
+                    icon,
+                    size: 24,
+                    color: count > 0
+                        ? const Color(0xFFC62828)
+                        : const Color(0xFF344054),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '$count',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: count > 0
+                          ? const Color(0xFFC62828)
+                          : const Color(0xFF101828),
+                    ),
+                  ),
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF475467),
+                    ),
+                  ),
+                ],
               ),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: Color(0xFF475467),
-                ),
-              ),
-            ],
+            ),
           ),
         );
 
@@ -835,7 +1220,7 @@ class _NeedsAttentionPanel extends StatelessWidget {
               ),
               const Spacer(),
               TextButton(
-                onPressed: () {},
+                onPressed: onViewAll,
                 child: const Text('View All'),
               ),
             ],
@@ -844,8 +1229,9 @@ class _NeedsAttentionPanel extends StatelessWidget {
             children: [
               item(
                 Icons.calendar_month_outlined,
-                '0',
+                appointmentRequests,
                 'Appointment\nRequests',
+                onAppointmentRequests,
               ),
               const SizedBox(
                 height: 58,
@@ -853,22 +1239,29 @@ class _NeedsAttentionPanel extends StatelessWidget {
               ),
               item(
                 Icons.receipt_long_outlined,
-                '0',
+                pendingCloseInvoices,
                 'Pending Close\nInvoices',
+                onPendingCloseInvoices,
               ),
               const SizedBox(
                 height: 58,
                 child: VerticalDivider(width: 1),
               ),
-              item(Icons.build_outlined, '0', 'Unassigned\nJobs'),
+              item(
+                Icons.build_outlined,
+                unassignedJobs,
+                'Unassigned\nJobs',
+                onUnassignedJobs,
+              ),
               const SizedBox(
                 height: 58,
                 child: VerticalDivider(width: 1),
               ),
               item(
                 Icons.chat_bubble_outline,
-                '0',
+                unreadMessages,
                 'Unread\nMessages',
+                onUnreadMessages,
               ),
             ],
           ),
