@@ -8,6 +8,7 @@ import '../core/supabase_config.dart';
 import '../services/briskers_api.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/customer_vehicle_sync_service.dart';
+import '../services/document_index_sync_service.dart';
 import '../services/job_sync_service.dart';
 import '../services/offline_preinspection_service.dart';
 import '../services/offline_work_findings_service.dart';
@@ -28,6 +29,7 @@ class _BusinessGateState extends State<BusinessGate> {
       AppointmentSyncService();
   final CustomerVehicleSyncService _customerVehicleSync =
       CustomerVehicleSyncService();
+  final DocumentIndexSyncService _documentSync = DocumentIndexSyncService();
   final OfflinePreInspectionService _offlineInspection =
       OfflinePreInspectionService();
   final OfflineWorkFindingsService _offlineWorkFindings =
@@ -201,6 +203,12 @@ class _BusinessGateState extends State<BusinessGate> {
       await _customerVehicleSync.pull(businessId);
     } catch (_) {
       // Customer/vehicle browsing keeps the previous local snapshot.
+    }
+
+    try {
+      await _documentSync.pull(businessId);
+    } catch (_) {
+      // Estimate/invoice Home counts keep the previous local snapshot.
     }
   }
 
