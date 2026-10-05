@@ -1,16 +1,17 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
 import '../services/briskers_api.dart';
+import '../services/customer_vehicle_sync_service.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/job_sync_service.dart';
 import '../services/local_appointment_repository.dart';
+import '../services/local_customer_repository.dart';
 import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
 import 'appointments_screen.dart';
@@ -61,12 +62,16 @@ class _ShellScreenState extends State<ShellScreen> {
   final LocalJobRepository _localJobs = LocalJobRepository();
   final LocalAppointmentRepository _localAppointments =
       LocalAppointmentRepository();
+  final LocalCustomerRepository _localCustomers = LocalCustomerRepository();
   int _homeJobsCount = 0;
   int _homeAppointmentsCount = 0;
+  int _homeCustomersNewCount = 0;
   StreamSubscription<int>? _homeJobsCountSubscription;
   StreamSubscription<String>? _homeJobsSyncSubscription;
   StreamSubscription<int>? _homeAppointmentsCountSubscription;
   StreamSubscription<String>? _homeAppointmentsSyncSubscription;
+  StreamSubscription<int>? _homeCustomersTableSubscription;
+  StreamSubscription<String>? _homeCustomersSyncSubscription;
 
   @override
   void initState() {
@@ -91,7 +96,17 @@ class _ShellScreenState extends State<ShellScreen> {
         _refreshHomeAppointmentsCount();
       }
     });
-    unawaited(_refreshNavCounts());
+    _refreshHomeCustomersCount();
+    _homeCustomersTableSubscription =
+        _localCustomers.watchCustomerTotal(widget.businessId).listen((_) {
+      _refreshHomeCustomersCount();
+    });
+    _homeCustomersSyncSubscription =
+        CustomerVehicleSyncService.syncEvents.listen((businessId) {
+      if (businessId == widget.businessId) {
+        _refreshHomeCustomersCount();
+      }
+    });
   }
 
   void _applyHomeJobsCount(int count) {
@@ -133,38 +148,44 @@ class _ShellScreenState extends State<ShellScreen> {
     } catch (_) {}
   }
 
+  void _applyHomeCustomersCount(int count) {
+    if (!mounted) return;
+    final navCount =
+        int.tryParse(_navCounts['customers']?.toString() ?? '') ?? 0;
+    if (count == _homeCustomersNewCount && count == navCount) return;
+    setState(() {
+      _homeCustomersNewCount = count;
+      _navCounts = Map<String, dynamic>.from(_navCounts)
+        ..['customers'] = count;
+    });
+  }
+
+  Future<void> _refreshHomeCustomersCount() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final rawSince = prefs.getString(_customersViewedKey);
+      final since = rawSince == null ? null : DateTime.tryParse(rawSince);
+      final count = await _localCustomers.newCustomerCount(
+        widget.businessId,
+        since: since,
+      );
+      _applyHomeCustomersCount(count);
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     _homeJobsCountSubscription?.cancel();
     _homeJobsSyncSubscription?.cancel();
     _homeAppointmentsCountSubscription?.cancel();
     _homeAppointmentsSyncSubscription?.cancel();
+    _homeCustomersTableSubscription?.cancel();
+    _homeCustomersSyncSubscription?.cancel();
     super.dispose();
   }
 
   String get _customersViewedKey =>
       'briskers_customers_viewed_${widget.businessId}';
-
-  Future<void> _refreshNavCounts() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final rawSince = prefs.getString(_customersViewedKey);
-      final customersSince =
-          rawSince == null ? null : DateTime.tryParse(rawSince);
-      final counts = await _api.attentionCounts(
-        widget.businessId,
-        DateFormat('yyyy-MM-dd').format(DateTime.now()),
-        customersSince: customersSince,
-      );
-      if (!mounted) return;
-      final customerCount =
-          int.tryParse(counts['customers']?.toString() ?? '') ?? 0;
-      setState(() {
-        _navCounts = Map<String, dynamic>.from(_navCounts)
-          ..['customers'] = customerCount;
-      });
-    } catch (_) {}
-  }
 
   Future<void> _markCustomersViewed() async {
     final prefs = await SharedPreferences.getInstance();
@@ -172,12 +193,7 @@ class _ShellScreenState extends State<ShellScreen> {
       _customersViewedKey,
       DateTime.now().toUtc().toIso8601String(),
     );
-    if (!mounted) return;
-    setState(() {
-      _navCounts = Map<String, dynamic>.from(_navCounts)
-        ..['customers'] = 0;
-    });
-    await _refreshNavCounts();
+    _applyHomeCustomersCount(0);
   }
 
   void _goTo(int index) {
@@ -258,8 +274,7 @@ class _ShellScreenState extends State<ShellScreen> {
           roleCode: widget.roleCode,
           jobsCount: _homeJobsCount,
           appointmentsCount: _homeAppointmentsCount,
-          customersNewCount:
-              int.tryParse(_navCounts['customers']?.toString() ?? '') ?? 0,
+          customersNewCount: _homeCustomersNewCount,
         );
       }
       return _lazyPages.putIfAbsent(index, () {
@@ -279,9 +294,7 @@ class _ShellScreenState extends State<ShellScreen> {
               businessId: widget.businessId,
               roleCode: widget.roleCode,
               refreshToken: _jobsRefreshToken,
-              onJobsChanged: () {
-                _refreshNavCounts();
-              },
+              onJobsChanged: _refreshHomeJobsCount,
               jobDetailBottomNavigationBar: _shellNavigationBar(),
             );
           case 4:
