@@ -256,7 +256,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _createEstimate() async {
     if (!_canManage) return;
-    final job = await _chooseEstimateJob('New Estimate');
+    final job = await _chooseEstimateJob('New Blank Estimate');
     if (job == null || !mounted) return;
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;
@@ -350,8 +350,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 Icons.receipt_long_outlined,
                 color: BriskersColors.invoices,
               ),
-              title: const Text('Blank Invoice'),
-              subtitle: const Text('Choose customer and optional vehicle'),
+              title: const Text('New Blank Invoice'),
+              subtitle: const Text('Start a blank invoice and choose a customer.'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.pop(sheetContext, 'blank'),
             ),
@@ -708,7 +708,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   if (_canManage)
                     _DrawerAction(
-                      label: 'New Estimate',
+                      label: 'New Blank Estimate',
                       icon: Icons.request_quote_outlined,
                       onTap: _createEstimate,
                     ),
@@ -727,7 +727,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 actions: [
                   if (_canManage)
                     _DrawerAction(
-                      label: 'New Invoice',
+                      label: 'New Blank Invoice',
                       icon: Icons.note_add_outlined,
                       onTap: _createInvoice,
                     ),
