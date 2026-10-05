@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -15,6 +16,10 @@ class AppointmentSyncService {
         _database = database ?? localDatabase;
 
   static const _scope = 'appointments';
+  static final StreamController<String> _syncEvents =
+      StreamController<String>.broadcast();
+
+  static Stream<String> get syncEvents => _syncEvents.stream;
 
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
@@ -44,6 +49,7 @@ class AppointmentSyncService {
 
     if (!bootstrapped) {
       await _bootstrap(businessId);
+      _syncEvents.add(businessId);
       return;
     }
 
@@ -67,6 +73,7 @@ class AppointmentSyncService {
               error: null,
             );
           });
+          _syncEvents.add(businessId);
           return;
         }
 
@@ -110,6 +117,7 @@ class AppointmentSyncService {
 
         pageCursor = nextCursor;
       }
+      _syncEvents.add(businessId);
     } catch (error) {
       await _writeSyncState(
         businessId,
