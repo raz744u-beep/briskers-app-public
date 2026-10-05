@@ -440,6 +440,20 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> needsAttention(
+    String businessId, {
+    int limit = 25,
+  }) async {
+    final result = await supabase.rpc(
+      'briskers_needs_attention',
+      params: {
+        'p_business_id': businessId,
+        'p_limit': limit,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> attentionCounts(
     String businessId,
     String day, {
