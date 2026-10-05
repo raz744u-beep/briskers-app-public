@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/formatters.dart';
 import '../../core/briskers_i18n.dart';
+import '../../core/connection_mode.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/local_customer_repository.dart';
@@ -57,8 +58,9 @@ class _CustomersScreenState extends State<CustomersScreen> {
   Future<void> _load({bool refreshOnline = true}) async {
     final query = _search.text.trim();
     var localAvailable = false;
+    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
-    try {
+    if (!forceOnline) try {
       final results = await Future.wait<dynamic>([
         _localCustomers.customers(
           widget.businessId,
@@ -114,7 +116,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
       if (!mounted) return;
       setState(() {
         _onlineReady = false;
-        if (localAvailable) {
+        if (localAvailable && !forceOnline) {
           _showingLocal = true;
           _error = null;
         } else {
