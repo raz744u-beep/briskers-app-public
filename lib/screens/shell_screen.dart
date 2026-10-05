@@ -7,10 +7,12 @@ import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
 import '../services/customer_vehicle_sync_service.dart';
+import '../services/document_index_sync_service.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/job_sync_service.dart';
 import '../services/local_appointment_repository.dart';
 import '../services/local_customer_repository.dart';
+import '../services/local_document_repository.dart';
 import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
 import 'appointments_screen.dart';
@@ -60,15 +62,19 @@ class _ShellScreenState extends State<ShellScreen> {
   final LocalAppointmentRepository _localAppointments =
       LocalAppointmentRepository();
   final LocalCustomerRepository _localCustomers = LocalCustomerRepository();
+  final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
   int _homeJobsCount = 0;
   int _homeAppointmentsCount = 0;
   int _homeCustomersNewCount = 0;
+  int _homeEstimatesOpenCount = 0;
   StreamSubscription<int>? _homeJobsCountSubscription;
   StreamSubscription<String>? _homeJobsSyncSubscription;
   StreamSubscription<int>? _homeAppointmentsCountSubscription;
   StreamSubscription<String>? _homeAppointmentsSyncSubscription;
   StreamSubscription<int>? _homeCustomersTableSubscription;
   StreamSubscription<String>? _homeCustomersSyncSubscription;
+  StreamSubscription<int>? _homeEstimatesCountSubscription;
+  StreamSubscription<String>? _homeDocumentsSyncSubscription;
 
   @override
   void initState() {
@@ -102,6 +108,16 @@ class _ShellScreenState extends State<ShellScreen> {
         CustomerVehicleSyncService.syncEvents.listen((businessId) {
       if (businessId == widget.businessId) {
         _refreshHomeCustomersCount();
+      }
+    });
+    _refreshHomeEstimatesCount();
+    _homeEstimatesCountSubscription = _localDocuments
+        .watchOpenEstimateCount(widget.businessId)
+        .listen(_applyHomeEstimatesCount);
+    _homeDocumentsSyncSubscription =
+        DocumentIndexSyncService.syncEvents.listen((businessId) {
+      if (businessId == widget.businessId) {
+        _refreshHomeEstimatesCount();
       }
     });
   }
@@ -170,6 +186,18 @@ class _ShellScreenState extends State<ShellScreen> {
     } catch (_) {}
   }
 
+  void _applyHomeEstimatesCount(int count) {
+    if (!mounted || count == _homeEstimatesOpenCount) return;
+    setState(() => _homeEstimatesOpenCount = count);
+  }
+
+  Future<void> _refreshHomeEstimatesCount() async {
+    try {
+      final count = await _localDocuments.openEstimateCount(widget.businessId);
+      _applyHomeEstimatesCount(count);
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     _homeJobsCountSubscription?.cancel();
@@ -178,6 +206,8 @@ class _ShellScreenState extends State<ShellScreen> {
     _homeAppointmentsSyncSubscription?.cancel();
     _homeCustomersTableSubscription?.cancel();
     _homeCustomersSyncSubscription?.cancel();
+    _homeEstimatesCountSubscription?.cancel();
+    _homeDocumentsSyncSubscription?.cancel();
     super.dispose();
   }
 
@@ -272,6 +302,7 @@ class _ShellScreenState extends State<ShellScreen> {
           jobsCount: _homeJobsCount,
           appointmentsCount: _homeAppointmentsCount,
           customersNewCount: _homeCustomersNewCount,
+          estimatesOpenCount: _homeEstimatesOpenCount,
         );
       }
       return _lazyPages.putIfAbsent(index, () {
