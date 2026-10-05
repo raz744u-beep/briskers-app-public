@@ -3765,4 +3765,17 @@ class BriskersApi {
     );
     return result.toString();
   }
+
+  Future<void> closeInvoice(
+    String businessId,
+    String invoiceId,
+  ) async {
+    await supabase.rpc(
+      'briskers_close_invoice',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+      },
+    );
+  }
 }
