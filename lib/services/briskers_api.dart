@@ -1813,7 +1813,6 @@ class BriskersApi {
           'business_id': businessId,
           'vendor_id': vendorId,
           'mime_type': mimeType,
-          'source_type': sourceType,
           'image_base64': base64Encode(bytes),
         },
       );
@@ -2553,6 +2552,7 @@ class BriskersApi {
         body: {
           'business_id': businessId,
           'mime_type': mimeType,
+          'source_type': sourceType,
           'image_base64': base64Encode(bytes),
         },
       );
