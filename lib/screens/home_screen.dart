@@ -9,6 +9,7 @@ import 'customers/new_customer_screen.dart';
 import 'documents_screen.dart';
 import 'expenses/expense_entry_screen.dart';
 import 'expenses_screen.dart';
+import 'jobs/estimate_job_setup_screen.dart';
 import 'jobs/identifix_estimate_import_screen.dart';
 import 'jobs/job_document_screen.dart';
 
@@ -155,6 +156,66 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<Map<String, dynamic>?> _chooseEstimateJob(String title) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              subtitle: const Text(
+                'Use an existing Job or create a new Pending approval Job.',
+              ),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.build_outlined,
+                color: BriskersColors.jobs,
+              ),
+              title: const Text('Existing Job'),
+              subtitle: const Text('Select one of the active jobs'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.pop(sheetContext, 'existing'),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.add_circle_outline,
+                color: BriskersColors.estimates,
+              ),
+              title: const Text('New Job for Estimate'),
+              subtitle: const Text('Select customer, vehicle and brief title'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.pop(sheetContext, 'new'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted || choice == null) return null;
+    if (choice == 'existing') {
+      return _pickActiveJob(title);
+    }
+
+    return Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EstimateJobSetupScreen(
+          businessId: widget.businessId,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openDocument(String documentId) async {
     await Navigator.push<void>(
       context,
@@ -171,7 +232,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _createEstimate() async {
     if (!_canManage) return;
-    final job = await _pickActiveJob('New Estimate');
+    final job = await _chooseEstimateJob('New Estimate');
     if (job == null || !mounted) return;
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;
@@ -188,9 +249,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _scanIdentifixEstimate() async {
+  Future<void> _scanEstimate({
+    required String sourceType,
+    required String title,
+  }) async {
     if (!_canManage) return;
-    final job = await _pickActiveJob('Scan from Identifix');
+    final job = await _chooseEstimateJob(title);
     if (job == null || !mounted) return;
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;
@@ -206,6 +270,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ? job['customer_name'].toString()
                   : 'Customer',
           vehicle: job['vehicle']?.toString() ?? '',
+          sourceType: sourceType,
         ),
       ),
     );
@@ -213,6 +278,16 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted || documentId == null || documentId.isEmpty) return;
     await _openDocument(documentId);
   }
+
+  Future<void> _scanIdentifixEstimate() => _scanEstimate(
+        sourceType: 'identifix',
+        title: 'Scan from Identifix',
+      );
+
+  Future<void> _scanHandwrittenEstimate() => _scanEstimate(
+        sourceType: 'handwritten',
+        title: 'Scan Handwritten Estimate',
+      );
 
   Future<void> _createInvoice() async {
     if (!_canManage) return;
@@ -520,6 +595,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       label: 'Scan from Identifix',
                       icon: Icons.document_scanner_outlined,
                       onTap: _scanIdentifixEstimate,
+                    ),
+                  if (_canManage)
+                    _DrawerAction(
+                      label: 'Scan Handwritten Estimate',
+                      icon: Icons.edit_note_outlined,
+                      onTap: _scanHandwrittenEstimate,
                     ),
                   if (_canManage)
                     _DrawerAction(
