@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
-import '../services/briskers_api.dart';
 import '../services/customer_vehicle_sync_service.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/job_sync_service.dart';
@@ -38,8 +37,6 @@ class ShellScreen extends StatefulWidget {
 }
 
 class _ShellScreenState extends State<ShellScreen> {
-  static const _api = BriskersApi();
-
   static const _sectionColors = [
     BriskersColors.today,
     BriskersColors.customers,
