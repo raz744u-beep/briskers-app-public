@@ -136,7 +136,7 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
-            'Create an invoice without an existing Job. Select the customer and, if applicable, a vehicle.',
+            'Start a blank invoice and choose a customer.',
             style: TextStyle(color: Color(0xFF667085)),
           ),
           const SizedBox(height: 16),
