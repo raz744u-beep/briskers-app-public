@@ -98,6 +98,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   bool get _canEditFindings => _jobCapability('edit_findings');
   bool get _canEditInspection => _jobCapability('edit_inspection');
   bool get _owner => widget.roleCode == 'owner';
+  String? _profitabilityError;
 
   @override
   void initState() {
@@ -3406,10 +3407,31 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   Widget _profitabilityDrawer() {
     final data = _profitability;
-    if (!_owner || data == null) {
+    if (!_owner) {
       return const Padding(
         padding: EdgeInsets.all(16),
-        child: Text('Profitability is not available.'),
+        child: Text('Profitability is available to the owner only.'),
+      );
+    }
+    if (data == null) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              _profitabilityError == null
+                  ? 'Profitability could not be loaded.'
+                  : 'Profitability could not be loaded.\n\n$_profitabilityError',
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _reloadProfitability,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try again'),
+            ),
+          ],
+        ),
       );
     }
 
@@ -4205,8 +4227,35 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
+  Future<void> _reloadProfitability() async {
+    if (!_owner) return;
+    try {
+      final data = await _api.jobProfitability(
+        widget.businessId,
+        widget.jobId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _profitability = data;
+        _profitabilityError = null;
+      });
+      _modalRefresh?.call();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _profitabilityError = error.toString();
+      });
+      _modalRefresh?.call();
+    }
+  }
+
   Future<void> _openSectionModal(String key) async {
     if (_job == null) return;
+
+    if (key == 'profit' && _owner) {
+      await _reloadProfitability();
+      if (!mounted) return;
+    }
 
     await showModalBottomSheet<void>(
       context: context,
