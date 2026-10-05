@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -15,6 +16,10 @@ class JobSyncService {
         _database = database ?? localDatabase;
 
   static const _scope = 'jobs';
+  static final StreamController<String> _syncEvents =
+      StreamController<String>.broadcast();
+
+  static Stream<String> get syncEvents => _syncEvents.stream;
 
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
@@ -100,6 +105,7 @@ class JobSyncService {
           hasMore = false;
         }
       }
+      _syncEvents.add(businessId);
     } catch (error) {
       await _writeSyncState(
         businessId,
