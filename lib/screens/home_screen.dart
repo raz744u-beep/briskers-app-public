@@ -942,7 +942,7 @@ class _HomeTiles extends StatelessWidget {
             ),
             _tile(
               'Invoices',
-              '$invoicesOpenCount Open',
+              '$invoicesOpenCount Not Closed',
               Icons.receipt_long_outlined,
               BriskersColors.invoices,
               () => onToggle('invoices'),
