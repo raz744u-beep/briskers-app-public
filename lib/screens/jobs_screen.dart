@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
+import '../core/connection_mode.dart';
 import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
@@ -82,8 +83,9 @@ class _JobsScreenState extends State<JobsScreen> {
 
   Future<void> _load() async {
     var localAvailable = false;
+    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
-    try {
+    if (!forceOnline) try {
       final query = _search.text.trim();
       final localResults = await Future.wait<dynamic>([
         _localJobs.listJobs(
@@ -169,7 +171,7 @@ class _JobsScreenState extends State<JobsScreen> {
       if (!mounted) return;
       setState(() {
         _onlineReady = false;
-        if (localAvailable) {
+        if (localAvailable && !forceOnline) {
           _showingLocal = true;
           _error = null;
         } else {
