@@ -14,6 +14,7 @@ class HomeScreen extends StatefulWidget {
     required this.onMoreTap,
     required this.businessId,
     required this.roleCode,
+    required this.jobsCount,
   });
 
   final VoidCallback onCustomersTap;
@@ -23,6 +24,7 @@ class HomeScreen extends StatefulWidget {
   final VoidCallback onMoreTap;
   final String businessId;
   final String roleCode;
+  final int jobsCount;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -155,6 +157,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onJobsTap: widget.onJobsTap,
               onInvoicesTap: widget.onInvoicesTap,
               onMoreTap: widget.onMoreTap,
+              jobsCount: widget.jobsCount,
             ),
             const SizedBox(height: 24),
           ],
@@ -223,6 +226,7 @@ class _HomeTiles extends StatelessWidget {
     required this.onJobsTap,
     required this.onInvoicesTap,
     required this.onMoreTap,
+    required this.jobsCount,
   });
 
   final bool customersExpanded;
@@ -232,6 +236,7 @@ class _HomeTiles extends StatelessWidget {
   final VoidCallback onJobsTap;
   final VoidCallback onInvoicesTap;
   final VoidCallback onMoreTap;
+  final int jobsCount;
 
   Widget _tile(
     String label,
@@ -322,7 +327,7 @@ class _HomeTiles extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           row(
-            _tile('Jobs', '0 In Progress', Icons.build_outlined,
+            _tile('Jobs', '$jobsCount In Progress', Icons.build_outlined,
                 BriskersColors.jobs, onJobsTap),
             _tile('Expenses', '0 Today', Icons.payments_outlined,
                 BriskersColors.expenses, onMoreTap),
