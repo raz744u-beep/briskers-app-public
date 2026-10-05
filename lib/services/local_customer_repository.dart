@@ -40,6 +40,42 @@ class LocalCustomerRepository {
     return row.read<int>('count');
   }
 
+  Future<int> newCustomerCount(
+    String businessId, {
+    required DateTime? since,
+  }) async {
+    if (since == null) return 0;
+    final row = await _database.customSelect(
+      '''
+      SELECT COUNT(*) AS count
+      FROM local_customers
+      WHERE business_id = ?
+        AND created_at IS NOT NULL
+        AND created_at > ?
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<DateTime>(since.toUtc()),
+      ],
+    ).getSingle();
+    return row.read<int>('count');
+  }
+
+  Stream<int> watchCustomerTotal(String businessId) {
+    return _database
+        .customSelect(
+          '''
+          SELECT COUNT(*) AS count
+          FROM local_customers
+          WHERE business_id = ?
+          ''',
+          variables: [Variable<String>(businessId)],
+          readsFrom: {_database.localCustomers},
+        )
+        .watchSingle()
+        .map((row) => row.read<int>('count'));
+  }
+
   Future<List<Map<String, dynamic>>> customers(
     String businessId, {
     String? search,
