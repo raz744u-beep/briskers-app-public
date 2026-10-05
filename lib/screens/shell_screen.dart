@@ -77,8 +77,15 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   void _applyHomeJobsCount(int count) {
-    if (!mounted || count == _homeJobsCount) return;
-    setState(() => _homeJobsCount = count);
+    if (!mounted) return;
+    final navCount =
+        int.tryParse(_navCounts['jobs']?.toString() ?? '') ?? 0;
+    if (count == _homeJobsCount && count == navCount) return;
+    setState(() {
+      _homeJobsCount = count;
+      _navCounts = Map<String, dynamic>.from(_navCounts)
+        ..['jobs'] = count;
+    });
   }
 
   Future<void> _refreshHomeJobsCount() async {
