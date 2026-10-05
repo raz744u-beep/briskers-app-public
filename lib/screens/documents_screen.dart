@@ -38,6 +38,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
   String? _error;
+  final TextEditingController _search = TextEditingController();
 
   bool get _estimate => widget.kind == 'estimate';
 
@@ -147,6 +148,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     unawaited(_load());
   }
 
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     try {
       final results = await Future.wait<dynamic>([
@@ -210,7 +217,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       _rows ?? const <Map<String, dynamic>>[],
     );
 
-    final filtered = _selectedStatus == null
+    var filtered = _selectedStatus == null
         ? rows
         : rows
             .where(
@@ -218,6 +225,22 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   row['display_status']?.toString() == _selectedStatus,
             )
             .toList();
+
+    final query = _search.text.trim().toLowerCase();
+    if (query.isNotEmpty) {
+      filtered = filtered.where((row) {
+        final haystack = <Object?>[
+          row['document_number'],
+          row['customer_name'],
+          row['vehicle'],
+          row['job_number'],
+          row['display_status'],
+          row['document_date'],
+        ].whereType<Object>().map((value) => value.toString().toLowerCase())
+            .join(' ');
+        return haystack.contains(query);
+      }).toList();
+    }
 
     if (!_estimate || _selectedStatus != null) return filtered;
 
@@ -1027,6 +1050,26 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     ),
                   ),
               ],
+            ),
+            const SizedBox(height: 10),
+            SearchBar(
+              controller: _search,
+              hintText: _estimate
+                  ? 'Search estimate #, customer, job or vehicle'
+                  : 'Search invoice #, customer, job or vehicle',
+              leading: const Icon(Icons.search),
+              trailing: [
+                if (_search.text.isNotEmpty)
+                  IconButton(
+                    tooltip: 'Clear',
+                    onPressed: () {
+                      _search.clear();
+                      setState(() {});
+                    },
+                    icon: const Icon(Icons.close),
+                  ),
+              ],
+              onChanged: (_) => setState(() {}),
             ),
             if (!_estimate && widget.isOwner) ...[
               const SizedBox(height: 8),
