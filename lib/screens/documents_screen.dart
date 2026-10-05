@@ -41,12 +41,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   bool get _estimate => widget.kind == 'estimate';
 
-  List<String> get _statuses => _estimate
-      ? const ['Draft', 'Issued', 'Accepted', 'Declined', 'Expired', 'Void']
-      : _invoiceStyles
-          .map((item) => item['name']?.toString() ?? '')
-          .where((name) => name.isNotEmpty)
-          .toList();
+  List<String> get _statuses {
+    if (_estimate) {
+      return const ['Draft', 'Issued', 'Accepted', 'Declined', 'Expired', 'Void'];
+    }
+    final names = _invoiceStyles
+        .map((item) => item['name']?.toString() ?? '')
+        .where((name) => name.isNotEmpty)
+        .toList();
+    if ((_rows ?? const <Map<String, dynamic>>[])
+            .any((row) => row['display_status']?.toString() == 'Closed') &&
+        !names.contains('Closed')) {
+      names.add('Closed');
+    }
+    return names;
+  }
 
   String get _title => _estimate ? tr('estimates') : tr('invoices');
 
@@ -58,6 +67,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         return tr('invoicePendingClose');
       case 'Paid':
         return tr('invoicePaid');
+      case 'Closed':
+        return tr('invoiceClosed');
       case 'Partial':
         return tr('invoicePartial');
       case 'Draft':
@@ -496,7 +507,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     if (_estimate || !widget.isOwner) return;
 
     final eligible = (_rows ?? const <Map<String, dynamic>>[])
-        .where((row) => row['display_status']?.toString() == 'Pending Close')
+        .where((row) => <String>{'Pending Close', 'Paid'}
+            .contains(row['display_status']?.toString() ?? ''))
         .toList();
 
     if (eligible.isEmpty) {
@@ -504,7 +516,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: const Text('Close invoices'),
-          content: const Text('There are no invoices ready to close right now.'),
+          content: const Text(
+            'There are no fully paid invoices ready to close right now.',
+          ),
           actions: [
             FilledButton(
               onPressed: () => Navigator.pop(dialogContext),
@@ -568,7 +582,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        'Only fully paid invoices that are ready to close are shown here.',
+                        'Fully paid invoices are shown here. Pending payments are posted during closeout, then the invoice is marked Closed.',
                       ),
                     ),
                   ),
@@ -683,7 +697,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           builder: (dialogContext) => AlertDialog(
             title: const Text('Close selected invoices?'),
             content: Text(
-              'This will finalize ${selected.length} selected invoice'
+              'This will close ${selected.length} selected invoice'
               '${selected.length == 1 ? '' : 's'}.',
             ),
             actions: [
@@ -706,7 +720,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     try {
       for (final id in selected) {
-        await _api.finalizePendingInvoicePayment(widget.businessId, id);
+        await _api.closeInvoice(widget.businessId, id);
       }
       await _load();
       if (!mounted) return;
