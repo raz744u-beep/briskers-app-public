@@ -9,6 +9,7 @@ import 'customers/new_customer_screen.dart';
 import 'documents_screen.dart';
 import 'expenses/expense_entry_screen.dart';
 import 'expenses_screen.dart';
+import 'jobs/blank_invoice_setup_screen.dart';
 import 'jobs/estimate_job_setup_screen.dart';
 import 'jobs/identifix_estimate_import_screen.dart';
 import 'jobs/job_document_screen.dart';
@@ -314,6 +315,78 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _createInvoice() async {
     if (!_canManage) return;
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text(
+                'New Invoice',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              subtitle: Text(
+                'Use an existing Job or create a blank invoice for a customer.',
+              ),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.build_outlined,
+                color: BriskersColors.jobs,
+              ),
+              title: const Text('Existing Job'),
+              subtitle: const Text('Select one of the active jobs'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.pop(sheetContext, 'job'),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.receipt_long_outlined,
+                color: BriskersColors.invoices,
+              ),
+              title: const Text('Blank Invoice'),
+              subtitle: const Text('Choose customer and optional vehicle'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.pop(sheetContext, 'blank'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted || choice == null) return;
+
+    if (choice == 'blank') {
+      final invoiceId = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BlankInvoiceSetupScreen(
+            businessId: widget.businessId,
+          ),
+        ),
+      );
+      if (!mounted || invoiceId == null || invoiceId.isEmpty) return;
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => JobDocumentScreen(
+            businessId: widget.businessId,
+            documentId: invoiceId,
+            isOwner: widget.roleCode == 'owner',
+            canManageExpenses: _canManage,
+            initialAction: 'edit',
+          ),
+        ),
+      );
+      return;
+    }
+
     final job = await _pickActiveJob('New Invoice');
     if (job == null || !mounted) return;
     final jobId = job['id']?.toString() ?? '';
