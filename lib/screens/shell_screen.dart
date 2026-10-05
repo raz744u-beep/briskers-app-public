@@ -67,7 +67,7 @@ class _ShellScreenState extends State<ShellScreen> {
     _businessName = widget.businessName;
     _refreshHomeJobsCount();
     _homeJobsCountSubscription = _localJobs
-        .watchJobCount(widget.businessId, status: 'in_progress')
+        .watchActiveJobCount(widget.businessId)
         .listen(_applyHomeJobsCount);
     _homeJobsSyncSubscription = JobSyncService.syncEvents.listen((businessId) {
       if (businessId == widget.businessId) {
@@ -90,10 +90,7 @@ class _ShellScreenState extends State<ShellScreen> {
 
   Future<void> _refreshHomeJobsCount() async {
     try {
-      final count = await _localJobs.jobCount(
-        widget.businessId,
-        status: 'in_progress',
-      );
+      final count = await _localJobs.activeJobCount(widget.businessId);
       _applyHomeJobsCount(count);
     } catch (_) {}
   }
