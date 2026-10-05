@@ -28,8 +28,8 @@ class LocalDocumentRepository {
           '''
           INSERT OR REPLACE INTO local_documents (
             id, business_id, job_id, customer_id, kind, document_number,
-            status, total, created_at, server_updated_at, row_version, sync_state
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+            status, converted, total, created_at, server_updated_at, row_version, sync_state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
           ''',
           [
             id,
@@ -39,6 +39,7 @@ class LocalDocumentRepository {
             document['kind']?.toString() ?? 'invoice',
             _text(document['document_number']),
             _text(document['status']),
+            document['converted'] == true ? 1 : 0,
             _double(document['total']) ?? 0,
             _unix(_date(document['created_at'])),
             _unix(_date(document['updated_at'])),
@@ -61,14 +62,15 @@ class LocalDocumentRepository {
           '''
           INSERT INTO local_documents (
             id, business_id, job_id, customer_id, kind, document_number,
-            status, total, created_at, server_updated_at, row_version, sync_state
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+            status, converted, total, created_at, server_updated_at, row_version, sync_state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
           ON CONFLICT(id) DO UPDATE SET
             job_id=excluded.job_id,
             customer_id=excluded.customer_id,
             kind=excluded.kind,
             document_number=excluded.document_number,
             status=excluded.status,
+            converted=excluded.converted,
             total=excluded.total,
             created_at=excluded.created_at,
             server_updated_at=excluded.server_updated_at,
@@ -81,6 +83,7 @@ class LocalDocumentRepository {
             _text(document['customer_id']),
             document['kind']?.toString() ?? 'invoice',
             _text(document['document_number']), _text(document['status']),
+            document['converted'] == true ? 1 : 0,
             _double(document['total_amount'] ?? document['total']) ?? 0,
             _unix(_date(document['created_at'])),
             _unix(_date(document['updated_at'])),
@@ -98,6 +101,7 @@ class LocalDocumentRepository {
       FROM local_documents
       WHERE business_id = ?
         AND kind = 'estimate'
+        AND converted = 0
         AND COALESCE(status, '') NOT IN ('Declined', 'Expired', 'Void')
       ''',
       variables: [Variable<String>(businessId)],
@@ -113,6 +117,7 @@ class LocalDocumentRepository {
           FROM local_documents
           WHERE business_id = ?
             AND kind = 'estimate'
+            AND converted = 0
             AND COALESCE(status, '') NOT IN ('Declined', 'Expired', 'Void')
           ''',
           variables: [Variable<String>(businessId)],
