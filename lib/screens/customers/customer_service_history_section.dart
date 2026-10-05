@@ -219,61 +219,61 @@ class _CustomerServiceHistorySectionState
     return DateFormat('MMM d, yyyy').format(parsed.toLocal());
   }
 
-  Widget _vehicleSelector() {
+  Future<void> _chooseVehicle() async {
     final vehicles = widget.vehicles
         .whereType<Map>()
         .map((raw) => Map<String, dynamic>.from(raw))
         .where((vehicle) => (vehicle['id']?.toString() ?? '').isNotEmpty)
         .toList();
 
-    if (vehicles.length <= 1) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(12, 8, 12, 4),
-          child: Text(
-            'Vehicle',
-            style: TextStyle(fontWeight: FontWeight.w700),
-          ),
-        ),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: Row(
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: ChoiceChip(
-                  label: const Text('All vehicles'),
-                  selected: _selectedVehicleId == null,
-                  onSelected: (_) {
-                    setState(() => _selectedVehicleId = null);
-                  },
+    final selected = await showModalBottomSheet<String?>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text(
+                'Vehicle',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
-              ...vehicles.map((vehicle) {
-                final id = vehicle['id'].toString();
-                return Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: ChoiceChip(
-                    label: Text(_vehicleLabel(vehicle)),
-                    selected: _selectedVehicleId == id,
-                    onSelected: (_) {
-                      setState(() => _selectedVehicleId = id);
-                    },
-                  ),
-                );
-              }),
-            ],
-          ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.directions_car_outlined),
+              title: const Text('All vehicles'),
+              trailing: _selectedVehicleId == null
+                  ? const Icon(Icons.check)
+                  : null,
+              onTap: () => Navigator.pop(sheetContext, '__all__'),
+            ),
+            ...vehicles.map((vehicle) {
+              final id = vehicle['id'].toString();
+              return ListTile(
+                leading: const Icon(Icons.directions_car_outlined),
+                title: Text(_vehicleLabel(vehicle)),
+                trailing: _selectedVehicleId == id
+                    ? const Icon(Icons.check)
+                    : null,
+                onTap: () => Navigator.pop(sheetContext, id),
+              );
+            }),
+            const SizedBox(height: 8),
+          ],
         ),
-      ],
+      ),
     );
+
+    if (!mounted || selected == null) return;
+    setState(() {
+      _selectedVehicleId = selected == '__all__' ? null : selected;
+    });
   }
 
-  Widget _historyTypeSelector() {
+  Future<void> _chooseHistoryView() async {
     final choices = <(String, String, int)>[
       ('jobs', 'Jobs', _visibleJobs.length),
       if (_canSeeFinancial)
@@ -284,21 +284,151 @@ class _CustomerServiceHistorySectionState
         ('expenses', 'Expenses', _visibleExpenses.length),
     ];
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
-      child: Row(
-        children: choices.map((choice) {
-          return Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: ChoiceChip(
-              label: Text('${choice.$2} ${choice.$3}'),
-              selected: _view == choice.$1,
-              onSelected: (_) => setState(() => _view = choice.$1),
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text(
+                'View',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
-          );
-        }).toList(),
+            ...choices.map((choice) => ListTile(
+                  title: Text(choice.$2),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${choice.$3}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      if (_view == choice.$1) ...[
+                        const SizedBox(width: 10),
+                        const Icon(Icons.check),
+                      ],
+                    ],
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, choice.$1),
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
+    );
+
+    if (!mounted || selected == null) return;
+    setState(() => _view = selected);
+  }
+
+  String get _selectedVehicleLabel {
+    if (_selectedVehicleId == null) return 'All vehicles';
+    for (final raw in widget.vehicles.whereType<Map>()) {
+      final vehicle = Map<String, dynamic>.from(raw);
+      if (vehicle['id']?.toString() == _selectedVehicleId) {
+        return _vehicleLabel(vehicle);
+      }
+    }
+    return 'All vehicles';
+  }
+
+  String get _selectedViewLabel {
+    switch (_view) {
+      case 'estimates':
+        return 'Estimates (${_visibleEstimates.length})';
+      case 'invoices':
+        return 'Invoices (${_visibleInvoices.length})';
+      case 'expenses':
+        return 'Expenses (${_visibleExpenses.length})';
+      case 'jobs':
+      default:
+        return 'Jobs (${_visibleJobs.length})';
+    }
+  }
+
+  Widget _selectorBar({
+    required String label,
+    required String value,
+    required VoidCallback onTap,
+    required IconData icon,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          child: Row(
+            children: [
+              Icon(icon, size: 20),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  value,
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Icon(Icons.keyboard_arrow_down_rounded),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _vehicleSelector() {
+    final vehicleCount = widget.vehicles
+        .whereType<Map>()
+        .where((raw) => (raw['id']?.toString() ?? '').isNotEmpty)
+        .length;
+
+    if (vehicleCount <= 1) return const SizedBox.shrink();
+
+    return Column(
+      children: [
+        _selectorBar(
+          label: 'Vehicle',
+          value: _selectedVehicleLabel,
+          onTap: _chooseVehicle,
+          icon: Icons.directions_car_outlined,
+        ),
+        const Divider(height: 1),
+      ],
+    );
+  }
+
+  Widget _historyTypeSelector() {
+    return Column(
+      children: [
+        _selectorBar(
+          label: 'View',
+          value: _selectedViewLabel,
+          onTap: _chooseHistoryView,
+          icon: Icons.view_list_outlined,
+        ),
+        const Divider(height: 1),
+      ],
     );
   }
 
