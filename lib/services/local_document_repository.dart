@@ -91,6 +91,37 @@ class LocalDocumentRepository {
     });
   }
 
+  Future<int> openEstimateCount(String businessId) async {
+    final row = await _database.customSelect(
+      '''
+      SELECT COUNT(*) AS count
+      FROM local_documents
+      WHERE business_id = ?
+        AND kind = 'estimate'
+        AND COALESCE(status, '') NOT IN ('Declined', 'Expired', 'Void')
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).getSingle();
+    return row.read<int>('count');
+  }
+
+  Stream<int> watchOpenEstimateCount(String businessId) {
+    return _database
+        .customSelect(
+          '''
+          SELECT COUNT(*) AS count
+          FROM local_documents
+          WHERE business_id = ?
+            AND kind = 'estimate'
+            AND COALESCE(status, '') NOT IN ('Declined', 'Expired', 'Void')
+          ''',
+          variables: [Variable<String>(businessId)],
+          readsFrom: {_database.localDocuments},
+        )
+        .watchSingle()
+        .map((row) => row.read<int>('count'));
+  }
+
   Future<List<Map<String, dynamic>>> search(
     String businessId,
     String query, {
