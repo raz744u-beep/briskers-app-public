@@ -166,11 +166,15 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     );
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _load({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    } else {
+      setState(() => _error = null);
+    }
 
     try {
       final results = await Future.wait<dynamic>([
@@ -229,7 +233,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
   void _searchChanged(String _) {
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 350), _load);
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 350),
+      () {
+        if (mounted) _load(showLoading: false);
+      },
+    );
   }
 
   Future<void> _chooseDirection() async {
@@ -913,7 +922,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: _load,
+              onRefresh: () => _load(),
               child: ListView(
                 controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
@@ -1131,9 +1140,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           : IconButton(
                               tooltip: 'Clear search',
                               onPressed: () {
+                                _searchDebounce?.cancel();
                                 _searchController.clear();
                                 setState(() {});
-                                _load();
+                                _load(showLoading: false);
                               },
                               icon: const Icon(Icons.close),
                             ),
