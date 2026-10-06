@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -7,6 +9,7 @@ import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
 import '../../services/local_attachment_cache.dart';
+import '../../services/offline_customer_detail_write_service.dart';
 
 class CustomerNotesSection extends StatefulWidget {
   const CustomerNotesSection({
@@ -26,6 +29,8 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
   static const _api = BriskersApi();
   static const _cache = CustomerDetailCache();
   final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
+  final OfflineCustomerDetailWriteService _offlineWrites =
+      OfflineCustomerDetailWriteService();
   final _picker = ImagePicker();
   final _note = TextEditingController();
 
@@ -207,36 +212,121 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
       _error = null;
     });
 
-    String? noteId;
     try {
-      noteId = await _api.createCustomerNote(
+      final stagedPhotos = <Map<String, dynamic>>[];
+      for (final photo in _photos) {
+        stagedPhotos.add({
+          'filename': photo.name,
+          'mime_type': _mimeType(photo.name),
+          'bytes': await photo.readAsBytes(),
+        });
+      }
+
+      await _offlineWrites.createCustomerNote(
         widget.businessId,
         widget.customerId,
-        body: body.isEmpty ? null : body,
+        body: body,
+        photos: stagedPhotos,
       );
 
-      await _uploadPhotos(noteId, List<XFile>.from(_photos));
-
       _note.clear();
+      _photos.clear();
+
+      final cached = await _cache.load(
+        widget.businessId,
+        widget.customerId,
+        'notes',
+      );
+      final notes = cached is List
+          ? cached
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList()
+          : <Map<String, dynamic>>[];
+
       if (mounted) {
-        setState(() => _photos.clear());
-        await _load();
+        setState(() {
+          _notes = notes;
+          _saving = false;
+          _error = null;
+        });
+      }
+
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        unawaited(
+          _offlineWrites.flush(widget.businessId).then((_) => _load()),
+        );
       }
     } catch (error) {
-      if (body.isEmpty && noteId != null && _canDeleteRecords) {
-        try {
-          await _api.deleteCustomerNote(widget.businessId, noteId);
-        } catch (_) {
-          // Preserve the original upload error for the user.
-        }
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = error.toString();
+        });
       }
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _editNote(Map<String, dynamic> note) async {
+    final offline =
+        BriskersConnectionModeController.instance.forceOffline;
+
+    if (offline) {
+      final controller = TextEditingController(
+        text: note['body']?.toString() ?? '',
+      );
+      final updated = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Edit note'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: 3,
+            maxLines: 6,
+            decoration: const InputDecoration(labelText: 'Note'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, controller.text.trim()),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      );
+      controller.dispose();
+      if (updated == null) return;
+
+      try {
+        await _offlineWrites.updateCustomerNote(
+          widget.businessId,
+          widget.customerId,
+          note['id'].toString(),
+          body: updated,
+        );
+        final cached = await _cache.load(
+          widget.businessId,
+          widget.customerId,
+          'notes',
+        );
+        final notes = cached is List
+            ? cached
+                .whereType<Map>()
+                .map((row) => Map<String, dynamic>.from(row))
+                .toList()
+            : <Map<String, dynamic>>[];
+        if (mounted) setState(() => _notes = notes);
+      } catch (error) {
+        if (mounted) setState(() => _error = error.toString());
+      }
+      return;
+    }
+
     final result = await showDialog<_NoteEditResult>(
       context: context,
       builder: (_) => _EditCustomerNoteDialog(
@@ -282,6 +372,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
       if (mounted) setState(() => _saving = false);
     }
   }
+
 
   Future<void> _deleteNote(Map<String, dynamic> note) async {
     if (!_canDeleteRecords) return;
@@ -444,8 +535,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
         children: [
           const Divider(height: 1),
           const SizedBox(height: 12),
-          if (!BriskersConnectionModeController.instance.forceOffline)
-            _composer(),
+          _composer(),
           if (_loading)
             const Padding(
               padding: EdgeInsets.all(16),
@@ -470,9 +560,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
                       (entry) => _NoteCard(
                         note: entry.value,
                         index: entry.key,
-                        onEdit: BriskersConnectionModeController.instance.forceOffline
-                            ? () {}
-                            : () => _editNote(entry.value),
+                        onEdit: () => _editNote(entry.value),
                         canDelete: !BriskersConnectionModeController.instance.forceOffline && _canDeleteRecords,
                         onDelete: () => _deleteNote(entry.value),
                       ),
