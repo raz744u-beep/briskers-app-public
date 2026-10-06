@@ -1,9 +1,13 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
+import '../../services/local_attachment_cache.dart';
+import '../../services/local_financial_cache.dart';
 import 'expense_entry_screen.dart';
 
 class ExpenseDetailScreen extends StatefulWidget {
@@ -29,6 +33,8 @@ class ExpenseDetailScreen extends StatefulWidget {
 class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   static const _api = BriskersApi();
   final _picker = ImagePicker();
+  final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
+  final LocalFinancialCache _localFinancial = LocalFinancialCache();
 
   Map<String, dynamic>? _detail;
   bool _loading = true;
@@ -44,15 +50,31 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     super.initState();
     final cached = widget.cachedDetail;
     if (cached != null) {
-      _detail = Map<String, dynamic>.from(cached)
-        ..['editable'] = false
-        ..['deletable'] = false
-        ..['date'] = cached['date'] ?? cached['transaction_date']
-        ..['attachments'] = cached['attachments'] ?? const <dynamic>[];
-      _loading = false;
+      _loadCached(cached);
     } else {
       _load();
     }
+  }
+
+  Future<void> _loadCached(Map<String, dynamic> summary) async {
+    final saved = await _localFinancial.loadTransactionDetail(
+      widget.businessId,
+      widget.transactionId,
+    );
+    final detail = Map<String, dynamic>.from(saved ?? summary)
+      ..['editable'] = false
+      ..['deletable'] = false
+      ..['date'] = (saved ?? summary)['date'] ??
+          (saved ?? summary)['transaction_date']
+      ..['attachments'] =
+          (saved ?? summary)['attachments'] ?? const <dynamic>[];
+
+    if (!mounted) return;
+    setState(() {
+      _detail = detail;
+      _loading = false;
+      _error = null;
+    });
   }
 
   Future<void> _load() async {
@@ -66,6 +88,17 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       ]);
       final detail = Map<String, dynamic>.from(results[0] as Map);
       final permissions = List<String>.from(results[1] as List);
+      await _localFinancial.saveTransactionDetail(
+        widget.businessId,
+        widget.transactionId,
+        detail,
+      );
+      await _prefetchLocalAttachments(
+        List<dynamic>.from(detail['attachments'] ?? const [])
+            .whereType<Map>()
+            .map((row) => Map<String, dynamic>.from(row))
+            .toList(),
+      );
       if (!mounted) return;
       setState(() {
         _detail = detail;
@@ -99,13 +132,35 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     );
   }
 
-  void _preloadAttachments(List<Map<String, dynamic>> attachments) {
+  Future<void> _prefetchLocalAttachments(
+    List<Map<String, dynamic>> attachments,
+  ) async {
+    final pending = <Future<File?>>[];
     for (final attachment in attachments) {
-      _attachmentUrl(attachment).then((url) {
-        if (!mounted) return;
-        precacheImage(NetworkImage(url), context);
-      }).catchError((_) {});
+      final bucket =
+          attachment['bucket']?.toString() ?? 'briskers-private';
+      final key = attachment['key']?.toString() ?? '';
+      if (key.isEmpty) continue;
+      pending.add(_attachmentCache.getOrDownload(bucket, key));
+      if (pending.length >= 4) {
+        await Future.wait(pending);
+        pending.clear();
+      }
     }
+    if (pending.isNotEmpty) await Future.wait(pending);
+  }
+
+  void _preloadAttachments(List<Map<String, dynamic>> attachments) {
+    _prefetchLocalAttachments(attachments);
+  }
+
+  Future<File?> _localAttachment(
+    Map<String, dynamic> attachment,
+  ) {
+    return _attachmentCache.existing(
+      attachment['bucket']?.toString() ?? 'briskers-private',
+      attachment['key']?.toString() ?? '',
+    );
   }
   String _money(Object? raw) {
     final value = num.tryParse(raw?.toString() ?? '') ?? 0;
@@ -259,7 +314,11 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
   Future<void> _openAttachment(Map<String, dynamic> attachment) async {
     try {
-      final url = await _attachmentUrl(attachment);
+      final local = await _localAttachment(attachment);
+      String? url;
+      if (local == null) {
+        url = await _attachmentUrl(attachment);
+      }
       if (!mounted) return;
       final editable = _detail?['editable'] == true;
       await showDialog<void>(
@@ -271,14 +330,18 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
               InteractiveViewer(
                 minScale: 0.5,
                 maxScale: 5,
-                child: Image.network(
-                  url,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) => const SizedBox(
-                    height: 300,
-                    child: Center(child: Text('Could not load receipt.')),
-                  ),
-                ),
+                child: local != null
+                    ? Image.file(local, fit: BoxFit.contain)
+                    : Image.network(
+                        url!,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) => const SizedBox(
+                          height: 300,
+                          child: Center(
+                            child: Text('Could not load receipt.'),
+                          ),
+                        ),
+                      ),
               ),
               Positioned(
                 right: 4,
@@ -715,10 +778,10 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
   Widget _receiptThumbnail(Map<String, dynamic> attachment) {
     const size = 52.0;
-    final bucket = attachment['bucket']?.toString() ?? '';
+    final bucket = attachment['bucket']?.toString() ?? 'briskers-private';
     final key = attachment['key']?.toString() ?? '';
 
-    if (bucket.isEmpty || key.isEmpty) {
+    if (key.isEmpty) {
       return Container(
         width: size,
         height: size,
@@ -731,42 +794,60 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       );
     }
 
-    return FutureBuilder<String>(
-      future: _attachmentUrl(attachment),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return Container(
-            width: size,
-            height: size,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: BriskersColors.expenses.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(8),
+    return FutureBuilder<File?>(
+      future: _attachmentCache.existing(bucket, key),
+      builder: (context, localSnapshot) {
+        final local = localSnapshot.data;
+        if (local != null) {
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.file(
+              local,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
             ),
-            child: snapshot.hasError
-                ? const Icon(Icons.broken_image_outlined)
-                : const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
           );
         }
 
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Image.network(
-            snapshot.data!,
-            width: size,
-            height: size,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => Container(
-              width: size,
-              height: size,
-              alignment: Alignment.center,
-              color: BriskersColors.expenses.withValues(alpha: 0.08),
-              child: const Icon(Icons.broken_image_outlined),
-            ),
-          ),
+        return FutureBuilder<String>(
+          future: _attachmentUrl(attachment),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return Container(
+                width: size,
+                height: size,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: BriskersColors.expenses.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: snapshot.hasError
+                    ? const Icon(Icons.broken_image_outlined)
+                    : const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+              );
+            }
+
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                snapshot.data!,
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => Container(
+                  width: size,
+                  height: size,
+                  alignment: Alignment.center,
+                  color: BriskersColors.expenses.withValues(alpha: 0.08),
+                  child: const Icon(Icons.broken_image_outlined),
+                ),
+              ),
+            );
+          },
         );
       },
     );
