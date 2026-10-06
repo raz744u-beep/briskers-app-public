@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/connection_mode.dart';
 import '../core/invoice_status_style.dart';
 import '../core/briskers_i18n.dart';
 import '../services/briskers_api.dart';
+import '../services/local_document_repository.dart';
 import '../widgets/briskers_page_header.dart';
 import 'jobs/job_document_screen.dart';
 import 'expenses/expense_detail_screen.dart';
@@ -31,6 +33,7 @@ class DocumentsScreen extends StatefulWidget {
 
 class _DocumentsScreenState extends State<DocumentsScreen> {
   static const _api = BriskersApi();
+  final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
   static final Map<String, List<Map<String, dynamic>>> _rowCache = {};
   static final Map<String, List<Map<String, dynamic>>> _styleCache = {};
 
@@ -155,6 +158,38 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 
   Future<void> _load() async {
+    var localShown = false;
+    final forceOnline =
+        BriskersConnectionModeController.instance.forceOnline;
+    final forceOffline =
+        BriskersConnectionModeController.instance.forceOffline;
+
+    if (!forceOnline) {
+      try {
+        final local = await _localDocuments.listByKind(
+          widget.businessId,
+          kind: widget.kind,
+        );
+        if (mounted && local.isNotEmpty) {
+          localShown = true;
+          setState(() {
+            _rows = local;
+            _error = null;
+          });
+        }
+      } catch (_) {}
+    }
+
+    if (forceOffline) {
+      if (mounted && !localShown) {
+        setState(() {
+          _rows ??= const [];
+          _error = null;
+        });
+      }
+      return;
+    }
+
     try {
       final results = await Future.wait<dynamic>([
         _api.documents(
@@ -170,6 +205,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       final rows = List<Map<String, dynamic>>.from(results[0] as List);
       final styles = List<Map<String, dynamic>>.from(results[1] as List);
 
+      await _localDocuments.upsertFromServer(
+        widget.businessId,
+        rows,
+      );
+
       _rowCache[_cacheKey] = List<Map<String, dynamic>>.from(rows);
       if (!_estimate) {
         _styleCache[widget.businessId] =
@@ -182,11 +222,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         _invoiceStyles = styles;
         _error = null;
       });
-    } catch (error) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _rows ??= _rowCache[_cacheKey] ?? const [];
-        _error = _rows!.isEmpty
+        _error = (_rows!.isEmpty && !localShown)
             ? 'Could not refresh documents. Pull down to try again.'
             : null;
       });
