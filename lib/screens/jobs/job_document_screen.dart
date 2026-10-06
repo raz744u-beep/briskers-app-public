@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
@@ -14,6 +15,8 @@ import '../../services/document_pdf_service.dart';
 import '../../services/gmail_compose_service.dart';
 import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
+import '../../services/local_document_detail_cache.dart';
+import '../../services/offline_estimate_invoice_service.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'customer_invoice_signature_screen.dart';
@@ -43,6 +46,10 @@ class JobDocumentScreen extends StatefulWidget {
 class _JobDocumentScreenState extends State<JobDocumentScreen> {
   static const _api = BriskersApi();
   final _localCatalog = LocalCatalogRepository();
+  final LocalDocumentDetailCache _detailCache =
+      const LocalDocumentDetailCache();
+  final OfflineEstimateInvoiceService _offlineEstimateInvoice =
+      OfflineEstimateInvoiceService();
   final _catalogSync = CatalogSyncService();
   final ImagePicker _picker = ImagePicker();
   final ScrollController _workspaceHeaderController = ScrollController();
@@ -139,10 +146,49 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _load() async {
+    final forceOffline =
+        BriskersConnectionModeController.instance.forceOffline;
+
+    if (forceOffline) {
+      final cached = await _detailCache.load(
+        widget.businessId,
+        widget.documentId,
+      );
+      if (!mounted) return;
+      if (cached == null) {
+        setState(() {
+          _loading = false;
+          _error =
+              'This document is not saved locally yet. Open it online once to cache it.';
+        });
+        return;
+      }
+      setState(() {
+        _detail = cached;
+        if (!_notesDirty && !_notesFocusNode.hasFocus) {
+          _notesController.text = cached['memo']?.toString() ?? '';
+        }
+        _identifixMeta = const {};
+        _warrantyDetail = const {};
+        _signatureStatus = const {};
+        _submissionReadiness = const {};
+        _invoiceStyles = const [];
+        _openFindings = const [];
+        _loading = false;
+        _error = null;
+      });
+      return;
+    }
+
     try {
       final detail = await _api.documentDetail(
         widget.businessId,
         widget.documentId,
+      );
+      await _detailCache.save(
+        widget.businessId,
+        widget.documentId,
+        detail,
       );
       final taxSettings = await _api.taxSettings(widget.businessId);
       List<Map<String, dynamic>> invoiceStyles = const [];
@@ -235,11 +281,26 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         });
       }
     } catch (error) {
+      final cached = await _detailCache.load(
+        widget.businessId,
+        widget.documentId,
+      );
       if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = error.toString();
-      });
+      if (cached != null) {
+        setState(() {
+          _detail = cached;
+          if (!_notesDirty && !_notesFocusNode.hasFocus) {
+            _notesController.text = cached['memo']?.toString() ?? '';
+          }
+          _loading = false;
+          _error = null;
+        });
+      } else {
+        setState(() {
+          _loading = false;
+          _error = error.toString();
+        });
+      }
     }
   }
 
@@ -1171,11 +1232,79 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _convertEstimate() async {
-    if (!_estimate || _converted) return;
+    if (!_estimate || _converted || _busy) return;
 
     final lines = List<dynamic>.from(_detail?['lines'] ?? const []);
     if (lines.isEmpty) {
-      setState(() => _error = 'Add at least one item before creating an invoice.');
+      setState(
+        () => _error = 'Add at least one item before creating an invoice.',
+      );
+      return;
+    }
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Convert Estimate',
+                  style: TextStyle(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_circle_outline),
+              title: const Text(
+                'Create new invoice',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: const Text(
+                'Create a separate invoice from this estimate.',
+              ),
+              onTap: () => Navigator.pop(sheetContext, 'new'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.post_add_outlined),
+              title: const Text(
+                'Add to existing invoice',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: const Text(
+                'Add these items to an open invoice for this customer.',
+              ),
+              onTap: () => Navigator.pop(sheetContext, 'existing'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (action == 'existing') {
+      await _addEstimateToExistingInvoice();
+      return;
+    }
+    if (action != 'new') return;
+
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Creating a new invoice from an estimate still requires a connection.',
+          ),
+        ),
+      );
       return;
     }
 
@@ -1199,6 +1328,268 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _addEstimateToExistingInvoice() async {
+    final estimate = _detail;
+    if (estimate == null || _busy) return;
+
+    List<Map<String, dynamic>> invoices =
+        await _offlineEstimateInvoice.eligibleLocalInvoices(
+      widget.businessId,
+      estimate,
+    );
+
+    if (invoices.isEmpty &&
+        !BriskersConnectionModeController.instance.forceOffline) {
+      try {
+        invoices = await _api.eligibleInvoicesForEstimate(
+          widget.businessId,
+          widget.documentId,
+        );
+      } catch (_) {
+        // The local list remains authoritative if the network is unavailable.
+      }
+    }
+
+    if (!mounted) return;
+    if (invoices.isEmpty) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('No open invoice'),
+          content: const Text(
+            'There is no eligible open invoice for this customer. '
+            'Create a new invoice instead.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(sheetContext).height * 0.68,
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(18, 0, 18, 10),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Add to Existing Invoice',
+                    style: TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 18),
+                  itemCount: invoices.length,
+                  itemBuilder: (context, index) {
+                    final invoice = invoices[index];
+                    final number =
+                        invoice['document_number']?.toString() ?? '';
+                    final vehicle = invoice['vehicle']?.toString() ?? '';
+                    final jobNumber =
+                        invoice['job_number']?.toString() ?? '';
+                    final sameVehicle = invoice['same_vehicle'] == true;
+                    return Card(
+                      child: ListTile(
+                        leading: Icon(
+                          Icons.receipt_long_outlined,
+                          color: sameVehicle
+                              ? BriskersColors.invoices
+                              : Colors.grey.shade600,
+                        ),
+                        title: Text(
+                          number.isEmpty
+                              ? 'Open invoice'
+                              : 'Invoice #$number',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        subtitle: Text(
+                          <String>[
+                            if (vehicle.isNotEmpty) vehicle,
+                            if (jobNumber.isNotEmpty) 'Job $jobNumber',
+                            if (sameVehicle) 'Same vehicle',
+                          ].join(' • '),
+                        ),
+                        trailing: Text(
+                          _money(invoice['total_amount']),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        onTap: () =>
+                            Navigator.pop(sheetContext, invoice),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+
+    if (selected['same_vehicle'] != true) {
+      final continueDifferentVehicle = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Different vehicle'),
+          content: const Text(
+            'This invoice appears to be for a different vehicle. '
+            'Add the estimate to it anyway?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Add Anyway'),
+            ),
+          ],
+        ),
+      );
+      if (continueDifferentVehicle != true) return;
+    }
+
+    final invoiceId = selected['id']?.toString() ?? '';
+    if (invoiceId.isEmpty) return;
+
+    var invoiceDetail =
+        await _detailCache.load(widget.businessId, invoiceId);
+    if (invoiceDetail == null &&
+        !BriskersConnectionModeController.instance.forceOffline) {
+      try {
+        invoiceDetail =
+            await _api.documentDetail(widget.businessId, invoiceId);
+        await _detailCache.save(
+          widget.businessId,
+          invoiceId,
+          invoiceDetail,
+        );
+      } catch (_) {}
+    }
+    if (invoiceDetail == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This invoice is not cached yet. Open it once while online, then retry.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final estimateTotal = _number(estimate['total_amount']);
+    final currentTotal = _number(invoiceDetail['total_amount']);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Add Estimate to Invoice'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Estimate total'),
+              trailing: Text(_money(estimateTotal)),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Current invoice total'),
+              trailing: Text(_money(currentTotal)),
+            ),
+            const Divider(),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                'New invoice total',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              trailing: Text(
+                _money(currentTotal + estimateTotal),
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'The estimate will be closed and become read-only after it is added.',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Add to Invoice'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _offlineEstimateInvoice.mergeLocal(
+        widget.businessId,
+        estimateId: widget.documentId,
+        invoiceId: invoiceId,
+      );
+
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineEstimateInvoice.flush(widget.businessId);
+        } catch (_) {
+          // The local merge remains queued and will retry later.
+        }
+      }
+
+      if (!mounted) return;
+      await Navigator.pushReplacement<void, void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => JobDocumentScreen(
+            businessId: widget.businessId,
+            documentId: invoiceId,
+            isOwner: widget.isOwner,
+            canManageExpenses: widget.canManageExpenses,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<List<Map<String, dynamic>>> _paymentMethods() async {
