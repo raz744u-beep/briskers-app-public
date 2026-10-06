@@ -19,6 +19,7 @@ import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'identifix_estimate_import_screen.dart';
 import 'job_document_screen.dart';
+import 'job_edit_screen.dart';
 
 class JobDetailScreen extends StatefulWidget {
   const JobDetailScreen({
@@ -75,11 +76,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   bool get _canManage {
     if (!_onlineReady) return false;
-    return _job == null
-        ? widget.roleCode == 'owner' ||
-            widget.roleCode == 'manager' ||
-            widget.roleCode == 'office'
-        : _jobCapability('manage_job');
+    final roleCanManage = widget.roleCode == 'owner' ||
+        widget.roleCode == 'manager' ||
+        widget.roleCode == 'office';
+    if (_job == null) return roleCanManage;
+    return roleCanManage || _jobCapability('manage_job');
   }
 
   bool get _canSeeFinancial {
@@ -1073,6 +1074,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         note: note,
       );
     });
+  }
+
+  Future<void> _editJob() async {
+    if (!_canManage || _job == null || _busy) return;
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobEditScreen(
+          businessId: widget.businessId,
+          job: Map<String, dynamic>.from(_job!),
+        ),
+      ),
+    );
+    if (changed == true && mounted) {
+      await _load();
+    }
   }
 
   Future<void> _changeAssignment() async {
@@ -4537,7 +4554,46 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         title: Text(jobNumber.isEmpty ? 'Job' : 'Job $jobNumber', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 20)),
         actions: [
           Center(child: _statusControl()),
-          PopupMenuButton<String>(tooltip: 'Job menu', onSelected: (value) { if (value == 'refresh') _load(); }, itemBuilder: (_) => const [PopupMenuItem(value: 'refresh', child: Text('Refresh'))]),
+          PopupMenuButton<String>(
+            tooltip: 'Job menu',
+            onSelected: (value) async {
+              if (value == 'edit') await _editJob();
+              if (value == 'assignment') await _changeAssignment();
+              if (value == 'refresh') await _load();
+            },
+            itemBuilder: (_) => [
+              if (_canManage)
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('Edit job'),
+                  ),
+                ),
+              if (_canManage)
+                const PopupMenuItem(
+                  value: 'assignment',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.person_outline),
+                    title: Text('Assign / unassign mechanic'),
+                  ),
+                ),
+              if (_canManage) const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: 'refresh',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.refresh),
+                  title: Text('Refresh'),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
       bottomNavigationBar: widget.bottomNavigationBar,
