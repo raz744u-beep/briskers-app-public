@@ -6,6 +6,7 @@ import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/local_customer_repository.dart';
+import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../appointments/appointment_create_screen.dart';
 import '../jobs/job_create_screen.dart';
 import 'customer_account_section.dart';
@@ -37,11 +38,15 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       CustomerVehicleSyncService();
   final LocalCustomerRepository _localCustomers =
       LocalCustomerRepository();
+  final OfflineCustomerVehicleAdminService _offlineAdmin =
+      OfflineCustomerVehicleAdminService();
 
   Map<String, dynamic>? _data;
   String? _error;
   bool _onlineReady = false;
   bool _showingLocal = false;
+
+  bool get _canEditLocal => _data != null;
 
   @override
   void initState() {
@@ -108,7 +113,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _editCustomer(Map<String, dynamic> customer) async {
-    if (!_onlineReady) return;
+    if (!_canEditLocal) return;
     final saved = await Navigator.push<Map<String, dynamic>?>(
       context,
       MaterialPageRoute(
@@ -135,7 +140,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _editProblemFlag() async {
-    if (!_onlineReady) return;
+    if (!_canEditLocal) return;
     final customer = Map<String, dynamic>.from(
       _data?['customer'] ?? const {},
     );
@@ -204,7 +209,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _addVehicle() async {
-    if (!_onlineReady) return;
+    if (!_canEditLocal) return;
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -500,7 +505,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                           SizedBox(width: 7),
                           Expanded(
                             child: Text(
-                              'Showing saved customer and vehicle data • editing requires a connection',
+                              'Showing saved customer and vehicle data • edits save locally and sync when reconnected',
                               style: TextStyle(
                                 fontWeight: FontWeight.w700,
                               ),
@@ -597,11 +602,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                                   ? 'Tap to add a reason'
                                   : customer['problem_flag_note'].toString(),
                             ),
-                            trailing: _onlineReady
+                            trailing: _canEditLocal
                                 ? const Icon(Icons.edit_outlined)
                                 : null,
                             onTap:
-                                _onlineReady ? _editProblemFlag : null,
+                                _canEditLocal ? _editProblemFlag : null,
                           ),
                       ],
                     ),
@@ -611,7 +616,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     vehicles: vehicles,
                     onAdd: _addVehicle,
                     onEdit: _editVehicle,
-                    enabled: _onlineReady,
+                    enabled: _canEditLocal,
                   ),
                   if (_onlineReady) ...[
                     const SizedBox(height: 18),
