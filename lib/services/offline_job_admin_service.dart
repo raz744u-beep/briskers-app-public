@@ -34,24 +34,126 @@ class OfflineJobAdminService {
     }
   }
 
-  Future<void> queuePlannedHours(
+  Future<void> queueCore(
     String businessId,
-    String jobId,
-    num plannedHours,
-  ) async {
+    String jobId, {
+    String? customerId,
+    String? vehicleId,
+    String? title,
+    String? requestedWork,
+    num? plannedHours,
+  }) async {
+    final rows = await localDatabase.customSelect(
+      '''
+      SELECT customer_id, vehicle_id, title, requested_work, planned_hours
+      FROM local_jobs
+      WHERE business_id = ? AND id = ?
+      LIMIT 1
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(jobId),
+      ],
+    ).get();
+    if (rows.isEmpty) {
+      throw StateError('The job is not available in the local database.');
+    }
+
+    final current = rows.first;
+    final nextCustomerId =
+        customerId ?? current.readNullable<String>('customer_id') ?? '';
+    final nextVehicleId =
+        vehicleId ?? current.readNullable<String>('vehicle_id');
+    final nextTitle = title ?? current.read<String>('title');
+    final nextRequestedWork = requestedWork ??
+        current.readNullable<String>('requested_work');
+    final nextPlannedHours = plannedHours ??
+        (num.tryParse(current.data['planned_hours']?.toString() ?? '') ?? 0);
+
     await localDatabase.transaction(() async {
       await localDatabase.customStatement(
         '''
         UPDATE local_jobs
-        SET planned_hours = ?, sync_state = 'pending'
+        SET customer_id = ?,
+            vehicle_id = ?,
+            title = ?,
+            requested_work = ?,
+            planned_hours = ?,
+            sync_state = 'pending'
         WHERE business_id = ? AND id = ?
         ''',
-        [plannedHours.toDouble(), businessId, jobId],
+        [
+          nextCustomerId,
+          nextVehicleId,
+          nextTitle,
+          nextRequestedWork,
+          nextPlannedHours.toDouble(),
+          businessId,
+          jobId,
+        ],
+      );
+
+      await _mergeOutbox(
+        businessId,
+        jobId,
+        {
+          'core_changed': true,
+          'customer_id': nextCustomerId,
+          'vehicle_id': nextVehicleId,
+          'title': nextTitle,
+          'requested_work': nextRequestedWork,
+          'planned_hours': nextPlannedHours.toDouble(),
+        },
+      );
+    });
+  }
+
+  Future<void> queuePlannedHours(
+    String businessId,
+    String jobId,
+    num plannedHours,
+  ) =>
+      queueCore(
+        businessId,
+        jobId,
+        plannedHours: plannedHours,
+      );
+
+  Future<void> queueStatus(
+    String businessId,
+    String jobId, {
+    required String code,
+    required String name,
+    String? colorHex,
+    String? iconKey,
+  }) async {
+    await localDatabase.transaction(() async {
+      await localDatabase.customStatement(
+        '''
+        UPDATE local_jobs
+        SET status = ?,
+            status_name = ?,
+            status_color = ?,
+            status_icon = ?,
+            sync_state = 'pending'
+        WHERE business_id = ? AND id = ?
+        ''',
+        [
+          code,
+          name,
+          colorHex,
+          iconKey,
+          businessId,
+          jobId,
+        ],
       );
       await _mergeOutbox(
         businessId,
         jobId,
-        {'planned_hours': plannedHours.toDouble()},
+        {
+          'status_changed': true,
+          'status_code': code,
+        },
       );
     });
   }
@@ -204,10 +306,11 @@ class OfflineJobAdminService {
           jsonDecode(row.read<String>('payload_json')) as Map,
         );
 
-        if (payload.containsKey('planned_hours')) {
+        if (payload['core_changed'] == true ||
+            payload.containsKey('planned_hours')) {
           final jobRows = await localDatabase.customSelect(
             '''
-            SELECT customer_id, vehicle_id, title, requested_work
+            SELECT customer_id, vehicle_id, title, requested_work, planned_hours
             FROM local_jobs
             WHERE business_id = ? AND id = ?
             LIMIT 1
@@ -222,12 +325,35 @@ class OfflineJobAdminService {
             await _api.updateJob(
               businessId,
               jobId,
-              customerId: job.readNullable<String>('customer_id') ?? '',
-              vehicleId: job.readNullable<String>('vehicle_id'),
-              title: job.read<String>('title'),
-              requestedWork: job.readNullable<String>('requested_work'),
-              plannedHours:
-                  num.tryParse(payload['planned_hours'].toString()) ?? 0,
+              customerId:
+                  payload['customer_id']?.toString() ??
+                  job.readNullable<String>('customer_id') ??
+                  '',
+              vehicleId: payload.containsKey('vehicle_id')
+                  ? payload['vehicle_id']?.toString()
+                  : job.readNullable<String>('vehicle_id'),
+              title:
+                  payload['title']?.toString() ?? job.read<String>('title'),
+              requestedWork: payload.containsKey('requested_work')
+                  ? payload['requested_work']?.toString()
+                  : job.readNullable<String>('requested_work'),
+              plannedHours: num.tryParse(
+                    payload['planned_hours']?.toString() ??
+                        job.data['planned_hours']?.toString() ??
+                        '',
+                  ) ??
+                  0,
+            );
+          }
+        }
+
+        if (payload['status_changed'] == true) {
+          final statusCode = payload['status_code']?.toString() ?? '';
+          if (statusCode.isNotEmpty) {
+            await _api.changeJobStatus(
+              businessId,
+              jobId,
+              statusCode,
             );
           }
         }
