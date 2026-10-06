@@ -17,6 +17,7 @@ import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
+import '../../services/offline_document_draft_service.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'customer_invoice_signature_screen.dart';
@@ -50,6 +51,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       const LocalDocumentDetailCache();
   final OfflineEstimateInvoiceService _offlineEstimateInvoice =
       OfflineEstimateInvoiceService();
+  final OfflineDocumentDraftService _offlineDocumentDraft =
+      OfflineDocumentDraftService();
   final _catalogSync = CatalogSyncService();
   final ImagePicker _picker = ImagePicker();
   final ScrollController _workspaceHeaderController = ScrollController();
@@ -148,6 +151,30 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _load() async {
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
+
+    if (!forceOffline &&
+        _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      final cached = await _detailCache.load(
+        widget.businessId,
+        widget.documentId,
+      );
+      final serverId = cached?['_server_document_id']?.toString() ?? '';
+      if (serverId.isNotEmpty && serverId != widget.documentId) {
+        if (!mounted) return;
+        await Navigator.pushReplacement<void, void>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => JobDocumentScreen(
+              businessId: widget.businessId,
+              documentId: serverId,
+              isOwner: widget.isOwner,
+              canManageExpenses: widget.canManageExpenses,
+            ),
+          ),
+        );
+        return;
+      }
+    }
 
     if (forceOffline) {
       final cached = await _detailCache.load(
@@ -390,6 +417,149 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _addLineLocalAware({
+    required String name,
+    String? description,
+    String? itemId,
+    required num quantity,
+    required num unitPrice,
+    required num taxRate,
+    required String lineKind,
+  }) async {
+    if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      await _offlineDocumentDraft.addLine(
+        widget.businessId,
+        widget.documentId,
+        name: name,
+        description: description,
+        itemId: itemId,
+        quantity: quantity,
+        unitPrice: unitPrice,
+        taxRate: taxRate,
+        lineKind: lineKind,
+      );
+      return;
+    }
+    await _api.addDocumentLine(
+      widget.businessId,
+      widget.documentId,
+      expectedVersion: _version,
+      name: name,
+      description: description,
+      itemId: itemId,
+      quantity: quantity,
+      unitPrice: unitPrice,
+      taxRate: taxRate,
+      lineKind: lineKind,
+    );
+  }
+
+  Future<void> _updateLineLocalAware(
+    Map<String, dynamic> line, {
+    required String name,
+    String? description,
+    required num quantity,
+    required num unitPrice,
+    required num taxRate,
+    required String lineKind,
+  }) async {
+    if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      await _offlineDocumentDraft.updateLine(
+        widget.businessId,
+        widget.documentId,
+        line['id'].toString(),
+        name: name,
+        description: description,
+        quantity: quantity,
+        unitPrice: unitPrice,
+        taxRate: taxRate,
+        lineKind: lineKind,
+      );
+      return;
+    }
+    await _api.updateDocumentLineV2(
+      widget.businessId,
+      line['id'].toString(),
+      expectedVersion: _version,
+      name: name,
+      quantity: quantity,
+      unitPrice: unitPrice,
+      taxRate: taxRate,
+      description: description,
+      lineKind: lineKind,
+    );
+  }
+
+  Future<void> _deleteLineLocalAware(Map<String, dynamic> line) async {
+    if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      await _offlineDocumentDraft.deleteLine(
+        widget.businessId,
+        widget.documentId,
+        line['id'].toString(),
+      );
+      return;
+    }
+    await _api.deleteDocumentLine(
+      widget.businessId,
+      line['id'].toString(),
+      expectedVersion: _version,
+    );
+  }
+
+  Future<void> _copyLineLocalAware(Map<String, dynamic> line) async {
+    if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      await _offlineDocumentDraft.copyLine(
+        widget.businessId,
+        widget.documentId,
+        line['id'].toString(),
+      );
+      return;
+    }
+    await _api.copyDocumentLine(
+      widget.businessId,
+      line['id'].toString(),
+      expectedVersion: _version,
+    );
+  }
+
+  Future<void> _moveLineLocalAware(
+    Map<String, dynamic> line,
+    String direction,
+  ) async {
+    if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      await _offlineDocumentDraft.moveLine(
+        widget.businessId,
+        widget.documentId,
+        line['id'].toString(),
+        direction,
+      );
+      return;
+    }
+    await _api.moveDocumentLine(
+      widget.businessId,
+      line['id'].toString(),
+      expectedVersion: _version,
+      direction: direction,
+    );
+  }
+
+  Future<void> _saveMemoLocalAware(String? memo) async {
+    if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      await _offlineDocumentDraft.saveMemo(
+        widget.businessId,
+        widget.documentId,
+        memo,
+      );
+      return;
+    }
+    await _api.updateDocumentNotes(
+      widget.businessId,
+      widget.documentId,
+      expectedVersion: _version,
+      memo: memo,
+    );
   }
 
   Future<Map<String, dynamic>?> _translateManualEntry(
@@ -851,10 +1021,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (translatedResult == null) return;
 
     await _run(() async {
-      await _api.addDocumentLine(
-        widget.businessId,
-        widget.documentId,
-        expectedVersion: _version,
+      await _addLineLocalAware(
         name: translatedResult['name'].toString(),
         description: translatedResult['description']?.toString(),
         itemId: selected['id']?.toString(),
@@ -881,10 +1048,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (translatedResult == null) return;
 
     await _run(() async {
-      await _api.addDocumentLine(
-        widget.businessId,
-        widget.documentId,
-        expectedVersion: _version,
+      await _addLineLocalAware(
         name: translatedResult['name'].toString(),
         description: translatedResult['description']?.toString(),
         quantity: translatedResult['quantity'] as num,
@@ -921,10 +1085,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (translatedResult == null) return;
 
     await _run(() async {
-      await _api.updateDocumentLineV2(
-        widget.businessId,
-        line['id'].toString(),
-        expectedVersion: _version,
+      await _updateLineLocalAware(
+        line,
         name: translatedResult['name'].toString(),
         quantity: translatedResult['quantity'] as num,
         unitPrice: translatedResult['unit_price'] as num,
@@ -1022,21 +1184,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (confirmed != true) return;
 
     await _run(() async {
-      await _api.deleteDocumentLine(
-        widget.businessId,
-        line['id'].toString(),
-        expectedVersion: _version,
-      );
+      await _deleteLineLocalAware(line);
     });
   }
 
   Future<void> _copyLine(Map<String, dynamic> line) async {
     if (_readOnly || _busy) return;
-    await _run(() => _api.copyDocumentLine(
-          widget.businessId,
-          line['id'].toString(),
-          expectedVersion: _version,
-        ));
+    await _run(() => _copyLineLocalAware(line));
   }
 
   Future<void> _moveLine(
@@ -1044,12 +1198,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     String direction,
   ) async {
     if (_readOnly || _busy) return;
-    await _run(() => _api.moveDocumentLine(
-          widget.businessId,
-          line['id'].toString(),
-          expectedVersion: _version,
-          direction: direction,
-        ));
+    await _run(() => _moveLineLocalAware(line, direction));
   }
 
   Future<void> _showLineActions(
@@ -4502,12 +4651,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             : '$current\n\n$body';
 
     await _run(
-      () => _api.updateDocumentNotes(
-        widget.businessId,
-        widget.documentId,
-        expectedVersion: _version,
-        memo: combined,
-      ),
+      () => _saveMemoLocalAware(combined),
     );
   }
 
@@ -4872,11 +5016,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (translatedValue == null || !mounted) return;
 
     await _run(
-      () => _api.updateDocumentNotes(
-        widget.businessId,
-        widget.documentId,
-        expectedVersion: _version,
-        memo: translatedValue.isEmpty ? null : translatedValue,
+      () => _saveMemoLocalAware(
+        translatedValue.isEmpty ? null : translatedValue,
       ),
     );
 
