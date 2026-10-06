@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/supabase_config.dart';
+import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/customer_vehicle_sync_service.dart';
@@ -49,7 +50,37 @@ class _BusinessGateState extends State<BusinessGate> {
   @override
   void initState() {
     super.initState();
+    BriskersConnectionModeController.instance.addListener(
+      _connectionModeChanged,
+    );
     _load();
+  }
+
+  void _connectionModeChanged() {
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    final businesses = _businesses;
+    if (businesses == null || businesses.isEmpty) return;
+    final business = businesses.first;
+    final businessId =
+        '${business['business_id'] ?? business['id'] ?? ''}';
+    final roleCode =
+        '${business['role_code'] ?? business['role'] ?? ''}';
+    if (businessId.isNotEmpty) {
+      unawaited(
+        _refreshLocalData(
+          businessId,
+          roleCode: roleCode,
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    BriskersConnectionModeController.instance.removeListener(
+      _connectionModeChanged,
+    );
+    super.dispose();
   }
 
   String? get _businessCacheKey {
