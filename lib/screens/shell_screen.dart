@@ -51,6 +51,7 @@ class _ShellScreenState extends State<ShellScreen> {
   int _index = 0;
   int _customersRefreshToken = 0;
   int _jobsRefreshToken = 0;
+  int _homeAttentionRefreshToken = 0;
   Map<String, dynamic> _navCounts = const {
     'customers': 0,
     'appointments': 0,
@@ -85,7 +86,12 @@ class _ShellScreenState extends State<ShellScreen> {
     _refreshHomeJobsCount();
     _homeJobsCountSubscription = _localJobs
         .watchActiveJobCount(widget.businessId)
-        .listen(_applyHomeJobsCount);
+        .listen((count) {
+          _applyHomeJobsCount(count);
+          if (mounted) {
+            setState(() => _homeAttentionRefreshToken++);
+          }
+        });
     _homeJobsSyncSubscription = JobSyncService.syncEvents.listen((businessId) {
       if (businessId == widget.businessId) {
         _refreshHomeJobsCount();
@@ -249,6 +255,7 @@ class _ShellScreenState extends State<ShellScreen> {
       _index = index;
       if (index == 1) _customersRefreshToken++;
       if (index == 3) _jobsRefreshToken++;
+      if (index == 0) _homeAttentionRefreshToken++;
     });
     if (index == 1) {
       _markCustomersViewed();
@@ -324,6 +331,7 @@ class _ShellScreenState extends State<ShellScreen> {
           customersNewCount: _homeCustomersNewCount,
           estimatesOpenCount: _homeEstimatesOpenCount,
           invoicesOpenCount: _homeInvoicesOpenCount,
+          attentionRefreshToken: _homeAttentionRefreshToken,
         );
       }
       return _lazyPages.putIfAbsent(index, () {
