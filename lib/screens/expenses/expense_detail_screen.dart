@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_financial_cache.dart';
@@ -62,7 +63,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       widget.transactionId,
     );
     final detail = Map<String, dynamic>.from(saved ?? summary)
-      ..['editable'] = false
+      ..['editable'] = true
       ..['deletable'] = false
       ..['date'] = (saved ?? summary)['date'] ??
           (saved ?? summary)['transaction_date']
@@ -156,7 +157,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
   Future<File?> _localAttachment(
     Map<String, dynamic> attachment,
-  ) {
+  ) async {
+    final localPath = attachment['local_file_path']?.toString() ?? '';
+    if (localPath.isNotEmpty) {
+      final file = File(localPath);
+      if (await file.exists()) return file;
+    }
     return _attachmentCache.existing(
       attachment['bucket']?.toString() ?? 'briskers-private',
       attachment['key']?.toString() ?? '',
@@ -430,6 +436,34 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   Future<void> _edit() async {
     final detail = _detail;
     if (detail == null || _busy) return;
+
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      final changed = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ExpenseEntryScreen(
+            businessId: widget.businessId,
+            editTransactionId: widget.transactionId,
+            allowRecurring: widget.allowRecurring,
+          ),
+        ),
+      );
+      if (changed == true && mounted) {
+        final saved = await _localFinancial.loadTransactionDetail(
+          widget.businessId,
+          widget.transactionId,
+        );
+        if (saved != null) {
+          setState(() {
+            _detail = Map<String, dynamic>.from(saved)
+              ..['editable'] = true
+              ..['deletable'] = false;
+            _error = null;
+          });
+        }
+      }
+      return;
+    }
 
     final options = await _api.transactionOptions(widget.businessId);
     if (!mounted) return;
@@ -778,6 +812,19 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
   Widget _receiptThumbnail(Map<String, dynamic> attachment) {
     const size = 52.0;
+    final localPath = attachment['local_file_path']?.toString() ?? '';
+    if (localPath.isNotEmpty && File(localPath).existsSync()) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.file(
+          File(localPath),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+
     final bucket = attachment['bucket']?.toString() ?? 'briskers-private';
     final key = attachment['key']?.toString() ?? '';
 
@@ -807,6 +854,19 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
               height: size,
               fit: BoxFit.cover,
             ),
+          );
+        }
+
+        if (BriskersConnectionModeController.instance.forceOffline) {
+          return Container(
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.image_not_supported_outlined),
           );
         }
 
