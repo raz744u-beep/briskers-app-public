@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
+import '../../services/customer_detail_cache.dart';
 
 class CustomerVehicleFindingsSection extends StatefulWidget {
   const CustomerVehicleFindingsSection({
@@ -24,6 +26,7 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
 class _CustomerVehicleFindingsSectionState
     extends State<CustomerVehicleFindingsSection> {
   static const _api = BriskersApi();
+  static const _cache = CustomerDetailCache();
   final ImagePicker _picker = ImagePicker();
 
   late Future<List<Map<String, dynamic>>> _findingsFuture;
@@ -57,30 +60,62 @@ class _CustomerVehicleFindingsSectionState
   }
 
   Future<List<Map<String, dynamic>>> _allFindings() async {
-    final all = <Map<String, dynamic>>[];
-
-    for (final raw in widget.vehicles) {
-      final vehicle = Map<String, dynamic>.from(raw as Map);
-      final vehicleId = vehicle['id']?.toString() ?? '';
-      if (vehicleId.isEmpty) continue;
-
-      final rows = await _api.vehicleFindings(
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      final cached = await _cache.load(
         widget.businessId,
-        vehicleId,
-        includeResolved: true,
+        widget.customerId,
+        'findings',
       );
-
-      final vehicleLabel = _vehicleLabel(vehicle);
-      for (final row in rows) {
-        all.add(<String, dynamic>{
-          ...row,
-          '_vehicle_id': vehicleId,
-          '_vehicle_label': vehicleLabel,
-        });
-      }
+      return cached is List
+          ? cached
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList()
+          : <Map<String, dynamic>>[];
     }
 
-    return all;
+    final all = <Map<String, dynamic>>[];
+    try {
+      for (final raw in widget.vehicles) {
+        final vehicle = Map<String, dynamic>.from(raw as Map);
+        final vehicleId = vehicle['id']?.toString() ?? '';
+        if (vehicleId.isEmpty) continue;
+
+        final rows = await _api.vehicleFindings(
+          widget.businessId,
+          vehicleId,
+          includeResolved: true,
+        );
+
+        final vehicleLabel = _vehicleLabel(vehicle);
+        for (final row in rows) {
+          all.add(<String, dynamic>{
+            ...row,
+            '_vehicle_id': vehicleId,
+            '_vehicle_label': vehicleLabel,
+          });
+        }
+      }
+      await _cache.save(
+        widget.businessId,
+        widget.customerId,
+        'findings',
+        all,
+      );
+      return all;
+    } catch (_) {
+      final cached = await _cache.load(
+        widget.businessId,
+        widget.customerId,
+        'findings',
+      );
+      return cached is List
+          ? cached
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList()
+          : <Map<String, dynamic>>[];
+    }
   }
 
   String _vehicleLabel(Map<String, dynamic> vehicle) => <String>[
@@ -1059,7 +1094,9 @@ class _CustomerVehicleFindingsSectionState
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
-                    onPressed: _busy ? null : _addFinding,
+                    onPressed: BriskersConnectionModeController.instance.forceOffline || _busy
+                        ? null
+                        : _addFinding,
                     icon: const Icon(Icons.add_circle_outline, size: 19),
                     label: const Text('Add finding'),
                   ),
