@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -6,6 +9,7 @@ import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
 import '../../services/local_attachment_cache.dart';
+import '../../services/offline_customer_detail_write_service.dart';
 
 class CustomerVehicleFindingsSection extends StatefulWidget {
   const CustomerVehicleFindingsSection({
@@ -29,6 +33,8 @@ class _CustomerVehicleFindingsSectionState
   static const _api = BriskersApi();
   static const _cache = CustomerDetailCache();
   final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
+  final OfflineCustomerDetailWriteService _offlineWrites =
+      OfflineCustomerDetailWriteService();
   final ImagePicker _picker = ImagePicker();
 
   late Future<List<Map<String, dynamic>>> _findingsFuture;
@@ -344,25 +350,31 @@ class _CustomerVehicleFindingsSectionState
     });
 
     try {
-      final findingId = await _api.createVehicleFindingForVehicle(
+      final stagedPhotos = <Map<String, dynamic>>[];
+      for (final photo in photos) {
+        stagedPhotos.add({
+          'filename': photo.name,
+          'mime_type': _imageMime(photo.name),
+          'bytes': await photo.readAsBytes(),
+        });
+      }
+
+      await _offlineWrites.createFinding(
         widget.businessId,
         widget.customerId,
         vehicleId,
         body: body,
         includeOnInvoice: includeOnInvoice,
+        photos: stagedPhotos,
       );
 
-      for (final photo in photos) {
-        await _api.uploadVehicleFindingPhoto(
-          widget.businessId,
-          findingId,
-          filename: photo.name,
-          mimeType: _imageMime(photo.name),
-          bytes: await photo.readAsBytes(),
+      await _refresh();
+
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        unawaited(
+          _offlineWrites.flush(widget.businessId).then((_) => _refresh()),
         );
       }
-
-      await _refresh();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -377,97 +389,109 @@ class _CustomerVehicleFindingsSectionState
   }) async {
     if (attachments.isEmpty) return;
 
-    try {
-      final urls = <String>[];
-      for (final attachment in attachments) {
-        final bucket = attachment['bucket']?.toString() ?? '';
-        final key = attachment['key']?.toString() ?? '';
-        if (bucket.isEmpty || key.isEmpty) continue;
-        urls.add(await _api.signedAttachmentUrl(bucket, key));
+    final images = <ImageProvider>[];
+    for (final attachment in attachments) {
+      final localPath = attachment['local_file_path']?.toString() ?? '';
+      if (localPath.isNotEmpty) {
+        final file = File(localPath);
+        if (await file.exists()) {
+          images.add(FileImage(file));
+          continue;
+        }
       }
 
-      if (urls.isEmpty || !context.mounted) return;
+      final bucket =
+          attachment['bucket']?.toString() ?? 'briskers-private';
+      final key = attachment['key']?.toString() ?? '';
+      if (key.isEmpty) continue;
 
-      var current = initialIndex.clamp(0, urls.length - 1);
-      final controller = PageController(initialPage: current);
+      final cached = await _attachmentCache.existing(bucket, key);
+      if (cached != null) {
+        images.add(FileImage(cached));
+        continue;
+      }
 
-      await showDialog<void>(
-        context: context,
-        barrierColor: Colors.black87,
-        builder: (dialogContext) => StatefulBuilder(
-          builder: (context, setDialogState) => Dialog(
-            insetPadding: const EdgeInsets.all(12),
-            backgroundColor: Colors.black,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: PageView.builder(
-                    controller: controller,
-                    itemCount: urls.length,
-                    onPageChanged: (index) =>
-                        setDialogState(() => current = index),
-                    itemBuilder: (context, index) => InteractiveViewer(
-                      minScale: 1,
-                      maxScale: 5,
-                      child: Center(
-                        child: Image.network(
-                          urls[index],
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) =>
-                              const Icon(
-                            Icons.broken_image_outlined,
-                            color: Colors.white70,
-                            size: 56,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 6,
-                  right: 6,
-                  child: IconButton.filled(
-                    tooltip: 'Close photo',
-                    onPressed: () => Navigator.pop(dialogContext),
-                    icon: const Icon(Icons.close),
-                  ),
-                ),
-                if (urls.length > 1)
-                  Positioned(
-                    bottom: 12,
-                    left: 0,
-                    right: 0,
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          final file = await _attachmentCache.getOrDownload(bucket, key);
+          if (file != null) images.add(FileImage(file));
+        } catch (_) {}
+      }
+    }
+
+    if (images.isEmpty || !context.mounted) return;
+
+    var current = initialIndex.clamp(0, images.length - 1);
+    final controller = PageController(initialPage: current);
+
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => Dialog(
+          insetPadding: const EdgeInsets.all(12),
+          backgroundColor: Colors.black,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: PageView.builder(
+                  controller: controller,
+                  itemCount: images.length,
+                  onPageChanged: (index) =>
+                      setDialogState(() => current = index),
+                  itemBuilder: (context, index) => InteractiveViewer(
+                    minScale: 1,
+                    maxScale: 5,
                     child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          '${current + 1} / ${urls.length}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                          ),
+                      child: Image(
+                        image: images[index],
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 6,
+                right: 6,
+                child: IconButton.filled(
+                  tooltip: 'Close photo',
+                  onPressed: () => Navigator.pop(dialogContext),
+                  icon: const Icon(Icons.close),
+                ),
+              ),
+              if (images.length > 1)
+                Positioned(
+                  bottom: 12,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '${current + 1} / ${images.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
-      );
+      ),
+    );
 
-      controller.dispose();
-    } catch (_) {
-      // Keep the findings list usable even if a photo cannot be opened.
-    }
+    controller.dispose();
   }
 
   Widget _findingThumbnail(
@@ -493,13 +517,30 @@ class _CustomerVehicleFindingsSectionState
     }
 
     final first = attachments.first;
-    final bucket = first['bucket']?.toString() ?? '';
-    final key = first['key']?.toString() ?? '';
+    final localPath = first['local_file_path']?.toString() ?? '';
+    if (localPath.isNotEmpty && File(localPath).existsSync()) {
+      return InkWell(
+        onTap: () => _showPhotoGallery(context, attachments),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.file(
+            File(localPath),
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+          ),
+        ),
+      );
+    }
 
-    if (bucket.isEmpty || key.isEmpty) {
+    final bucket =
+        first['bucket']?.toString() ?? 'briskers-private';
+    final key = first['key']?.toString() ?? '';
+    if (key.isEmpty) {
       return Container(
         width: size,
         height: size,
+        alignment: Alignment.center,
         decoration: BoxDecoration(
           color: const Color(0xFFF3F5F7),
           borderRadius: BorderRadius.circular(8),
@@ -511,71 +552,37 @@ class _CustomerVehicleFindingsSectionState
       );
     }
 
-    return FutureBuilder<String>(
-      future: _api.signedAttachmentUrl(bucket, key),
+    return FutureBuilder<File?>(
+      future: _attachmentCache.existing(bucket, key),
       builder: (context, snapshot) {
-        final image = snapshot.hasData
-            ? ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.network(
-                  snapshot.data!,
+        final file = snapshot.data;
+        return InkWell(
+          onTap: file == null
+              ? null
+              : () => _showPhotoGallery(context, attachments),
+          child: file == null
+              ? Container(
                   width: size,
                   height: size,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3F5F7),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.image_outlined,
+                    color: Colors.deepOrange,
+                  ),
+                )
+              : ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.file(
+                    file,
                     width: size,
                     height: size,
-                    alignment: Alignment.center,
-                    color: const Color(0xFFF3F5F7),
-                    child: const Icon(
-                      Icons.broken_image_outlined,
-                      color: Colors.deepOrange,
-                    ),
+                    fit: BoxFit.cover,
                   ),
                 ),
-              )
-            : const SizedBox(
-                width: size,
-                height: size,
-                child: Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              );
-
-        return InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: snapshot.hasData
-              ? () => _showPhotoGallery(context, attachments)
-              : null,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              image,
-              if (attachments.length > 1)
-                Positioned(
-                  right: 3,
-                  bottom: 3,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.68),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      '+${attachments.length - 1}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
         );
       },
     );
@@ -721,11 +728,15 @@ class _CustomerVehicleFindingsSectionState
 
             setSheetState(() => actionBusy = true);
             try {
-              await _api.updateVehicleFinding(
+              await _offlineWrites.updateFinding(
                 widget.businessId,
+                widget.customerId,
                 findingId,
                 body: updatedBody,
               );
+              if (!BriskersConnectionModeController.instance.forceOffline) {
+                unawaited(_offlineWrites.flush(widget.businessId));
+              }
               changed = true;
               setSheetState(() => localBody = updatedBody);
             } catch (error) {
@@ -1116,9 +1127,7 @@ class _CustomerVehicleFindingsSectionState
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
-                    onPressed: BriskersConnectionModeController.instance.forceOffline || _busy
-                        ? null
-                        : _addFinding,
+                    onPressed: _busy ? null : _addFinding,
                     icon: const Icon(Icons.add_circle_outline, size: 19),
                     label: const Text('Add finding'),
                   ),
