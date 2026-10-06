@@ -9,6 +9,7 @@ import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/customer_vehicle_sync_service.dart';
+import '../services/catalog_sync_service.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/job_sync_service.dart';
 import '../services/local_financial_cache.dart';
@@ -37,6 +38,7 @@ class _BusinessGateState extends State<BusinessGate> {
       AppointmentSyncService();
   final CustomerVehicleSyncService _customerVehicleSync =
       CustomerVehicleSyncService();
+  final CatalogSyncService _catalogSync = CatalogSyncService();
   final DocumentIndexSyncService _documentSync = DocumentIndexSyncService();
   final OfflinePreInspectionService _offlineInspection =
       OfflinePreInspectionService();
@@ -309,6 +311,18 @@ class _BusinessGateState extends State<BusinessGate> {
       await _customerVehicleSync.pull(businessId);
     } catch (_) {
       // Customer/vehicle browsing keeps the previous local snapshot.
+    }
+
+    try {
+      await _catalogSync.flush(businessId);
+    } catch (_) {
+      // Catalog edits stay queued and the last local item list remains usable.
+    }
+
+    try {
+      await _catalogSync.pull(businessId);
+    } catch (_) {
+      // Keep the last saved catalog snapshot for offline estimates/invoices.
     }
 
     try {
