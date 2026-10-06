@@ -691,6 +691,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           transactionId: id,
           allowRecurring: _allowRecurring,
           canDeleteTransaction: widget.roleCode == 'owner',
+          cachedDetail: _showingLocal
+              ? Map<String, dynamic>.from(transaction)
+              : null,
         ),
       ),
     );
@@ -1334,9 +1337,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         margin: const EdgeInsets.only(bottom: 8),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
-                          onTap: _showingLocal
-                              ? null
-                              : () => _openTransaction(transaction),
+                          onTap: () => _openTransaction(transaction),
                           onLongPress: _showingLocal
                               ? null
                               : () => _showTransactionActions(transaction),
