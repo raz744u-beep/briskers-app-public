@@ -307,6 +307,7 @@ class _JobsScreenState extends State<JobsScreen> {
     final controller = TextEditingController(
       text: job['planned_hours']?.toString() ?? '0',
     );
+    var clearedForEntry = false;
 
     final value = await showDialog<num?>(
       context: context,
@@ -315,18 +316,32 @@ class _JobsScreenState extends State<JobsScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
+          onTap: () {
+            if (!clearedForEntry) {
+              controller.clear();
+              clearedForEntry = true;
+            }
+          },
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: const InputDecoration(
             labelText: 'Hours',
             suffixText: 'hr',
           ),
         ),
+        actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
         actions: [
-          TextButton(
+          OutlinedButton(
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
-          FilledButton(
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: BriskersColors.jobs,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
             onPressed: () {
               final parsed = num.tryParse(controller.text.trim());
               Navigator.pop(dialogContext, parsed);
