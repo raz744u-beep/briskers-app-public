@@ -231,6 +231,135 @@ class _JobsScreenState extends State<JobsScreen> {
     widget.onJobsChanged?.call();
   }
 
+  Future<void> _quickEditMechanic(Map<String, dynamic> job) async {
+    if (!_canManage || !_onlineReady || _busyJobId != null) return;
+
+    setState(() => _busyJobId = job['id']?.toString());
+    try {
+      final employees = await _api.assignableEmployees(widget.businessId);
+      if (!mounted) return;
+
+      final currentId = job['assigned_employee_id']?.toString();
+      final selected = await showModalBottomSheet<String?>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(
+                title: Text(
+                  'Assign mechanic / employee',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.person_off_outlined),
+                title: const Text('Unassigned'),
+                trailing: currentId == null || currentId.isEmpty
+                    ? const Icon(Icons.check, color: BriskersColors.jobs)
+                    : null,
+                onTap: () => Navigator.pop(sheetContext, ''),
+              ),
+              const Divider(),
+              ...employees.map((employee) {
+                final id = employee['id']?.toString() ?? '';
+                return ListTile(
+                  leading: const Icon(Icons.person_outline),
+                  title: Text(employee['name']?.toString() ?? ''),
+                  subtitle: Text(
+                    employee['position_name']?.toString() ?? 'Employee',
+                  ),
+                  trailing: id == currentId
+                      ? const Icon(Icons.check, color: BriskersColors.jobs)
+                      : null,
+                  onTap: () => Navigator.pop(sheetContext, id),
+                );
+              }),
+            ],
+          ),
+        ),
+      );
+
+      if (selected == null) return;
+
+      if (selected.isEmpty) {
+        await _api.clearJobAssignments(widget.businessId, job['id'].toString());
+      } else {
+        await _api.setPrimaryJobEmployee(
+          widget.businessId,
+          job['id'].toString(),
+          selected,
+        );
+      }
+      await _load();
+      widget.onJobsChanged?.call();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busyJobId = null);
+    }
+  }
+
+  Future<void> _quickEditPlannedTime(Map<String, dynamic> job) async {
+    if (!_canManage || !_onlineReady || _busyJobId != null) return;
+
+    final controller = TextEditingController(
+      text: job['planned_hours']?.toString() ?? '0',
+    );
+
+    final value = await showDialog<num?>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Planned time'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Hours',
+            suffixText: 'hr',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final parsed = num.tryParse(controller.text.trim());
+              Navigator.pop(dialogContext, parsed);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    if (value == null || value < 0) return;
+
+    setState(() => _busyJobId = job['id']?.toString());
+    try {
+      await _api.updateJob(
+        widget.businessId,
+        job['id'].toString(),
+        customerId: job['customer_id']?.toString() ?? '',
+        vehicleId: job['vehicle_id']?.toString(),
+        title: job['title']?.toString() ?? '',
+        requestedWork: job['requested_work']?.toString(),
+        plannedHours: value,
+      );
+      await _load();
+      widget.onJobsChanged?.call();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busyJobId = null);
+    }
+  }
+
   Future<void> _changeStatus(
     Map<String, dynamic> job,
     String statusCode,
@@ -363,6 +492,12 @@ class _JobsScreenState extends State<JobsScreen> {
         job: job,
         statusControl: _statusControl(job),
         onOpen: () => _openJob(job),
+        onEditMechanic: _canManage && _onlineReady
+            ? () => _quickEditMechanic(job)
+            : null,
+        onEditPlannedTime: _canManage && _onlineReady
+            ? () => _quickEditPlannedTime(job)
+            : null,
         canOpen: _busyJobId != job['id']?.toString(),
       );
 
