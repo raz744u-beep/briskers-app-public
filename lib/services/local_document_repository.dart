@@ -100,6 +100,66 @@ class LocalDocumentRepository {
     });
   }
 
+  Future<List<Map<String, dynamic>>> listByKind(
+    String businessId, {
+    required String kind,
+  }) async {
+    final rows = await _database.customSelect(
+      '''
+      SELECT d.*, j.job_number, j.customer_name, j.vehicle_label
+      FROM local_documents d
+      LEFT JOIN local_jobs j
+        ON j.business_id = d.business_id AND j.id = d.job_id
+      WHERE d.business_id = ? AND d.kind = ?
+      ORDER BY d.created_at DESC, d.id
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(kind),
+      ],
+    ).get();
+
+    String displayStatus(QueryRow row) {
+      final raw = row.readNullable<String>('display_status_code') ??
+          row.readNullable<String>('status') ??
+          '';
+      if (raw.isEmpty) return '';
+      return raw
+          .split('_')
+          .where((part) => part.isNotEmpty)
+          .map((part) =>
+              part.length == 1
+                  ? part.toUpperCase()
+                  : part[0].toUpperCase() + part.substring(1).toLowerCase())
+          .join(' ');
+    }
+
+    return rows
+        .map(
+          (row) => <String, dynamic>{
+            'id': row.read<String>('id'),
+            'job_id': row.readNullable<String>('job_id'),
+            'customer_id': row.readNullable<String>('customer_id'),
+            'kind': row.read<String>('kind'),
+            'document_number': row.readNullable<String>('document_number'),
+            'status': row.readNullable<String>('status'),
+            'display_status': displayStatus(row),
+            'display_status_code':
+                row.readNullable<String>('display_status_code'),
+            'total_amount': row.read<double>('total'),
+            'paid_amount': 0,
+            'pending_payment': 0,
+            'document_date': _isoFromDb(row.data['created_at']),
+            'created_at': _isoFromDb(row.data['created_at']),
+            'updated_at': _isoFromDb(row.data['server_updated_at']),
+            'job_number': row.readNullable<String>('job_number'),
+            'customer_name': row.readNullable<String>('customer_name'),
+            'vehicle': row.readNullable<String>('vehicle_label'),
+            '_local_snapshot': true,
+          },
+        )
+        .toList();
+  }
   Future<int> openEstimateCount(String businessId) async {
     final row = await _database.customSelect(
       '''
@@ -211,6 +271,20 @@ class LocalDocumentRepository {
       'vehicle': row.readNullable<String>('vehicle_label'),
       '_local_snapshot': true,
     }).toList();
+  }
+
+  String? _isoFromDb(Object? value) {
+    if (value == null) return null;
+    if (value is DateTime) return value.toUtc().toIso8601String();
+    if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(
+        value * 1000,
+        isUtc: true,
+      ).toIso8601String();
+    }
+    return DateTime.tryParse(value.toString())
+        ?.toUtc()
+        .toIso8601String();
   }
 
   String? _text(Object? value) {
