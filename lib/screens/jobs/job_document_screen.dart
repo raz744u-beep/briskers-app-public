@@ -1505,6 +1505,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     final estimateTotal = _number(estimate['total_amount']);
     final currentTotal = _number(invoiceDetail['total_amount']);
+    if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
