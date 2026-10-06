@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
+import '../../core/connection_mode.dart';
 import '../../core/vehicle_options.dart';
 import '../../services/briskers_api.dart';
+import '../../services/offline_customer_vehicle_admin_service.dart';
 import 'vin_scanner_screen.dart';
 
 class NewVehicleScreen extends StatefulWidget {
@@ -26,6 +28,8 @@ class NewVehicleScreen extends StatefulWidget {
 
 class _NewVehicleScreenState extends State<NewVehicleScreen> {
   static const _api = BriskersApi();
+  final OfflineCustomerVehicleAdminService _offlineAdmin =
+      OfflineCustomerVehicleAdminService();
 
   final _year = TextEditingController();
   final _model = TextEditingController();
@@ -132,34 +136,28 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
             : _keyPassword.text.trim(),
       );
 
-      if (widget.isEditing) {
-        await _api.updateVehicle(
-          widget.businessId,
-          widget.vehicle!['id'].toString(),
-          make: params.make,
-          model: params.model,
-          year: params.year,
-          vin: params.vin,
-          licensePlate: params.licensePlate,
-          licenseState: params.licenseState,
-          mileage: params.mileage,
-          color: params.color,
-          keyPassword: params.keyPassword,
-        );
-      } else {
-        await _api.createVehicle(
-          widget.businessId,
-          widget.customerId,
-          make: params.make,
-          model: params.model,
-          year: params.year,
-          vin: params.vin,
-          licensePlate: params.licensePlate,
-          licenseState: params.licenseState,
-          mileage: params.mileage,
-          color: params.color,
-          keyPassword: params.keyPassword,
-        );
+      await _offlineAdmin.queueVehicle(
+        widget.businessId,
+        widget.customerId,
+        vehicleId:
+            widget.isEditing ? widget.vehicle!['id']?.toString() : null,
+        make: params.make,
+        model: params.model,
+        year: params.year,
+        vin: params.vin,
+        licensePlate: params.licensePlate,
+        licenseState: params.licenseState,
+        mileage: params.mileage,
+        color: params.color,
+        keyPassword: params.keyPassword,
+      );
+
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineAdmin.flush(widget.businessId);
+        } catch (_) {
+          // The saved vehicle edit remains queued for the next sync.
+        }
       }
 
       if (mounted) Navigator.pop(context, true);
