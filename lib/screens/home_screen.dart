@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
 import '../services/local_job_repository.dart';
 import 'appointments/appointment_manage_screen.dart';
@@ -30,6 +31,7 @@ class HomeScreen extends StatefulWidget {
     this.customersNewCount = 0,
     this.estimatesOpenCount = 0,
     this.invoicesOpenCount = 0,
+    this.attentionRefreshToken = 0,
   });
 
   final VoidCallback onCustomersTap;
@@ -44,6 +46,7 @@ class HomeScreen extends StatefulWidget {
   final int customersNewCount;
   final int estimatesOpenCount;
   final int invoicesOpenCount;
+  final int attentionRefreshToken;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -78,7 +81,8 @@ class _HomeScreenState extends State<HomeScreen> {
         oldWidget.roleCode != widget.roleCode ||
         oldWidget.jobsCount != widget.jobsCount ||
         oldWidget.appointmentsCount != widget.appointmentsCount ||
-        oldWidget.invoicesOpenCount != widget.invoicesOpenCount) {
+        oldWidget.invoicesOpenCount != widget.invoicesOpenCount ||
+        oldWidget.attentionRefreshToken != widget.attentionRefreshToken) {
       _loadAttention();
     }
   }
@@ -109,12 +113,39 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadAttention() async {
     if (_attentionLoading) return;
     _attentionLoading = true;
+
     try {
-      final data = await _api.needsAttention(widget.businessId);
-      if (!mounted) return;
-      setState(() => _attention = data);
-    } catch (_) {
-      // Keep the last good snapshot so Home remains usable offline.
+      final localJobs = await _localJobs.unassignedOpenJobs(
+        widget.businessId,
+        limit: 25,
+      );
+      final localCount =
+          await _localJobs.unassignedOpenJobCount(widget.businessId);
+
+      if (mounted) {
+        final currentCounts = _attention['counts'] is Map
+            ? Map<String, dynamic>.from(_attention['counts'] as Map)
+            : <String, dynamic>{};
+        final next = Map<String, dynamic>.from(_attention)
+          ..['unassigned_jobs'] = localJobs
+          ..['counts'] = {
+            ...currentCounts,
+            'unassigned_jobs': localCount,
+          };
+        setState(() => _attention = next);
+      }
+
+      if (BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
+
+      try {
+        final data = await _api.needsAttention(widget.businessId);
+        if (!mounted) return;
+        setState(() => _attention = data);
+      } catch (_) {
+        // Keep the local unassigned-jobs result and the last server snapshot.
+      }
     } finally {
       _attentionLoading = false;
     }
