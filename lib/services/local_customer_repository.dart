@@ -211,6 +211,8 @@ class LocalCustomerRepository {
                   vehicle.readNullable<String>('license_state'),
               'mileage': vehicle.data['mileage'],
               'color': vehicle.readNullable<String>('color'),
+              'key_password':
+                  vehicle.readNullable<String>('key_password'),
               'updated_at':
                   _isoFromDb(vehicle.data['server_updated_at']),
               'row_version':
