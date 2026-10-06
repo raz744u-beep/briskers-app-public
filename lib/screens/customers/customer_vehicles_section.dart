@@ -82,6 +82,8 @@ class CustomerVehiclesSection extends StatelessWidget {
             final state = '${vehicle['license_state'] ?? ''}'.trim();
             final vin = '${vehicle['vin'] ?? ''}'.trim();
             final color = '${vehicle['color'] ?? ''}'.trim();
+            final keyPassword =
+                '${vehicle['key_password'] ?? ''}'.trim();
             final mileage = vehicle['mileage'];
 
             return Card(
@@ -117,6 +119,12 @@ class CustomerVehiclesSection extends StatelessWidget {
                           _detailRow(context, 'VIN', vin),
                         if (color.isNotEmpty)
                           _detailRow(context, 'Color', color),
+                        if (keyPassword.isNotEmpty)
+                          _detailRow(
+                            context,
+                            'Key Code',
+                            keyPassword,
+                          ),
                         Align(
                           alignment: Alignment.centerRight,
                           child: TextButton.icon(
