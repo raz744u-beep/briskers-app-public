@@ -340,6 +340,16 @@ class LocalDocuments extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+class LocalFinancialCache extends Table {
+  TextColumn get businessId => text()();
+  TextColumn get cacheKey => text()();
+  TextColumn get payloadJson => text()();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column<Object>> get primaryKey => {businessId, cacheKey};
+}
+
 class LocalCatalogItems extends Table {
   TextColumn get id => text()();
   TextColumn get businessId => text()();
@@ -378,6 +388,7 @@ class LocalCatalogItems extends Table {
     LocalPreInspectionPhotos,
     LocalFindings,
     LocalFindingPhotos,
+    LocalFinancialCache,
     LocalCatalogItems,
     LocalDocuments,
   ],
@@ -396,7 +407,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 16;
+  int get schemaVersion => 17;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -513,6 +524,9 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
             await customStatement(
               "UPDATE local_sync_states SET last_server_cursor = NULL, bootstrapped = 0 WHERE scope = 'customers_vehicles'",
             );
+          }
+          if (from < 17) {
+            await migrator.createTable(localFinancialCache);
           }
         },
       );
