@@ -1127,7 +1127,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       _job?['assignments'] ?? const [],
     );
     final currentId = assignments.isEmpty
-        ? _job?['assigned_employee_id']?.toString()
+        ? (_job == null
+            ? null
+            : _job!['assigned_employee_id']?.toString())
         : Map<String, dynamic>.from(assignments.first as Map)['employee_id']
             ?.toString();
 
