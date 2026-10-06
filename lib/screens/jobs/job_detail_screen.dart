@@ -117,7 +117,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     var localShown = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
-    if (!forceOnline) try {
+    if (!forceOnline) {
+      try {
       final snapshot = await _localJobs.jobDetail(
         widget.businessId,
         widget.jobId,
@@ -139,6 +140,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       }
     } catch (_) {
       // The online load below can still succeed without a local snapshot.
+      }
     }
 
     try {
