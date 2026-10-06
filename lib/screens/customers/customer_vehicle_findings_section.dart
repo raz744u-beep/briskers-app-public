@@ -639,25 +639,26 @@ class _CustomerVehicleFindingsSectionState
 
     setState(() => _busy = true);
     try {
+      final staged = <Map<String, dynamic>>[];
       for (final photo in picked) {
-        await _api.uploadVehicleFindingPhoto(
-          widget.businessId,
-          findingId,
-          filename: photo.name,
-          mimeType: _imageMime(photo.name),
-          bytes: await photo.readAsBytes(),
-        );
+        staged.add({
+          'filename': photo.name,
+          'mime_type': _imageMime(photo.name),
+          'bytes': await photo.readAsBytes(),
+        });
       }
 
-      final rows = await _allFindings();
-      final updated = rows.cast<Map<String, dynamic>?>().firstWhere(
-            (row) => row?['id']?.toString() == findingId,
-            orElse: () => null,
-          );
-      if (updated == null) return current;
-      return List<dynamic>.from(
-        updated['attachments'] ?? const [],
-      ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+      final updated = await _offlineWrites.addFindingPhotos(
+        widget.businessId,
+        widget.customerId,
+        findingId,
+        photos: staged,
+      );
+
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        unawaited(_offlineWrites.flush(widget.businessId));
+      }
+      return updated;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
