@@ -895,7 +895,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     List<Map<String, dynamic>> items;
     try {
-      await _catalogSync.ensureBootstrap(widget.businessId);
+      final forceOffline =
+          BriskersConnectionModeController.instance.forceOffline;
+      if (!forceOffline) {
+        await _catalogSync.ensureBootstrap(widget.businessId);
+      }
       items = await _localCatalog.items(
         widget.businessId,
         includeInactive: false,
@@ -906,6 +910,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     }
 
     if (!mounted) return;
+
+    if (items.isEmpty) {
+      setState(() {
+        _error = BriskersConnectionModeController.instance.forceOffline
+            ? 'No item catalog is saved on this device yet. Go online once so Briskers can sync the Items / Catalog, then offline estimates can use it.'
+            : 'No active catalog items are available.';
+      });
+      return;
+    }
 
     final selected = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
