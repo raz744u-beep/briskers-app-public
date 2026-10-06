@@ -130,6 +130,7 @@ class OfflineJobAdminService {
     required String name,
     String? colorHex,
     String? iconKey,
+    String? note,
   }) async {
     await localDatabase.transaction(() async {
       await localDatabase.customStatement(
@@ -157,6 +158,7 @@ class OfflineJobAdminService {
         {
           'status_changed': true,
           'status_code': code,
+          'status_note': note,
         },
       );
     });
@@ -358,6 +360,7 @@ class OfflineJobAdminService {
               businessId,
               jobId,
               statusCode,
+              note: payload['status_note']?.toString(),
             );
           }
         }
