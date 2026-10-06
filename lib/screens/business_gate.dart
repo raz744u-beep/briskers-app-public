@@ -238,6 +238,25 @@ class _BusinessGateState extends State<BusinessGate> {
       // Queued check-ins stay local and retry on the next sync.
     }
 
+    if (<String>{'owner', 'manager', 'office'}.contains(roleCode)) {
+      try {
+        final results = await Future.wait<dynamic>([
+          _api.transactions(businessId, limit: 1000),
+          _api.transactionOptions(businessId),
+        ]);
+        await _localFinancial.saveTransactions(
+          businessId,
+          List<Map<String, dynamic>>.from(results[0] as List),
+        );
+        await _localFinancial.saveOptions(
+          businessId,
+          Map<String, dynamic>.from(results[1] as Map),
+        );
+      } catch (_) {
+        // Keep the last saved transaction snapshot for offline use.
+      }
+    }
+
     try {
       await _jobSync.pull(businessId);
     } catch (_) {
@@ -262,24 +281,6 @@ class _BusinessGateState extends State<BusinessGate> {
       // Estimate/invoice Home counts keep the previous local snapshot.
     }
 
-    if (<String>{'owner', 'manager', 'office'}.contains(roleCode)) {
-      try {
-        final results = await Future.wait<dynamic>([
-          _api.transactions(businessId, limit: 1000),
-          _api.transactionOptions(businessId),
-        ]);
-        await _localFinancial.saveTransactions(
-          businessId,
-          List<Map<String, dynamic>>.from(results[0] as List),
-        );
-        await _localFinancial.saveOptions(
-          businessId,
-          Map<String, dynamic>.from(results[1] as Map),
-        );
-      } catch (_) {
-        // Keep the last saved transaction snapshot for offline use.
-      }
-    }
   }
 
   @override
