@@ -176,6 +176,69 @@ class OfflineCustomerDetailWriteService {
     return row;
   }
 
+  Future<List<Map<String, dynamic>>> addCustomerNotePhotos(
+    String businessId,
+    String customerId,
+    String noteId, {
+    required List<Map<String, dynamic>> photos,
+  }) async {
+    final rows = await _loadList(businessId, customerId, 'notes');
+    final index = rows.indexWhere((row) => row['id']?.toString() == noteId);
+    if (index < 0) {
+      throw StateError('Customer note is not available locally.');
+    }
+
+    final attachments = List<dynamic>.from(
+      rows[index]['attachments'] ?? const [],
+    ).whereType<Map>().map((raw) {
+      return Map<String, dynamic>.from(raw);
+    }).toList();
+
+    for (final photo in photos) {
+      final filename = photo['filename']?.toString() ?? 'photo.jpg';
+      final mimeType = photo['mime_type']?.toString() ?? 'image/jpeg';
+      final bytes = photo['bytes'] as Uint8List;
+      final file = await _stageFile(
+        businessId,
+        customerId,
+        'notes',
+        filename,
+        bytes,
+      );
+      final photoId = 'local-note-photo-${_operationId('photo')}';
+      attachments.add({
+        'attachment_id': photoId,
+        'id': photoId,
+        'filename': filename,
+        'mime_type': mimeType,
+        'local_file_path': file.path,
+        'upload_state': 'pending',
+      });
+      await _enqueue(
+        businessId,
+        'customer_note_photo',
+        photoId,
+        'upload',
+        {
+          'customer_id': customerId,
+          'note_id': noteId,
+          'local_note_id': noteId,
+          'filename': filename,
+          'mime_type': mimeType,
+          'local_file_path': file.path,
+        },
+      );
+    }
+
+    rows[index] = {
+      ...rows[index],
+      'attachments': attachments,
+      'sync_state': 'pending',
+    };
+    await _saveList(businessId, customerId, 'notes', rows);
+    return attachments;
+  }
+
   Future<void> updateCustomerNote(
     String businessId,
     String customerId,
@@ -317,6 +380,70 @@ class OfflineCustomerDetailWriteService {
     rows.insert(0, row);
     await _saveList(businessId, customerId, 'findings', rows);
     return row;
+  }
+
+  Future<List<Map<String, dynamic>>> addFindingPhotos(
+    String businessId,
+    String customerId,
+    String findingId, {
+    required List<Map<String, dynamic>> photos,
+  }) async {
+    final rows = await _loadList(businessId, customerId, 'findings');
+    final index =
+        rows.indexWhere((row) => row['id']?.toString() == findingId);
+    if (index < 0) {
+      throw StateError('Finding is not available locally.');
+    }
+
+    final attachments = List<dynamic>.from(
+      rows[index]['attachments'] ?? const [],
+    ).whereType<Map>().map((raw) {
+      return Map<String, dynamic>.from(raw);
+    }).toList();
+
+    for (final photo in photos) {
+      final filename = photo['filename']?.toString() ?? 'photo.jpg';
+      final mimeType = photo['mime_type']?.toString() ?? 'image/jpeg';
+      final bytes = photo['bytes'] as Uint8List;
+      final file = await _stageFile(
+        businessId,
+        customerId,
+        'findings',
+        filename,
+        bytes,
+      );
+      final photoId = 'local-finding-photo-${_operationId('photo')}';
+      attachments.add({
+        'attachment_id': photoId,
+        'id': photoId,
+        'filename': filename,
+        'mime_type': mimeType,
+        'local_file_path': file.path,
+        'upload_state': 'pending',
+      });
+      await _enqueue(
+        businessId,
+        'customer_finding_photo',
+        photoId,
+        'upload',
+        {
+          'customer_id': customerId,
+          'finding_id': findingId,
+          'local_finding_id': findingId,
+          'filename': filename,
+          'mime_type': mimeType,
+          'local_file_path': file.path,
+        },
+      );
+    }
+
+    rows[index] = {
+      ...rows[index],
+      'attachments': attachments,
+      'sync_state': 'pending',
+    };
+    await _saveList(businessId, customerId, 'findings', rows);
+    return attachments;
   }
 
   Future<void> updateFinding(
