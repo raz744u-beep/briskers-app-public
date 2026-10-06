@@ -14,6 +14,7 @@ import '../../services/job_sync_service.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/offline_preinspection_service.dart';
+import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../services/offline_work_findings_service.dart';
 import '../expenses/expense_detail_screen.dart';
@@ -50,6 +51,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   final JobSyncService _jobSync = JobSyncService();
   final LocalJobRepository _localJobs = LocalJobRepository();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
+  final OfflineDocumentDraftService _offlineDocumentDraft =
+      OfflineDocumentDraftService();
 
   Map<String, dynamic>? _job;
   Map<String, dynamic>? _profitability;
@@ -89,12 +92,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   bool get _canSeeFinancial {
-    if (!_onlineReady) return false;
-    return _job == null
-        ? widget.roleCode == 'owner' ||
-            widget.roleCode == 'manager' ||
-            widget.roleCode == 'office'
-        : _jobCapability('view_financial');
+    final roleCanSee = widget.roleCode == 'owner' ||
+        widget.roleCode == 'manager' ||
+        widget.roleCode == 'office';
+    if (!_onlineReady) return roleCanSee;
+    return _job == null ? roleCanSee : roleCanSee || _jobCapability('view_financial');
   }
 
   bool get _canRequestJob =>
@@ -2184,7 +2186,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     if (!_canSeeFinancial) return;
     String? id;
     await _run(() async {
-      id = await _api.createEstimate(widget.businessId, widget.jobId);
+      id = BriskersConnectionModeController.instance.forceOffline
+          ? await _offlineDocumentDraft.createEstimate(
+              widget.businessId,
+              widget.jobId,
+            )
+          : await _api.createEstimate(widget.businessId, widget.jobId);
     });
     if (!mounted || id == null) return;
     await _openDocument(id!);
