@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import '../../core/formatters.dart';
 import '../../core/connection_mode.dart';
 import '../../core/vehicle_options.dart';
-import '../../services/briskers_api.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
 
 class EditCustomerScreen extends StatefulWidget {
@@ -24,7 +23,6 @@ class EditCustomerScreen extends StatefulWidget {
 }
 
 class _EditCustomerScreenState extends State<EditCustomerScreen> {
-  static const _api = BriskersApi();
   final OfflineCustomerVehicleAdminService _offlineAdmin =
       OfflineCustomerVehicleAdminService();
 
