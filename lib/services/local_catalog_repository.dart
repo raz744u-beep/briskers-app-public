@@ -239,7 +239,7 @@ class LocalCatalogRepository {
         (business_id, scope, last_pull_at, bootstrapped)
         VALUES (?, 'catalog', ?, 1)
         ''',
-        [businessId, DateTime.now().toUtc()],
+        [businessId, DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000],
       );
     });
   }
