@@ -54,9 +54,13 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
             for (final mode in BriskersConnectionMode.values)
-              RadioListTile<BriskersConnectionMode>(
-                value: mode,
-                groupValue: controller.mode,
+              ListTile(
+                leading: Icon(
+                  controller.mode == mode
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: BriskersColors.settings,
+                ),
                 title: Text(
                   switch (mode) {
                     BriskersConnectionMode.auto => 'Auto',
@@ -74,7 +78,7 @@ class SettingsScreen extends StatelessWidget {
                       'Block Briskers server calls and test only local/offline behavior.',
                   },
                 ),
-                onChanged: (value) => Navigator.pop(sheetContext, value),
+                onTap: () => Navigator.pop(sheetContext, mode),
               ),
             const SizedBox(height: 8),
           ],
