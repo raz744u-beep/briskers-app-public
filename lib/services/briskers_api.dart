@@ -1354,6 +1354,60 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> syncCreateManualTransaction(
+    String businessId, {
+    required String operationId,
+    required String direction,
+    required String accountId,
+    required String categoryId,
+    required num amount,
+    required DateTime date,
+    String? jobId,
+    String? documentId,
+    String? counterpartyId,
+    String? counterpartyName,
+    String? remarks,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_sync_create_manual_transaction_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_operation_id': operationId,
+        'p_direction': direction,
+        'p_account_id': accountId,
+        'p_category_id': categoryId,
+        'p_amount': amount,
+        'p_date': date.toIso8601String().split('T').first,
+        'p_job_id': jobId,
+        'p_document_id': documentId,
+        'p_counterparty_id': counterpartyId,
+        'p_counterparty_name': counterpartyName,
+        'p_remarks': remarks,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> syncRegisterExpensePhoto(
+    String businessId,
+    String transactionId, {
+    required String operationId,
+    required String filename,
+    required String mimeType,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_sync_register_expense_photo_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_id': transactionId,
+        'p_operation_id': operationId,
+        'p_original_filename': filename,
+        'p_mime_type': mimeType,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<String> createManualTransaction(
     String businessId, {
     required String direction,
