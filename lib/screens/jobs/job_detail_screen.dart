@@ -14,6 +14,7 @@ import '../../services/job_sync_service.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/offline_preinspection_service.dart';
+import '../../services/offline_job_admin_service.dart';
 import '../../services/offline_work_findings_service.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
@@ -48,6 +49,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       OfflineWorkFindingsService();
   final JobSyncService _jobSync = JobSyncService();
   final LocalJobRepository _localJobs = LocalJobRepository();
+  final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
 
   Map<String, dynamic>? _job;
   Map<String, dynamic>? _profitability;
@@ -74,11 +76,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     return raw[key] == true;
   }
 
+  bool get _canQuickAdmin =>
+      widget.roleCode == 'owner' ||
+      widget.roleCode == 'manager' ||
+      widget.roleCode == 'office';
+
   bool get _canManage {
     if (!_onlineReady) return false;
-    final roleCanManage = widget.roleCode == 'owner' ||
-        widget.roleCode == 'manager' ||
-        widget.roleCode == 'office';
+    final roleCanManage = _canQuickAdmin;
     if (_job == null) return roleCanManage;
     return roleCanManage || _jobCapability('manage_job');
   }
@@ -902,7 +907,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _changePlannedHours() async {
-    if (!_canManage || _job == null || _busy) return;
+    if (!_canQuickAdmin || _job == null || _busy) return;
     final controller = TextEditingController(
       text: _hours(_job!['planned_hours']),
     );
@@ -962,12 +967,27 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     controller.dispose();
     if (value == null || _job == null) return;
 
-    await _run(() => _updateCore(
-          customerId: _job!['customer_id'].toString(),
-          vehicleId: _job!['vehicle_id']?.toString(),
-          plannedHours: value,
-          requestedWork: _job!['requested_work']?.toString() ?? '',
-        ));
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _offlineJobAdmin.queuePlannedHours(
+        widget.businessId,
+        widget.jobId,
+        value,
+      );
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineJobAdmin.flush(widget.businessId);
+        } catch (_) {}
+      }
+      if (mounted) await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<String?> _editTextSheet({
@@ -1101,15 +1121,37 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _changeAssignment() async {
-    if (!_canManage || _busy) return;
+    if (!_canQuickAdmin || _busy) return;
 
     final assignments = List<dynamic>.from(
       _job?['assignments'] ?? const [],
     );
     final currentId = assignments.isEmpty
-        ? null
+        ? _job?['assigned_employee_id']?.toString()
         : Map<String, dynamic>.from(assignments.first as Map)['employee_id']
             ?.toString();
+
+    List<Map<String, dynamic>> employees;
+    if (_onlineReady && _employees.isNotEmpty) {
+      employees = _employees;
+      try {
+        await _offlineJobAdmin.refreshEmployees(widget.businessId);
+      } catch (_) {}
+    } else {
+      employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
+    }
+
+    if (!mounted) return;
+    if (employees.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No employee list is saved on this device yet. Open Jobs once while online, then mechanic changes will work offline.',
+          ),
+        ),
+      );
+      return;
+    }
 
     final selected = await showModalBottomSheet<String?>(
       context: context,
@@ -1139,13 +1181,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     child: Icon(Icons.person_off_outlined),
                   ),
                   title: const Text('Unassigned'),
-                  trailing: currentId == null
+                  trailing: currentId == null || currentId.isEmpty
                       ? const Icon(Icons.check, color: BriskersColors.jobs)
                       : null,
                   onTap: () => Navigator.pop(sheetContext, ''),
                 ),
                 const Divider(),
-                ..._employees.map((employee) {
+                ...employees.map((employee) {
                   final position =
                       employee['position_name']?.toString() ?? 'Employee';
                   final roleStyle = employeeRoleStyle(position);
@@ -1173,17 +1215,39 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
     if (selected == null) return;
 
-    await _run(() async {
-      if (selected.isEmpty) {
-        await _api.clearJobAssignments(widget.businessId, widget.jobId);
-      } else {
-        await _api.setPrimaryJobEmployee(
-          widget.businessId,
-          widget.jobId,
-          selected,
-        );
+    Map<String, dynamic>? employee;
+    if (selected.isNotEmpty) {
+      for (final row in employees) {
+        if (row['id']?.toString() == selected) {
+          employee = row;
+          break;
+        }
       }
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
     });
+    try {
+      await _offlineJobAdmin.queueAssignment(
+        widget.businessId,
+        widget.jobId,
+        employeeId: selected.isEmpty ? null : selected,
+        employeeName: employee?['name']?.toString(),
+        position: employee?['position_name']?.toString(),
+      );
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineJobAdmin.flush(widget.businessId);
+        } catch (_) {}
+      }
+      if (mounted) await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _requestJob() async {
@@ -2480,7 +2544,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         color: roleStyle.color,
                         label: 'Mechanic',
                         value: employeeName,
-                        onTap: _canManage ? _changeAssignment : null,
+                        onTap: _canQuickAdmin ? _changeAssignment : null,
                       ),
                     ),
                     Container(
@@ -2495,7 +2559,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         color: statusColor,
                         label: 'Planned time',
                         value: '${_hours(_job!['planned_hours'])} hr',
-                        onTap: _canManage ? _changePlannedHours : null,
+                        onTap: _canQuickAdmin ? _changePlannedHours : null,
                       ),
                     ),
                   ],
@@ -4580,7 +4644,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     title: Text('Edit job'),
                   ),
                 ),
-              if (_canManage)
+              if (_canQuickAdmin)
                 const PopupMenuItem(
                   value: 'assignment',
                   child: ListTile(
@@ -4590,7 +4654,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     title: Text('Assign / unassign mechanic'),
                   ),
                 ),
-              if (_canManage) const PopupMenuDivider(),
+              if (_canManage || _canQuickAdmin) const PopupMenuDivider(),
               const PopupMenuItem(
                 value: 'refresh',
                 child: ListTile(
