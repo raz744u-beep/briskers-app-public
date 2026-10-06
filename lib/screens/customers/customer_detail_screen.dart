@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
-import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
@@ -33,7 +32,6 @@ class CustomerDetailScreen extends StatefulWidget {
 }
 
 class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
-  static const _api = BriskersApi();
   final CustomerVehicleSyncService _sync =
       CustomerVehicleSyncService();
   final LocalCustomerRepository _localCustomers =
