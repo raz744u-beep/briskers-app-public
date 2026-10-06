@@ -10,12 +10,16 @@ class JobCompactCard extends StatelessWidget {
     required this.job,
     required this.statusControl,
     required this.onOpen,
+    this.onEditMechanic,
+    this.onEditPlannedTime,
     this.canOpen = true,
   });
 
   final Map<String, dynamic> job;
   final Widget statusControl;
   final VoidCallback onOpen;
+  final VoidCallback? onEditMechanic;
+  final VoidCallback? onEditPlannedTime;
   final bool canOpen;
 
   String _hours(Object? raw) {
@@ -238,51 +242,68 @@ class JobCompactCard extends StatelessWidget {
                       separator(),
                       Expanded(
                         flex: employeeFlex,
-                        child: Center(
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                roleStyle.icon,
-                                size: 17,
-                                color: roleStyle.color,
-                              ),
-                              const SizedBox(width: 5),
-                              Flexible(
-                                child: Text(
-                                  firstName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
+                        child: InkWell(
+                          onTap: onEditMechanic,
+                          borderRadius: BorderRadius.circular(10),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 5,
+                            ),
+                            child: Center(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    roleStyle.icon,
+                                    size: 17,
+                                    color: roleStyle.color,
                                   ),
-                                ),
+                                  const SizedBox(width: 5),
+                                  Flexible(
+                                    child: Text(
+                                      firstName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
                           ),
                         ),
                       ),
                       separator(),
                       SizedBox(
                         width: 82,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            Text(
-                              '${_hours(job['planned_hours'])} hr',
-                              style: const TextStyle(
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w700,
-                              ),
+                        child: InkWell(
+                          onTap: onEditPlannedTime,
+                          borderRadius: BorderRadius.circular(10),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 5),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                Text(
+                                  '${_hours(job['planned_hours'])} hr',
+                                  style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                const Icon(
+                                  Icons.timer_outlined,
+                                  size: 17,
+                                  color: BriskersColors.jobs,
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 4),
-                            const Icon(
-                              Icons.timer_outlined,
-                              size: 17,
-                              color: BriskersColors.jobs,
-                            ),
-                          ],
+                          ),
                         ),
                       ),
                     ],
