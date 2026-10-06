@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,6 +11,7 @@ import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/customer_detail_cache.dart';
 import '../../services/local_customer_repository.dart';
+import '../../services/local_attachment_cache.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../appointments/appointment_create_screen.dart';
 import '../jobs/job_create_screen.dart';
@@ -43,6 +45,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       CustomerVehicleSyncService();
   final LocalCustomerRepository _localCustomers =
       LocalCustomerRepository();
+  final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
   final OfflineCustomerVehicleAdminService _offlineAdmin =
       OfflineCustomerVehicleAdminService();
 
@@ -89,12 +92,98 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     };
   }
 
+  Widget _offlineAttachmentThumbnail(
+    Map<String, dynamic> row,
+    IconData fallbackIcon,
+  ) {
+    const size = 54.0;
+    final attachments = List<dynamic>.from(
+      row['attachments'] ?? const [],
+    ).whereType<Map>().map((raw) {
+      return Map<String, dynamic>.from(raw);
+    }).toList();
+
+    if (attachments.isEmpty) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Icon(fallbackIcon),
+      );
+    }
+
+    final attachment = attachments.first;
+    final bucket =
+        attachment['bucket']?.toString() ?? 'briskers-private';
+    final key = attachment['key']?.toString() ?? '';
+    if (key.isEmpty) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Icon(fallbackIcon),
+      );
+    }
+
+    return FutureBuilder<File?>(
+      future: _attachmentCache.existing(bucket, key),
+      builder: (context, snapshot) {
+        final file = snapshot.data;
+        if (file == null) {
+          return SizedBox(
+            width: size,
+            height: size,
+            child: Icon(fallbackIcon),
+          );
+        }
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => showDialog<void>(
+            context: context,
+            builder: (dialogContext) => Dialog(
+              insetPadding: const EdgeInsets.all(12),
+              child: Stack(
+                children: [
+                  InteractiveViewer(
+                    minScale: 0.5,
+                    maxScale: 5,
+                    child: Image.file(
+                      file,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                  Positioned(
+                    right: 4,
+                    top: 4,
+                    child: IconButton.filledTonal(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.file(
+              file,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _offlineCountCard({
     required IconData icon,
     required String title,
     required String emptyText,
     required List<Map<String, dynamic>> rows,
     String Function(Map<String, dynamic>)? label,
+    bool showPhotos = false,
   }) {
     return Card(
       child: ExpansionTile(
@@ -125,6 +214,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 final text = label?.call(row) ?? '';
                 return ListTile(
                   dense: true,
+                  leading: showPhotos
+                      ? _offlineAttachmentThumbnail(row, icon)
+                      : null,
                   title: Text(
                     text.isEmpty ? 'Saved item' : text,
                     maxLines: 2,
@@ -191,6 +283,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               title: 'Vehicle Findings',
               emptyText: 'No saved findings',
               rows: findings,
+              showPhotos: true,
               label: (row) => row['body']?.toString() ?? 'Vehicle finding',
             ),
             const SizedBox(height: 18),
@@ -199,6 +292,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               title: 'Notes',
               emptyText: 'No saved notes',
               rows: notes,
+              showPhotos: true,
               label: (row) => row['body']?.toString() ?? 'Customer note',
             ),
             const SizedBox(height: 18),
