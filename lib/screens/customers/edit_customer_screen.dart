@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
+import '../../core/connection_mode.dart';
 import '../../core/vehicle_options.dart';
 import '../../services/briskers_api.dart';
+import '../../services/offline_customer_vehicle_admin_service.dart';
 
 class EditCustomerScreen extends StatefulWidget {
   const EditCustomerScreen({
@@ -23,6 +25,8 @@ class EditCustomerScreen extends StatefulWidget {
 
 class _EditCustomerScreenState extends State<EditCustomerScreen> {
   static const _api = BriskersApi();
+  final OfflineCustomerVehicleAdminService _offlineAdmin =
+      OfflineCustomerVehicleAdminService();
 
   late final TextEditingController _name;
   late final TextEditingController _phone;
@@ -105,46 +109,36 @@ class _EditCustomerScreenState extends State<EditCustomerScreen> {
     });
 
     try {
-      final response = await _api.updateCustomerProfile(
+      final address = <String, dynamic>{
+        if (_address1.text.trim().isNotEmpty)
+          'line1': _address1.text.trim(),
+        if (_address2.text.trim().isNotEmpty)
+          'line2': _address2.text.trim(),
+        if (_city.text.trim().isNotEmpty)
+          'city': _city.text.trim(),
+        if ((_state ?? '').isNotEmpty) 'state': _state,
+        if (_zip.text.trim().isNotEmpty)
+          'postal_code': _zip.text.trim(),
+        'country': 'US',
+      };
+
+      final customer = await _offlineAdmin.queueCustomerProfile(
         widget.businessId,
         widget.customerId,
         name: name,
         phone: phoneDigits.isEmpty ? null : phoneDigits,
         email: email.isEmpty ? null : email,
-        billingAddress: <String, dynamic>{
-          if (_address1.text.trim().isNotEmpty)
-            'line1': _address1.text.trim(),
-          if (_address2.text.trim().isNotEmpty)
-            'line2': _address2.text.trim(),
-          if (_city.text.trim().isNotEmpty)
-            'city': _city.text.trim(),
-          if ((_state ?? '').isNotEmpty) 'state': _state,
-          if (_zip.text.trim().isNotEmpty)
-            'postal_code': _zip.text.trim(),
-          'country': 'US',
-        },
+        billingAddress: address,
       );
-      final saved = response['customer'];
-      final customer = saved is Map
-          ? Map<String, dynamic>.from(saved)
-          : <String, dynamic>{
-              'id': widget.customerId,
-              'name': name,
-              'phone': phoneDigits.isEmpty ? null : phoneDigits,
-              'email': email.isEmpty ? null : email,
-              'billing_address': <String, dynamic>{
-                if (_address1.text.trim().isNotEmpty)
-                  'line1': _address1.text.trim(),
-                if (_address2.text.trim().isNotEmpty)
-                  'line2': _address2.text.trim(),
-                if (_city.text.trim().isNotEmpty)
-                  'city': _city.text.trim(),
-                if ((_state ?? '').isNotEmpty) 'state': _state,
-                if (_zip.text.trim().isNotEmpty)
-                  'postal_code': _zip.text.trim(),
-                'country': 'US',
-              },
-            };
+
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineAdmin.flush(widget.businessId);
+        } catch (_) {
+          // The saved customer edit remains queued for the next sync.
+        }
+      }
+
       if (mounted) Navigator.pop(context, customer);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
