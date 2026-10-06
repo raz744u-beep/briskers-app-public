@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_document_repository.dart';
+import 'local_document_detail_cache.dart';
 
 class DocumentIndexSyncService {
   DocumentIndexSyncService({
@@ -20,6 +21,7 @@ class DocumentIndexSyncService {
   static Stream<String> get syncEvents => _syncEvents.stream;
   final BriskersApi _api;
   final LocalDocumentRepository _repository;
+  final LocalDocumentDetailCache _detailCache = const LocalDocumentDetailCache();
 
   Future<void> pull(String businessId) async {
     final state = await localDatabase.customSelect(
@@ -58,6 +60,7 @@ class DocumentIndexSyncService {
           cursor;
 
       await _repository.upsertFromServer(businessId, documents);
+      await _prefetchOpenDocumentDetails(businessId, documents);
       await localDatabase.customStatement(
         '''
         INSERT INTO local_sync_states (
@@ -85,6 +88,34 @@ class DocumentIndexSyncService {
       cursor = next;
     }
     _syncEvents.add(businessId);
+  }
+
+  Future<void> _prefetchOpenDocumentDetails(
+    String businessId,
+    List<Map<String, dynamic>> documents,
+  ) async {
+    for (final document in documents) {
+      final id = document['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+
+      final kind = document['kind']?.toString() ?? '';
+      final status = document['status']?.toString().toLowerCase() ?? '';
+      final closed = document['closed_at'] != null;
+      final converted = document['converted'] == true;
+      final activeEstimate = kind == 'estimate' &&
+          !converted &&
+          !<String>{'accepted', 'declined', 'expired', 'void'}.contains(status);
+      final activeInvoice =
+          kind == 'invoice' && !closed && status != 'void';
+      if (!activeEstimate && !activeInvoice) continue;
+
+      try {
+        final detail = await _api.documentDetail(businessId, id);
+        await _detailCache.save(businessId, id, detail);
+      } catch (_) {
+        // Keep the previous local detail snapshot if one already exists.
+      }
+    }
   }
 
   Future<void> refreshBestEffort(String businessId) async {
