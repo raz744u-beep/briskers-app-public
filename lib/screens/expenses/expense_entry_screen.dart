@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
 import '../../services/briskers_api.dart';
+import '../../services/local_financial_cache.dart';
+import '../../services/offline_financial_write_service.dart';
 
 class ExpenseEntryScreen extends StatefulWidget {
   const ExpenseEntryScreen({
@@ -38,6 +41,9 @@ class ExpenseEntryScreen extends StatefulWidget {
 class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   static const _api = BriskersApi();
   final _picker = ImagePicker();
+  final LocalFinancialCache _localFinancial = LocalFinancialCache();
+  final OfflineFinancialWriteService _offlineFinancial =
+      OfflineFinancialWriteService();
   final _amountController = TextEditingController();
   final _amountFocusNode = FocusNode();
   final _counterpartyController = TextEditingController();
@@ -131,129 +137,198 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     return rows;
   }
 
-  Future<void> _load() async {
-    try {
-      final data = await _api.transactionOptions(widget.businessId);
-      final accounts = List<dynamic>.from(data['accounts'] ?? const [])
-          .map((raw) => Map<String, dynamic>.from(raw as Map))
-          .toList();
-      final categories = List<dynamic>.from(data['categories'] ?? const [])
-          .map((raw) => Map<String, dynamic>.from(raw as Map))
-          .toList();
-      final counterparties =
-          List<dynamic>.from(data['counterparties'] ?? const [])
-              .map((raw) => Map<String, dynamic>.from(raw as Map))
-              .toList();
-      final quickTemplates =
-          List<dynamic>.from(data['quick_templates'] ?? const [])
-              .map((raw) => Map<String, dynamic>.from(raw as Map))
-              .toList();
-
-      Map<String, dynamic>? detail;
-      final sourceId = widget.editTransactionId ?? widget.copyTransactionId;
-      if (sourceId != null) {
-        detail = await _api.transactionDetail(widget.businessId, sourceId);
+  String _selectedAccountName() {
+    for (final item in _accounts) {
+      if (item['id']?.toString() == _accountId) {
+        return item['name']?.toString() ?? '';
       }
+    }
+    return '';
+  }
 
-      if (!mounted) return;
-      setState(() {
-        _accounts = accounts;
-        _categories = categories;
-        _counterparties = counterparties;
-        _quickTemplates = quickTemplates;
+  String _selectedCategoryName() {
+    for (final item in _categories) {
+      if (item['id']?.toString() == _categoryId) {
+        return item['name']?.toString() ?? '';
+      }
+    }
+    return '';
+  }
 
-        if (detail != null) {
-          _direction = detail['direction']?.toString() == 'income'
-              ? 'income'
-              : 'expense';
-          _amountController.text = detail['amount']?.toString() ?? '';
-          _remarksController.text = detail['remarks']?.toString() ?? '';
-          _counterpartyController.text =
-              detail['counterparty']?.toString() ?? '';
-          final detailAccount = detail['account_id']?.toString();
-          final detailCategory = detail['category_id']?.toString();
-          final detailCounterparty = detail['counterparty_id']?.toString();
-          _accountId = accounts.any((x) => x['id']?.toString() == detailAccount)
-              ? detailAccount
-              : null;
-          _categoryId =
-              categories.any((x) => x['id']?.toString() == detailCategory)
-                  ? detailCategory
-                  : null;
-          _counterpartyId = counterparties
-                  .any((x) => x['id']?.toString() == detailCounterparty)
-              ? detailCounterparty
-              : null;
-          _jobId = detail['job_id']?.toString();
-          if ((_jobId ?? '').isEmpty) _jobId = null;
-          _documentId = detail['document_id']?.toString();
-          if ((_documentId ?? '').isEmpty) _documentId = null;
-          final jobNumber = detail['job_number']?.toString() ?? '';
-          final documentNumber = detail['document_number']?.toString() ?? '';
-          _contextLabel = <String>[
-            if (jobNumber.isNotEmpty) 'Job $jobNumber',
-            if (documentNumber.isNotEmpty) 'Invoice #$documentNumber',
-          ].join(' • ');
-          if (_contextLabel!.isEmpty) _contextLabel = null;
+  void _applyLoadedOptions(
+    Map<String, dynamic> data,
+    Map<String, dynamic>? detail,
+  ) {
+    final accounts = List<dynamic>.from(data['accounts'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+    final categories = List<dynamic>.from(data['categories'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+    final counterparties =
+        List<dynamic>.from(data['counterparties'] ?? const [])
+            .map((raw) => Map<String, dynamic>.from(raw as Map))
+            .toList();
+    final quickTemplates =
+        List<dynamic>.from(data['quick_templates'] ?? const [])
+            .map((raw) => Map<String, dynamic>.from(raw as Map))
+            .toList();
 
-          if (_copying) {
-            _date = DateTime.now();
-            _repeat = false;
-            _recurringRuleId = null;
-          } else {
-            _date = _parseDate(detail['date']);
-            final recurring = detail['recurring_rule'];
-            if (widget.allowRecurring && recurring is Map) {
-              final rule = Map<String, dynamic>.from(recurring);
-              _recurringRuleId = rule['id']?.toString();
-              _repeat = rule['is_repeating'] == true;
-              _nextDate = _parseDate(
-                rule['next_date'],
-                fallback: DateTime.now().add(const Duration(days: 30)),
-              );
-              final rawEnd = rule['end_date']?.toString() ?? '';
-              _endDate = rawEnd.isEmpty ? null : DateTime.tryParse(rawEnd);
-              final frequency = rule['frequency']?.toString() ?? 'monthly';
-              final interval =
-                  int.tryParse(rule['interval_count']?.toString() ?? '') ?? 1;
-              if (frequency == 'weekly' && interval == 2) {
-                _repeatPreset = 'biweekly';
-              } else {
-                _repeatPreset = frequency;
-              }
+    setState(() {
+      _accounts = accounts;
+      _categories = categories;
+      _counterparties = counterparties;
+      _quickTemplates = quickTemplates;
+
+      if (detail != null) {
+        _direction = detail['direction']?.toString() == 'income'
+            ? 'income'
+            : 'expense';
+        _amountController.text = detail['amount']?.toString() ?? '';
+        _remarksController.text = detail['remarks']?.toString() ?? '';
+        _counterpartyController.text =
+            detail['counterparty']?.toString() ?? '';
+        final detailAccount = detail['account_id']?.toString();
+        final detailCategory = detail['category_id']?.toString();
+        final detailCounterparty = detail['counterparty_id']?.toString();
+        _accountId = accounts.any((x) => x['id']?.toString() == detailAccount)
+            ? detailAccount
+            : null;
+        _categoryId =
+            categories.any((x) => x['id']?.toString() == detailCategory)
+                ? detailCategory
+                : null;
+        _counterpartyId = counterparties
+                .any((x) => x['id']?.toString() == detailCounterparty)
+            ? detailCounterparty
+            : null;
+        _jobId = detail['job_id']?.toString();
+        if ((_jobId ?? '').isEmpty) _jobId = null;
+        _documentId = detail['document_id']?.toString();
+        if ((_documentId ?? '').isEmpty) _documentId = null;
+        final jobNumber = detail['job_number']?.toString() ?? '';
+        final documentNumber = detail['document_number']?.toString() ?? '';
+        _contextLabel = <String>[
+          if (jobNumber.isNotEmpty) 'Job $jobNumber',
+          if (documentNumber.isNotEmpty) 'Invoice #$documentNumber',
+        ].join(' • ');
+        if ((_contextLabel ?? '').isEmpty) _contextLabel = null;
+
+        if (_copying) {
+          _date = DateTime.now();
+          _repeat = false;
+          _recurringRuleId = null;
+        } else {
+          _date = _parseDate(
+            detail['date'] ?? detail['transaction_date'],
+          );
+          final recurring = detail['recurring_rule'];
+          if (widget.allowRecurring && recurring is Map) {
+            final rule = Map<String, dynamic>.from(recurring);
+            _recurringRuleId = rule['id']?.toString();
+            _repeat = rule['is_repeating'] == true;
+            _nextDate = _parseDate(
+              rule['next_date'],
+              fallback: DateTime.now().add(const Duration(days: 30)),
+            );
+            final rawEnd = rule['end_date']?.toString() ?? '';
+            _endDate = rawEnd.isEmpty ? null : DateTime.tryParse(rawEnd);
+            final frequency = rule['frequency']?.toString() ?? 'monthly';
+            final interval =
+                int.tryParse(rule['interval_count']?.toString() ?? '') ?? 1;
+            if (frequency == 'weekly' && interval == 2) {
+              _repeatPreset = 'biweekly';
+            } else {
+              _repeatPreset = frequency;
             }
           }
-        } else {
-          Map<String, dynamic>? defaultExpenseAccount;
-          for (final account in accounts) {
-            if (account['is_default_expense'] == true) {
-              defaultExpenseAccount = account;
+        }
+      } else {
+        Map<String, dynamic>? defaultExpenseAccount;
+        for (final account in accounts) {
+          if (account['is_default_expense'] == true) {
+            defaultExpenseAccount = account;
+            break;
+          }
+        }
+        _accountId = defaultExpenseAccount?['id']?.toString();
+
+        if (_linked && _direction == 'expense') {
+          Map<String, dynamic>? customerParts;
+          for (final item in categories) {
+            if ((item['name']?.toString().trim().toLowerCase() ?? '') ==
+                'customer parts') {
+              customerParts = item;
               break;
             }
           }
-          _accountId = defaultExpenseAccount?['id']?.toString();
-
-          if (_linked && _direction == 'expense') {
-            Map<String, dynamic>? customerParts;
-            for (final item in categories) {
-              if ((item['name']?.toString().trim().toLowerCase() ?? '') ==
-                  'customer parts') {
-                customerParts = item;
-                break;
-              }
-            }
-            _categoryId = customerParts?['id']?.toString();
-          } else {
-            _categoryId = null;
-          }
-          if (widget.quickTemplate != null) {
-            _applyQuickTemplate(widget.quickTemplate!, updateState: false);
-          }
+          _categoryId = customerParts?['id']?.toString();
+        } else {
+          _categoryId = null;
         }
+        if (widget.quickTemplate != null) {
+          _applyQuickTemplate(widget.quickTemplate!, updateState: false);
+        }
+      }
 
-        _loading = false;
-        _error = null;
-      });
+      _loading = false;
+      _error = null;
+    });
+  }
+
+  Future<void> _load() async {
+    var localShown = false;
+    final forceOnline =
+        BriskersConnectionModeController.instance.forceOnline;
+    final forceOffline =
+        BriskersConnectionModeController.instance.forceOffline;
+    final sourceId = widget.editTransactionId ?? widget.copyTransactionId;
+
+    if (!forceOnline) {
+      try {
+        final data = await _localFinancial.loadOptions(widget.businessId);
+        Map<String, dynamic>? detail;
+        if (sourceId != null) {
+          detail = await _localFinancial.loadTransactionDetail(
+            widget.businessId,
+            sourceId,
+          );
+        }
+        if (data.isNotEmpty) {
+          localShown = true;
+          if (mounted) _applyLoadedOptions(data, detail);
+        }
+      } catch (_) {
+        // The online path can still load the editor.
+      }
+    }
+
+    if (forceOffline) {
+      if (!localShown && mounted) {
+        setState(() {
+          _loading = false;
+          _error =
+              'Expense setup has not been cached yet. Go online once to sync accounts and categories.';
+        });
+      }
+      return;
+    }
+
+    try {
+      final data = await _api.transactionOptions(widget.businessId);
+      Map<String, dynamic>? detail;
+      if (sourceId != null) {
+        detail = await _api.transactionDetail(widget.businessId, sourceId);
+        await _localFinancial.saveTransactionDetail(
+          widget.businessId,
+          sourceId,
+          detail,
+        );
+      }
+      await _localFinancial.saveOptions(widget.businessId, data);
+
+      if (!mounted) return;
+      _applyLoadedOptions(data, detail);
 
       if (widget.autoScanReceipt &&
           !_autoScanLaunched &&
@@ -266,10 +341,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       }
     } catch (error) {
       if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = error.toString();
-      });
+      if (!localShown) {
+        setState(() {
+          _loading = false;
+          _error = error.toString();
+        });
+      }
     }
   }
 
@@ -366,6 +443,16 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
 
   Future<void> _readReceipt(XFile file) async {
     if (_readingReceipt) return;
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (mounted) {
+        setState(() {
+          _receiptReadMessage =
+              'Receipt saved locally. Automatic reading will be available when online.';
+          _error = null;
+        });
+      }
+      return;
+    }
     setState(() {
       _readingReceipt = true;
       _receiptReadMessage = 'Reading receipt...';
@@ -882,6 +969,75 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     try {
       final rounded = num.parse(amount.toStringAsFixed(2));
       final counterpartyName = _counterpartyController.text.trim();
+
+      if (BriskersConnectionModeController.instance.forceOffline) {
+        if (_repeat) {
+          setState(() {
+            _saving = false;
+            _error =
+                'Recurring scheduling needs a connection. Turn Repeat off to save this transaction offline.';
+          });
+          return;
+        }
+
+        final stagedReceipts = <Map<String, dynamic>>[];
+        for (final receipt in _receipts) {
+          stagedReceipts.add({
+            'filename': receipt.name,
+            'mime_type': _mimeType(receipt.name),
+            'bytes': await receipt.readAsBytes(),
+          });
+        }
+
+        if (_editing) {
+          await _offlineFinancial.updateLocalTransaction(
+            widget.businessId,
+            widget.editTransactionId!,
+            direction: _direction,
+            accountId: _accountId!,
+            accountName: _selectedAccountName(),
+            categoryId: _categoryId!,
+            categoryName: _selectedCategoryName(),
+            amount: rounded,
+            date: _date,
+            jobId: _jobId,
+            documentId: _documentId,
+            counterpartyId: _counterpartyId,
+            counterpartyName:
+                counterpartyName.isEmpty ? null : counterpartyName,
+            remarks: _remarksController.text.trim().isEmpty
+                ? null
+                : _remarksController.text.trim(),
+            contextLabel: _contextLabel,
+          );
+        } else {
+          await _offlineFinancial.createLocalTransaction(
+            widget.businessId,
+            direction: _direction,
+            accountId: _accountId!,
+            accountName: _selectedAccountName(),
+            categoryId: _categoryId!,
+            categoryName: _selectedCategoryName(),
+            amount: rounded,
+            date: _date,
+            jobId: _jobId,
+            documentId: _documentId,
+            counterpartyId: _counterpartyId,
+            counterpartyName:
+                counterpartyName.isEmpty ? null : counterpartyName,
+            remarks: _remarksController.text.trim().isEmpty
+                ? null
+                : _remarksController.text.trim(),
+            contextLabel: _contextLabel,
+            receipts: stagedReceipts,
+          );
+        }
+
+        if (!mounted) return;
+        Navigator.pop(context, true);
+        return;
+      }
+
       String transactionId;
 
       if (_editing) {
