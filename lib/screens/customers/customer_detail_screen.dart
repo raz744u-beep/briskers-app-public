@@ -8,6 +8,7 @@ import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
+import '../../services/customer_detail_cache.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../appointments/appointment_create_screen.dart';
@@ -37,6 +38,7 @@ class CustomerDetailScreen extends StatefulWidget {
 
 class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   static const _api = BriskersApi();
+  static const _sectionCache = CustomerDetailCache();
   final CustomerVehicleSyncService _sync =
       CustomerVehicleSyncService();
   final LocalCustomerRepository _localCustomers =
@@ -50,6 +52,219 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   bool _showingLocal = false;
 
   bool get _canEditLocal => _data != null;
+
+  Future<Map<String, dynamic>> _loadOfflineSections() async {
+    Future<List<Map<String, dynamic>>> listSection(String key) async {
+      final raw = await _sectionCache.load(
+        widget.businessId,
+        widget.customerId,
+        key,
+      );
+      return raw is List
+          ? raw
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList()
+          : <Map<String, dynamic>>[];
+    }
+
+    final findings = await listSection('findings');
+    final notes = await listSection('notes');
+    final appointments = await listSection('appointments');
+
+    final historyRaw = await _sectionCache.load(
+      widget.businessId,
+      widget.customerId,
+      'service_history',
+    );
+    final history = historyRaw is Map
+        ? Map<String, dynamic>.from(historyRaw)
+        : <String, dynamic>{};
+
+    return <String, dynamic>{
+      'findings': findings,
+      'notes': notes,
+      'appointments': appointments,
+      'history': history,
+    };
+  }
+
+  Widget _offlineCountCard({
+    required IconData icon,
+    required String title,
+    required String emptyText,
+    required List<Map<String, dynamic>> rows,
+    String Function(Map<String, dynamic>)? label,
+  }) {
+    return Card(
+      child: ExpansionTile(
+        maintainState: false,
+        leading: Icon(icon),
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          rows.isEmpty
+              ? emptyText
+              : rows.length == 1
+                  ? '1 saved item'
+                  : '${rows.length} saved items',
+        ),
+        children: rows.isEmpty
+            ? const <Widget>[
+                Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('No saved data yet.'),
+                  ),
+                ),
+              ]
+            : rows.map((row) {
+                final text = label?.call(row) ?? '';
+                return ListTile(
+                  dense: true,
+                  title: Text(
+                    text.isEmpty ? 'Saved item' : text,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                );
+              }).toList(),
+      ),
+    );
+  }
+
+  Widget _offlineCustomerSections() {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _loadOfflineSections(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Card(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 12),
+                  Text('Loading saved customer details...'),
+                ],
+              ),
+            ),
+          );
+        }
+
+        final data = snapshot.data ?? const <String, dynamic>{};
+        final findings = List<Map<String, dynamic>>.from(
+          data['findings'] ?? const <Map<String, dynamic>>[],
+        );
+        final notes = List<Map<String, dynamic>>.from(
+          data['notes'] ?? const <Map<String, dynamic>>[],
+        );
+        final appointments = List<Map<String, dynamic>>.from(
+          data['appointments'] ?? const <Map<String, dynamic>>[],
+        );
+        final history = Map<String, dynamic>.from(
+          data['history'] ?? const <String, dynamic>{},
+        );
+        final jobs = List<dynamic>.from(history['jobs'] ?? const [])
+            .whereType<Map>()
+            .map((row) => Map<String, dynamic>.from(row))
+            .toList();
+        final documents = List<dynamic>.from(history['documents'] ?? const [])
+            .whereType<Map>()
+            .map((row) => Map<String, dynamic>.from(row))
+            .toList();
+        final expenses = List<dynamic>.from(history['expenses'] ?? const [])
+            .whereType<Map>()
+            .map((row) => Map<String, dynamic>.from(row))
+            .toList();
+
+        return Column(
+          children: [
+            _offlineCountCard(
+              icon: Icons.car_repair_outlined,
+              title: 'Vehicle Findings',
+              emptyText: 'No saved findings',
+              rows: findings,
+              label: (row) => row['body']?.toString() ?? 'Vehicle finding',
+            ),
+            const SizedBox(height: 18),
+            _offlineCountCard(
+              icon: Icons.note_alt_outlined,
+              title: 'Notes',
+              emptyText: 'No saved notes',
+              rows: notes,
+              label: (row) => row['body']?.toString() ?? 'Customer note',
+            ),
+            const SizedBox(height: 18),
+            _offlineCountCard(
+              icon: Icons.calendar_month_outlined,
+              title: 'Appointments',
+              emptyText: 'No saved appointments',
+              rows: appointments,
+              label: (row) {
+                final title = row['title']?.toString().trim() ?? '';
+                final starts = row['starts_at']?.toString().trim() ?? '';
+                return [starts, title].where((x) => x.isNotEmpty).join(' • ');
+              },
+            ),
+            const SizedBox(height: 18),
+            Card(
+              child: ExpansionTile(
+                leading: const Icon(Icons.history_outlined),
+                title: const Text(
+                  'Service History',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  '${jobs.length} jobs • ${documents.length} documents • ${expenses.length} expenses',
+                ),
+                children: [
+                  if (jobs.isEmpty && documents.isEmpty && expenses.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('No saved service history yet.'),
+                      ),
+                    )
+                  else ...[
+                    for (final job in jobs.take(12))
+                      ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.build_outlined),
+                        title: Text(
+                          [
+                            job['job_number']?.toString() ?? '',
+                            job['title']?.toString() ?? '',
+                          ].where((x) => x.isNotEmpty).join(' — '),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    if (jobs.length > 12)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text('+ ${jobs.length - 12} more jobs saved'),
+                        ),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
 
   String get _detailCacheKey =>
       'briskers_customer_detail_${widget.businessId}_${widget.customerId}';
@@ -686,35 +901,39 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     enabled: _canEditLocal,
                   ),
                   const SizedBox(height: 18),
-                  CustomerVehicleFindingsSection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
-                    vehicles: vehicles,
-                  ),
-                  const SizedBox(height: 18),
-                  CustomerNotesSection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
-                  ),
-                  const SizedBox(height: 18),
-                  CustomerAppointmentsSection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
-                  ),
-                  const SizedBox(height: 18),
-                  CustomerServiceHistorySection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
-                    vehicles: vehicles,
-                  ),
-                  if (_onlineReady) ...[
-                    const SizedBox(height: 18),
-                    CustomerAccountSection(
+                  if (BriskersConnectionModeController.instance.forceOffline)
+                    _offlineCustomerSections()
+                  else ...[
+                    CustomerVehicleFindingsSection(
                       businessId: widget.businessId,
                       customerId: widget.customerId,
-                      onDeleted: () =>
-                          Navigator.pop(context, true),
+                      vehicles: vehicles,
                     ),
+                    const SizedBox(height: 18),
+                    CustomerNotesSection(
+                      businessId: widget.businessId,
+                      customerId: widget.customerId,
+                    ),
+                    const SizedBox(height: 18),
+                    CustomerAppointmentsSection(
+                      businessId: widget.businessId,
+                      customerId: widget.customerId,
+                    ),
+                    const SizedBox(height: 18),
+                    CustomerServiceHistorySection(
+                      businessId: widget.businessId,
+                      customerId: widget.customerId,
+                      vehicles: vehicles,
+                    ),
+                    if (_onlineReady) ...[
+                      const SizedBox(height: 18),
+                      CustomerAccountSection(
+                        businessId: widget.businessId,
+                        customerId: widget.customerId,
+                        onDeleted: () =>
+                            Navigator.pop(context, true),
+                      ),
+                    ],
                   ],
                   const SizedBox(height: 96),
                 ],
