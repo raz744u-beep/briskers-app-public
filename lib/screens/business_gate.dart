@@ -10,6 +10,7 @@ import '../services/appointment_sync_service.dart';
 import '../services/customer_vehicle_sync_service.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/job_sync_service.dart';
+import '../services/local_financial_cache.dart';
 import '../services/offline_preinspection_service.dart';
 import '../services/offline_job_admin_service.dart';
 import '../services/offline_customer_vehicle_admin_service.dart';
@@ -35,10 +36,10 @@ class _BusinessGateState extends State<BusinessGate> {
   final OfflinePreInspectionService _offlineInspection =
       OfflinePreInspectionService();
   final OfflineJobAdminService _offlineJobAdmin =
+      OfflineJobAdminService();
   final OfflineCustomerVehicleAdminService _offlineCustomerVehicle =
       OfflineCustomerVehicleAdminService();
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
-      OfflineJobAdminService();
   final OfflineWorkFindingsService _offlineWorkFindings =
       OfflineWorkFindingsService();
 
