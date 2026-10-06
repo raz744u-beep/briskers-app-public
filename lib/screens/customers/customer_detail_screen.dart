@@ -685,45 +685,35 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     onEdit: _editVehicle,
                     enabled: _canEditLocal,
                   ),
+                  const SizedBox(height: 18),
+                  CustomerVehicleFindingsSection(
+                    businessId: widget.businessId,
+                    customerId: widget.customerId,
+                    vehicles: vehicles,
+                  ),
+                  const SizedBox(height: 18),
+                  CustomerNotesSection(
+                    businessId: widget.businessId,
+                    customerId: widget.customerId,
+                  ),
+                  const SizedBox(height: 18),
+                  CustomerAppointmentsSection(
+                    businessId: widget.businessId,
+                    customerId: widget.customerId,
+                  ),
+                  const SizedBox(height: 18),
+                  CustomerServiceHistorySection(
+                    businessId: widget.businessId,
+                    customerId: widget.customerId,
+                    vehicles: vehicles,
+                  ),
                   if (_onlineReady) ...[
-                    const SizedBox(height: 18),
-                    CustomerVehicleFindingsSection(
-                      businessId: widget.businessId,
-                      customerId: widget.customerId,
-                      vehicles: vehicles,
-                    ),
-                    const SizedBox(height: 18),
-                    CustomerNotesSection(
-                      businessId: widget.businessId,
-                      customerId: widget.customerId,
-                    ),
-                    const SizedBox(height: 18),
-                    CustomerAppointmentsSection(
-                      businessId: widget.businessId,
-                      customerId: widget.customerId,
-                    ),
-                    const SizedBox(height: 18),
-                    CustomerServiceHistorySection(
-                      businessId: widget.businessId,
-                      customerId: widget.customerId,
-                      vehicles: vehicles,
-                    ),
                     const SizedBox(height: 18),
                     CustomerAccountSection(
                       businessId: widget.businessId,
                       customerId: widget.customerId,
                       onDeleted: () =>
                           Navigator.pop(context, true),
-                    ),
-                  ] else ...[
-                    const SizedBox(height: 18),
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text(
-                          'Customer notes, findings history, appointments, service history, and account actions are available when Briskers reconnects.',
-                        ),
-                      ),
                     ),
                   ],
                   const SizedBox(height: 96),
