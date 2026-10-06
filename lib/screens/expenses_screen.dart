@@ -226,6 +226,19 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       }
     }
 
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (mounted && !_showingLocal) {
+        setState(() {
+          _transactions = const [];
+          _hasMore = false;
+          _loading = false;
+          _error = null;
+          _showingLocal = true;
+        });
+      }
+      return;
+    }
+
     try {
       final results = await Future.wait<dynamic>([
         _fetchTransactions(offset: 0),
@@ -1016,7 +1029,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           SizedBox(width: 7),
                           Expanded(
                             child: Text(
-                              'Showing saved transactions • reconnect to add or edit',
+                              'Showing saved transactions • reconnect to refresh, add or edit',
                               style: TextStyle(fontWeight: FontWeight.w700),
                             ),
                           ),
