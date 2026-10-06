@@ -23,6 +23,23 @@ class CustomerVehicleSyncService {
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
 
+  Future<void> refreshCustomer(
+    String businessId,
+    String customerId,
+  ) async {
+    final detail = await _api.customerDetail(
+      businessId,
+      customerId,
+    );
+    await _database.transaction(() async {
+      await _applyBundle(
+        businessId,
+        detail,
+      );
+    });
+    _syncEvents.add(businessId);
+  }
+
   Future<void> pull(String businessId) async {
     int? cursor;
     var bootstrapped = false;
