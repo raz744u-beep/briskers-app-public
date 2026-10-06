@@ -18,6 +18,7 @@ import '../services/offline_customer_vehicle_admin_service.dart';
 import '../services/offline_customer_detail_write_service.dart';
 import '../services/offline_financial_write_service.dart';
 import '../services/offline_estimate_invoice_service.dart';
+import '../services/offline_document_draft_service.dart';
 import '../services/offline_work_findings_service.dart';
 import 'kiosk/kiosk_checkin_screen.dart';
 import 'shell_screen.dart';
@@ -49,6 +50,8 @@ class _BusinessGateState extends State<BusinessGate> {
       OfflineFinancialWriteService();
   final OfflineEstimateInvoiceService _offlineEstimateInvoice =
       OfflineEstimateInvoiceService();
+  final OfflineDocumentDraftService _offlineDocumentDraft =
+      OfflineDocumentDraftService();
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
   final OfflineWorkFindingsService _offlineWorkFindings =
       OfflineWorkFindingsService();
@@ -251,6 +254,12 @@ class _BusinessGateState extends State<BusinessGate> {
       await _offlineFinancial.flush(businessId);
     } catch (_) {
       // Expense and receipt changes stay queued and retry on reconnect.
+    }
+
+    try {
+      await _offlineDocumentDraft.flush(businessId);
+    } catch (_) {
+      // New offline estimate drafts stay queued and retry on reconnect.
     }
 
     try {
