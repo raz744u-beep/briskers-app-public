@@ -54,7 +54,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
 
   Future<void> _load() async {
     var localShown = false;
-    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
+    final forceOnline =
+        BriskersConnectionModeController.instance.forceOnline;
+    final forceOffline =
+        BriskersConnectionModeController.instance.forceOffline;
 
     if (!forceOnline) {
       try {
@@ -74,6 +77,17 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     } catch (_) {
       // The online refresh below can still populate the local cache.
       }
+    }
+
+    if (forceOffline) {
+      if (mounted && localShown) {
+        setState(() {
+          _onlineReady = false;
+          _showingLocal = true;
+          _error = null;
+        });
+      }
+      return;
     }
 
     try {
@@ -561,16 +575,16 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                                 ],
                               ),
                             ),
-                          if (_onlineReady) ...[
+                          if (_canEditLocal) ...[
                             const SizedBox(height: 2),
                             const Text('Tap to edit'),
                           ],
                         ],
                       ),
-                      trailing: _onlineReady
+                      trailing: _canEditLocal
                           ? const Icon(Icons.edit_outlined)
                           : null,
-                      onTap: _onlineReady
+                      onTap: _canEditLocal
                           ? () => _editCustomer(customer)
                           : null,
                     ),
@@ -589,7 +603,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                           ),
                           value: customer['problem_flag'] == true,
                           onChanged:
-                              _onlineReady ? (_) => _editProblemFlag() : null,
+                              _canEditLocal ? (_) => _editProblemFlag() : null,
                         ),
                         if (customer['problem_flag'] == true)
                           ListTile(
