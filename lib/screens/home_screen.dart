@@ -1068,6 +1068,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: _ActionDrawer(
                 color: BriskersColors.estimates,
                 actions: [
+                  _DrawerAction(
+                    label: 'View Estimates',
+                    icon: Icons.list_alt_outlined,
+                    onTap: _viewEstimates,
+                  ),
                   if (_canManage)
                     _DrawerAction(
                       label: 'Scan from Identifix',
@@ -1086,11 +1091,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       icon: Icons.request_quote_outlined,
                       onTap: _createEstimate,
                     ),
-                  _DrawerAction(
-                    label: 'View Estimates',
-                    icon: Icons.list_alt_outlined,
-                    onTap: _viewEstimates,
-                  ),
                 ],
                 ),
               ),
@@ -1099,17 +1099,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: _ActionDrawer(
                 color: BriskersColors.invoices,
                 actions: [
+                  _DrawerAction(
+                    label: 'View Invoices',
+                    icon: Icons.receipt_long_outlined,
+                    onTap: widget.onInvoicesTap,
+                  ),
                   if (_canManage)
                     _DrawerAction(
                       label: 'Add Invoice',
                       icon: Icons.note_add_outlined,
                       onTap: _createInvoice,
                     ),
-                  _DrawerAction(
-                    label: 'View Invoices',
-                    icon: Icons.receipt_long_outlined,
-                    onTap: widget.onInvoicesTap,
-                  ),
                 ],
                 ),
               ),
@@ -1118,6 +1118,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: _ActionDrawer(
                 color: BriskersColors.expenses,
                 actions: [
+                  _DrawerAction(
+                    label: 'View Expenses',
+                    icon: Icons.payments_outlined,
+                    onTap: _viewExpenses,
+                  ),
                   if (_canManage)
                     _DrawerAction(
                       label: 'Scan Expense',
@@ -1136,11 +1141,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       icon: Icons.bolt_outlined,
                       onTap: _quickExpense,
                     ),
-                  _DrawerAction(
-                    label: 'View Expenses',
-                    icon: Icons.payments_outlined,
-                    onTap: _viewExpenses,
-                  ),
                 ],
                 ),
               ),
