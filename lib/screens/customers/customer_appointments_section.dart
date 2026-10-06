@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
+import '../../services/customer_detail_cache.dart';
 
 class CustomerAppointmentsSection extends StatefulWidget {
   const CustomerAppointmentsSection({
@@ -22,6 +24,7 @@ class CustomerAppointmentsSection extends StatefulWidget {
 class _CustomerAppointmentsSectionState
     extends State<CustomerAppointmentsSection> {
   static const _api = BriskersApi();
+  static const _cache = CustomerDetailCache();
 
   List<Map<String, dynamic>> _appointments = const [];
   bool _loading = true;
@@ -34,10 +37,38 @@ class _CustomerAppointmentsSectionState
   }
 
   Future<void> _load() async {
+    final offline = BriskersConnectionModeController.instance.forceOffline;
+    if (offline) {
+      final cached = await _cache.load(
+        widget.businessId,
+        widget.customerId,
+        'appointments',
+      );
+      final rows = cached is List
+          ? cached
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList()
+          : <Map<String, dynamic>>[];
+      if (!mounted) return;
+      setState(() {
+        _appointments = rows;
+        _loading = false;
+        _error = null;
+      });
+      return;
+    }
+
     try {
       final rows = await _api.customerAppointments(
         widget.businessId,
         widget.customerId,
+      );
+      await _cache.save(
+        widget.businessId,
+        widget.customerId,
+        'appointments',
+        rows,
       );
       if (!mounted) return;
       setState(() {
@@ -46,10 +77,22 @@ class _CustomerAppointmentsSectionState
         _error = null;
       });
     } catch (error) {
+      final cached = await _cache.load(
+        widget.businessId,
+        widget.customerId,
+        'appointments',
+      );
+      final rows = cached is List
+          ? cached
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList()
+          : <Map<String, dynamic>>[];
       if (!mounted) return;
       setState(() {
+        _appointments = rows;
         _loading = false;
-        _error = error.toString();
+        _error = rows.isEmpty ? error.toString() : null;
       });
     }
   }
