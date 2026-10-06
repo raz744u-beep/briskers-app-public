@@ -1058,7 +1058,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _changeStatus(String code) async {
-    if (!_canManage || _job == null) return;
+    if (!_canQuickAdmin || _job == null) return;
     if (code == _job!['status']?.toString()) return;
 
     String? note;
@@ -1094,18 +1094,44 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       if (note == null) return;
     }
 
-    await _run(() async {
-      await _api.changeJobStatus(
+    Map<String, dynamic>? selectedStatus;
+    for (final status in _statuses) {
+      if (status['code']?.toString() == code) {
+        selectedStatus = status;
+        break;
+      }
+    }
+    if (selectedStatus == null) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _offlineJobAdmin.queueStatus(
         widget.businessId,
         widget.jobId,
-        code,
+        code: code,
+        name: selectedStatus['name']?.toString() ?? code,
+        colorHex: selectedStatus['color_hex']?.toString(),
+        iconKey: selectedStatus['icon_key']?.toString(),
         note: note,
       );
-    });
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineJobAdmin.flush(widget.businessId);
+        } catch (_) {}
+      }
+      if (mounted) await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _editJob() async {
-    if (!_canManage || _job == null || _busy) return;
+    if (!_canQuickAdmin || _job == null || _busy) return;
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -1281,7 +1307,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _editComplaint() async {
-    if (!_canManage || _job == null || _busy) return;
+    if (!_canQuickAdmin || _job == null || _busy) return;
     final value = await _editTextSheet(
       title: 'Customer complaint',
       initialValue: _job!['requested_work']?.toString() ?? '',
@@ -1289,12 +1315,28 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
     if (value == null || _job == null) return;
 
-    await _run(() => _updateCore(
-          customerId: _job!['customer_id'].toString(),
-          vehicleId: _job!['vehicle_id']?.toString(),
-          plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
-          requestedWork: value,
-        ));
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _offlineJobAdmin.queueCore(
+        widget.businessId,
+        widget.jobId,
+        requestedWork: value.trim().isEmpty ? null : value.trim(),
+        replaceRequestedWork: true,
+      );
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineJobAdmin.flush(widget.businessId);
+        } catch (_) {}
+      }
+      if (mounted) await _load();
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _editWorkSummary() async {
@@ -1741,6 +1783,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.deepOrange,
+                        foregroundColor: Colors.white,
+                      ),
                       onPressed: () {
                         if (controller.text.trim().isEmpty) return;
                         Navigator.pop(sheetContext, true);
@@ -1851,6 +1897,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.deepOrange,
+                    foregroundColor: Colors.white,
+                  ),
                   onPressed: () =>
                       Navigator.pop(sheetContext, true),
                   child: const Text('Save'),
@@ -2223,7 +2273,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               fontWeight: FontWeight.w700,
             ),
           ),
-          if (_canManage) ...[
+          if (_canQuickAdmin) ...[
             const SizedBox(width: 2),
             Icon(Icons.keyboard_arrow_down, color: color, size: 17),
           ],
@@ -2231,7 +2281,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       ),
     );
 
-    if (!_canManage || _busy) return child;
+    if (!_canQuickAdmin || _busy) return child;
 
     return PopupMenuButton<String>(
       tooltip: 'Change job status',
@@ -3725,14 +3775,18 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   ? 'No customer complaint entered.'
                   : complaint,
             ),
-            if (_canManage) ...[
+            if (_canQuickAdmin) ...[
               const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
                   onPressed: _busy ? null : _editComplaint,
-                  icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Edit'),
+                  icon: Icon(
+                    complaint.isEmpty
+                        ? Icons.add_circle_outline
+                        : Icons.edit_outlined,
+                  ),
+                  label: Text(complaint.isEmpty ? 'Add' : 'Edit'),
                 ),
               ),
             ],
@@ -4404,6 +4458,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         ),
                         if (key == 'findings' && _canEditFindings)
                           TextButton.icon(
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.deepOrange,
+                            ),
                             onPressed: _busy ? null : _addFinding,
                             icon: const Icon(Icons.add),
                             label: const Text('Add Finding'),
@@ -4636,7 +4693,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               if (value == 'refresh') await _load();
             },
             itemBuilder: (_) => [
-              if (_canManage)
+              if (_canQuickAdmin)
                 const PopupMenuItem(
                   value: 'edit',
                   child: ListTile(
@@ -4656,7 +4713,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     title: Text('Assign / unassign mechanic'),
                   ),
                 ),
-              if (_canManage || _canQuickAdmin) const PopupMenuDivider(),
+              if (_canQuickAdmin) const PopupMenuDivider(),
               const PopupMenuItem(
                 value: 'refresh',
                 child: ListTile(
