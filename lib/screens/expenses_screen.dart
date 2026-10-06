@@ -816,16 +816,25 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     if (id.isEmpty) return;
 
     Map<String, dynamic> detail;
-    try {
-      detail = await _api.transactionDetail(widget.businessId, id);
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-      return;
+    if (_showingLocal) {
+      detail = await _localFinancial.loadTransactionDetail(
+            widget.businessId,
+            id,
+          ) ??
+          Map<String, dynamic>.from(transaction);
+    } else {
+      try {
+        detail = await _api.transactionDetail(widget.businessId, id);
+      } catch (error) {
+        if (mounted) setState(() => _error = error.toString());
+        return;
+      }
     }
     if (!mounted) return;
 
-    final editable = detail['editable'] == true;
-    final deletable = _owner && detail['deletable'] == true;
+    final editable = _showingLocal ? true : detail['editable'] == true;
+    final deletable =
+        !_showingLocal && _owner && detail['deletable'] == true;
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -1384,9 +1393,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
                           onTap: () => _openTransaction(transaction),
-                          onLongPress: _showingLocal
-                              ? null
-                              : () => _showTransactionActions(transaction),
+                          onLongPress: () =>
+                              _showTransactionActions(transaction),
                           child: Padding(
                             padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
                             child: Row(
