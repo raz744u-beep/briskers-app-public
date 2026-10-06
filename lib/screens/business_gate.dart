@@ -34,6 +34,7 @@ class _BusinessGateState extends State<BusinessGate> {
   final OfflinePreInspectionService _offlineInspection =
       OfflinePreInspectionService();
   final OfflineJobAdminService _offlineJobAdmin =
+  final LocalFinancialCache _localFinancial = LocalFinancialCache();
       OfflineJobAdminService();
   final OfflineWorkFindingsService _offlineWorkFindings =
       OfflineWorkFindingsService();
@@ -218,6 +219,25 @@ class _BusinessGateState extends State<BusinessGate> {
       await _documentSync.pull(businessId);
     } catch (_) {
       // Estimate/invoice Home counts keep the previous local snapshot.
+    }
+
+    if (<String>{'owner', 'manager', 'office'}.contains(roleCode)) {
+      try {
+        final results = await Future.wait<dynamic>([
+          _api.transactions(businessId, limit: 1000),
+          _api.transactionOptions(businessId),
+        ]);
+        await _localFinancial.saveTransactions(
+          businessId,
+          List<Map<String, dynamic>>.from(results[0] as List),
+        );
+        await _localFinancial.saveOptions(
+          businessId,
+          Map<String, dynamic>.from(results[1] as Map),
+        );
+      } catch (_) {
+        // Keep the last saved transaction snapshot for offline use.
+      }
     }
   }
 
