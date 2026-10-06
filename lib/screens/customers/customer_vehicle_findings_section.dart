@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
+import '../../services/local_attachment_cache.dart';
 
 class CustomerVehicleFindingsSection extends StatefulWidget {
   const CustomerVehicleFindingsSection({
@@ -27,6 +28,7 @@ class _CustomerVehicleFindingsSectionState
     extends State<CustomerVehicleFindingsSection> {
   static const _api = BriskersApi();
   static const _cache = CustomerDetailCache();
+  final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
   final ImagePicker _picker = ImagePicker();
 
   late Future<List<Map<String, dynamic>>> _findingsFuture;
@@ -102,6 +104,26 @@ class _CustomerVehicleFindingsSectionState
         'findings',
         all,
       );
+      final pending = <Future<dynamic>>[];
+      for (final finding in all) {
+        final attachments = List<dynamic>.from(
+          finding['attachments'] ?? const [],
+        ).whereType<Map>().map((raw) {
+          return Map<String, dynamic>.from(raw);
+        });
+        for (final attachment in attachments) {
+          final bucket =
+              attachment['bucket']?.toString() ?? 'briskers-private';
+          final key = attachment['key']?.toString() ?? '';
+          if (key.isEmpty) continue;
+          pending.add(_attachmentCache.getOrDownload(bucket, key));
+          if (pending.length >= 4) {
+            await Future.wait(pending);
+            pending.clear();
+          }
+        }
+      }
+      if (pending.isNotEmpty) await Future.wait(pending);
       return all;
     } catch (_) {
       final cached = await _cache.load(
