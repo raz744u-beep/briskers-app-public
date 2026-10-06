@@ -53,7 +53,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     var localShown = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
-    if (!forceOnline) try {
+    if (!forceOnline) {
+      try {
       final local = await _localCustomers.customerDetail(
         widget.businessId,
         widget.customerId,
@@ -69,6 +70,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       }
     } catch (_) {
       // The online refresh below can still populate the local cache.
+      }
     }
 
     try {
