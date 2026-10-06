@@ -33,6 +33,7 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
   final _plate = TextEditingController();
   final _mileage = TextEditingController();
   final _color = TextEditingController();
+  final _keyPassword = TextEditingController();
 
   String? _make;
   String? _licenseState;
@@ -50,6 +51,7 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
       _plate.text = vehicle['license_plate']?.toString() ?? '';
       _mileage.text = vehicle['mileage']?.toString() ?? '';
       _color.text = vehicle['color']?.toString() ?? '';
+      _keyPassword.text = vehicle['key_password']?.toString() ?? '';
 
       final existingMake = vehicle['make']?.toString();
       if (existingMake != null && existingMake.isNotEmpty) {
@@ -71,6 +73,7 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
     _plate.dispose();
     _mileage.dispose();
     _color.dispose();
+    _keyPassword.dispose();
     super.dispose();
   }
 
@@ -124,6 +127,9 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
         licenseState: _licenseState,
         mileage: mileage,
         color: _color.text.trim().isEmpty ? null : _color.text.trim(),
+        keyPassword: _keyPassword.text.trim().isEmpty
+            ? null
+            : _keyPassword.text.trim(),
       );
 
       if (widget.isEditing) {
@@ -138,6 +144,7 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
           licenseState: params.licenseState,
           mileage: params.mileage,
           color: params.color,
+          keyPassword: params.keyPassword,
         );
       } else {
         await _api.createVehicle(
@@ -151,6 +158,7 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
           licenseState: params.licenseState,
           mileage: params.mileage,
           color: params.color,
+          keyPassword: params.keyPassword,
         );
       }
 
@@ -272,6 +280,17 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
             controller: _color,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(labelText: 'Color'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _keyPassword,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: const InputDecoration(
+              labelText: 'Key Password / Key Code',
+              helperText: 'Internal shop information only',
+              prefixIcon: Icon(Icons.key_outlined),
+            ),
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
