@@ -13,12 +13,14 @@ class ExpenseDetailScreen extends StatefulWidget {
     required this.transactionId,
     this.allowRecurring = true,
     this.canDeleteTransaction = false,
+    this.cachedDetail,
   });
 
   final String businessId;
   final String transactionId;
   final bool allowRecurring;
   final bool canDeleteTransaction;
+  final Map<String, dynamic>? cachedDetail;
 
   @override
   State<ExpenseDetailScreen> createState() => _ExpenseDetailScreenState();
@@ -40,7 +42,17 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    final cached = widget.cachedDetail;
+    if (cached != null) {
+      _detail = Map<String, dynamic>.from(cached)
+        ..['editable'] = false
+        ..['deletable'] = false
+        ..['date'] = cached['date'] ?? cached['transaction_date']
+        ..['attachments'] = cached['attachments'] ?? const <dynamic>[];
+      _loading = false;
+    } else {
+      _load();
+    }
   }
 
   Future<void> _load() async {
