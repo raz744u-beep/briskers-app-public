@@ -5,6 +5,7 @@ import '../core/briskers_colors.dart';
 import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
 import '../services/local_job_repository.dart';
+import '../services/offline_document_draft_service.dart';
 import 'appointments/appointment_manage_screen.dart';
 import 'customers/new_customer_screen.dart';
 import 'documents_screen.dart';
@@ -55,6 +56,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   static const _api = BriskersApi();
   final LocalJobRepository _localJobs = LocalJobRepository();
+  final OfflineDocumentDraftService _offlineDocumentDraft =
+      OfflineDocumentDraftService();
 
   String? _expandedSection;
   Map<String, dynamic> _attention = const {};
@@ -585,6 +588,18 @@ class _HomeScreenState extends State<HomeScreen> {
       return _pickActiveJob(title);
     }
 
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Creating a brand-new Job still requires a connection. '
+            'Select Existing Job to create an estimate offline.',
+          ),
+        ),
+      );
+      return null;
+    }
+
     return Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(
@@ -618,7 +633,13 @@ class _HomeScreenState extends State<HomeScreen> {
     if (jobId.isEmpty) return;
 
     try {
-      final documentId = await _api.createEstimate(widget.businessId, jobId);
+      final documentId =
+          BriskersConnectionModeController.instance.forceOffline
+              ? await _offlineDocumentDraft.createEstimate(
+                  widget.businessId,
+                  jobId,
+                )
+              : await _api.createEstimate(widget.businessId, jobId);
       if (!mounted) return;
       await _openDocument(documentId);
     } catch (error) {
