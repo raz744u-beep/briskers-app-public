@@ -437,18 +437,38 @@ class _JobsScreenState extends State<JobsScreen> {
     String statusCode,
   ) async {
     if (!_canManage ||
-        !_onlineReady ||
         statusCode == job['status']?.toString()) {
       return;
     }
 
+    Map<String, dynamic>? selectedStatus;
+    for (final status in _statuses) {
+      if (status['code']?.toString() == statusCode) {
+        selectedStatus = status;
+        break;
+      }
+    }
+    if (selectedStatus == null) return;
+
     setState(() => _busyJobId = job['id']?.toString());
     try {
-      await _api.changeJobStatus(
+      await _offlineJobAdmin.queueStatus(
         widget.businessId,
         job['id'].toString(),
-        statusCode,
+        code: statusCode,
+        name: selectedStatus['name']?.toString() ?? statusCode,
+        colorHex: selectedStatus['color_hex']?.toString(),
+        iconKey: selectedStatus['icon_key']?.toString(),
       );
+
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineJobAdmin.flush(widget.businessId);
+        } catch (_) {
+          // The status change remains queued for the next successful sync.
+        }
+      }
+
       await _load();
       widget.onJobsChanged?.call();
     } catch (error) {
@@ -526,7 +546,7 @@ class _JobsScreenState extends State<JobsScreen> {
                 ),
               ),
             ),
-          if (_canManage && _onlineReady && !busy) ...[
+          if (_canManage && !busy) ...[
             const SizedBox(width: 3),
             Icon(Icons.chevron_right, size: 15, color: color),
           ],
@@ -534,7 +554,7 @@ class _JobsScreenState extends State<JobsScreen> {
       ),
     );
 
-    if (!_canManage || !_onlineReady || busy) return child;
+    if (!_canManage || busy) return child;
 
     return PopupMenuButton<String>(
       tooltip: tr('changeStatus'),
