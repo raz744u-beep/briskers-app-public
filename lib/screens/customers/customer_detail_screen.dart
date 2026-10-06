@@ -419,6 +419,28 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     final vehicles = List<dynamic>.from(
       _data?['vehicles'] ?? const [],
     );
+    final addressRaw = customer['billing_address'];
+    final address = addressRaw is Map
+        ? Map<String, dynamic>.from(addressRaw)
+        : <String, dynamic>{};
+    final addressLine1 = address['line1']?.toString().trim() ?? '';
+    final addressLine2 = address['line2']?.toString().trim() ?? '';
+    final addressCity = address['city']?.toString().trim() ?? '';
+    final addressState = address['state']?.toString().trim() ?? '';
+    final addressZip =
+        (address['postal_code'] ?? address['zip'])?.toString().trim() ?? '';
+    final addressText = <String>[
+      if (addressLine1.isNotEmpty) addressLine1,
+      if (addressLine2.isNotEmpty) addressLine2,
+      if (addressCity.isNotEmpty ||
+          addressState.isNotEmpty ||
+          addressZip.isNotEmpty)
+        <String>[
+          if (addressCity.isNotEmpty) addressCity,
+          if (addressState.isNotEmpty) addressState,
+          if (addressZip.isNotEmpty) addressZip,
+        ].join(' '),
+    ].join('\n');
 
     return Scaffold(
       appBar: AppBar(
@@ -518,6 +540,18 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                             Padding(
                               padding: const EdgeInsets.only(top: 2),
                               child: Text('${customer['email']}'),
+                            ),
+                          if (addressText.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(Icons.location_on_outlined, size: 17),
+                                  const SizedBox(width: 5),
+                                  Expanded(child: Text(addressText)),
+                                ],
+                              ),
                             ),
                           if (_onlineReady) ...[
                             const SizedBox(height: 2),
