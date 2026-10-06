@@ -175,6 +175,55 @@ class LocalJobRepository {
         .map((row) => row.read<int>('count'));
   }
 
+  Future<List<Map<String, dynamic>>> unassignedOpenJobs(
+    String businessId, {
+    int limit = 25,
+  }) async {
+    final rows = await _database.customSelect(
+      '''
+      SELECT id, job_number, title, customer_name, vehicle_label, status
+      FROM local_jobs
+      WHERE business_id = ?
+        AND is_unassigned = 1
+        AND status NOT IN ('completed', 'cancelled')
+      ORDER BY created_at DESC, id
+      LIMIT ?
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<int>(limit),
+      ],
+    ).get();
+
+    return rows
+        .map(
+          (row) => <String, dynamic>{
+            'id': row.read<String>('id'),
+            'job_number': row.readNullable<String>('job_number'),
+            'title': row.read<String>('title'),
+            'customer_name': row.readNullable<String>('customer_name'),
+            'vehicle': row.readNullable<String>('vehicle_label'),
+            'status': row.read<String>('status'),
+            '_local_snapshot': true,
+          },
+        )
+        .toList();
+  }
+
+  Future<int> unassignedOpenJobCount(String businessId) async {
+    final row = await _database.customSelect(
+      '''
+      SELECT COUNT(*) AS count
+      FROM local_jobs
+      WHERE business_id = ?
+        AND is_unassigned = 1
+        AND status NOT IN ('completed', 'cancelled')
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).getSingle();
+    return row.read<int>('count');
+  }
+
   Future<int> activeJobCount(String businessId) async {
     final row = await _database.customSelect(
       '''
