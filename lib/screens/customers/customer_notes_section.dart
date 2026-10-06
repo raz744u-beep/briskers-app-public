@@ -6,6 +6,7 @@ import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
+import '../../services/local_attachment_cache.dart';
 
 class CustomerNotesSection extends StatefulWidget {
   const CustomerNotesSection({
@@ -24,6 +25,7 @@ class CustomerNotesSection extends StatefulWidget {
 class _CustomerNotesSectionState extends State<CustomerNotesSection> {
   static const _api = BriskersApi();
   static const _cache = CustomerDetailCache();
+  final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
   final _picker = ImagePicker();
   final _note = TextEditingController();
 
@@ -86,6 +88,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
         'notes',
         notes,
       );
+      await _prefetchNotePhotos(notes);
       if (!mounted) return;
       setState(() {
         _notes = notes;
@@ -113,6 +116,31 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
         _error = notes.isEmpty ? error.toString() : null;
       });
     }
+  }
+
+  Future<void> _prefetchNotePhotos(
+    List<Map<String, dynamic>> notes,
+  ) async {
+    final pending = <Future<dynamic>>[];
+    for (final note in notes) {
+      final attachments = List<dynamic>.from(
+        note['attachments'] ?? const [],
+      ).whereType<Map>().map((raw) {
+        return Map<String, dynamic>.from(raw);
+      });
+      for (final attachment in attachments) {
+        final bucket =
+            attachment['bucket']?.toString() ?? 'briskers-private';
+        final key = attachment['key']?.toString() ?? '';
+        if (key.isEmpty) continue;
+        pending.add(_attachmentCache.getOrDownload(bucket, key));
+        if (pending.length >= 4) {
+          await Future.wait(pending);
+          pending.clear();
+        }
+      }
+    }
+    if (pending.isNotEmpty) await Future.wait(pending);
   }
 
   String _mimeType(String name) {
