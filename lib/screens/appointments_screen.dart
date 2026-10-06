@@ -68,7 +68,8 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     var localAvailable = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
-    if (!forceOnline) try {
+    if (!forceOnline) {
+      try {
       final localRows =
           await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim());
       final bootstrapped =
@@ -85,6 +86,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       }
     } catch (_) {
       // Online refresh below can still populate the local appointment cache.
+      }
     }
 
     try {
