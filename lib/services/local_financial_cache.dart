@@ -98,6 +98,37 @@ class LocalFinancialCache {
     return rows.where(matches).toList();
   }
 
+  Future<void> saveTransactionDetail(
+    String businessId,
+    String transactionId,
+    Map<String, dynamic> detail,
+  ) async {
+    await _save(
+      businessId,
+      'transaction_detail_$transactionId',
+      jsonEncode(detail),
+    );
+  }
+
+  Future<Map<String, dynamic>?> loadTransactionDetail(
+    String businessId,
+    String transactionId,
+  ) async {
+    final raw = await _load(
+      businessId,
+      'transaction_detail_$transactionId',
+    );
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map
+          ? Map<String, dynamic>.from(decoded)
+          : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> saveOptions(
     String businessId,
     Map<String, dynamic> options,
