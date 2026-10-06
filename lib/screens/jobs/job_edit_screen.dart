@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
+import '../../services/local_customer_repository.dart';
+import '../../services/offline_job_admin_service.dart';
 
 class JobEditScreen extends StatefulWidget {
   const JobEditScreen({
@@ -19,6 +22,8 @@ class JobEditScreen extends StatefulWidget {
 
 class _JobEditScreenState extends State<JobEditScreen> {
   static const _api = BriskersApi();
+  final LocalCustomerRepository _localCustomers = LocalCustomerRepository();
+  final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
 
   late final TextEditingController _title;
   late final TextEditingController _requestedWork;
@@ -61,12 +66,28 @@ class _JobEditScreenState extends State<JobEditScreen> {
   }
 
   Future<void> _load() async {
+    final forceOffline =
+        BriskersConnectionModeController.instance.forceOffline;
+
     try {
-      final customers = await _api.customers(
-        widget.businessId,
-        limit: 200,
-      );
-      final vehicles = await _vehiclesForCustomer(_customerId);
+      List<Map<String, dynamic>> customers;
+      List<Map<String, dynamic>> vehicles;
+
+      if (forceOffline) {
+        customers = await _localCustomers.customers(widget.businessId);
+        vehicles = await _localVehiclesForCustomer(_customerId);
+      } else {
+        try {
+          customers = await _api.customers(
+            widget.businessId,
+            limit: 200,
+          );
+          vehicles = await _vehiclesForCustomer(_customerId);
+        } catch (_) {
+          customers = await _localCustomers.customers(widget.businessId);
+          vehicles = await _localVehiclesForCustomer(_customerId);
+        }
+      }
 
       if (!mounted) return;
       setState(() {
@@ -76,7 +97,9 @@ class _JobEditScreenState extends State<JobEditScreen> {
         _error = null;
 
         if (_vehicleId != null &&
-            !_vehicles.any((vehicle) => vehicle['id']?.toString() == _vehicleId)) {
+            !_vehicles.any(
+              (vehicle) => vehicle['id']?.toString() == _vehicleId,
+            )) {
           _vehicleId = null;
         }
       });
@@ -101,6 +124,16 @@ class _JobEditScreenState extends State<JobEditScreen> {
         .toList();
   }
 
+  Future<List<Map<String, dynamic>>> _localVehiclesForCustomer(
+    String customerId,
+  ) async {
+    final detail =
+        await _localCustomers.customerDetail(widget.businessId, customerId);
+    return List<dynamic>.from(detail?['vehicles'] ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .toList();
+  }
+
   Future<void> _changeCustomer(String customerId) async {
     if (customerId == _customerId || _loadingVehicles) return;
 
@@ -113,7 +146,16 @@ class _JobEditScreenState extends State<JobEditScreen> {
     });
 
     try {
-      final vehicles = await _vehiclesForCustomer(customerId);
+      List<Map<String, dynamic>> vehicles;
+      if (BriskersConnectionModeController.instance.forceOffline) {
+        vehicles = await _localVehiclesForCustomer(customerId);
+      } else {
+        try {
+          vehicles = await _vehiclesForCustomer(customerId);
+        } catch (_) {
+          vehicles = await _localVehiclesForCustomer(customerId);
+        }
+      }
       if (!mounted) return;
       setState(() {
         _vehicles = vehicles;
@@ -165,17 +207,27 @@ class _JobEditScreenState extends State<JobEditScreen> {
     });
 
     try {
-      await _api.updateJob(
+      await _offlineJobAdmin.queueCore(
         widget.businessId,
         widget.job['id'].toString(),
         customerId: _customerId,
         vehicleId: _vehicleId,
+        replaceVehicle: true,
         title: title,
         requestedWork: _requestedWork.text.trim().isEmpty
             ? null
             : _requestedWork.text.trim(),
+        replaceRequestedWork: true,
         plannedHours: plannedHours,
       );
+
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineJobAdmin.flush(widget.businessId);
+        } catch (_) {
+          // The local edit remains queued and will retry on reconnect.
+        }
+      }
 
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
