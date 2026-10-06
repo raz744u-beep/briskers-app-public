@@ -278,24 +278,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
 
         return Column(
           children: [
-            _offlineCountCard(
-              icon: Icons.car_repair_outlined,
-              title: 'Vehicle Findings',
-              emptyText: 'No saved findings',
-              rows: findings,
-              showPhotos: true,
-              label: (row) => row['body']?.toString() ?? 'Vehicle finding',
-            ),
-            const SizedBox(height: 18),
-            _offlineCountCard(
-              icon: Icons.note_alt_outlined,
-              title: 'Notes',
-              emptyText: 'No saved notes',
-              rows: notes,
-              showPhotos: true,
-              label: (row) => row['body']?.toString() ?? 'Customer note',
-            ),
-            const SizedBox(height: 18),
+
             _offlineCountCard(
               icon: Icons.calendar_month_outlined,
               title: 'Appointments',
@@ -995,20 +978,20 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     enabled: _canEditLocal,
                   ),
                   const SizedBox(height: 18),
+                  CustomerVehicleFindingsSection(
+                    businessId: widget.businessId,
+                    customerId: widget.customerId,
+                    vehicles: vehicles,
+                  ),
+                  const SizedBox(height: 18),
+                  CustomerNotesSection(
+                    businessId: widget.businessId,
+                    customerId: widget.customerId,
+                  ),
+                  const SizedBox(height: 18),
                   if (BriskersConnectionModeController.instance.forceOffline)
                     _offlineCustomerSections()
                   else ...[
-                    CustomerVehicleFindingsSection(
-                      businessId: widget.businessId,
-                      customerId: widget.customerId,
-                      vehicles: vehicles,
-                    ),
-                    const SizedBox(height: 18),
-                    CustomerNotesSection(
-                      businessId: widget.businessId,
-                      customerId: widget.customerId,
-                    ),
-                    const SizedBox(height: 18),
                     CustomerAppointmentsSection(
                       businessId: widget.businessId,
                       customerId: widget.customerId,
