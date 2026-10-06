@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
+import '../../core/vehicle_options.dart';
 import '../../services/briskers_api.dart';
 import 'new_vehicle_screen.dart';
 
@@ -20,6 +21,11 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
   final _name = TextEditingController();
   final _phone = TextEditingController();
   final _email = TextEditingController();
+  final _address1 = TextEditingController();
+  final _address2 = TextEditingController();
+  final _city = TextEditingController();
+  final _zip = TextEditingController();
+  String? _state;
 
   String? _error;
   bool _busy = false;
@@ -30,6 +36,10 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
     _name.dispose();
     _phone.dispose();
     _email.dispose();
+    _address1.dispose();
+    _address2.dispose();
+    _city.dispose();
+    _zip.dispose();
     super.dispose();
   }
 
@@ -110,6 +120,18 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
         name: name,
         phone: phoneDigits.isEmpty ? null : phoneDigits,
         email: email.isEmpty ? null : email,
+        billingAddress: <String, dynamic>{
+          if (_address1.text.trim().isNotEmpty)
+            'line1': _address1.text.trim(),
+          if (_address2.text.trim().isNotEmpty)
+            'line2': _address2.text.trim(),
+          if (_city.text.trim().isNotEmpty)
+            'city': _city.text.trim(),
+          if ((_state ?? '').isNotEmpty) 'state': _state,
+          if (_zip.text.trim().isNotEmpty)
+            'postal_code': _zip.text.trim(),
+          'country': 'US',
+        },
       );
 
       if (_createOnlineAccount) {
@@ -179,6 +201,83 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
             decoration: const InputDecoration(labelText: 'Email', border: roundedInput, enabledBorder: roundedInput, focusedBorder: roundedInput),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Address',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _address1,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'Street address',
+              border: roundedInput,
+              enabledBorder: roundedInput,
+              focusedBorder: roundedInput,
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _address2,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'Address line 2',
+              border: roundedInput,
+              enabledBorder: roundedInput,
+              focusedBorder: roundedInput,
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _city,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'City',
+              border: roundedInput,
+              enabledBorder: roundedInput,
+              focusedBorder: roundedInput,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: _state,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'State',
+                    border: roundedInput,
+                    enabledBorder: roundedInput,
+                    focusedBorder: roundedInput,
+                  ),
+                  items: usStateCodes
+                      .map((state) => DropdownMenuItem(
+                            value: state,
+                            child: Text(state),
+                          ))
+                      .toList(),
+                  onChanged: _busy
+                      ? null
+                      : (value) => setState(() => _state = value),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _zip,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'ZIP',
+                    border: roundedInput,
+                    enabledBorder: roundedInput,
+                    focusedBorder: roundedInput,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           Card(
