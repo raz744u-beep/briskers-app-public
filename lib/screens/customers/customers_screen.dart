@@ -87,6 +87,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
       }
     } catch (_) {
       // The online refresh below can still populate the local cache.
+      }
     }
 
     if (!refreshOnline) return;
