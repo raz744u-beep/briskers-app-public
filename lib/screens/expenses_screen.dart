@@ -9,6 +9,7 @@ import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
+import '../services/local_attachment_cache.dart';
 import '../services/local_financial_cache.dart';
 import '../widgets/briskers_page_header.dart';
 import 'expenses/expense_detail_screen.dart';
@@ -33,6 +34,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   static const _api = BriskersApi();
   static const _expenseIqChannel = MethodChannel('com.briskers/expenseiq');
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
+  final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
 
   static const int _pageSize = 50;
   final ScrollController _scrollController = ScrollController();
@@ -170,6 +172,49 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     );
   }
 
+  Future<void> _prefetchReceiptDetails(
+    List<Map<String, dynamic>> snapshot,
+  ) async {
+    final rows = snapshot.where((row) {
+      final count =
+          int.tryParse(row['receipt_count']?.toString() ?? '') ?? 0;
+      return count > 0 && (row['id']?.toString() ?? '').isNotEmpty;
+    }).toList();
+
+    for (var index = 0; index < rows.length; index += 3) {
+      final batch = rows.skip(index).take(3).map((row) async {
+        final id = row['id'].toString();
+        try {
+          final detail = await _api.transactionDetail(
+            widget.businessId,
+            id,
+          );
+          await _localFinancial.saveTransactionDetail(
+            widget.businessId,
+            id,
+            detail,
+          );
+          final attachments = List<dynamic>.from(
+            detail['attachments'] ?? const [],
+          ).whereType<Map>().map((raw) {
+            return Map<String, dynamic>.from(raw);
+          }).toList();
+
+          for (final attachment in attachments) {
+            final bucket = attachment['bucket']?.toString() ??
+                'briskers-private';
+            final key = attachment['key']?.toString() ?? '';
+            if (key.isEmpty) continue;
+            await _attachmentCache.getOrDownload(bucket, key);
+          }
+        } catch (_) {
+          // Keep the transaction list usable if an individual receipt fails.
+        }
+      });
+      await Future.wait(batch);
+    }
+  }
+
   Future<void> _load({bool showLoading = true}) async {
     if (showLoading) {
       setState(() {
@@ -255,6 +300,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         snapshot,
       );
       await _localFinancial.saveOptions(widget.businessId, options);
+      unawaited(_prefetchReceiptDetails(snapshot));
 
       if (!mounted) return;
       setState(() {
