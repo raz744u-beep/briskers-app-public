@@ -91,7 +91,20 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     }
 
     try {
+      try {
+        await _offlineAdmin.flush(widget.businessId);
+      } catch (_) {
+        // Pending edits stay queued if the connection is not ready yet.
+      }
       await _sync.pull(widget.businessId);
+      try {
+        await _sync.refreshCustomer(
+          widget.businessId,
+          widget.customerId,
+        );
+      } catch (_) {
+        // The regular local snapshot is still usable if a focused refresh fails.
+      }
       final bootstrapped =
           await _localCustomers.hasBootstrap(widget.businessId);
       final local = await _localCustomers.customerDetail(
