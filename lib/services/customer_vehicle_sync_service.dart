@@ -302,9 +302,9 @@ class CustomerVehicleSyncService {
         '''
         INSERT INTO local_vehicles (
           id, business_id, year, make, model, vin,
-          license_plate, license_state, mileage, color,
+          license_plate, license_state, mileage, color, key_password,
           server_updated_at, row_version, sync_state
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
         ON CONFLICT(id) DO UPDATE SET
           year=excluded.year,
           make=excluded.make,
@@ -314,6 +314,7 @@ class CustomerVehicleSyncService {
           license_state=excluded.license_state,
           mileage=excluded.mileage,
           color=excluded.color,
+          key_password=excluded.key_password,
           server_updated_at=excluded.server_updated_at,
           row_version=excluded.row_version,
           sync_state='synced'
@@ -329,6 +330,7 @@ class CustomerVehicleSyncService {
           _text(vehicle['license_state']),
           _double(vehicle['mileage']),
           _text(vehicle['color']),
+          _text(vehicle['key_password']),
           _unix(_date(vehicle['updated_at'])),
           _int(vehicle['row_version']),
         ],
