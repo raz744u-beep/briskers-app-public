@@ -3,7 +3,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
+import '../../services/customer_detail_cache.dart';
 
 class CustomerNotesSection extends StatefulWidget {
   const CustomerNotesSection({
@@ -21,6 +23,7 @@ class CustomerNotesSection extends StatefulWidget {
 
 class _CustomerNotesSectionState extends State<CustomerNotesSection> {
   static const _api = BriskersApi();
+  static const _cache = CustomerDetailCache();
   final _picker = ImagePicker();
   final _note = TextEditingController();
 
@@ -44,6 +47,29 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
   }
 
   Future<void> _load() async {
+    final offline = BriskersConnectionModeController.instance.forceOffline;
+    if (offline) {
+      final cached = await _cache.load(
+        widget.businessId,
+        widget.customerId,
+        'notes',
+      );
+      final notes = cached is List
+          ? cached
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList()
+          : <Map<String, dynamic>>[];
+      if (!mounted) return;
+      setState(() {
+        _notes = notes;
+        _canDeleteRecords = false;
+        _loading = false;
+        _error = null;
+      });
+      return;
+    }
+
     try {
       final results = await Future.wait<dynamic>([
         _api.customerNotes(
@@ -54,6 +80,12 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
       ]);
       final notes = List<Map<String, dynamic>>.from(results[0] as List);
       final permissions = List<String>.from(results[1] as List);
+      await _cache.save(
+        widget.businessId,
+        widget.customerId,
+        'notes',
+        notes,
+      );
       if (!mounted) return;
       setState(() {
         _notes = notes;
@@ -62,10 +94,23 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
         _error = null;
       });
     } catch (error) {
+      final cached = await _cache.load(
+        widget.businessId,
+        widget.customerId,
+        'notes',
+      );
+      final notes = cached is List
+          ? cached
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList()
+          : <Map<String, dynamic>>[];
       if (!mounted) return;
       setState(() {
+        _notes = notes;
+        _canDeleteRecords = false;
         _loading = false;
-        _error = error.toString();
+        _error = notes.isEmpty ? error.toString() : null;
       });
     }
   }
@@ -371,7 +416,8 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
         children: [
           const Divider(height: 1),
           const SizedBox(height: 12),
-          _composer(),
+          if (!BriskersConnectionModeController.instance.forceOffline)
+            _composer(),
           if (_loading)
             const Padding(
               padding: EdgeInsets.all(16),
@@ -396,8 +442,10 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
                       (entry) => _NoteCard(
                         note: entry.value,
                         index: entry.key,
-                        onEdit: () => _editNote(entry.value),
-                        canDelete: _canDeleteRecords,
+                        onEdit: BriskersConnectionModeController.instance.forceOffline
+                            ? () {}
+                            : () => _editNote(entry.value),
+                        canDelete: !BriskersConnectionModeController.instance.forceOffline && _canDeleteRecords,
                         onDelete: () => _deleteNote(entry.value),
                       ),
                     )
