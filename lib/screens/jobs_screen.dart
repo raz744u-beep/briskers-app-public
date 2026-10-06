@@ -11,6 +11,7 @@ import '../services/job_sync_service.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_job_repository.dart';
+import '../services/offline_job_admin_service.dart';
 import '../widgets/job_compact_card.dart';
 import 'jobs/job_detail_screen.dart';
 import 'jobs/job_document_screen.dart';
@@ -41,6 +42,7 @@ class _JobsScreenState extends State<JobsScreen> {
   final JobSyncService _jobSync = JobSyncService();
   final DocumentIndexSyncService _documentSync = DocumentIndexSyncService();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
+  final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
 
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _statuses = const [];
@@ -140,6 +142,18 @@ class _JobsScreenState extends State<JobsScreen> {
       // Do not download the complete server job list as history grows.
       final onlineStatuses = await _api.jobStatuses(widget.businessId);
       await _localJobs.replaceJobStatuses(widget.businessId, onlineStatuses);
+      if (_canManage) {
+        try {
+          await _offlineJobAdmin.flush(widget.businessId);
+        } catch (_) {
+          // Queued job edits remain local and retry when connectivity returns.
+        }
+        try {
+          await _offlineJobAdmin.refreshEmployees(widget.businessId);
+        } catch (_) {
+          // Keep the last cached employee list for offline assignment.
+        }
+      }
       await _jobSync.pull(widget.businessId);
       unawaited(_documentSync.refreshBestEffort(widget.businessId));
 
@@ -232,12 +246,35 @@ class _JobsScreenState extends State<JobsScreen> {
   }
 
   Future<void> _quickEditMechanic(Map<String, dynamic> job) async {
-    if (!_canManage || !_onlineReady || _busyJobId != null) return;
+    if (!_canManage || _busyJobId != null) return;
 
     setState(() => _busyJobId = job['id']?.toString());
     try {
-      final employees = await _api.assignableEmployees(widget.businessId);
+      List<Map<String, dynamic>> employees;
+      if (_onlineReady) {
+        try {
+          employees =
+              await _offlineJobAdmin.refreshEmployees(widget.businessId);
+        } catch (_) {
+          employees =
+              await _offlineJobAdmin.cachedEmployees(widget.businessId);
+        }
+      } else {
+        employees =
+            await _offlineJobAdmin.cachedEmployees(widget.businessId);
+      }
+
       if (!mounted) return;
+      if (employees.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No employee list is saved on this device yet. Open Jobs once while online, then mechanic changes will work offline.',
+            ),
+          ),
+        );
+        return;
+      }
 
       final currentId = job['assigned_employee_id']?.toString();
       final selected = await showModalBottomSheet<String?>(
@@ -283,15 +320,32 @@ class _JobsScreenState extends State<JobsScreen> {
 
       if (selected == null) return;
 
-      if (selected.isEmpty) {
-        await _api.clearJobAssignments(widget.businessId, job['id'].toString());
-      } else {
-        await _api.setPrimaryJobEmployee(
-          widget.businessId,
-          job['id'].toString(),
-          selected,
-        );
+      Map<String, dynamic>? selectedEmployee;
+      if (selected.isNotEmpty) {
+        for (final employee in employees) {
+          if (employee['id']?.toString() == selected) {
+            selectedEmployee = employee;
+            break;
+          }
+        }
       }
+
+      await _offlineJobAdmin.queueAssignment(
+        widget.businessId,
+        job['id'].toString(),
+        employeeId: selected.isEmpty ? null : selected,
+        employeeName: selectedEmployee?['name']?.toString(),
+        position: selectedEmployee?['position_name']?.toString(),
+      );
+
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineJobAdmin.flush(widget.businessId);
+        } catch (_) {
+          // The local change remains queued for the next successful sync.
+        }
+      }
+
       await _load();
       widget.onJobsChanged?.call();
     } catch (error) {
@@ -302,7 +356,7 @@ class _JobsScreenState extends State<JobsScreen> {
   }
 
   Future<void> _quickEditPlannedTime(Map<String, dynamic> job) async {
-    if (!_canManage || !_onlineReady || _busyJobId != null) return;
+    if (!_canManage || _busyJobId != null) return;
 
     final controller = TextEditingController(
       text: job['planned_hours']?.toString() ?? '0',
@@ -357,15 +411,18 @@ class _JobsScreenState extends State<JobsScreen> {
 
     setState(() => _busyJobId = job['id']?.toString());
     try {
-      await _api.updateJob(
+      await _offlineJobAdmin.queuePlannedHours(
         widget.businessId,
         job['id'].toString(),
-        customerId: job['customer_id']?.toString() ?? '',
-        vehicleId: job['vehicle_id']?.toString(),
-        title: job['title']?.toString() ?? '',
-        requestedWork: job['requested_work']?.toString(),
-        plannedHours: value,
+        value,
       );
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineJobAdmin.flush(widget.businessId);
+        } catch (_) {
+          // The local change remains queued for the next successful sync.
+        }
+      }
       await _load();
       widget.onJobsChanged?.call();
     } catch (error) {
@@ -507,12 +564,10 @@ class _JobsScreenState extends State<JobsScreen> {
         job: job,
         statusControl: _statusControl(job),
         onOpen: () => _openJob(job),
-        onEditMechanic: _canManage && _onlineReady
-            ? () => _quickEditMechanic(job)
-            : null,
-        onEditPlannedTime: _canManage && _onlineReady
-            ? () => _quickEditPlannedTime(job)
-            : null,
+        onEditMechanic:
+            _canManage ? () => _quickEditMechanic(job) : null,
+        onEditPlannedTime:
+            _canManage ? () => _quickEditPlannedTime(job) : null,
         canOpen: _busyJobId != job['id']?.toString(),
       );
 
