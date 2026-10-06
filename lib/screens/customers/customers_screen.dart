@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/formatters.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/connection_mode.dart';
 import '../../core/briskers_colors.dart';
+import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/local_customer_repository.dart';
 import 'customer_detail_screen.dart';
@@ -24,11 +27,14 @@ class CustomersScreen extends StatefulWidget {
 }
 
 class _CustomersScreenState extends State<CustomersScreen> {
+  static const _api = BriskersApi();
   final CustomerVehicleSyncService _sync =
       CustomerVehicleSyncService();
   final LocalCustomerRepository _localCustomers =
       LocalCustomerRepository();
   final _search = TextEditingController();
+  Timer? _searchDebounce;
+  int _searchRequest = 0;
   List<Map<String, dynamic>>? _rows;
   int _totalCustomers = 0;
   String? _error;
@@ -51,6 +57,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _search.dispose();
     super.dispose();
   }
@@ -129,6 +136,43 @@ class _CustomersScreenState extends State<CustomersScreen> {
     }
   }
 
+  void _onSearchChanged(String _) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 250),
+      _runSearch,
+    );
+  }
+
+  Future<void> _runSearch() async {
+    final request = ++_searchRequest;
+    final query = _search.text.trim();
+    final forceOnline =
+        BriskersConnectionModeController.instance.forceOnline;
+
+    try {
+      final rows = forceOnline
+          ? await _api.customers(
+              widget.businessId,
+              search: query.isEmpty ? null : query,
+            )
+          : await _localCustomers.customers(
+              widget.businessId,
+              search: query.isEmpty ? null : query,
+            );
+
+      if (!mounted || request != _searchRequest) return;
+      setState(() {
+        _rows = rows;
+        _showingLocal = !forceOnline && !_onlineReady;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted || request != _searchRequest) return;
+      setState(() => _error = error.toString());
+    }
+  }
+
   Future<void> _add() async {
     if (!_onlineReady) return;
     final created = await Navigator.push<bool>(
@@ -187,8 +231,11 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   controller: _search,
                   hintText: tr('searchCustomers'),
                   leading: const Icon(Icons.search),
-                  onSubmitted: (_) =>
-                      _load(refreshOnline: false),
+                  onChanged: _onSearchChanged,
+                  onSubmitted: (_) {
+                    _searchDebounce?.cancel();
+                    _runSearch();
+                  },
                 ),
               ),
               const SizedBox(width: 8),
