@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
+import '../../core/vehicle_options.dart';
 import '../../services/briskers_api.dart';
 
 class EditCustomerScreen extends StatefulWidget {
@@ -26,6 +27,11 @@ class _EditCustomerScreenState extends State<EditCustomerScreen> {
   late final TextEditingController _name;
   late final TextEditingController _phone;
   late final TextEditingController _email;
+  late final TextEditingController _address1;
+  late final TextEditingController _address2;
+  late final TextEditingController _city;
+  late final TextEditingController _zip;
+  String? _state;
 
   bool _busy = false;
   String? _error;
@@ -42,6 +48,28 @@ class _EditCustomerScreenState extends State<EditCustomerScreen> {
     _email = TextEditingController(
       text: widget.customer['email']?.toString() ?? '',
     );
+    final addressRaw = widget.customer['billing_address'];
+    final address = addressRaw is Map
+        ? Map<String, dynamic>.from(addressRaw)
+        : <String, dynamic>{};
+    _address1 = TextEditingController(
+      text: address['line1']?.toString() ?? '',
+    );
+    _address2 = TextEditingController(
+      text: address['line2']?.toString() ?? '',
+    );
+    _city = TextEditingController(
+      text: address['city']?.toString() ?? '',
+    );
+    _zip = TextEditingController(
+      text: address['postal_code']?.toString() ??
+          address['zip']?.toString() ??
+          '',
+    );
+    final existingState = address['state']?.toString().toUpperCase();
+    if (existingState != null && usStateCodes.contains(existingState)) {
+      _state = existingState;
+    }
   }
 
   @override
@@ -49,6 +77,10 @@ class _EditCustomerScreenState extends State<EditCustomerScreen> {
     _name.dispose();
     _phone.dispose();
     _email.dispose();
+    _address1.dispose();
+    _address2.dispose();
+    _city.dispose();
+    _zip.dispose();
     super.dispose();
   }
 
@@ -79,6 +111,18 @@ class _EditCustomerScreenState extends State<EditCustomerScreen> {
         name: name,
         phone: phoneDigits.isEmpty ? null : phoneDigits,
         email: email.isEmpty ? null : email,
+        billingAddress: <String, dynamic>{
+          if (_address1.text.trim().isNotEmpty)
+            'line1': _address1.text.trim(),
+          if (_address2.text.trim().isNotEmpty)
+            'line2': _address2.text.trim(),
+          if (_city.text.trim().isNotEmpty)
+            'city': _city.text.trim(),
+          if ((_state ?? '').isNotEmpty) 'state': _state,
+          if (_zip.text.trim().isNotEmpty)
+            'postal_code': _zip.text.trim(),
+          'country': 'US',
+        },
       );
       final saved = response['customer'];
       final customer = saved is Map
@@ -88,6 +132,18 @@ class _EditCustomerScreenState extends State<EditCustomerScreen> {
               'name': name,
               'phone': phoneDigits.isEmpty ? null : phoneDigits,
               'email': email.isEmpty ? null : email,
+              'billing_address': <String, dynamic>{
+                if (_address1.text.trim().isNotEmpty)
+                  'line1': _address1.text.trim(),
+                if (_address2.text.trim().isNotEmpty)
+                  'line2': _address2.text.trim(),
+                if (_city.text.trim().isNotEmpty)
+                  'city': _city.text.trim(),
+                if ((_state ?? '').isNotEmpty) 'state': _state,
+                if (_zip.text.trim().isNotEmpty)
+                  'postal_code': _zip.text.trim(),
+                'country': 'US',
+              },
             };
       if (mounted) Navigator.pop(context, customer);
     } catch (error) {
@@ -128,6 +184,58 @@ class _EditCustomerScreenState extends State<EditCustomerScreen> {
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
             decoration: const InputDecoration(labelText: 'Email'),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Address',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _address1,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(labelText: 'Street address'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _address2,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(labelText: 'Address line 2'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _city,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(labelText: 'City'),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: _state,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'State'),
+                  items: usStateCodes
+                      .map((state) => DropdownMenuItem(
+                            value: state,
+                            child: Text(state),
+                          ))
+                      .toList(),
+                  onChanged: _busy
+                      ? null
+                      : (value) => setState(() => _state = value),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _zip,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'ZIP'),
+                ),
+              ),
+            ],
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
