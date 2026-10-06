@@ -85,7 +85,8 @@ class _JobsScreenState extends State<JobsScreen> {
     var localAvailable = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
-    if (!forceOnline) try {
+    if (!forceOnline) {
+      try {
       final query = _search.text.trim();
       final localResults = await Future.wait<dynamic>([
         _localJobs.listJobs(
@@ -131,6 +132,7 @@ class _JobsScreenState extends State<JobsScreen> {
       }
     } catch (_) {
       // Online loading below can still succeed if the local cache is unavailable.
+      }
     }
 
     try {
