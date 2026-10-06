@@ -7,7 +7,9 @@ import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
+import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
+import '../services/local_financial_cache.dart';
 import '../widgets/briskers_page_header.dart';
 import 'expenses/expense_detail_screen.dart';
 import 'expenses/expense_entry_screen.dart';
@@ -30,6 +32,7 @@ class ExpensesScreen extends StatefulWidget {
 class _ExpensesScreenState extends State<ExpensesScreen> {
   static const _api = BriskersApi();
   static const _expenseIqChannel = MethodChannel('com.briskers/expenseiq');
+  final LocalFinancialCache _localFinancial = LocalFinancialCache();
 
   static const int _pageSize = 50;
   final ScrollController _scrollController = ScrollController();
@@ -56,6 +59,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   String? _counterpartyFilterId;
   Timer? _searchDebounce;
   String? _error;
+  bool _showingLocal = false;
 
   bool get _owner => widget.roleCode == 'owner';
   bool get _showFinancialSummary =>
@@ -176,13 +180,68 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       setState(() => _error = null);
     }
 
+    final forceOnline =
+        BriskersConnectionModeController.instance.forceOnline;
+
+    if (!forceOnline) {
+      try {
+        final localRows = await _localFinancial.loadTransactions(
+          widget.businessId,
+          startDate: _rangeStartDate,
+          endDate: _rangeEndDate,
+          search: _searchController.text.trim().isEmpty
+              ? null
+              : _searchController.text.trim(),
+          direction: _filter == 'all' ? null : _filter,
+          accountId: _accountFilterId,
+          categoryId: _categoryFilterId,
+          counterpartyId: _counterpartyFilterId,
+        );
+        final localOptions =
+            await _localFinancial.loadOptions(widget.businessId);
+
+        if (mounted && (localRows.isNotEmpty || localOptions.isNotEmpty)) {
+          setState(() {
+            _transactions = localRows.take(_pageSize).toList();
+            _hasMore = localRows.length > _pageSize;
+            _quickTemplates = List<dynamic>.from(
+              localOptions['quick_templates'] ?? const [],
+            ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+            _accounts = List<dynamic>.from(
+              localOptions['accounts'] ?? const [],
+            ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+            _categories = List<dynamic>.from(
+              localOptions['categories'] ?? const [],
+            ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+            _counterparties = List<dynamic>.from(
+              localOptions['counterparties'] ?? const [],
+            ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+            _loading = false;
+            _showingLocal = true;
+            _error = null;
+          });
+        }
+      } catch (_) {
+        // Online load can still succeed if the local cache is unavailable.
+      }
+    }
+
     try {
       final results = await Future.wait<dynamic>([
         _fetchTransactions(offset: 0),
         _api.transactionOptions(widget.businessId),
+        _api.transactions(widget.businessId, limit: 1000),
       ]);
       final rows = List<Map<String, dynamic>>.from(results[0] as List);
       final options = Map<String, dynamic>.from(results[1] as Map);
+      final snapshot =
+          List<Map<String, dynamic>>.from(results[2] as List);
+
+      await _localFinancial.saveTransactions(
+        widget.businessId,
+        snapshot,
+      );
+      await _localFinancial.saveOptions(widget.businessId, options);
 
       if (!mounted) return;
       setState(() {
@@ -201,18 +260,31 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           options['counterparties'] ?? const [],
         ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
         _loading = false;
+        _showingLocal = false;
+        _error = null;
       });
     } catch (error) {
       if (!mounted) return;
+      final forceOffline =
+          BriskersConnectionModeController.instance.forceOffline;
       setState(() {
         _loading = false;
-        _error = error.toString();
+        if (_showingLocal || forceOffline) {
+          _error = null;
+        } else {
+          _error = error.toString();
+        }
       });
     }
   }
 
   Future<void> _loadMore() async {
-    if (_loading || _loadingMore || !_hasMore) return;
+    if (_showingLocal ||
+        _loading ||
+        _loadingMore ||
+        !_hasMore) {
+      return;
+    }
     setState(() => _loadingMore = true);
     try {
       final rows = await _fetchTransactions(offset: _transactions.length);
@@ -913,7 +985,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _importing ? null : _showAddMenu,
+        onPressed: _importing || _showingLocal ? null : _showAddMenu,
         backgroundColor: BriskersColors.expenses,
         foregroundColor: Colors.white,
         tooltip: 'Add transaction',
@@ -927,6 +999,30 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                 controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
                 children: [
+                  if (_showingLocal)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: BriskersColors.expenses.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.cloud_off_outlined, size: 18),
+                          SizedBox(width: 7),
+                          Expanded(
+                            child: Text(
+                              'Showing saved transactions • reconnect to add or edit',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   if (_showFinancialSummary)
                     Card(
                       margin: EdgeInsets.zero,
@@ -1225,8 +1321,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         margin: const EdgeInsets.only(bottom: 8),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
-                          onTap: () => _openTransaction(transaction),
-                          onLongPress: () => _showTransactionActions(transaction),
+                          onTap: _showingLocal
+                              ? null
+                              : () => _openTransaction(transaction),
+                          onLongPress: _showingLocal
+                              ? null
+                              : () => _showTransactionActions(transaction),
                           child: Padding(
                             padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
                             child: Row(
