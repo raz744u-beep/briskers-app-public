@@ -1,8 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
+import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
@@ -32,6 +36,7 @@ class CustomerDetailScreen extends StatefulWidget {
 }
 
 class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
+  static const _api = BriskersApi();
   final CustomerVehicleSyncService _sync =
       CustomerVehicleSyncService();
   final LocalCustomerRepository _localCustomers =
@@ -45,6 +50,29 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   bool _showingLocal = false;
 
   bool get _canEditLocal => _data != null;
+
+  String get _detailCacheKey =>
+      'briskers_customer_detail_${widget.businessId}_${widget.customerId}';
+
+  Future<Map<String, dynamic>?> _cachedFullDetail() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_detailCacheKey);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is Map
+          ? Map<String, dynamic>.from(decoded)
+          : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _saveFullDetail(Map<String, dynamic> detail) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_detailCacheKey, jsonEncode(detail));
+  }
+
 
   @override
   void initState() {
@@ -61,21 +89,23 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
 
     if (!forceOnline) {
       try {
-      final local = await _localCustomers.customerDetail(
-        widget.businessId,
-        widget.customerId,
-      );
-      if (local != null && mounted) {
-        localShown = true;
-        setState(() {
-          _data = local;
-          _showingLocal = true;
-          _onlineReady = false;
-          _error = null;
-        });
-      }
-    } catch (_) {
-      // The online refresh below can still populate the local cache.
+        final cached = await _cachedFullDetail();
+        final local = cached ??
+            await _localCustomers.customerDetail(
+              widget.businessId,
+              widget.customerId,
+            );
+        if (local != null && mounted) {
+          localShown = true;
+          setState(() {
+            _data = local;
+            _showingLocal = true;
+            _onlineReady = false;
+            _error = null;
+          });
+        }
+      } catch (_) {
+        // The online refresh below can still populate the local cache.
       }
     }
 
@@ -97,7 +127,13 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         // Pending edits stay queued if the connection is not ready yet.
       }
       await _sync.pull(widget.businessId);
+      Map<String, dynamic>? fullDetail;
       try {
+        fullDetail = await _api.customerDetail(
+          widget.businessId,
+          widget.customerId,
+        );
+        await _saveFullDetail(fullDetail);
         await _sync.refreshCustomer(
           widget.businessId,
           widget.customerId,
@@ -107,10 +143,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       }
       final bootstrapped =
           await _localCustomers.hasBootstrap(widget.businessId);
-      final local = await _localCustomers.customerDetail(
-        widget.businessId,
-        widget.customerId,
-      );
+      final local = fullDetail ??
+          await _localCustomers.customerDetail(
+            widget.businessId,
+            widget.customerId,
+          );
 
       if (!mounted) return;
       setState(() {
