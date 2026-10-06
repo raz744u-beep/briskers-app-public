@@ -197,12 +197,17 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     );
 
     if (saved == true) {
-      await _api.setCustomerProblemFlag(
+      await _offlineAdmin.queueProblemFlag(
         widget.businessId,
         widget.customerId,
         flagged: flagged,
-        note: controller.text.trim(),
+        note: flagged ? controller.text.trim() : null,
       );
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineAdmin.flush(widget.businessId);
+        } catch (_) {}
+      }
       await _load();
     }
     controller.dispose();
@@ -223,7 +228,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _editVehicle(Map<String, dynamic> vehicle) async {
-    if (!_onlineReady) return;
+    if (!_canEditLocal) return;
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
