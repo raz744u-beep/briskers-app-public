@@ -271,6 +271,16 @@ class JobCompactCard extends StatelessWidget {
                                       ),
                                     ),
                                   ),
+                                  if (onEditMechanic != null) ...[
+                                    const SizedBox(width: 4),
+                                    Icon(
+                                      Icons.edit_outlined,
+                                      size: 13,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -301,6 +311,16 @@ class JobCompactCard extends StatelessWidget {
                                   size: 17,
                                   color: BriskersColors.jobs,
                                 ),
+                                if (onEditPlannedTime != null) ...[
+                                  const SizedBox(width: 3),
+                                  Icon(
+                                    Icons.edit_outlined,
+                                    size: 13,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                                ],
                               ],
                             ),
                           ),
