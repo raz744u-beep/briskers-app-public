@@ -6,9 +6,17 @@ import '../../core/briskers_i18n.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/appointment_sync_service.dart';
 import '../../services/customer_vehicle_sync_service.dart';
+import '../../services/catalog_sync_service.dart';
+import '../../services/document_index_sync_service.dart';
 import '../../services/job_sync_service.dart';
 import '../../services/kiosk_registration_service.dart';
 import '../../services/offline_preinspection_service.dart';
+import '../../services/offline_job_admin_service.dart';
+import '../../services/offline_customer_vehicle_admin_service.dart';
+import '../../services/offline_customer_detail_write_service.dart';
+import '../../services/offline_financial_write_service.dart';
+import '../../services/offline_document_draft_service.dart';
+import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_work_findings_service.dart';
 
 class LocalSyncStatusScreen extends StatefulWidget {
@@ -28,11 +36,23 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   final JobSyncService _jobs = JobSyncService();
   final AppointmentSyncService _appointments = AppointmentSyncService();
   final CustomerVehicleSyncService _customers = CustomerVehicleSyncService();
+  final CatalogSyncService _catalog = CatalogSyncService();
+  final DocumentIndexSyncService _documents = DocumentIndexSyncService();
   final OfflinePreInspectionService _preInspections =
       OfflinePreInspectionService();
   final OfflineWorkFindingsService _workFindings =
       OfflineWorkFindingsService();
   final KioskRegistrationService _kiosk = KioskRegistrationService();
+  final OfflineJobAdminService _jobAdmin = OfflineJobAdminService();
+  final OfflineCustomerVehicleAdminService _customerVehicleAdmin =
+      OfflineCustomerVehicleAdminService();
+  final OfflineCustomerDetailWriteService _customerDetail =
+      OfflineCustomerDetailWriteService();
+  final OfflineFinancialWriteService _financial = OfflineFinancialWriteService();
+  final OfflineDocumentDraftService _documentDrafts =
+      OfflineDocumentDraftService();
+  final OfflineEstimateInvoiceService _estimateInvoice =
+      OfflineEstimateInvoiceService();
 
   bool _loading = true;
   bool _syncing = false;
@@ -72,6 +92,8 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         'vehicles': await _count('local_vehicles'),
         'appointments': await _count('local_appointments'),
         'jobs': await _count('local_jobs'),
+        'catalog': await _count('local_catalog_items'),
+        'documents': await _count('local_documents'),
         'findings': await _count('local_findings'),
         'inspections': await _count('local_pre_inspections'),
         'pending': await _count(
@@ -170,6 +192,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         return tr('appointments');
       case 'customers_vehicles':
         return tr('customersVehicles');
+      case 'catalog':
+        return 'Items / Catalog';
+      case 'documents':
+        return 'Estimates / Invoices';
       default:
         return scope;
     }
@@ -219,6 +245,30 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     }
 
     await attempt(
+      'Job changes',
+      () => _jobAdmin.flush(widget.businessId),
+    );
+    await attempt(
+      'Customer / vehicle changes',
+      () => _customerVehicleAdmin.flush(widget.businessId),
+    );
+    await attempt(
+      'Customer notes / findings',
+      () => _customerDetail.flush(widget.businessId),
+    );
+    await attempt(
+      'Expenses / receipts',
+      () => _financial.flush(widget.businessId),
+    );
+    await attempt(
+      'Offline estimate drafts',
+      () => _documentDrafts.flush(widget.businessId),
+    );
+    await attempt(
+      'Estimate / invoice changes',
+      () => _estimateInvoice.flush(widget.businessId),
+    );
+    await attempt(
       tr('preInspection'),
       () => _preInspections.flush(widget.businessId),
     );
@@ -240,6 +290,14 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     await attempt(
       tr('customersVehicles'),
       () => _customers.pull(widget.businessId),
+    );
+    await attempt(
+      'Items / Catalog',
+      () => _catalog.pull(widget.businessId),
+    );
+    await attempt(
+      'Estimates / Invoices',
+      () => _documents.pull(widget.businessId),
     );
 
     await _load();
@@ -280,7 +338,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   Widget build(BuildContext context) {
     final offlineReady = (_counts['customers'] ?? 0) > 0 &&
         (_counts['jobs'] ?? 0) > 0 &&
-        (_counts['appointments'] ?? 0) > 0;
+        (_counts['catalog'] ?? 0) > 0;
 
     return Scaffold(
       appBar: AppBar(
@@ -346,6 +404,16 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                     Icons.build_outlined,
                     tr('jobs'),
                     _counts['jobs'] ?? 0,
+                  ),
+                  _countTile(
+                    Icons.inventory_2_outlined,
+                    'Items / Catalog',
+                    _counts['catalog'] ?? 0,
+                  ),
+                  _countTile(
+                    Icons.description_outlined,
+                    'Estimates / Invoices',
+                    _counts['documents'] ?? 0,
                   ),
                   _countTile(
                     Icons.car_repair_outlined,
