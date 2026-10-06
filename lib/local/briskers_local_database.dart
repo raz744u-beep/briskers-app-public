@@ -72,6 +72,7 @@ class LocalVehicles extends Table {
   TextColumn get licenseState => text().nullable()();
   RealColumn get mileage => real().nullable()();
   TextColumn get color => text().nullable()();
+  TextColumn get keyPassword => text().nullable()();
   DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
   IntColumn get rowVersion => integer().nullable()();
   TextColumn get syncState =>
@@ -395,7 +396,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 15;
+  int get schemaVersion => 16;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -502,6 +503,15 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
             );
             await customStatement(
               "UPDATE local_sync_states SET last_server_cursor = 0 WHERE scope = 'documents'",
+            );
+          }
+          if (from < 16) {
+            await migrator.addColumn(
+              localVehicles,
+              localVehicles.keyPassword,
+            );
+            await customStatement(
+              "UPDATE local_sync_states SET last_server_cursor = NULL, bootstrapped = 0 WHERE scope = 'customers_vehicles'",
             );
           }
         },
