@@ -275,40 +275,123 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
       final controller = TextEditingController(
         text: note['body']?.toString() ?? '',
       );
-      final updated = await showDialog<String>(
+      final addedPhotos = <XFile>[];
+
+      final saved = await showDialog<bool>(
         context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Edit note'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            minLines: 3,
-            maxLines: 6,
-            decoration: const InputDecoration(labelText: 'Note'),
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Edit note'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    minLines: 3,
+                    maxLines: 6,
+                    decoration: const InputDecoration(labelText: 'Note'),
+                  ),
+                  const SizedBox(height: 12),
+                  if (addedPhotos.isNotEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        addedPhotos.length == 1
+                            ? '1 new picture selected'
+                            : '${addedPhotos.length} new pictures selected',
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final photo = await _picker.pickImage(
+                              source: ImageSource.camera,
+                              imageQuality: 88,
+                              maxWidth: 1920,
+                              maxHeight: 1920,
+                            );
+                            if (photo != null && dialogContext.mounted) {
+                              setDialogState(() => addedPhotos.add(photo));
+                            }
+                          },
+                          icon: const Icon(Icons.camera_alt_outlined),
+                          label: const Text('Camera'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final photos = await _picker.pickMultiImage(
+                              imageQuality: 88,
+                              maxWidth: 1920,
+                              maxHeight: 1920,
+                            );
+                            if (photos.isNotEmpty && dialogContext.mounted) {
+                              setDialogState(
+                                () => addedPhotos.addAll(photos),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: const Text('Gallery'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Save'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.pop(dialogContext, controller.text.trim()),
-              child: const Text('Save'),
-            ),
-          ],
         ),
       );
+
+      final updated = controller.text.trim();
       controller.dispose();
-      if (updated == null) return;
+      if (saved != true) return;
 
       try {
-        await _offlineWrites.updateCustomerNote(
-          widget.businessId,
-          widget.customerId,
-          note['id'].toString(),
-          body: updated,
-        );
+        if (updated != (note['body']?.toString() ?? '').trim()) {
+          await _offlineWrites.updateCustomerNote(
+            widget.businessId,
+            widget.customerId,
+            note['id'].toString(),
+            body: updated,
+          );
+        }
+
+        if (addedPhotos.isNotEmpty) {
+          final staged = <Map<String, dynamic>>[];
+          for (final photo in addedPhotos) {
+            staged.add({
+              'filename': photo.name,
+              'mime_type': _mimeType(photo.name),
+              'bytes': await photo.readAsBytes(),
+            });
+          }
+          await _offlineWrites.addCustomerNotePhotos(
+            widget.businessId,
+            widget.customerId,
+            note['id'].toString(),
+            photos: staged,
+          );
+        }
+
         final cached = await _cache.load(
           widget.businessId,
           widget.customerId,
