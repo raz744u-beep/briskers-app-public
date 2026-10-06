@@ -60,7 +60,8 @@ class _CustomersScreenState extends State<CustomersScreen> {
     var localAvailable = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
-    if (!forceOnline) try {
+    if (!forceOnline) {
+      try {
       final results = await Future.wait<dynamic>([
         _localCustomers.customers(
           widget.businessId,
