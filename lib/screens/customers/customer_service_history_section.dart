@@ -3,7 +3,9 @@ import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/job_status_style.dart';
+import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
+import '../../services/customer_detail_cache.dart';
 import '../../widgets/job_compact_card.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../jobs/job_detail_screen.dart';
@@ -29,6 +31,7 @@ class CustomerServiceHistorySection extends StatefulWidget {
 class _CustomerServiceHistorySectionState
     extends State<CustomerServiceHistorySection> {
   static const _api = BriskersApi();
+  static const _cache = CustomerDetailCache();
 
   List<Map<String, dynamic>> _jobs = const [];
   List<Map<String, dynamic>> _documents = const [];
@@ -51,6 +54,45 @@ class _CustomerServiceHistorySectionState
   }
 
   Future<void> _load() async {
+    final offline = BriskersConnectionModeController.instance.forceOffline;
+
+    if (offline) {
+      final cached = await _cache.load(
+        widget.businessId,
+        widget.customerId,
+        'service_history',
+      );
+      if (cached is Map) {
+        final data = Map<String, dynamic>.from(cached);
+        if (!mounted) return;
+        setState(() {
+          _jobs = List<dynamic>.from(data['jobs'] ?? const [])
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList();
+          _documents = List<dynamic>.from(data['documents'] ?? const [])
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList();
+          _expenses = List<dynamic>.from(data['expenses'] ?? const [])
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList();
+          _roleCode = data['role']?.toString() ?? 'office';
+          _loading = false;
+          _error = null;
+        });
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = null;
+      });
+      return;
+    }
+
     try {
       final results = await Future.wait<dynamic>([
         _api.customerServiceHistory(
@@ -66,8 +108,9 @@ class _CustomerServiceHistorySectionState
       final current = businesses.where(
         (business) => business['id']?.toString() == widget.businessId,
       );
-      final role =
-          current.isEmpty ? 'office' : current.first['role']?.toString() ?? 'office';
+      final role = current.isEmpty
+          ? 'office'
+          : current.first['role']?.toString() ?? 'office';
 
       List<Map<String, dynamic>> documents = const [];
       List<Map<String, dynamic>> expenses = const [];
@@ -89,6 +132,18 @@ class _CustomerServiceHistorySectionState
         }
       }
 
+      await _cache.save(
+        widget.businessId,
+        widget.customerId,
+        'service_history',
+        <String, dynamic>{
+          'jobs': rows,
+          'documents': documents,
+          'expenses': expenses,
+          'role': role,
+        },
+      );
+
       if (!mounted) return;
       setState(() {
         _jobs = rows;
@@ -99,6 +154,34 @@ class _CustomerServiceHistorySectionState
         _error = null;
       });
     } catch (error) {
+      final cached = await _cache.load(
+        widget.businessId,
+        widget.customerId,
+        'service_history',
+      );
+      if (cached is Map) {
+        final data = Map<String, dynamic>.from(cached);
+        if (!mounted) return;
+        setState(() {
+          _jobs = List<dynamic>.from(data['jobs'] ?? const [])
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList();
+          _documents = List<dynamic>.from(data['documents'] ?? const [])
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList();
+          _expenses = List<dynamic>.from(data['expenses'] ?? const [])
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList();
+          _roleCode = data['role']?.toString() ?? 'office';
+          _loading = false;
+          _error = null;
+        });
+        return;
+      }
+
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -202,6 +285,9 @@ class _CustomerServiceHistorySectionState
         builder: (_) => ExpenseDetailScreen(
           businessId: widget.businessId,
           transactionId: id,
+          cachedDetail: BriskersConnectionModeController.instance.forceOffline
+              ? Map<String, dynamic>.from(expense)
+              : null,
         ),
       ),
     );
