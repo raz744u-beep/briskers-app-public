@@ -476,7 +476,7 @@ class BriskersApi {
     int limit = 500,
   }) async {
     final result = await networkSupabase.rpc(
-      'briskers_sync_pull_documents',
+      'briskers_sync_pull_documents_v2',
       params: {
         'p_business_id': businessId,
         'p_after_version': afterVersion,
@@ -2828,6 +2828,40 @@ class BriskersApi {
     return result.toString();
   }
 
+  Future<List<Map<String, dynamic>>> eligibleInvoicesForEstimate(
+    String businessId,
+    String estimateId,
+  ) async {
+    final result = await networkSupabase.rpc(
+      'briskers_eligible_invoices_for_estimate_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_estimate_id': estimateId,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> addEstimateToExistingInvoice(
+    String businessId, {
+    required String estimateId,
+    required String invoiceId,
+    required String operationId,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_add_estimate_to_invoice_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_estimate_id': estimateId,
+        'p_invoice_id': invoiceId,
+        'p_operation_id': operationId,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<List<Map<String, dynamic>>> jobDocuments(
     String businessId,
     String jobId,
@@ -2849,7 +2883,7 @@ class BriskersApi {
     String documentId,
   ) async {
     final result = await networkSupabase.rpc(
-      'briskers_document_detail',
+      'briskers_document_detail_v2',
       params: {
         'p_business_id': businessId,
         'p_document_id': documentId,
