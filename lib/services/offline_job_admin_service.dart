@@ -39,8 +39,10 @@ class OfflineJobAdminService {
     String jobId, {
     String? customerId,
     String? vehicleId,
+    bool replaceVehicle = false,
     String? title,
     String? requestedWork,
+    bool replaceRequestedWork = false,
     num? plannedHours,
   }) async {
     final rows = await localDatabase.customSelect(
@@ -62,11 +64,13 @@ class OfflineJobAdminService {
     final current = rows.first;
     final nextCustomerId =
         customerId ?? current.readNullable<String>('customer_id') ?? '';
-    final nextVehicleId =
-        vehicleId ?? current.readNullable<String>('vehicle_id');
+    final nextVehicleId = replaceVehicle
+        ? vehicleId
+        : vehicleId ?? current.readNullable<String>('vehicle_id');
     final nextTitle = title ?? current.read<String>('title');
-    final nextRequestedWork = requestedWork ??
-        current.readNullable<String>('requested_work');
+    final nextRequestedWork = replaceRequestedWork
+        ? requestedWork
+        : requestedWork ?? current.readNullable<String>('requested_work');
     final nextPlannedHours = plannedHours ??
         (num.tryParse(current.data['planned_hours']?.toString() ?? '') ?? 0);
 
