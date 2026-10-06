@@ -581,14 +581,16 @@ class BriskersApi {
     required String name,
     String? phone,
     String? email,
+    Map<String, dynamic>? billingAddress,
   }) async {
     final result = await networkSupabase.rpc(
-      'briskers_create_customer',
+      'briskers_create_customer_v2',
       params: {
         'p_business_id': businessId,
         'p_name': name,
         'p_phone': phone,
         'p_email': email,
+        'p_billing_address': billingAddress ?? const <String, dynamic>{},
       },
     );
     return result.toString();
@@ -705,29 +707,20 @@ class BriskersApi {
     required String name,
     String? phone,
     String? email,
+    Map<String, dynamic>? billingAddress,
   }) async {
-    try {
-      final result = await networkSupabase.functions.invoke(
-        'customer-account-admin',
-        body: {
-          'business_id': businessId,
-          'customer_id': customerId,
-          'action': 'update_profile',
-          'name': name,
-          'phone': phone,
-          'email': email,
-        },
-      );
-      return Map<String, dynamic>.from(result.data as Map);
-    } on FunctionException catch (error) {
-      final details = error.details;
-      if (details is Map && details['error'] != null) {
-        throw Exception(details['error'].toString());
-      }
-      throw Exception(
-        error.reasonPhrase ?? 'Could not update customer.',
-      );
-    }
+    await networkSupabase.rpc(
+      'briskers_update_customer_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_name': name,
+        'p_phone': phone,
+        'p_email': email,
+        'p_billing_address': billingAddress ?? const <String, dynamic>{},
+      },
+    );
+    return customerDetail(businessId, customerId);
   }
 
   Future<List<Map<String, dynamic>>> customerNotes(
@@ -921,9 +914,10 @@ class BriskersApi {
     String? licenseState,
     num? mileage,
     String? color,
+    String? keyPassword,
   }) async {
     final result = await networkSupabase.rpc(
-      'briskers_create_vehicle_v3',
+      'briskers_create_vehicle_v4',
       params: {
         'p_business_id': businessId,
         'p_customer_id': customerId,
@@ -935,6 +929,7 @@ class BriskersApi {
         'p_license_state': licenseState,
         'p_mileage': mileage,
         'p_color': color,
+        'p_key_password': keyPassword,
       },
     );
     return result.toString();
@@ -951,9 +946,10 @@ class BriskersApi {
     String? licenseState,
     num? mileage,
     String? color,
+    String? keyPassword,
   }) async {
     final result = await networkSupabase.rpc(
-      'briskers_update_vehicle',
+      'briskers_update_vehicle_v2',
       params: {
         'p_business_id': businessId,
         'p_vehicle_id': vehicleId,
@@ -965,6 +961,7 @@ class BriskersApi {
         'p_license_state': licenseState,
         'p_mileage': mileage,
         'p_color': color,
+        'p_key_password': keyPassword,
       },
     );
     return result.toString();
