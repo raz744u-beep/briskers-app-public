@@ -496,7 +496,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 
   Future<void> _showDocumentActions(Map<String, dynamic> row) async {
-    final canExpenses = !_estimate && (widget.isOwner || widget.canManageExpenses);
+    final canExpenses =
+        !_estimate && (widget.isOwner || widget.canManageExpenses);
+    final estimateConverted = _estimate && row['converted'] == true;
     final canDelete = widget.isOwner;
     final status = row['display_status']?.toString() ?? '';
     final total = num.tryParse(row['total_amount']?.toString() ?? '') ?? 0;
@@ -513,11 +515,38 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ListTile(
-                leading: Icon(Icons.edit_outlined, color: _estimate ? BriskersColors.estimates : BriskersColors.invoices),
-                title: Text(_estimate ? tr('editEstimate') : tr('editInvoice')),
-                onTap: () => Navigator.pop(sheetContext, 'edit'),
-              ),
+              if (!estimateConverted)
+                ListTile(
+                  leading: Icon(
+                    Icons.edit_outlined,
+                    color: _estimate
+                        ? BriskersColors.estimates
+                        : BriskersColors.invoices,
+                  ),
+                  title: Text(
+                    _estimate ? tr('editEstimate') : tr('editInvoice'),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, 'edit'),
+                ),
+              if (_estimate && !estimateConverted) ...[
+                ListTile(
+                  leading: const Icon(
+                    Icons.receipt_long_outlined,
+                    color: BriskersColors.invoices,
+                  ),
+                  title: const Text('Convert to New Invoice'),
+                  onTap: () => Navigator.pop(sheetContext, 'convert_new'),
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.post_add_outlined,
+                    color: BriskersColors.invoices,
+                  ),
+                  title: const Text('Add to Existing Invoice'),
+                  onTap: () =>
+                      Navigator.pop(sheetContext, 'add_to_invoice'),
+                ),
+              ],
               if (!_estimate)
                 ListTile(
                   leading: const Icon(Icons.copy_outlined, color: BriskersColors.invoices),
