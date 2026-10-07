@@ -9,6 +9,7 @@ import '../core/invoice_status_style.dart';
 import '../core/briskers_i18n.dart';
 import '../services/briskers_api.dart';
 import '../services/local_document_repository.dart';
+import '../services/local_invoice_status_styles_cache.dart';
 import '../widgets/briskers_page_header.dart';
 import 'jobs/job_document_screen.dart';
 import 'expenses/expense_detail_screen.dart';
@@ -34,6 +35,8 @@ class DocumentsScreen extends StatefulWidget {
 class _DocumentsScreenState extends State<DocumentsScreen> {
   static const _api = BriskersApi();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
+  final LocalInvoiceStatusStylesCache _localInvoiceStyles =
+      LocalInvoiceStatusStylesCache();
   static final Map<String, List<Map<String, dynamic>>> _rowCache = {};
   static final Map<String, List<Map<String, dynamic>>> _styleCache = {};
 
@@ -104,9 +107,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       if (style != null) {
         return invoiceStatusColorFromHex(
           style['color_hex']?.toString(),
-          fallback: BriskersColors.invoices,
+          fallback: invoiceStatusDefaultColor(status),
         );
       }
+      return invoiceStatusDefaultColor(status);
     }
 
     switch (status) {
@@ -131,6 +135,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       if (style != null) {
         return invoiceStatusIcon(style['icon_key']?.toString());
       }
+      return invoiceStatusDefaultIcon(status);
     }
     return Icons.circle;
   }
@@ -163,6 +168,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         BriskersConnectionModeController.instance.forceOnline;
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
+
+    if (!_estimate && !forceOnline) {
+      try {
+        final cachedStyles =
+            await _localInvoiceStyles.load(widget.businessId);
+        if (mounted && cachedStyles.isNotEmpty) {
+          setState(() => _invoiceStyles = cachedStyles);
+        }
+      } catch (_) {}
+    }
 
     if (!forceOnline) {
       try {
@@ -214,6 +229,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       if (!_estimate) {
         _styleCache[widget.businessId] =
             List<Map<String, dynamic>>.from(styles);
+        await _localInvoiceStyles.save(widget.businessId, styles);
       }
 
       if (!mounted) return;
