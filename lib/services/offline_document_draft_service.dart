@@ -164,6 +164,8 @@ class OfflineDocumentDraftService {
   }) async {
     final detail = await _requireDraft(businessId, documentId);
     final lines = _lines(detail);
+    final netAmount = quantity * unitPrice;
+    final taxAmount = netAmount * taxRate;
     lines.add(<String, dynamic>{
       'id': _lineId(),
       'name': name,
@@ -172,6 +174,8 @@ class OfflineDocumentDraftService {
       'quantity': quantity,
       'unit_price': unitPrice,
       'tax_rate': taxRate,
+      'net_amount': netAmount,
+      'tax_amount': taxAmount,
       'line_kind': lineKind,
       'position': lines.length + 1,
       '_local_draft_line': true,
@@ -196,6 +200,8 @@ class OfflineDocumentDraftService {
         lines.indexWhere((line) => line['id']?.toString() == lineId);
     if (index < 0) throw StateError('The estimate line is not saved locally.');
 
+    final netAmount = quantity * unitPrice;
+    final taxAmount = netAmount * taxRate;
     lines[index] = <String, dynamic>{
       ...lines[index],
       'name': name,
@@ -203,6 +209,8 @@ class OfflineDocumentDraftService {
       'quantity': quantity,
       'unit_price': unitPrice,
       'tax_rate': taxRate,
+      'net_amount': netAmount,
+      'tax_amount': taxAmount,
       'line_kind': lineKind,
     };
     await _saveDraft(businessId, documentId, detail, lines);
