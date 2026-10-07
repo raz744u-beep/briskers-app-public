@@ -70,6 +70,8 @@ class OfflineDocumentEditService {
     final detail = await _requireCached(businessId, documentId);
     final lines = _lines(detail);
     final localId = _localLineId();
+    final netAmount = quantity * unitPrice;
+    final taxAmount = netAmount * taxRate;
     lines.add(<String, dynamic>{
       'id': localId,
       'name': name,
@@ -78,6 +80,8 @@ class OfflineDocumentEditService {
       'quantity': quantity,
       'unit_price': unitPrice,
       'tax_rate': taxRate,
+      'net_amount': netAmount,
+      'tax_amount': taxAmount,
       'line_kind': lineKind,
       'position': lines.length + 1,
       '_local_pending': true,
@@ -118,6 +122,8 @@ class OfflineDocumentEditService {
         lines.indexWhere((line) => line['id']?.toString() == lineId);
     if (index < 0) throw StateError('The estimate line is not saved locally.');
 
+    final netAmount = quantity * unitPrice;
+    final taxAmount = netAmount * taxRate;
     lines[index] = <String, dynamic>{
       ...lines[index],
       'name': name,
@@ -125,6 +131,8 @@ class OfflineDocumentEditService {
       'quantity': quantity,
       'unit_price': unitPrice,
       'tax_rate': taxRate,
+      'net_amount': netAmount,
+      'tax_amount': taxAmount,
       'line_kind': lineKind,
       '_local_pending': true,
     };
