@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:drift/drift.dart';
 
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
