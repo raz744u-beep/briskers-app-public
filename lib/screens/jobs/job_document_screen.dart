@@ -74,6 +74,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   List<Map<String, dynamic>> _invoiceStyles = const [];
   List<Map<String, dynamic>> _openFindings = const [];
   num _defaultTaxRate = 0;
+  bool _taxSettingsCached = false;
   bool _loading = true;
   bool _busy = false;
   bool _initialActionHandled = false;
@@ -213,6 +214,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               cachedTax?['sales_tax_rate']?.toString() ?? '',
             ) ??
             0;
+        _taxSettingsCached = cachedTax != null;
         _loading = false;
         _error = null;
       });
@@ -310,6 +312,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _openFindings = openFindings;
         _defaultTaxRate =
             num.tryParse(taxSettings['sales_tax_rate']?.toString() ?? '') ?? 0;
+        _taxSettingsCached = true;
         _loading = false;
         _error = null;
       });
@@ -348,6 +351,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       int.tryParse(_detail?['row_version']?.toString() ?? '') ?? 1;
 
   num _number(Object? raw) => num.tryParse(raw?.toString() ?? '') ?? 0;
+
+  num _lineNetAmount(Map<String, dynamic> line) {
+    if (line.containsKey('net_amount') && line['net_amount'] != null) {
+      return _number(line['net_amount']);
+    }
+    return _number(line['quantity']) * _number(line['unit_price']);
+  }
 
   String _money(Object? raw) =>
       NumberFormat.currency(symbol: '\$').format(_number(raw));
@@ -1076,6 +1086,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
 
     if (selected == null || !mounted) return;
+
+    if (selected['taxable'] == true &&
+        BriskersConnectionModeController.instance.forceOffline &&
+        !_taxSettingsCached) {
+      setState(() {
+        _error =
+            'The shop sales-tax settings are not saved on this device yet. '
+            'Switch online and run Sync now once, then return to Force Offline.';
+      });
+      return;
+    }
 
     final line = <String, dynamic>{
       'name': selected['name']?.toString() ?? 'Item',
@@ -3903,7 +3924,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ...lines.map((line) {
               final description =
                   line['description']?.toString().trim() ?? '';
-              final amount = _number(line['net_amount']);
+              final amount = _lineNetAmount(line);
               final importMeta =
                   importByLine[line['id']?.toString()] ?? const {};
               final partNumber =
@@ -4031,7 +4052,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                         .where((line) => line['line_kind'] != 'discount')
                         .fold<num>(
                           0,
-                          (sum, line) => sum + _number(line['net_amount']),
+                          (sum, line) => sum + _lineNetAmount(line),
                         ),
                   ),
                 ),
