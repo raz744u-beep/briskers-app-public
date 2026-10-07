@@ -5,7 +5,7 @@ import 'dart:math';
 import 'package:drift/drift.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../local/briskers_local_database.dart';
+import '../local/briskers_local_database.dart' show BriskersLocalDatabase;
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_financial_cache.dart';
