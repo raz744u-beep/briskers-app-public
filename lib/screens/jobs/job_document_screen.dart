@@ -18,6 +18,8 @@ import '../../services/local_catalog_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_document_draft_service.dart';
+import '../../services/offline_document_edit_service.dart';
+import '../../services/local_tax_settings_cache.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'customer_invoice_signature_screen.dart';
@@ -53,6 +55,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       OfflineEstimateInvoiceService();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
+  final OfflineDocumentEditService _offlineDocumentEdit =
+      OfflineDocumentEditService();
+  final LocalTaxSettingsCache _taxSettingsCache =
+      LocalTaxSettingsCache();
   final _catalogSync = CatalogSyncService();
   final ImagePicker _picker = ImagePicker();
   final ScrollController _workspaceHeaderController = ScrollController();
@@ -190,6 +196,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         });
         return;
       }
+      final cachedTax = await _taxSettingsCache.load(widget.businessId);
+      if (!mounted) return;
       setState(() {
         _detail = cached;
         if (!_notesDirty && !_notesFocusNode.hasFocus) {
@@ -201,6 +209,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _submissionReadiness = const {};
         _invoiceStyles = const [];
         _openFindings = const [];
+        _defaultTaxRate = num.tryParse(
+              cachedTax?['sales_tax_rate']?.toString() ?? '',
+            ) ??
+            0;
         _loading = false;
         _error = null;
       });
@@ -218,6 +230,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         detail,
       );
       final taxSettings = await _api.taxSettings(widget.businessId);
+      await _taxSettingsCache.save(widget.businessId, taxSettings);
       List<Map<String, dynamic>> invoiceStyles = const [];
       List<Map<String, dynamic>> openFindings = const [];
       Map<String, dynamic> warrantyDetail = const {};
@@ -442,6 +455,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       );
       return;
     }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      await _offlineDocumentEdit.addLine(
+        widget.businessId,
+        widget.documentId,
+        name: name,
+        description: description,
+        itemId: itemId,
+        quantity: quantity,
+        unitPrice: unitPrice,
+        taxRate: taxRate,
+        lineKind: lineKind,
+      );
+      return;
+    }
     await _api.addDocumentLine(
       widget.businessId,
       widget.documentId,
@@ -479,6 +506,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       );
       return;
     }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      await _offlineDocumentEdit.updateLine(
+        widget.businessId,
+        widget.documentId,
+        line['id'].toString(),
+        name: name,
+        description: description,
+        quantity: quantity,
+        unitPrice: unitPrice,
+        taxRate: taxRate,
+        lineKind: lineKind,
+      );
+      return;
+    }
     await _api.updateDocumentLineV2(
       widget.businessId,
       line['id'].toString(),
@@ -501,6 +542,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       );
       return;
     }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      await _offlineDocumentEdit.deleteLine(
+        widget.businessId,
+        widget.documentId,
+        line['id'].toString(),
+      );
+      return;
+    }
     await _api.deleteDocumentLine(
       widget.businessId,
       line['id'].toString(),
@@ -511,6 +560,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _copyLineLocalAware(Map<String, dynamic> line) async {
     if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
       await _offlineDocumentDraft.copyLine(
+        widget.businessId,
+        widget.documentId,
+        line['id'].toString(),
+      );
+      return;
+    }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      await _offlineDocumentEdit.copyLine(
         widget.businessId,
         widget.documentId,
         line['id'].toString(),
@@ -537,6 +594,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       );
       return;
     }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      await _offlineDocumentEdit.moveLine(
+        widget.businessId,
+        widget.documentId,
+        line['id'].toString(),
+        direction,
+      );
+      return;
+    }
     await _api.moveDocumentLine(
       widget.businessId,
       line['id'].toString(),
@@ -548,6 +614,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _saveMemoLocalAware(String? memo) async {
     if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
       await _offlineDocumentDraft.saveMemo(
+        widget.businessId,
+        widget.documentId,
+        memo,
+      );
+      return;
+    }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      await _offlineDocumentEdit.saveMemo(
         widget.businessId,
         widget.documentId,
         memo,
