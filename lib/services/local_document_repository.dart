@@ -26,10 +26,25 @@ class LocalDocumentRepository {
         if (id.isEmpty) continue;
         await _database.customStatement(
           '''
-          INSERT OR REPLACE INTO local_documents (
+          INSERT INTO local_documents (
             id, business_id, job_id, customer_id, kind, document_number,
             status, display_status_code, closed_at, converted, total, created_at, server_updated_at, row_version, sync_state
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+          ON CONFLICT(id) DO UPDATE SET
+            job_id=excluded.job_id,
+            customer_id=excluded.customer_id,
+            kind=excluded.kind,
+            document_number=excluded.document_number,
+            status=excluded.status,
+            display_status_code=excluded.display_status_code,
+            closed_at=excluded.closed_at,
+            converted=excluded.converted,
+            total=excluded.total,
+            created_at=excluded.created_at,
+            server_updated_at=excluded.server_updated_at,
+            row_version=excluded.row_version,
+            sync_state='synced'
+          WHERE local_documents.sync_state = 'synced'
           ''',
           [
             id,
