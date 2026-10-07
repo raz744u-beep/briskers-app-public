@@ -42,7 +42,7 @@ class LocalDocumentRepository {
             _text(document['display_status_code']),
             _unix(_date(document['closed_at'])),
             document['converted'] == true ? 1 : 0,
-            _double(document['total']) ?? 0,
+            _double(document['total_amount'] ?? document['total']) ?? 0,
             _unix(_date(document['created_at'])),
             _unix(_date(document['updated_at'])),
             _int(document['row_version']),
@@ -143,6 +143,7 @@ class LocalDocumentRepository {
             'kind': row.read<String>('kind'),
             'document_number': row.readNullable<String>('document_number'),
             'status': row.readNullable<String>('status'),
+            'converted': row.read<int>('converted') == 1,
             'display_status': displayStatus(row),
             'display_status_code':
                 row.readNullable<String>('display_status_code'),
