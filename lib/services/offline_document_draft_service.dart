@@ -315,12 +315,20 @@ class OfflineDocumentDraftService {
 
     var net = 0.0;
     var tax = 0.0;
-    for (final line in lines) {
+    for (var index = 0; index < lines.length; index++) {
+      final line = lines[index];
       if (line['line_kind']?.toString() == 'discount') continue;
       final amount =
           _number(line['quantity']) * _number(line['unit_price']);
+      final lineTax = amount * _number(line['tax_rate']);
+      lines[index] = <String, dynamic>{
+        ...line,
+        'net_amount': amount.toDouble(),
+        'tax_amount': lineTax.toDouble(),
+        'total_amount': (amount + lineTax).toDouble(),
+      };
       net += amount.toDouble();
-      tax += (amount * _number(line['tax_rate'])).toDouble();
+      tax += lineTax.toDouble();
     }
     final total = net + tax;
 
