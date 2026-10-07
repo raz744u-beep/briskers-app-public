@@ -3,13 +3,19 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 
 class OfflineJobAdminService {
-  OfflineJobAdminService({BriskersApi api = const BriskersApi()}) : _api = api;
+  OfflineJobAdminService({
+    BriskersApi api = const BriskersApi(),
+    BriskersLocalDatabase? database,
+  })  : _api = api,
+        _database = database ?? localDatabase;
 
   final BriskersApi _api;
+  final BriskersLocalDatabase _database;
 
   String _employeesKey(String businessId) => 'briskers_job_employees_$businessId';
 
@@ -45,7 +51,7 @@ class OfflineJobAdminService {
     bool replaceRequestedWork = false,
     num? plannedHours,
   }) async {
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       '''
       SELECT customer_id, vehicle_id, title, requested_work, planned_hours
       FROM local_jobs
@@ -74,8 +80,8 @@ class OfflineJobAdminService {
     final nextPlannedHours = plannedHours ??
         (num.tryParse(current.data['planned_hours']?.toString() ?? '') ?? 0);
 
-    await localDatabase.transaction(() async {
-      await localDatabase.customStatement(
+    await _database.transaction(() async {
+      await _database.customStatement(
         '''
         UPDATE local_jobs
         SET customer_id = ?,
@@ -132,8 +138,8 @@ class OfflineJobAdminService {
     String? iconKey,
     String? note,
   }) async {
-    await localDatabase.transaction(() async {
-      await localDatabase.customStatement(
+    await _database.transaction(() async {
+      await _database.customStatement(
         '''
         UPDATE local_jobs
         SET status = ?,
@@ -171,8 +177,8 @@ class OfflineJobAdminService {
     String? employeeName,
     String? position,
   }) async {
-    await localDatabase.transaction(() async {
-      await localDatabase.customStatement(
+    await _database.transaction(() async {
+      await _database.customStatement(
         '''
         UPDATE local_jobs
         SET assigned_employee_id = ?,
@@ -192,13 +198,13 @@ class OfflineJobAdminService {
         ],
       );
 
-      await localDatabase.customStatement(
+      await _database.customStatement(
         'DELETE FROM local_job_assignments WHERE business_id = ? AND job_id = ?',
         [businessId, jobId],
       );
 
       if (employeeId != null && employeeId.isNotEmpty) {
-        await localDatabase.customStatement(
+        await _database.customStatement(
           '''
           INSERT INTO local_job_assignments (
             assignment_id, business_id, job_id, employee_id,
@@ -235,7 +241,7 @@ class OfflineJobAdminService {
     String jobId,
     Map<String, dynamic> changes,
   ) async {
-    final existing = await localDatabase.customSelect(
+    final existing = await _database.customSelect(
       '''
       SELECT id, payload_json
       FROM sync_outbox
@@ -265,7 +271,7 @@ class OfflineJobAdminService {
     payload.addAll(changes);
 
     if (existing.isNotEmpty) {
-      await localDatabase.customStatement(
+      await _database.customStatement(
         '''
         UPDATE sync_outbox
         SET payload_json = ?, last_error = NULL
@@ -274,7 +280,7 @@ class OfflineJobAdminService {
         [jsonEncode(payload), existing.first.read<int>('id')],
       );
     } else {
-      await localDatabase.customStatement(
+      await _database.customStatement(
         '''
         INSERT INTO sync_outbox (
           business_id, entity_type, entity_id, operation,
@@ -292,7 +298,7 @@ class OfflineJobAdminService {
   }
 
   Future<void> flush(String businessId) async {
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       '''
       SELECT id, entity_id, payload_json
       FROM sync_outbox
@@ -314,7 +320,7 @@ class OfflineJobAdminService {
 
         if (payload['core_changed'] == true ||
             payload.containsKey('planned_hours')) {
-          final jobRows = await localDatabase.customSelect(
+          final jobRows = await _database.customSelect(
             '''
             SELECT customer_id, vehicle_id, title, requested_work, planned_hours
             FROM local_jobs
@@ -374,11 +380,11 @@ class OfflineJobAdminService {
           }
         }
 
-        await localDatabase.customStatement(
+        await _database.customStatement(
           'DELETE FROM sync_outbox WHERE id = ?',
           [outboxId],
         );
-        await localDatabase.customStatement(
+        await _database.customStatement(
           '''
           UPDATE local_jobs
           SET sync_state = 'synced'
@@ -387,7 +393,7 @@ class OfflineJobAdminService {
           [businessId, jobId],
         );
       } catch (error) {
-        await localDatabase.customStatement(
+        await _database.customStatement(
           '''
           UPDATE sync_outbox
           SET attempt_count = attempt_count + 1,

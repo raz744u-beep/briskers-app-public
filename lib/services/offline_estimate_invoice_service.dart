@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:drift/drift.dart';
 
+import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_document_detail_cache.dart';
@@ -11,11 +12,14 @@ class OfflineEstimateInvoiceService {
   OfflineEstimateInvoiceService({
     BriskersApi api = const BriskersApi(),
     LocalDocumentDetailCache cache = const LocalDocumentDetailCache(),
+    BriskersLocalDatabase? database,
   })  : _api = api,
-        _cache = cache;
+        _cache = cache,
+        _database = database ?? localDatabase;
 
   final BriskersApi _api;
   final LocalDocumentDetailCache _cache;
+  final BriskersLocalDatabase _database;
   final Random _random = Random.secure();
 
   String _operationId() {
@@ -39,7 +43,7 @@ class OfflineEstimateInvoiceService {
     if (customerId.isEmpty) return const [];
 
     if (vehicleId.isEmpty && estimateJobId.isNotEmpty) {
-      final jobRows = await localDatabase.customSelect(
+      final jobRows = await _database.customSelect(
         '''
         SELECT vehicle_id
         FROM local_jobs
@@ -57,7 +61,7 @@ class OfflineEstimateInvoiceService {
       }
     }
 
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       '''
       SELECT d.*, j.job_number, j.title AS job_title,
              j.vehicle_id, j.vehicle_label, j.customer_name
@@ -230,8 +234,8 @@ class OfflineEstimateInvoiceService {
 
     final operationId = _operationId();
 
-    await localDatabase.transaction(() async {
-      await localDatabase.customStatement(
+    await _database.transaction(() async {
+      await _database.customStatement(
         '''
         UPDATE local_documents
         SET status='accepted', converted=1, sync_state='pending'
@@ -239,7 +243,7 @@ class OfflineEstimateInvoiceService {
         ''',
         [businessId, estimateId],
       );
-      await localDatabase.customStatement(
+      await _database.customStatement(
         '''
         UPDATE local_documents
         SET total=?, sync_state='pending'
@@ -247,7 +251,7 @@ class OfflineEstimateInvoiceService {
         ''',
         [newTotal.toDouble(), businessId, invoiceId],
       );
-      await localDatabase.customStatement(
+      await _database.customStatement(
         '''
         INSERT INTO sync_outbox(
           business_id,entity_type,entity_id,operation,payload_json,
@@ -276,7 +280,7 @@ class OfflineEstimateInvoiceService {
   }
 
   Future<void> flush(String businessId) async {
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       '''
       SELECT *
       FROM sync_outbox
@@ -315,8 +319,8 @@ class OfflineEstimateInvoiceService {
         await _cache.save(businessId, estimateId, estimate);
         await _cache.save(businessId, invoiceId, invoice);
 
-        await localDatabase.transaction(() async {
-          await localDatabase.customStatement(
+        await _database.transaction(() async {
+          await _database.customStatement(
             '''
             UPDATE local_documents
             SET status=?, converted=1, total=?, row_version=?,
@@ -332,7 +336,7 @@ class OfflineEstimateInvoiceService {
               estimateId,
             ],
           );
-          await localDatabase.customStatement(
+          await _database.customStatement(
             '''
             UPDATE local_documents
             SET status=?, total=?, row_version=?,
@@ -348,13 +352,13 @@ class OfflineEstimateInvoiceService {
               invoiceId,
             ],
           );
-          await localDatabase.customStatement(
+          await _database.customStatement(
             'DELETE FROM sync_outbox WHERE id=?',
             [outboxId],
           );
         });
       } catch (error) {
-        await localDatabase.customStatement(
+        await _database.customStatement(
           '''
           UPDATE sync_outbox
           SET attempt_count=attempt_count+1,

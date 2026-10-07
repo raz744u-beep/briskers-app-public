@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:drift/drift.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_financial_cache.dart';
@@ -13,10 +14,13 @@ class OfflineFinancialWriteService {
   OfflineFinancialWriteService({
     BriskersApi api = const BriskersApi(),
     LocalFinancialCache? cache,
+    BriskersLocalDatabase? database,
   })  : _api = api,
-        _cache = cache ?? LocalFinancialCache();
+        _database = database ?? localDatabase,
+        _cache = cache ?? LocalFinancialCache(database: database);
 
   final BriskersApi _api;
+  final BriskersLocalDatabase _database;
   final LocalFinancialCache _cache;
   final Random _random = Random.secure();
 
@@ -36,7 +40,7 @@ class OfflineFinancialWriteService {
     String operation,
     Map<String, dynamic> payload,
   ) async {
-    await localDatabase.customStatement(
+    await _database.customStatement(
       '''
       INSERT INTO sync_outbox (
         business_id, entity_type, entity_id, operation,
@@ -123,7 +127,7 @@ class OfflineFinancialWriteService {
     final localId = 'local-transaction-$operationId';
     final attachments = <Map<String, dynamic>>[];
 
-    await localDatabase.transaction(() async {
+    await _database.transaction(() async {
       await _enqueue(
         businessId,
         'financial_create',
@@ -302,7 +306,7 @@ class OfflineFinancialWriteService {
       detail,
     );
 
-    final pendingCreate = await localDatabase.customSelect(
+    final pendingCreate = await _database.customSelect(
       '''
       SELECT id, payload_json
       FROM sync_outbox
@@ -338,7 +342,7 @@ class OfflineFinancialWriteService {
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
       existingPayload.addAll(payload);
-      await localDatabase.customStatement(
+      await _database.customStatement(
         'UPDATE sync_outbox SET payload_json = ?, last_error = NULL WHERE id = ?',
         [jsonEncode(existingPayload), row.read<int>('id')],
       );
@@ -359,7 +363,7 @@ class OfflineFinancialWriteService {
   }
 
   Future<void> flush(String businessId) async {
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       '''
       SELECT *
       FROM sync_outbox
@@ -391,7 +395,7 @@ class OfflineFinancialWriteService {
           await _flushPhoto(businessId, outboxId, payload);
         }
       } catch (error) {
-        await localDatabase.customStatement(
+        await _database.customStatement(
           '''
           UPDATE sync_outbox
           SET attempt_count = attempt_count + 1,
@@ -458,7 +462,7 @@ class OfflineFinancialWriteService {
       );
     }
 
-    final photos = await localDatabase.customSelect(
+    final photos = await _database.customSelect(
       '''
       SELECT id, payload_json
       FROM sync_outbox
@@ -475,13 +479,13 @@ class OfflineFinancialWriteService {
       );
       if (photoPayload['transaction_id']?.toString() != localId) continue;
       photoPayload['transaction_id'] = serverId;
-      await localDatabase.customStatement(
+      await _database.customStatement(
         'UPDATE sync_outbox SET payload_json = ? WHERE id = ?',
         [jsonEncode(photoPayload), photoRow.read<int>('id')],
       );
     }
 
-    await localDatabase.customStatement(
+    await _database.customStatement(
       'DELETE FROM sync_outbox WHERE id = ?',
       [outboxId],
     );
@@ -507,7 +511,7 @@ class OfflineFinancialWriteService {
       counterpartyName: payload['counterparty_name']?.toString(),
       remarks: payload['remarks']?.toString(),
     );
-    await localDatabase.customStatement(
+    await _database.customStatement(
       'DELETE FROM sync_outbox WHERE id = ?',
       [outboxId],
     );
@@ -542,7 +546,7 @@ class OfflineFinancialWriteService {
       bytes: bytes,
     );
 
-    await localDatabase.customStatement(
+    await _database.customStatement(
       'DELETE FROM sync_outbox WHERE id = ?',
       [outboxId],
     );

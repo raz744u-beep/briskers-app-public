@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:drift/drift.dart';
 
+import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_document_detail_cache.dart';
@@ -13,12 +14,16 @@ class OfflineDocumentDraftService {
     BriskersApi api = const BriskersApi(),
     LocalDocumentDetailCache cache = const LocalDocumentDetailCache(),
     LocalDocumentRepository? documents,
+    BriskersLocalDatabase? database,
   })  : _api = api,
         _cache = cache,
-        _documents = documents ?? LocalDocumentRepository();
+        _database = database ?? localDatabase,
+        _documents =
+            documents ?? LocalDocumentRepository(database: database);
 
   final BriskersApi _api;
   final LocalDocumentDetailCache _cache;
+  final BriskersLocalDatabase _database;
   final LocalDocumentRepository _documents;
   final Random _random = Random.secure();
 
@@ -46,7 +51,7 @@ class OfflineDocumentDraftService {
     String businessId,
     String jobId,
   ) async {
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       '''
       SELECT id, job_number, title, customer_id, customer_name,
              vehicle_id, vehicle_label
@@ -107,8 +112,8 @@ class OfflineDocumentDraftService {
       '_local_draft': true,
     };
 
-    await localDatabase.transaction(() async {
-      await localDatabase.customStatement(
+    await _database.transaction(() async {
+      await _database.customStatement(
         '''
         INSERT INTO local_documents (
           id, business_id, job_id, customer_id, kind, document_number,
@@ -125,7 +130,7 @@ class OfflineDocumentDraftService {
           _unixNow(),
         ],
       );
-      await localDatabase.customStatement(
+      await _database.customStatement(
         '''
         INSERT INTO sync_outbox (
           business_id, entity_type, entity_id, operation, payload_json,
@@ -342,7 +347,7 @@ class OfflineDocumentDraftService {
       'sync_state': 'pending',
     };
 
-    await localDatabase.customStatement(
+    await _database.customStatement(
       '''
       UPDATE local_documents
       SET total = ?, sync_state = 'pending'
@@ -354,7 +359,7 @@ class OfflineDocumentDraftService {
   }
 
   Future<void> flush(String businessId) async {
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       '''
       SELECT id, entity_id, payload_json
       FROM sync_outbox
@@ -441,18 +446,18 @@ class OfflineDocumentDraftService {
           serverId,
         );
 
-        await localDatabase.transaction(() async {
-          await localDatabase.customStatement(
+        await _database.transaction(() async {
+          await _database.customStatement(
             'DELETE FROM local_documents WHERE business_id = ? AND id = ?',
             [businessId, localId],
           );
-          await localDatabase.customStatement(
+          await _database.customStatement(
             'DELETE FROM sync_outbox WHERE id = ?',
             [outboxId],
           );
         });
       } catch (error) {
-        await localDatabase.customStatement(
+        await _database.customStatement(
           '''
           UPDATE sync_outbox
           SET attempt_count = attempt_count + 1,
@@ -472,7 +477,7 @@ class OfflineDocumentDraftService {
     String localId,
     String serverId,
   ) async {
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       '''
       SELECT id, payload_json
       FROM sync_outbox
@@ -494,7 +499,7 @@ class OfflineDocumentDraftService {
       }
       if (payload['estimate_id']?.toString() != localId) continue;
       payload['estimate_id'] = serverId;
-      await localDatabase.customStatement(
+      await _database.customStatement(
         'UPDATE sync_outbox SET entity_id = ?, payload_json = ? WHERE id = ?',
         [serverId, jsonEncode(payload), row.read<int>('id')],
       );

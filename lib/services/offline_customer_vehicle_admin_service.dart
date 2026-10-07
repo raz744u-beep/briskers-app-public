@@ -2,15 +2,19 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 
+import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 
 class OfflineCustomerVehicleAdminService {
   OfflineCustomerVehicleAdminService({
     BriskersApi api = const BriskersApi(),
-  }) : _api = api;
+    BriskersLocalDatabase? database,
+  })  : _api = api,
+        _database = database ?? localDatabase;
 
   final BriskersApi _api;
+  final BriskersLocalDatabase _database;
 
   Future<Map<String, dynamic>> queueCustomerProfile(
     String businessId,
@@ -20,8 +24,8 @@ class OfflineCustomerVehicleAdminService {
     String? email,
     required Map<String, dynamic> billingAddress,
   }) async {
-    await localDatabase.transaction(() async {
-      await localDatabase.customStatement(
+    await _database.transaction(() async {
+      await _database.customStatement(
         '''
         UPDATE local_customers
         SET display_name = ?, phone = ?, list_phone = ?,
@@ -31,7 +35,7 @@ class OfflineCustomerVehicleAdminService {
         ''',
         [name, phone, phone, email, email, jsonEncode(billingAddress), businessId, customerId],
       );
-      await localDatabase.customStatement(
+      await _database.customStatement(
         'UPDATE local_jobs SET customer_name = ? WHERE business_id = ? AND customer_id = ?',
         [name, businessId, customerId],
       );
@@ -58,8 +62,8 @@ class OfflineCustomerVehicleAdminService {
     required bool flagged,
     String? note,
   }) async {
-    await localDatabase.transaction(() async {
-      await localDatabase.customStatement(
+    await _database.transaction(() async {
+      await _database.customStatement(
         '''
         UPDATE local_customers
         SET problem_flag = ?, problem_flag_note = ?, sync_state = 'pending'
@@ -67,7 +71,7 @@ class OfflineCustomerVehicleAdminService {
         ''',
         [flagged ? 1 : 0, note, businessId, customerId],
       );
-      await localDatabase.customStatement(
+      await _database.customStatement(
         '''
         UPDATE local_jobs
         SET customer_problem_flag = ?, customer_problem_flag_note = ?
@@ -101,8 +105,8 @@ class OfflineCustomerVehicleAdminService {
         ? 'local-vehicle-${DateTime.now().microsecondsSinceEpoch}'
         : vehicleId;
 
-    await localDatabase.transaction(() async {
-      await localDatabase.customStatement(
+    await _database.transaction(() async {
+      await _database.customStatement(
         '''
         INSERT INTO local_vehicles (
           id, business_id, year, make, model, vin, license_plate,
@@ -118,7 +122,7 @@ class OfflineCustomerVehicleAdminService {
         [id, businessId, year, make, model, vin, licensePlate, licenseState, mileage?.toDouble(), color, keyPassword],
       );
       if (creating) {
-        await localDatabase.customStatement(
+        await _database.customStatement(
           '''
           INSERT OR REPLACE INTO local_customer_vehicles
             (business_id, customer_id, vehicle_id, is_primary)
@@ -154,7 +158,7 @@ class OfflineCustomerVehicleAdminService {
     String entityId,
     Map<String, dynamic> payload,
   ) async {
-    final existing = await localDatabase.customSelect(
+    final existing = await _database.customSelect(
       '''
       SELECT id FROM sync_outbox
       WHERE business_id = ? AND entity_type = ? AND entity_id = ?
@@ -169,12 +173,12 @@ class OfflineCustomerVehicleAdminService {
     ).get();
 
     if (existing.isNotEmpty) {
-      await localDatabase.customStatement(
+      await _database.customStatement(
         'UPDATE sync_outbox SET payload_json = ?, last_error = NULL WHERE id = ?',
         [jsonEncode(payload), existing.first.read<int>('id')],
       );
     } else {
-      await localDatabase.customStatement(
+      await _database.customStatement(
         '''
         INSERT INTO sync_outbox (
           business_id, entity_type, entity_id, operation,
@@ -187,7 +191,7 @@ class OfflineCustomerVehicleAdminService {
   }
 
   Future<void> flush(String businessId) async {
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       '''
       SELECT id, entity_type, entity_id, payload_json
       FROM sync_outbox
@@ -218,7 +222,7 @@ class OfflineCustomerVehicleAdminService {
               payload['billing_address'] as Map? ?? const {},
             ),
           );
-          await localDatabase.customStatement(
+          await _database.customStatement(
             "UPDATE local_customers SET sync_state = 'synced' WHERE business_id = ? AND id = ?",
             [businessId, entityId],
           );
@@ -243,7 +247,7 @@ class OfflineCustomerVehicleAdminService {
             color: payload['color']?.toString(),
             keyPassword: payload['key_password']?.toString(),
           );
-          await localDatabase.customStatement(
+          await _database.customStatement(
             "UPDATE local_vehicles SET sync_state = 'synced' WHERE business_id = ? AND id = ?",
             [businessId, entityId],
           );
@@ -261,21 +265,21 @@ class OfflineCustomerVehicleAdminService {
             color: payload['color']?.toString(),
             keyPassword: payload['key_password']?.toString(),
           );
-          await localDatabase.customStatement(
+          await _database.customStatement(
             'UPDATE local_customer_vehicles SET vehicle_id = ? WHERE business_id = ? AND vehicle_id = ?',
             [serverId, businessId, entityId],
           );
-          await localDatabase.customStatement(
+          await _database.customStatement(
             "UPDATE local_vehicles SET id = ?, sync_state = 'synced' WHERE business_id = ? AND id = ?",
             [serverId, businessId, entityId],
           );
         }
-        await localDatabase.customStatement(
+        await _database.customStatement(
           'DELETE FROM sync_outbox WHERE id = ?',
           [outboxId],
         );
       } catch (error) {
-        await localDatabase.customStatement(
+        await _database.customStatement(
           '''
           UPDATE sync_outbox
           SET attempt_count = attempt_count + 1,
