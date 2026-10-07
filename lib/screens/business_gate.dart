@@ -22,6 +22,7 @@ import '../services/offline_estimate_invoice_service.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/offline_document_edit_service.dart';
 import '../services/local_tax_settings_cache.dart';
+import '../services/local_invoice_status_styles_cache.dart';
 import '../services/offline_work_findings_service.dart';
 import 'kiosk/kiosk_checkin_screen.dart';
 import 'shell_screen.dart';
@@ -60,6 +61,8 @@ class _BusinessGateState extends State<BusinessGate> {
       OfflineDocumentEditService();
   final LocalTaxSettingsCache _taxSettingsCache =
       LocalTaxSettingsCache();
+  final LocalInvoiceStatusStylesCache _invoiceStatusStyles =
+      LocalInvoiceStatusStylesCache();
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
   final OfflineWorkFindingsService _offlineWorkFindings =
       OfflineWorkFindingsService();
@@ -363,6 +366,12 @@ class _BusinessGateState extends State<BusinessGate> {
       await _documentSync.pull(businessId);
     } catch (_) {
       // Estimate/invoice Home counts keep the previous local snapshot.
+    }
+
+    try {
+      await _invoiceStatusStyles.refresh(businessId);
+    } catch (_) {
+      // Keep the last saved invoice status colors for offline use.
     }
 
   }
