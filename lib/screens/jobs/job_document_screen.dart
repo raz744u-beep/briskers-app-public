@@ -16,6 +16,7 @@ import '../../services/gmail_compose_service.dart';
 import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
 import '../../services/local_document_detail_cache.dart';
+import '../../services/local_document_repository.dart';
 import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_document_edit_service.dart';
@@ -51,6 +52,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   final _localCatalog = LocalCatalogRepository();
   final LocalDocumentDetailCache _detailCache =
       const LocalDocumentDetailCache();
+  final LocalDocumentRepository _localDocuments =
+      LocalDocumentRepository();
   final OfflineEstimateInvoiceService _offlineEstimateInvoice =
       OfflineEstimateInvoiceService();
   final OfflineDocumentDraftService _offlineDocumentDraft =
@@ -155,6 +158,43 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     return true;
   }
 
+  Future<Map<String, dynamic>> _withRecoveredDocumentDate(
+    Map<String, dynamic> detail,
+  ) async {
+    final rawDate = detail['document_date']?.toString().trim() ?? '';
+    if (DateTime.tryParse(rawDate) != null) return detail;
+
+    var rawCreated = detail['created_at']?.toString().trim() ?? '';
+    if (DateTime.tryParse(rawCreated) == null) {
+      rawCreated = await _localDocuments.createdAtForDocument(
+            widget.businessId,
+            widget.documentId,
+          ) ??
+          '';
+    }
+    final created = DateTime.tryParse(rawCreated);
+    if (created == null) return detail;
+
+    final localDate = DateTime(
+      created.toLocal().year,
+      created.toLocal().month,
+      created.toLocal().day,
+    );
+    final recovered = <String, dynamic>{
+      ...detail,
+      'document_date':
+          DateFormat('yyyy-MM-dd').format(localDate),
+      if ((detail['created_at']?.toString().trim() ?? '').isEmpty)
+        'created_at': created.toUtc().toIso8601String(),
+    };
+    await _detailCache.save(
+      widget.businessId,
+      widget.documentId,
+      recovered,
+    );
+    return recovered;
+  }
+
   Future<void> _load() async {
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
@@ -213,9 +253,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       final repairedCached =
           await _detailCache.load(widget.businessId, widget.documentId) ??
               cached;
+      final datedCached =
+          await _withRecoveredDocumentDate(repairedCached);
       if (!mounted) return;
       setState(() {
-        _detail = repairedCached;
+        _detail = datedCached;
         if (!_notesDirty && !_notesFocusNode.hasFocus) {
           _notesController.text = cached['memo']?.toString() ?? '';
         }
@@ -342,8 +384,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       );
       if (!mounted) return;
       if (cached != null) {
+        final datedCached = await _withRecoveredDocumentDate(cached);
+        if (!mounted) return;
         setState(() {
-          _detail = cached;
+          _detail = datedCached;
           if (!_notesDirty && !_notesFocusNode.hasFocus) {
             _notesController.text = cached['memo']?.toString() ?? '';
           }
