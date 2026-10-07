@@ -112,7 +112,7 @@ void main() {
       report.checks.any(
         (check) =>
             check.id == 'DOC-001' &&
-            check.level == DiagnosticLevel.pass,
+            check.level == BriskersDiagnosticLevel.pass,
       ),
       isTrue,
     );
@@ -120,7 +120,7 @@ void main() {
       report.checks.any(
         (check) =>
             check.id == 'REL-001' &&
-            check.level == DiagnosticLevel.pass,
+            check.level == BriskersDiagnosticLevel.pass,
       ),
       isTrue,
     );
@@ -186,7 +186,7 @@ void main() {
 
     final relationshipCheck =
         report.checks.firstWhere((check) => check.id == 'REL-001');
-    expect(relationshipCheck.level, DiagnosticLevel.fail);
+    expect(relationshipCheck.level, BriskersDiagnosticLevel.fail);
 
     await database.close();
   });

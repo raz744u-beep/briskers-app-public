@@ -1,3 +1,5 @@
+// ignore_for_file: prefer_interpolation_to_compose_strings
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -51,19 +53,19 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     );
   }
 
-  Color _levelColor(DiagnosticLevel level) {
+  Color _levelColor(BriskersDiagnosticLevel level) {
     return switch (level) {
-      DiagnosticLevel.pass => const Color(0xFF169B62),
-      DiagnosticLevel.warning => const Color(0xFFE58A00),
-      DiagnosticLevel.fail => const Color(0xFFC62828),
+      BriskersDiagnosticLevel.pass => const Color(0xFF169B62),
+      BriskersDiagnosticLevel.warning => const Color(0xFFE58A00),
+      BriskersDiagnosticLevel.fail => const Color(0xFFC62828),
     };
   }
 
-  IconData _levelIcon(DiagnosticLevel level) {
+  IconData _levelIcon(BriskersDiagnosticLevel level) {
     return switch (level) {
-      DiagnosticLevel.pass => Icons.check_circle_outline,
-      DiagnosticLevel.warning => Icons.warning_amber_rounded,
-      DiagnosticLevel.fail => Icons.error_outline,
+      BriskersDiagnosticLevel.pass => Icons.check_circle_outline,
+      BriskersDiagnosticLevel.warning => Icons.warning_amber_rounded,
+      BriskersDiagnosticLevel.fail => Icons.error_outline,
     };
   }
 

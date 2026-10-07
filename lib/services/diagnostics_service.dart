@@ -1,3 +1,5 @@
+// ignore_for_file: prefer_interpolation_to_compose_strings
+
 import 'dart:io';
 
 import 'package:drift/drift.dart';
@@ -9,7 +11,7 @@ import 'local_document_detail_cache.dart';
 import 'local_invoice_status_styles_cache.dart';
 import 'local_tax_settings_cache.dart';
 
-enum DiagnosticLevel {
+enum BriskersDiagnosticLevel {
   pass,
   warning,
   fail,
@@ -28,7 +30,7 @@ class DiagnosticCheck {
   final String id;
   final String category;
   final String title;
-  final DiagnosticLevel level;
+  final BriskersDiagnosticLevel level;
   final String summary;
   final List<String> details;
 }
@@ -49,11 +51,11 @@ class DiagnosticsReport {
   final List<DiagnosticCheck> checks;
 
   int get passed =>
-      checks.where((check) => check.level == DiagnosticLevel.pass).length;
+      checks.where((check) => check.level == BriskersDiagnosticLevel.pass).length;
   int get warnings =>
-      checks.where((check) => check.level == DiagnosticLevel.warning).length;
+      checks.where((check) => check.level == BriskersDiagnosticLevel.warning).length;
   int get failed =>
-      checks.where((check) => check.level == DiagnosticLevel.fail).length;
+      checks.where((check) => check.level == BriskersDiagnosticLevel.fail).length;
 
   String toText() {
     final buffer = StringBuffer()
@@ -69,9 +71,9 @@ class DiagnosticsReport {
 
     for (final check in checks) {
       final marker = switch (check.level) {
-        DiagnosticLevel.pass => 'PASS',
-        DiagnosticLevel.warning => 'WARN',
-        DiagnosticLevel.fail => 'FAIL',
+        BriskersDiagnosticLevel.pass => 'PASS',
+        BriskersDiagnosticLevel.warning => 'WARN',
+        BriskersDiagnosticLevel.fail => 'FAIL',
       };
       buffer.writeln(
         '[' + marker + '] ' + check.id + ' ' + check.title,
@@ -180,7 +182,7 @@ class BriskersDiagnosticsService {
         id: 'NET-001',
         category: 'Connection',
         title: 'Connection mode',
-        level: DiagnosticLevel.pass,
+        level: BriskersDiagnosticLevel.pass,
         summary: 'Current mode: ' + _connectionMode.label,
         details: [
           if (_connectionMode.forceOffline)
@@ -218,7 +220,7 @@ class BriskersDiagnosticsService {
           id: fallbackId,
           category: category,
           title: title,
-          level: DiagnosticLevel.fail,
+          level: BriskersDiagnosticLevel.fail,
           summary: 'The diagnostic check itself could not complete.',
           details: [error.toString()],
         ),
@@ -250,8 +252,8 @@ class BriskersDiagnosticsService {
         category: 'Local database',
         title: 'Database opens',
         level: ready.read<int>('ready') == 1
-            ? DiagnosticLevel.pass
-            : DiagnosticLevel.fail,
+            ? BriskersDiagnosticLevel.pass
+            : BriskersDiagnosticLevel.fail,
         summary: 'Local database schema version ' +
             _database.schemaVersion.toString() +
             ' is accessible.',
@@ -298,7 +300,7 @@ class BriskersDiagnosticsService {
         id: 'DB-002',
         category: 'Local database',
         title: 'Local data inventory',
-        level: DiagnosticLevel.pass,
+        level: BriskersDiagnosticLevel.pass,
         summary: 'Local record counts were read successfully.',
         details: counts.entries
             .map((entry) => entry.key + ': ' + entry.value.toString())
@@ -355,8 +357,8 @@ class BriskersDiagnosticsService {
         category: 'Offline readiness',
         title: 'Core offline datasets',
         level: missing.isEmpty
-            ? DiagnosticLevel.pass
-            : DiagnosticLevel.fail,
+            ? BriskersDiagnosticLevel.pass
+            : BriskersDiagnosticLevel.fail,
         summary: missing.isEmpty
             ? 'All core datasets report a completed local bootstrap.'
             : 'Offline data is incomplete for ' +
@@ -404,8 +406,8 @@ class BriskersDiagnosticsService {
         category: 'Sync',
         title: 'Sync conflicts',
         level: conflictCount == 0
-            ? DiagnosticLevel.pass
-            : DiagnosticLevel.fail,
+            ? BriskersDiagnosticLevel.pass
+            : BriskersDiagnosticLevel.fail,
         summary: conflictCount == 0
             ? 'No unresolved sync conflicts.'
             : conflictCount.toString() +
@@ -419,10 +421,10 @@ class BriskersDiagnosticsService {
         category: 'Sync',
         title: 'Pending changes',
         level: retryingCount > 0
-            ? DiagnosticLevel.warning
+            ? BriskersDiagnosticLevel.warning
             : (pendingCount > 0
-                ? DiagnosticLevel.warning
-                : DiagnosticLevel.pass),
+                ? BriskersDiagnosticLevel.warning
+                : BriskersDiagnosticLevel.pass),
         summary: pendingCount == 0
             ? 'No local changes are waiting to sync.'
             : pendingCount.toString() +
@@ -452,8 +454,8 @@ class BriskersDiagnosticsService {
         category: 'Sync',
         title: 'Dataset sync errors',
         level: stateErrors.isEmpty
-            ? DiagnosticLevel.pass
-            : DiagnosticLevel.fail,
+            ? BriskersDiagnosticLevel.pass
+            : BriskersDiagnosticLevel.fail,
         summary: stateErrors.isEmpty
             ? 'No dataset-level sync errors are recorded.'
             : stateErrors.length.toString() +
@@ -564,7 +566,7 @@ class BriskersDiagnosticsService {
         id: 'REL-001',
         category: 'Relationships',
         title: 'Customer, vehicle and job links',
-        level: total == 0 ? DiagnosticLevel.pass : DiagnosticLevel.fail,
+        level: total == 0 ? BriskersDiagnosticLevel.pass : BriskersDiagnosticLevel.fail,
         summary: total == 0
             ? 'No broken core relationships were found.'
             : total.toString() +
@@ -591,8 +593,8 @@ class BriskersDiagnosticsService {
         category: 'Offline settings',
         title: 'Tax settings cache',
         level: tax != null && rate != null
-            ? DiagnosticLevel.pass
-            : DiagnosticLevel.fail,
+            ? BriskersDiagnosticLevel.pass
+            : BriskersDiagnosticLevel.fail,
         summary: tax != null && rate != null
             ? 'Tax settings are available offline.'
             : 'Tax settings are not safely cached for offline use.',
@@ -611,8 +613,8 @@ class BriskersDiagnosticsService {
         category: 'Offline settings',
         title: 'Invoice status styles cache',
         level: styles.isNotEmpty
-            ? DiagnosticLevel.pass
-            : DiagnosticLevel.warning,
+            ? BriskersDiagnosticLevel.pass
+            : BriskersDiagnosticLevel.warning,
         summary: styles.isNotEmpty
             ? styles.length.toString() +
                 ' invoice status style(s) are cached.'
@@ -716,8 +718,8 @@ class BriskersDiagnosticsService {
         category: 'Documents',
         title: 'Active document cache coverage',
         level: missingCache == 0
-            ? DiagnosticLevel.pass
-            : DiagnosticLevel.fail,
+            ? BriskersDiagnosticLevel.pass
+            : BriskersDiagnosticLevel.fail,
         summary: missingCache == 0
             ? 'All ' +
                 rows.length.toString() +
@@ -733,8 +735,8 @@ class BriskersDiagnosticsService {
         category: 'Documents',
         title: 'Document relationship consistency',
         level: relationshipMismatch == 0
-            ? DiagnosticLevel.pass
-            : DiagnosticLevel.fail,
+            ? BriskersDiagnosticLevel.pass
+            : BriskersDiagnosticLevel.fail,
         summary: relationshipMismatch == 0
             ? 'Cached document links agree with the local document index.'
             : relationshipMismatch.toString() +
@@ -748,8 +750,8 @@ class BriskersDiagnosticsService {
         category: 'Documents',
         title: 'Document math consistency',
         level: mathMismatch == 0
-            ? DiagnosticLevel.pass
-            : DiagnosticLevel.warning,
+            ? BriskersDiagnosticLevel.pass
+            : BriskersDiagnosticLevel.warning,
         summary: mathMismatch == 0
             ? 'Cached line totals agree with document totals.'
             : mathMismatch.toString() +
@@ -793,10 +795,10 @@ class BriskersDiagnosticsService {
     }
 
     final level = missingFiles > 0
-        ? DiagnosticLevel.fail
+        ? BriskersDiagnosticLevel.fail
         : (withErrors > 0
-            ? DiagnosticLevel.warning
-            : DiagnosticLevel.pass);
+            ? BriskersDiagnosticLevel.warning
+            : BriskersDiagnosticLevel.pass);
     checks.add(
       DiagnosticCheck(
         id: 'PHOTO-001',
@@ -871,7 +873,7 @@ class BriskersDiagnosticsService {
         id: 'ID-001',
         category: 'Local IDs',
         title: 'Server ID remapping',
-        level: total == 0 ? DiagnosticLevel.pass : DiagnosticLevel.fail,
+        level: total == 0 ? BriskersDiagnosticLevel.pass : BriskersDiagnosticLevel.fail,
         summary: total == 0
             ? 'No synced records are stranded with temporary local IDs.'
             : total.toString() +
