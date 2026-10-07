@@ -270,6 +270,28 @@ class _BusinessGateState extends State<BusinessGate> {
       // New offline estimate drafts stay queued and retry on reconnect.
     }
 
+    Map<String, dynamic>? taxSettings;
+    try {
+      taxSettings = await _taxSettingsCache.refresh(businessId);
+    } catch (_) {
+      taxSettings = await _taxSettingsCache.load(businessId);
+    }
+
+    if (taxSettings != null) {
+      try {
+        final rate = num.tryParse(
+              taxSettings['sales_tax_rate']?.toString() ?? '',
+            ) ??
+            0;
+        await _offlineDocumentEdit.repairPendingCatalogTaxes(
+          businessId,
+          rate,
+        );
+      } catch (_) {
+        // Pending taxable document lines stay queued until repair can run.
+      }
+    }
+
     try {
       await _offlineDocumentEdit.flush(businessId);
     } catch (_) {
@@ -335,12 +357,6 @@ class _BusinessGateState extends State<BusinessGate> {
       await _catalogSync.pull(businessId);
     } catch (_) {
       // Keep the last saved catalog snapshot for offline estimates/invoices.
-    }
-
-    try {
-      await _taxSettingsCache.refresh(businessId);
-    } catch (_) {
-      // Keep the last saved tax settings for offline documents.
     }
 
     try {
