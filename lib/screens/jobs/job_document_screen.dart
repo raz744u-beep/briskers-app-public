@@ -485,6 +485,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       case 'preview':
         await _previewPdf();
         break;
+      case 'convert_new':
+        await _convertEstimateToNewInvoice();
+        break;
       case 'add_to_invoice':
         await _addEstimateToExistingInvoice();
         break;
@@ -1562,6 +1565,51 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
   }
 
+  Future<void> _convertEstimateToNewInvoice() async {
+    if (!_estimate || _converted || _busy) return;
+
+    final lines = List<dynamic>.from(_detail?['lines'] ?? const []);
+    if (lines.isEmpty) {
+      setState(
+        () => _error = 'Add at least one item before creating an invoice.',
+      );
+      return;
+    }
+
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Creating a new invoice from an estimate still requires a connection.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    String? invoiceId;
+    await _run(() async {
+      invoiceId = await _api.convertEstimate(
+        widget.businessId,
+        widget.documentId,
+      );
+    });
+
+    if (!mounted || invoiceId == null) return;
+    await Navigator.pushReplacement<void, void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: invoiceId!,
+          isOwner: widget.isOwner,
+          canManageExpenses: widget.canManageExpenses,
+        ),
+      ),
+    );
+  }
+
   Future<void> _convertEstimate() async {
     if (!_estimate || _converted || _busy) return;
 
@@ -1626,39 +1674,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       return;
     }
     if (action != 'new') return;
-
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Creating a new invoice from an estimate still requires a connection.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    String? invoiceId;
-    await _run(() async {
-      invoiceId = await _api.convertEstimate(
-        widget.businessId,
-        widget.documentId,
-      );
-    });
-
-    if (!mounted || invoiceId == null) return;
-    await Navigator.pushReplacement<void, void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => JobDocumentScreen(
-          businessId: widget.businessId,
-          documentId: invoiceId!,
-          isOwner: widget.isOwner,
-          canManageExpenses: widget.canManageExpenses,
-        ),
-      ),
-    );
+    await _convertEstimateToNewInvoice();
   }
 
   Future<void> _addEstimateToExistingInvoice() async {
@@ -5488,12 +5504,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 title: Text(tr('refresh')),
                 onTap: () => Navigator.pop(sheetContext, 'refresh'),
               ),
-              if (_estimate && !_converted)
+              if (_estimate && !_converted) ...[
                 ListTile(
                   leading: const Icon(Icons.receipt_long_outlined),
-                  title: Text(tr('createInvoice')),
-                  onTap: () => Navigator.pop(sheetContext, 'convert'),
+                  title: const Text('Convert to New Invoice'),
+                  onTap: () => Navigator.pop(sheetContext, 'convert_new'),
                 ),
+                ListTile(
+                  leading: const Icon(Icons.post_add_outlined),
+                  title: const Text('Add to Existing Invoice'),
+                  onTap: () => Navigator.pop(sheetContext, 'add_to_invoice'),
+                ),
+              ],
               if (widget.isOwner && (!_estimate || !_converted)) ...[
                 const Divider(height: 1),
                 ListTile(
@@ -5524,6 +5546,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         await _load();
       case 'convert':
         await _convertEstimate();
+      case 'convert_new':
+        await _convertEstimateToNewInvoice();
+      case 'add_to_invoice':
+        await _addEstimateToExistingInvoice();
       case 'edit':
         await _editDocumentHeader();
       case 'copy':
@@ -5632,16 +5658,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ),
           ),
           actions: [
-            if (_estimate && !_converted)
-              IconButton(
-                tooltip: 'Create / Add to Invoice',
-                onPressed: _busy ? null : _convertEstimate,
-                icon: const Icon(Icons.post_add_outlined),
-              ),
             if (!_readOnly)
               IconButton(
-                tooltip: _estimate ? tr('editEstimate') : tr('editInvoice'),
-                onPressed: _busy ? null : _editDocumentHeader,
+                tooltip: _estimate ? 'Estimate actions' : tr('editInvoice'),
+                onPressed: _busy
+                    ? null
+                    : (_estimate
+                        ? _showDocumentHeaderActions
+                        : _editDocumentHeader),
                 icon: const Icon(Icons.edit_outlined),
               ),
           ],
