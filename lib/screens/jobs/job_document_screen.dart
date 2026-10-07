@@ -105,6 +105,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     _load();
   }
 
+  void _scheduleInitialActionIfNeeded() {
+    if (_initialActionHandled ||
+        !(widget.initialAction?.trim().isNotEmpty ?? false)) {
+      return;
+    }
+    _initialActionHandled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _runInitialAction(widget.initialAction!);
+    });
+  }
+
   @override
   void dispose() {
     _workspaceHeaderController.dispose();
@@ -219,6 +230,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               documentId: serverId,
               isOwner: widget.isOwner,
               canManageExpenses: widget.canManageExpenses,
+              initialAction: widget.initialAction,
             ),
           ),
         );
@@ -277,6 +289,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _loading = false;
         _error = null;
       });
+      _scheduleInitialActionIfNeeded();
       return;
     }
 
@@ -379,13 +392,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _loading = false;
         _error = null;
       });
-      if (!_initialActionHandled &&
-          (widget.initialAction?.trim().isNotEmpty ?? false)) {
-        _initialActionHandled = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _runInitialAction(widget.initialAction!);
-        });
-      }
+      _scheduleInitialActionIfNeeded();
     } catch (error) {
       final cached = await _detailCache.load(
         widget.businessId,
@@ -403,6 +410,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           _loading = false;
           _error = null;
         });
+        _scheduleInitialActionIfNeeded();
       } else {
         setState(() {
           _loading = false;
@@ -1799,28 +1807,45 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                             fontWeight: FontWeight.w800,
                           ),
                         ),
-                        subtitle: Text(
-                          <String>[
-                            if (jobNumber.isNotEmpty || jobTitle.isNotEmpty)
-                              <String>[
-                                if (jobNumber.isNotEmpty) 'Job $jobNumber',
-                                if (jobTitle.isNotEmpty) jobTitle,
-                              ].join(' • '),
-                            if (vehicle.isNotEmpty) vehicle,
-                            <String>[
-                              if (status.isNotEmpty) status,
-                              if (sameJob)
-                                'Same job'
-                              else if (sameVehicle)
-                                'Same vehicle',
-                            ].join(' • '),
-                          ].where((line) => line.isNotEmpty).join('\n'),
-                          maxLines: 3,
-                        ),
-                        trailing: Text(
-                          _money(invoice['total_amount']),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (jobNumber.isNotEmpty ||
+                                  jobTitle.isNotEmpty)
+                                Text(
+                                  <String>[
+                                    if (jobNumber.isNotEmpty)
+                                      'Job $jobNumber',
+                                    if (jobTitle.isNotEmpty) jobTitle,
+                                  ].join(' • '),
+                                ),
+                              if (vehicle.isNotEmpty) Text(vehicle),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      <String>[
+                                        if (status.isNotEmpty) status,
+                                        if (sameJob)
+                                          'Same job'
+                                        else if (sameVehicle)
+                                          'Same vehicle',
+                                      ].join(' • '),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    _money(invoice['total_amount']),
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
                         onTap: () =>
