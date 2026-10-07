@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/invoice_status_style.dart';
 import '../../services/briskers_api.dart';
+import '../../services/local_invoice_status_styles_cache.dart';
 
 class InvoiceStatusesSettingsScreen extends StatefulWidget {
   const InvoiceStatusesSettingsScreen({
@@ -20,6 +21,8 @@ class InvoiceStatusesSettingsScreen extends StatefulWidget {
 class _InvoiceStatusesSettingsScreenState
     extends State<InvoiceStatusesSettingsScreen> {
   static const _api = BriskersApi();
+  final LocalInvoiceStatusStylesCache _localStyles =
+      LocalInvoiceStatusStylesCache();
 
   List<Map<String, dynamic>>? _statuses;
   String? _error;
@@ -33,6 +36,7 @@ class _InvoiceStatusesSettingsScreenState
   Future<void> _load() async {
     try {
       final rows = await _api.invoiceStatusStyles(widget.businessId);
+      await _localStyles.save(widget.businessId, rows);
       if (!mounted) return;
       setState(() {
         _statuses = rows;
