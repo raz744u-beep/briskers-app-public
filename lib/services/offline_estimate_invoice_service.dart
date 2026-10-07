@@ -77,9 +77,27 @@ class OfflineEstimateInvoiceService {
       ],
     ).get();
 
-    final result = rows.map((row) {
-      final invoiceVehicleId = row.readNullable<String>('vehicle_id') ?? '';
-      final invoiceJobId = row.readNullable<String>('job_id') ?? '';
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      final id = row.read<String>('id');
+      final cached = await _cache.load(businessId, id);
+
+      String prefer(String? primary, Object? fallback) {
+        final value = primary?.trim() ?? '';
+        if (value.isNotEmpty) return value;
+        return fallback?.toString().trim() ?? '';
+      }
+
+      final rowJobId = row.readNullable<String>('job_id') ?? '';
+      final cachedJobId = cached?['job_id']?.toString() ?? '';
+      final invoiceJobId =
+          rowJobId.isNotEmpty ? rowJobId : cachedJobId;
+
+      final rowVehicleId = row.readNullable<String>('vehicle_id') ?? '';
+      final cachedVehicleId = cached?['vehicle_id']?.toString() ?? '';
+      final invoiceVehicleId =
+          rowVehicleId.isNotEmpty ? rowVehicleId : cachedVehicleId;
+
       final sameJob = estimateJobId.isNotEmpty &&
           invoiceJobId.isNotEmpty &&
           estimateJobId == invoiceJobId;
@@ -87,21 +105,40 @@ class OfflineEstimateInvoiceService {
           (vehicleId.isNotEmpty &&
               invoiceVehicleId.isNotEmpty &&
               vehicleId == invoiceVehicleId);
-      return <String, dynamic>{
-        'id': row.read<String>('id'),
-        'document_number': row.readNullable<String>('document_number'),
-        'total_amount': row.read<double>('total'),
-        'status': row.readNullable<String>('status'),
-        'customer_name': row.readNullable<String>('customer_name'),
+
+      result.add(<String, dynamic>{
+        'id': id,
+        'document_number': prefer(
+          row.readNullable<String>('document_number'),
+          cached?['document_number'],
+        ),
+        'total_amount': cached?['total_amount'] ?? row.read<double>('total'),
+        'status': prefer(
+          row.readNullable<String>('status'),
+          cached?['status'],
+        ),
+        'customer_name': prefer(
+          row.readNullable<String>('customer_name'),
+          cached?['customer_name'],
+        ),
         'job_id': invoiceJobId,
-        'job_number': row.readNullable<String>('job_number'),
-        'job_title': row.readNullable<String>('job_title'),
+        'job_number': prefer(
+          row.readNullable<String>('job_number'),
+          cached?['job_number'],
+        ),
+        'job_title': prefer(
+          row.readNullable<String>('job_title'),
+          cached?['job_title'],
+        ),
         'vehicle_id': invoiceVehicleId,
-        'vehicle': row.readNullable<String>('vehicle_label'),
+        'vehicle': prefer(
+          row.readNullable<String>('vehicle_label'),
+          cached?['vehicle'],
+        ),
         'same_job': sameJob,
         'same_vehicle': sameVehicle,
-      };
-    }).toList();
+      });
+    }
 
     result.sort((a, b) {
       final aj = a['same_job'] == true ? 0 : 1;
