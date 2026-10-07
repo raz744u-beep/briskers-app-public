@@ -1083,14 +1083,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       return;
     }
 
+    final searchController = TextEditingController();
+    var filtered = List<Map<String, dynamic>>.from(items);
+
     final selected = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
       builder: (sheetContext) {
-        final controller = TextEditingController();
-        var filtered = List<Map<String, dynamic>>.from(items);
-
         return StatefulBuilder(
           builder: (context, setSheetState) {
             Future<void> filter(String value) async {
@@ -1105,20 +1106,38 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               });
             }
 
-            return SafeArea(
+            final keyboard = MediaQuery.viewInsetsOf(sheetContext).bottom;
+            final availableHeight =
+                MediaQuery.sizeOf(sheetContext).height - keyboard;
+
+            return AnimatedPadding(
+              duration: const Duration(milliseconds: 140),
+              curve: Curves.easeOut,
+              padding: EdgeInsets.only(bottom: keyboard),
               child: SizedBox(
-                height: MediaQuery.sizeOf(sheetContext).height * 0.78,
+                height: availableHeight * 0.78,
                 child: Column(
                   children: [
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                       child: TextField(
-                        controller: controller,
+                        controller: searchController,
                         autofocus: true,
+                        textInputAction: TextInputAction.search,
                         onChanged: filter,
                         decoration: InputDecoration(
                           labelText: tr('searchItems'),
                           prefixIcon: const Icon(Icons.search),
+                          suffixIcon: searchController.text.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Clear',
+                                  icon: const Icon(Icons.close),
+                                  onPressed: () {
+                                    searchController.clear();
+                                    filter('');
+                                  },
+                                ),
                         ),
                       ),
                     ),
@@ -1126,6 +1145,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       child: filtered.isEmpty
                           ? Center(child: Text(tr('noMatchingItems')))
                           : ListView.builder(
+                              keyboardDismissBehavior:
+                                  ScrollViewKeyboardDismissBehavior.onDrag,
                               itemCount: filtered.length,
                               itemBuilder: (context, index) {
                                 final item = filtered[index];
@@ -1163,6 +1184,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         );
       },
     );
+    searchController.dispose();
 
     if (selected == null || !mounted) return;
 
@@ -1881,6 +1903,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               child: const Text('Cancel'),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: BriskersColors.invoices,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () => Navigator.pop(dialogContext, true),
               child: const Text('Add Anyway'),
             ),

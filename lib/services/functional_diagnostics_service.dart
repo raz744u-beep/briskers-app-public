@@ -15,6 +15,7 @@ import 'offline_document_draft_service.dart';
 import 'offline_estimate_invoice_service.dart';
 import 'offline_financial_write_service.dart';
 import 'offline_job_admin_service.dart';
+import 'weather_service.dart';
 
 class FunctionalDiagnosticsReport {
   const FunctionalDiagnosticsReport({
@@ -103,6 +104,13 @@ class BriskersFunctionalDiagnosticsService {
       title: 'Expense create/edit offline',
       success: 'First local expense creation and edit stayed queued correctly.',
       action: _checkExpense,
+    );
+    await _scenario(
+      checks,
+      id: 'FUNC-006',
+      title: 'Home weather parsing/cache',
+      success: 'Shop geocoding, condition parsing and offline weather cache passed.',
+      action: _checkWeather,
     );
 
     return FunctionalDiagnosticsReport(
@@ -599,6 +607,67 @@ class BriskersFunctionalDiagnosticsService {
           payload['status_changed'] == true &&
           payload['assignment_changed'] == true,
       'Job admin pending payload is missing a change group.',
+    );
+  }
+
+  Future<void> _checkWeather(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final service = BriskersWeatherService(
+      forceOffline: () => false,
+      businessSettingsLoader: (_) async => {
+        'address': {
+          'formatted': '1400 Stumpf Blvd, Gretna, LA, 70053',
+        },
+        'latitude': null,
+        'longitude': null,
+      },
+      jsonLoader: (uri) async {
+        if (uri.host == 'geocoding-api.open-meteo.com') {
+          return {
+            'results': [
+              {
+                'name': 'Gretna',
+                'admin1': 'Louisiana',
+                'latitude': 29.9146,
+                'longitude': -90.0539,
+              },
+            ],
+          };
+        }
+        return {
+          'current': {
+            'temperature_2m': 82.6,
+            'apparent_temperature': 87.1,
+            'precipitation': 0.02,
+            'rain': 0.02,
+            'weather_code': 61,
+            'wind_speed_10m': 8.0,
+          },
+        };
+      },
+    );
+
+    final snapshot = await service.load(
+      businessId,
+      forceRefresh: true,
+    );
+    _require(snapshot != null, 'Weather snapshot was not created.');
+    _require(
+      snapshot!.condition == 'Rain' &&
+          snapshot.iconKey == 'rain' &&
+          snapshot.message == 'Rain now' &&
+          _near(snapshot.temperatureF, 82.6),
+      'Weather condition parsing is incorrect.',
+    );
+
+    final cached = await service.loadCached(businessId);
+    _require(
+      cached != null &&
+          cached.condition == 'Rain' &&
+          _near(cached.temperatureF, 82.6),
+      'Weather cache did not retain the sandbox snapshot.',
     );
   }
 

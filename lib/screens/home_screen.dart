@@ -6,6 +6,7 @@ import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
 import '../services/local_job_repository.dart';
 import '../services/offline_document_draft_service.dart';
+import '../services/weather_service.dart';
 import 'appointments/appointment_manage_screen.dart';
 import 'customers/new_customer_screen.dart';
 import 'documents_screen.dart';
@@ -58,10 +59,13 @@ class _HomeScreenState extends State<HomeScreen> {
   final LocalJobRepository _localJobs = LocalJobRepository();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
+  final BriskersWeatherService _weatherService = BriskersWeatherService();
 
   String? _expandedSection;
   Map<String, dynamic> _attention = const {};
   bool _attentionLoading = false;
+  BriskersWeatherSnapshot? _weather;
+  bool _weatherLoading = false;
 
   final Map<String, GlobalKey> _drawerKeys = {
     'customers': GlobalKey(),
@@ -75,6 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadAttention();
+    _loadWeather();
   }
 
   @override
@@ -87,6 +92,10 @@ class _HomeScreenState extends State<HomeScreen> {
         oldWidget.invoicesOpenCount != widget.invoicesOpenCount ||
         oldWidget.attentionRefreshToken != widget.attentionRefreshToken) {
       _loadAttention();
+      if (oldWidget.businessId != widget.businessId ||
+          oldWidget.attentionRefreshToken != widget.attentionRefreshToken) {
+        _loadWeather();
+      }
     }
   }
 
@@ -97,6 +106,47 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool get _allowRecurring =>
       widget.roleCode == 'owner' || widget.roleCode == 'manager';
+
+  IconData _weatherIcon(String key) {
+    switch (key) {
+      case 'sunny':
+        return Icons.wb_sunny_outlined;
+      case 'partly_cloudy':
+        return Icons.wb_cloudy_outlined;
+      case 'rain':
+        return Icons.grain_outlined;
+      case 'storm':
+        return Icons.thunderstorm_outlined;
+      case 'snow':
+        return Icons.ac_unit_outlined;
+      case 'fog':
+        return Icons.foggy;
+      default:
+        return Icons.cloud_outlined;
+    }
+  }
+
+  Future<void> _loadWeather({bool forceRefresh = false}) async {
+    if (_weatherLoading) return;
+    _weatherLoading = true;
+
+    try {
+      final cached = await _weatherService.loadCached(widget.businessId);
+      if (mounted && cached != null) {
+        setState(() => _weather = cached);
+      }
+
+      final weather = await _weatherService.load(
+        widget.businessId,
+        forceRefresh: forceRefresh,
+      );
+      if (!mounted) return;
+      setState(() => _weather = weather ?? _weather);
+    } finally {
+      _weatherLoading = false;
+      if (mounted) setState(() {});
+    }
+  }
 
   int _attentionCount(String key) {
     final counts = _attention['counts'];
@@ -627,7 +677,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _createEstimate() async {
     if (!_canManage) return;
-    final job = await _chooseEstimateJob('New Estimate');
+    final job = await _chooseEstimateJob('New Blank Estimate');
     if (job == null || !mounted) return;
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;
@@ -992,21 +1042,58 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        const Row(
-                          children: [
-                            Icon(
-                              Icons.wb_sunny_outlined,
-                              size: 19,
-                              color: Color(0xFFF4B400),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () => _loadWeather(forceRefresh: true),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  _weatherIcon(_weather?.iconKey ?? 'cloud'),
+                                  size: 19,
+                                  color: _weather?.iconKey == 'storm'
+                                      ? const Color(0xFFC62828)
+                                      : const Color(0xFFF4B400),
+                                ),
+                                const SizedBox(width: 5),
+                                Expanded(
+                                  child: Text(
+                                    _weather == null
+                                        ? (_weatherLoading
+                                            ? 'Weather…'
+                                            : 'Weather unavailable')
+                                        : '${_weather!.temperatureF.round()}° • ${_weather!.condition}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                if ((_weather?.message ?? '').isNotEmpty)
+                                  Text(
+                                    _weather!.message,
+                                    style: TextStyle(
+                                      color: _weather!.iconKey == 'storm'
+                                          ? const Color(0xFFC62828)
+                                          : const Color(0xFFE58A00),
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                if (_weatherLoading) ...[
+                                  const SizedBox(width: 8),
+                                  const SizedBox.square(
+                                    dimension: 13,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 1.8,
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
-                            SizedBox(width: 5),
-                            Text(
-                              'Weather',
-                              style: TextStyle(fontWeight: FontWeight.w700),
-                            ),
-                            Spacer(),
-                            SizedBox.shrink(),
-                          ],
+                          ),
                         ),
                       ],
                     ),
@@ -1096,7 +1183,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   if (_canManage)
                     _DrawerAction(
-                      label: 'New Estimate',
+                      label: 'New Blank Estimate',
                       icon: Icons.note_add_outlined,
                       onTap: _createEstimate,
                     ),
@@ -1127,7 +1214,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   if (_canManage)
                     _DrawerAction(
-                      label: 'Add Invoice',
+                      label: 'New Invoice',
                       icon: Icons.note_add_outlined,
                       onTap: _createInvoice,
                     ),

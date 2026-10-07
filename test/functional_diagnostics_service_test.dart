@@ -12,8 +12,8 @@ void main() {
 
     final report = await service.run();
 
-    expect(report.checks, hasLength(5));
-    expect(report.passed, 5);
+    expect(report.checks, hasLength(6));
+    expect(report.passed, 6);
     expect(report.warnings, 0);
     expect(report.failed, 0);
   });

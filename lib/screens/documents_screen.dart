@@ -11,6 +11,7 @@ import '../services/briskers_api.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_invoice_status_styles_cache.dart';
 import '../widgets/briskers_page_header.dart';
+import 'jobs/blank_invoice_setup_screen.dart';
 import 'jobs/job_document_screen.dart';
 import 'expenses/expense_detail_screen.dart';
 
@@ -1011,6 +1012,34 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       if (mounted) setState(() => _error = error.toString());
     }
   }
+  Future<void> _createBlankInvoice() async {
+    if (_estimate || !(widget.isOwner || widget.canManageExpenses)) return;
+
+    final invoiceId = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BlankInvoiceSetupScreen(
+          businessId: widget.businessId,
+        ),
+      ),
+    );
+    if (!mounted || invoiceId == null || invoiceId.isEmpty) return;
+
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: invoiceId,
+          isOwner: widget.isOwner,
+          canManageExpenses: widget.canManageExpenses,
+          initialAction: 'edit',
+        ),
+      ),
+    );
+    if (mounted) unawaited(_load());
+  }
+
   @override
   Widget build(BuildContext context) {
     final visible = _visibleRows;
@@ -1156,6 +1185,26 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               ],
               onChanged: (_) => setState(() {}),
             ),
+            if (!_estimate &&
+                (widget.isOwner || widget.canManageExpenses)) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: BriskersColors.invoices,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                  ),
+                  onPressed: _createBlankInvoice,
+                  icon: const Icon(Icons.note_add_outlined, size: 18),
+                  label: const Text('New Blank Invoice'),
+                ),
+              ),
+            ],
             if (!_estimate && widget.isOwner) ...[
               const SizedBox(height: 8),
               Align(
