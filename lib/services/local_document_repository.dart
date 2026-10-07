@@ -160,6 +160,26 @@ class LocalDocumentRepository {
         )
         .toList();
   }
+  Future<String?> createdAtForDocument(
+    String businessId,
+    String documentId,
+  ) async {
+    final rows = await _database.customSelect(
+      '''
+      SELECT created_at
+      FROM local_documents
+      WHERE business_id = ? AND id = ?
+      LIMIT 1
+      ''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(documentId),
+      ],
+    ).get();
+    if (rows.isEmpty) return null;
+    return _isoFromDb(rows.first.data['created_at']);
+  }
+
   Future<List<Map<String, dynamic>>> listByJob(
     String businessId,
     String jobId,
