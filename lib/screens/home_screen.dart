@@ -5,7 +5,6 @@ import '../core/briskers_colors.dart';
 import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
 import '../services/local_job_repository.dart';
-import '../services/local_document_repository.dart';
 import '../services/offline_document_draft_service.dart';
 import 'appointments/appointment_manage_screen.dart';
 import 'customers/new_customer_screen.dart';
@@ -57,7 +56,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   static const _api = BriskersApi();
   final LocalJobRepository _localJobs = LocalJobRepository();
-  final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
 
@@ -783,161 +781,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _addEstimateToInvoice() async {
-    if (!_canManage) return;
-
-    List<Map<String, dynamic>> estimates;
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      estimates = await _localDocuments.listByKind(
-        widget.businessId,
-        kind: 'estimate',
-      );
-    } else {
-      try {
-        estimates = await _api.documents(
-          widget.businessId,
-          kind: 'estimate',
-        );
-        await _localDocuments.upsertFromServer(
-          widget.businessId,
-          estimates,
-        );
-      } catch (_) {
-        estimates = await _localDocuments.listByKind(
-          widget.businessId,
-          kind: 'estimate',
-        );
-      }
-    }
-
-    estimates = estimates.where((estimate) {
-      if (estimate['converted'] == true) return false;
-      final status =
-          estimate['status']?.toString().trim().toLowerCase() ?? '';
-      return !<String>{'declined', 'expired', 'void'}.contains(status);
-    }).toList();
-
-    if (!mounted) return;
-    if (estimates.isEmpty) {
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('No available estimate'),
-          content: const Text(
-            'There is no open estimate available to add to an invoice.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    final selected = await showModalBottomSheet<Map<String, dynamic>>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (sheetContext) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(sheetContext).height * 0.72,
-          child: Column(
-            children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(18, 0, 18, 10),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Add Estimate',
-                    style: TextStyle(
-                      fontSize: 21,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 18),
-                  itemCount: estimates.length,
-                  itemBuilder: (context, index) {
-                    final estimate = estimates[index];
-                    final number =
-                        estimate['document_number']?.toString().trim() ?? '';
-                    final customer =
-                        estimate['customer_name']?.toString().trim() ?? '';
-                    final vehicle =
-                        estimate['vehicle']?.toString().trim() ?? '';
-                    final job =
-                        estimate['job_number']?.toString().trim() ?? '';
-                    final total = num.tryParse(
-                          estimate['total_amount']?.toString() ?? '',
-                        ) ??
-                        0;
-
-                    return Card(
-                      child: ListTile(
-                        leading: const Icon(
-                          Icons.request_quote_outlined,
-                          color: BriskersColors.estimates,
-                        ),
-                        title: Text(
-                          number.isEmpty
-                              ? 'Draft Estimate'
-                              : 'Estimate #$number',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        subtitle: Text(
-                          <String>[
-                            if (customer.isNotEmpty) customer,
-                            if (vehicle.isNotEmpty) vehicle,
-                            if (job.isNotEmpty) 'Job $job',
-                          ].join(' • '),
-                        ),
-                        trailing: Text(
-                          NumberFormat.currency(
-                            symbol: String.fromCharCode(36),
-                          ).format(total),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        onTap: () =>
-                            Navigator.pop(sheetContext, estimate),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    if (selected == null || !mounted) return;
-    final id = selected['id']?.toString() ?? '';
-    if (id.isEmpty) return;
-
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => JobDocumentScreen(
-          businessId: widget.businessId,
-          documentId: id,
-          isOwner: widget.roleCode == 'owner',
-          canManageExpenses: _canManage,
-          initialAction: 'add_to_invoice',
-        ),
-      ),
-    );
-  }
-
   Future<void> _viewEstimates() async {
     await Navigator.push<void>(
       context,
@@ -1256,12 +1099,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       label: 'New Estimate',
                       icon: Icons.note_add_outlined,
                       onTap: _createEstimate,
-                    ),
-                  if (_canManage)
-                    _DrawerAction(
-                      label: 'Add Estimate',
-                      icon: Icons.post_add_outlined,
-                      onTap: _addEstimateToInvoice,
                     ),
                   if (_canManage)
                     _DrawerAction(
