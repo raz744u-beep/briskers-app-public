@@ -5629,6 +5629,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ),
           ),
           actions: [
+            if (_estimate && !_converted)
+              IconButton(
+                tooltip: 'Create / Add to Invoice',
+                onPressed: _busy ? null : _convertEstimate,
+                icon: const Icon(Icons.post_add_outlined),
+              ),
             if (!_readOnly)
               IconButton(
                 tooltip: _estimate ? tr('editEstimate') : tr('editInvoice'),
