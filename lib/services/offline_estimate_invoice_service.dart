@@ -34,13 +34,33 @@ class OfflineEstimateInvoiceService {
     Map<String, dynamic> estimate,
   ) async {
     final customerId = estimate['customer_id']?.toString() ?? '';
-    final vehicleId = estimate['vehicle_id']?.toString() ?? '';
+    final estimateJobId = estimate['job_id']?.toString() ?? '';
+    var vehicleId = estimate['vehicle_id']?.toString() ?? '';
     if (customerId.isEmpty) return const [];
+
+    if (vehicleId.isEmpty && estimateJobId.isNotEmpty) {
+      final jobRows = await localDatabase.customSelect(
+        '''
+        SELECT vehicle_id
+        FROM local_jobs
+        WHERE business_id=? AND id=?
+        LIMIT 1
+        ''',
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(estimateJobId),
+        ],
+      ).get();
+      if (jobRows.isNotEmpty) {
+        vehicleId =
+            jobRows.first.readNullable<String>('vehicle_id') ?? '';
+      }
+    }
 
     final rows = await localDatabase.customSelect(
       '''
       SELECT d.*, j.job_number, j.title AS job_title,
-             j.vehicle_id, j.vehicle_label
+             j.vehicle_id, j.vehicle_label, j.customer_name
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id=d.business_id AND j.id=d.job_id
@@ -59,23 +79,35 @@ class OfflineEstimateInvoiceService {
 
     final result = rows.map((row) {
       final invoiceVehicleId = row.readNullable<String>('vehicle_id') ?? '';
+      final invoiceJobId = row.readNullable<String>('job_id') ?? '';
+      final sameJob = estimateJobId.isNotEmpty &&
+          invoiceJobId.isNotEmpty &&
+          estimateJobId == invoiceJobId;
+      final sameVehicle = sameJob ||
+          (vehicleId.isNotEmpty &&
+              invoiceVehicleId.isNotEmpty &&
+              vehicleId == invoiceVehicleId);
       return <String, dynamic>{
         'id': row.read<String>('id'),
         'document_number': row.readNullable<String>('document_number'),
         'total_amount': row.read<double>('total'),
         'status': row.readNullable<String>('status'),
-        'job_id': row.readNullable<String>('job_id'),
+        'customer_name': row.readNullable<String>('customer_name'),
+        'job_id': invoiceJobId,
         'job_number': row.readNullable<String>('job_number'),
         'job_title': row.readNullable<String>('job_title'),
         'vehicle_id': invoiceVehicleId,
         'vehicle': row.readNullable<String>('vehicle_label'),
-        'same_vehicle': vehicleId.isNotEmpty &&
-            invoiceVehicleId.isNotEmpty &&
-            vehicleId == invoiceVehicleId,
+        'same_job': sameJob,
+        'same_vehicle': sameVehicle,
       };
     }).toList();
 
     result.sort((a, b) {
+      final aj = a['same_job'] == true ? 0 : 1;
+      final bj = b['same_job'] == true ? 0 : 1;
+      final jobCompare = aj.compareTo(bj);
+      if (jobCompare != 0) return jobCompare;
       final av = a['same_vehicle'] == true ? 0 : 1;
       final bv = b['same_vehicle'] == true ? 0 : 1;
       return av.compareTo(bv);
