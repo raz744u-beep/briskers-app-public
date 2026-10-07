@@ -485,6 +485,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       case 'preview':
         await _previewPdf();
         break;
+      case 'add_to_invoice':
+        await _addEstimateToExistingInvoice();
+        break;
       case 'send':
         await _showSendMenu();
         break;
