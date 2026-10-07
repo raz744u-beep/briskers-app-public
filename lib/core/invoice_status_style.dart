@@ -11,6 +11,55 @@ Color invoiceStatusColorFromHex(
   return Color(0xFF000000 | parsed);
 }
 
+String _normalizedInvoiceStatus(String? value) =>
+    (value ?? '')
+        .trim()
+        .toLowerCase()
+        .replaceAll('-', '_')
+        .replaceAll(' ', '_');
+
+Color invoiceStatusDefaultColor(String? statusOrCode) {
+  switch (_normalizedInvoiceStatus(statusOrCode)) {
+    case 'paid':
+      return const Color(0xFF169B62);
+    case 'partial':
+      return const Color(0xFF1976D2);
+    case 'pending_close':
+    case 'pending':
+      return const Color(0xFFE58A00);
+    case 'closed':
+      return const Color(0xFF00897B);
+    case 'void':
+      return const Color(0xFFC62828);
+    case 'draft':
+      return const Color(0xFF667085);
+    case 'open':
+      return const Color(0xFF757575);
+    default:
+      return const Color(0xFF546E7A);
+  }
+}
+
+IconData invoiceStatusDefaultIcon(String? statusOrCode) {
+  switch (_normalizedInvoiceStatus(statusOrCode)) {
+    case 'paid':
+      return Icons.check_circle;
+    case 'partial':
+      return Icons.timelapse;
+    case 'pending_close':
+    case 'pending':
+      return Icons.schedule_outlined;
+    case 'closed':
+      return Icons.check_circle_outline;
+    case 'void':
+      return Icons.cancel_outlined;
+    case 'open':
+      return Icons.receipt_long_outlined;
+    default:
+      return Icons.label_outline;
+  }
+}
+
 IconData invoiceStatusIcon(String? key) {
   switch ((key ?? '').trim()) {
     case 'receipt':
