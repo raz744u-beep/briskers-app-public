@@ -56,8 +56,10 @@ jobs:
 
           class MainActivity : FlutterActivity() {
               private val channelName = "com.briskers/expenseiq"
-              private val pickFolderRequestCode = 7441
+              private val pickExpenseFolderRequestCode = 7441
+              private val pickHistoricalFolderRequestCode = 7442
               private var pendingFolderResult: MethodChannel.Result? = null
+              private var pendingFolderRequestCode: Int? = null
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
@@ -67,31 +69,13 @@ jobs:
                   ).setMethodCallHandler { call, result ->
                       when (call.method) {
                           "pickExpenseIqFolder" -> openExpenseIqFolderPicker(result)
-                          "readExpenseIqFile" -> {
+                          "pickHistoricalPhotoFolder" -> openHistoricalPhotoFolderPicker(result)
+                          "readExpenseIqFile", "readHistoricalPhotoFile" -> {
                               val uriText = call.argument<String>("uri")
                               if (uriText.isNullOrBlank()) {
-                                  result.error("invalid_uri", "Receipt URI is missing.", null)
+                                  result.error("invalid_uri", "Photo URI is missing.", null)
                               } else {
-                                  try {
-                                      val bytes = contentResolver
-                                          .openInputStream(Uri.parse(uriText))
-                                          ?.use { it.readBytes() }
-                                      if (bytes == null) {
-                                          result.error(
-                                              "read_failed",
-                                              "Could not open the receipt photo.",
-                                              null
-                                          )
-                                      } else {
-                                          result.success(bytes)
-                                      }
-                                  } catch (error: Exception) {
-                                      result.error(
-                                          "read_failed",
-                                          error.message ?: "Could not read receipt photo.",
-                                          null
-                                      )
-                                  }
+                                  readPhotoFile(uriText, result)
                               }
                           }
                           else -> result.notImplemented()
@@ -180,7 +164,37 @@ jobs:
                   }
               }
 
-              private fun openExpenseIqFolderPicker(result: MethodChannel.Result) {
+              private fun readPhotoFile(
+                  uriText: String,
+                  result: MethodChannel.Result
+              ) {
+                  try {
+                      val bytes = contentResolver
+                          .openInputStream(Uri.parse(uriText))
+                          ?.use { it.readBytes() }
+                      if (bytes == null) {
+                          result.error(
+                              "read_failed",
+                              "Could not open the photo.",
+                              null
+                          )
+                      } else {
+                          result.success(bytes)
+                      }
+                  } catch (error: Exception) {
+                      result.error(
+                          "read_failed",
+                          error.message ?: "Could not read photo.",
+                          null
+                      )
+                  }
+              }
+
+              private fun startPhotoFolderPicker(
+                  result: MethodChannel.Result,
+                  requestCode: Int,
+                  initialUri: Uri? = null
+              ) {
                   if (pendingFolderResult != null) {
                       result.error(
                           "picker_busy",
@@ -191,21 +205,42 @@ jobs:
                   }
 
                   pendingFolderResult = result
+                  pendingFolderRequestCode = requestCode
                   val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
                       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                       addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
                       addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
 
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      if (
+                          initialUri != null &&
+                          Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                      ) {
                           putExtra(
                               DocumentsContract.EXTRA_INITIAL_URI,
-                              Uri.parse(
-                                  "content://com.android.externalstorage.documents/document/primary%3AExpenseIQ%2Fphotos"
-                              )
+                              initialUri
                           )
                       }
                   }
-                  startActivityForResult(intent, pickFolderRequestCode)
+                  startActivityForResult(intent, requestCode)
+              }
+
+              private fun openExpenseIqFolderPicker(result: MethodChannel.Result) {
+                  startPhotoFolderPicker(
+                      result,
+                      pickExpenseFolderRequestCode,
+                      Uri.parse(
+                          "content://com.android.externalstorage.documents/document/primary%3AExpenseIQ%2Fphotos"
+                      )
+                  )
+              }
+
+              private fun openHistoricalPhotoFolderPicker(
+                  result: MethodChannel.Result
+              ) {
+                  startPhotoFolderPicker(
+                      result,
+                      pickHistoricalFolderRequestCode
+                  )
               }
 
               override fun onActivityResult(
@@ -214,10 +249,24 @@ jobs:
                   data: Intent?
               ) {
                   super.onActivityResult(requestCode, resultCode, data)
-                  if (requestCode != pickFolderRequestCode) return
+                  if (
+                      requestCode != pickExpenseFolderRequestCode &&
+                      requestCode != pickHistoricalFolderRequestCode
+                  ) return
 
                   val pending = pendingFolderResult ?: return
+                  val expectedRequestCode = pendingFolderRequestCode
                   pendingFolderResult = null
+                  pendingFolderRequestCode = null
+
+                  if (expectedRequestCode != requestCode) {
+                      pending.error(
+                          "picker_mismatch",
+                          "The folder picker result did not match the request.",
+                          null
+                      )
+                      return
+                  }
 
                   val treeUri = data?.data
                   if (resultCode != Activity.RESULT_OK || treeUri == null) {
@@ -235,13 +284,120 @@ jobs:
                   }
 
                   try {
-                      pending.success(listReceiptPhotos(treeUri))
+                      if (requestCode == pickHistoricalFolderRequestCode) {
+                          pending.success(listHistoricalPhotos(treeUri))
+                      } else {
+                          pending.success(listReceiptPhotos(treeUri))
+                      }
                   } catch (error: Exception) {
                       pending.error(
                           "folder_read_failed",
                           error.message ?: "Could not read the selected folder.",
                           null
                       )
+                  }
+              }
+
+              private fun listHistoricalPhotos(
+                  treeUri: Uri
+              ): List<Map<String, String>> {
+                  val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+                  val photos = mutableListOf<Map<String, String>>()
+                  walkHistoricalFolder(
+                      treeUri,
+                      rootId,
+                      "",
+                      photos
+                  )
+                  return photos
+              }
+
+              private fun walkHistoricalFolder(
+                  treeUri: Uri,
+                  parentDocumentId: String,
+                  relativePath: String,
+                  photos: MutableList<Map<String, String>>
+              ) {
+                  if (photos.size >= 10000) return
+
+                  val childrenUri =
+                      DocumentsContract.buildChildDocumentsUriUsingTree(
+                          treeUri,
+                          parentDocumentId
+                      )
+                  val projection = arrayOf(
+                      DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                      DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                      DocumentsContract.Document.COLUMN_MIME_TYPE
+                  )
+
+                  contentResolver.query(
+                      childrenUri,
+                      projection,
+                      null,
+                      null,
+                      null
+                  )?.use { cursor ->
+                      val idIndex = cursor.getColumnIndexOrThrow(
+                          DocumentsContract.Document.COLUMN_DOCUMENT_ID
+                      )
+                      val nameIndex = cursor.getColumnIndexOrThrow(
+                          DocumentsContract.Document.COLUMN_DISPLAY_NAME
+                      )
+                      val mimeIndex = cursor.getColumnIndexOrThrow(
+                          DocumentsContract.Document.COLUMN_MIME_TYPE
+                      )
+
+                      while (cursor.moveToNext()) {
+                          if (photos.size >= 10000) break
+                          val documentId = cursor.getString(idIndex)
+                          val name = cursor.getString(nameIndex) ?: continue
+                          val mime = cursor.getString(mimeIndex) ?: ""
+                          val path =
+                              if (relativePath.isBlank()) name
+                              else "$relativePath/$name"
+
+                          if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                              walkHistoricalFolder(
+                                  treeUri,
+                                  documentId,
+                                  path,
+                                  photos
+                              )
+                              continue
+                          }
+
+                          val lower = name.lowercase()
+                          val imageFile =
+                              mime.startsWith("image/") ||
+                              lower.endsWith(".jpg") ||
+                              lower.endsWith(".jpeg") ||
+                              lower.endsWith(".png") ||
+                              lower.endsWith(".webp")
+                          if (!imageFile) continue
+
+                          val documentUri =
+                              DocumentsContract.buildDocumentUriUsingTree(
+                                  treeUri,
+                                  documentId
+                              )
+                          photos.add(
+                              mapOf(
+                                  "name" to name,
+                                  "uri" to documentUri.toString(),
+                                  "relative_path" to path,
+                                  "mime_type" to if (mime.isBlank()) {
+                                      when {
+                                          lower.endsWith(".png") -> "image/png"
+                                          lower.endsWith(".webp") -> "image/webp"
+                                          else -> "image/jpeg"
+                                      }
+                                  } else {
+                                      mime
+                                  }
+                              )
+                          )
+                      }
                   }
               }
 

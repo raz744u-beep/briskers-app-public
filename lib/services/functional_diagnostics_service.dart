@@ -16,6 +16,7 @@ import 'offline_estimate_invoice_service.dart';
 import 'offline_financial_write_service.dart';
 import 'offline_job_admin_service.dart';
 import 'weather_service.dart';
+import 'historical_photo_matcher.dart';
 
 class FunctionalDiagnosticsReport {
   const FunctionalDiagnosticsReport({
@@ -111,6 +112,13 @@ class BriskersFunctionalDiagnosticsService {
       title: 'Home weather parsing/cache',
       success: 'Shop geocoding, condition parsing and offline weather cache passed.',
       action: _checkWeather,
+    );
+    await _scenario(
+      checks,
+      id: 'FUNC-007',
+      title: 'Historical photo job matching',
+      success: 'Exact MobileBiz job-number matching rejects ambiguous/unrelated files.',
+      action: _checkHistoricalPhotoMatching,
     );
 
     return FunctionalDiagnosticsReport(
@@ -607,6 +615,60 @@ class BriskersFunctionalDiagnosticsService {
           payload['status_changed'] == true &&
           payload['assignment_changed'] == true,
       'Job admin pending payload is missing a change group.',
+    );
+  }
+
+  Future<void> _checkHistoricalPhotoMatching(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    const matcher = HistoricalPhotoMatcher();
+    final jobs = <Map<String, dynamic>>[
+      {
+        'id': 'job-6230',
+        'job_number': 'MB-6230',
+        'status': 'completed',
+      },
+      {
+        'id': 'job-6087',
+        'job_number': 'MB-6087',
+        'status': 'completed',
+      },
+      {
+        'id': 'job-open',
+        'job_number': 'MB-7000',
+        'status': 'in_progress',
+      },
+    ];
+    final files = <Map<String, dynamic>>[
+      {
+        'name': 'IMG_001.jpg',
+        'relative_path': 'MobileBiz/6230/IMG_001.jpg',
+      },
+      {
+        'name': 'invoice_6087_photo.jpeg',
+        'relative_path': 'photos/invoice_6087_photo.jpeg',
+      },
+      {
+        'name': 'IMG_7000.jpg',
+        'relative_path': 'MobileBiz/7000/IMG_7000.jpg',
+      },
+      {
+        'name': 'wrong.jpg',
+        'relative_path': 'MobileBiz/16230/wrong.jpg',
+      },
+    ];
+
+    final matches = matcher.exactMatches(jobs, files);
+    _require(matches.length == 2, 'Expected exactly two historical photo matches.');
+    final ids = matches
+        .map((match) => match.job['id']?.toString() ?? '')
+        .toSet();
+    _require(
+      ids.contains('job-6230') &&
+          ids.contains('job-6087') &&
+          !ids.contains('job-open'),
+      'Historical photo matcher assigned an incorrect job.',
     );
   }
 

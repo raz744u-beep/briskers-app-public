@@ -677,7 +677,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _createEstimate() async {
     if (!_canManage) return;
-    final job = await _chooseEstimateJob('New Blank Estimate');
+    final job = await _chooseEstimateJob('New Estimate');
     if (job == null || !mounted) return;
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;
@@ -1183,7 +1183,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   if (_canManage)
                     _DrawerAction(
-                      label: 'New Blank Estimate',
+                      label: 'New Estimate',
                       icon: Icons.note_add_outlined,
                       onTap: _createEstimate,
                     ),

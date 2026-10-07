@@ -1,4 +1,8 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
@@ -6,6 +10,7 @@ import '../../core/job_status_style.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
+import '../../services/historical_photo_matcher.dart';
 import '../../widgets/job_compact_card.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../jobs/job_detail_screen.dart';
@@ -32,6 +37,8 @@ class _CustomerServiceHistorySectionState
     extends State<CustomerServiceHistorySection> {
   static const _api = BriskersApi();
   static const _cache = CustomerDetailCache();
+  static const _androidFileChannel = MethodChannel('com.briskers/expenseiq');
+  static const _historicalMatcher = HistoricalPhotoMatcher();
 
   List<Map<String, dynamic>> _jobs = const [];
   List<Map<String, dynamic>> _documents = const [];
@@ -41,6 +48,9 @@ class _CustomerServiceHistorySectionState
   String _roleCode = 'office';
   String? _selectedVehicleId;
   String _view = 'jobs';
+  bool _historicalImporting = false;
+  int _historicalImportDone = 0;
+  int _historicalImportTotal = 0;
 
   bool get _canSeeFinancial =>
       _roleCode == 'owner' ||
@@ -188,6 +198,209 @@ class _CustomerServiceHistorySectionState
         _error = error.toString();
       });
     }
+  }
+
+  String _historicalFileName(Map<String, dynamic> file) =>
+      file['name']?.toString().trim() ?? 'historical-photo.jpg';
+
+  String _historicalMimeType(Map<String, dynamic> file) {
+    final mime = file['mime_type']?.toString().trim().toLowerCase() ?? '';
+    if (mime == 'image/png' || mime == 'image/webp' || mime == 'image/jpeg') {
+      return mime;
+    }
+    final name = _historicalFileName(file).toLowerCase();
+    if (name.endsWith('.png')) return 'image/png';
+    if (name.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
+  }
+
+  Future<void> _importHistoricalJobPhotos() async {
+    if (_historicalImporting || _roleCode != 'owner' || !Platform.isAndroid) {
+      return;
+    }
+
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Historical photo import needs a connection so the recovered photos can be copied into Briskers storage.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final completedJobs = _jobs.where((job) {
+      return job['status']?.toString().toLowerCase() == 'completed';
+    }).toList();
+    if (completedJobs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No completed jobs are available to match.')),
+      );
+      return;
+    }
+
+    List<dynamic>? picked;
+    try {
+      picked = await _androidFileChannel.invokeMethod<List<dynamic>>(
+        'pickHistoricalPhotoFolder',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = 'Could not scan the selected photo folder. $error');
+      return;
+    }
+    if (picked == null || !mounted) return;
+
+    final files = picked
+        .whereType<Map>()
+        .map((raw) => Map<String, dynamic>.from(raw))
+        .toList();
+    final matches = _historicalMatcher.exactMatches(
+      completedJobs,
+      files,
+    );
+    final matchedUris = matches
+        .map((match) => match.file['uri']?.toString() ?? '')
+        .where((uri) => uri.isNotEmpty)
+        .toSet();
+    final unmatched = files
+        .where((file) => !matchedUris.contains(file['uri']?.toString() ?? ''))
+        .length;
+
+    final byJob = <String, List<HistoricalPhotoMatch>>{};
+    for (final match in matches) {
+      final jobId = match.job['id']?.toString() ?? '';
+      if (jobId.isEmpty) continue;
+      byJob.putIfAbsent(jobId, () => []).add(match);
+    }
+
+    if (!mounted) return;
+    final previewLines = byJob.entries.map((entry) {
+      final first = entry.value.first;
+      final jobNumber = first.job['job_number']?.toString() ?? 'Job';
+      return '$jobNumber: ${entry.value.length} photo(s)';
+    }).take(12).toList();
+
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Import historical job photos?'),
+        content: SingleChildScrollView(
+          child: Text(
+            'Scanned ${files.length} image file(s).\n'
+            'Exact completed-job matches: ${matches.length}\n'
+            'Jobs matched: ${byJob.length}\n'
+            'Unmatched files left untouched: $unmatched'
+            '${previewLines.isEmpty ? '' : '\n\n' + previewLines.join('\n')}'
+            '\n\nOnly exact job-number matches will be imported. '
+            'Photos are copied into Briskers private storage and tagged as historical MobileBiz photos.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: matches.isEmpty
+                ? null
+                : () => Navigator.pop(dialogContext, true),
+            child: const Text('Import matched photos'),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true || !mounted) return;
+
+    setState(() {
+      _historicalImporting = true;
+      _historicalImportDone = 0;
+      _historicalImportTotal = matches.length;
+      _error = null;
+    });
+
+    var imported = 0;
+    var skipped = 0;
+    var failed = 0;
+
+    for (final entry in byJob.entries) {
+      final jobId = entry.key;
+      final group = entry.value;
+      final existingNames = <String>{};
+
+      try {
+        final inspection = await _api.jobPreInspection(
+          widget.businessId,
+          jobId,
+        );
+        final photos = List<dynamic>.from(
+          inspection?['photos'] ?? const <dynamic>[],
+        );
+        for (final raw in photos.whereType<Map>()) {
+          final name = raw['filename']?.toString().trim().toLowerCase() ?? '';
+          if (name.isNotEmpty) existingNames.add(name);
+        }
+      } catch (_) {
+        // Import can still continue; the upload path will report any failure.
+      }
+
+      for (final match in group) {
+        final file = match.file;
+        final filename = _historicalFileName(file);
+        final lowerName = filename.toLowerCase();
+        try {
+          if (existingNames.contains(lowerName)) {
+            skipped += 1;
+          } else {
+            final uri = file['uri']?.toString() ?? '';
+            if (uri.isEmpty) throw StateError('Photo URI is missing.');
+            final bytes = await _androidFileChannel.invokeMethod<Uint8List>(
+              'readHistoricalPhotoFile',
+              {'uri': uri},
+            );
+            if (bytes == null || bytes.isEmpty) {
+              throw StateError('Could not read $filename.');
+            }
+
+            final jobNumber = match.job['job_number']?.toString() ?? '';
+            await _api.uploadJobPreInspectionPhoto(
+              widget.businessId,
+              jobId,
+              filename: filename,
+              mimeType: _historicalMimeType(file),
+              bytes: bytes,
+              note: jobNumber.isEmpty
+                  ? 'Historical MobileBiz photo'
+                  : 'Historical MobileBiz photo • $jobNumber',
+            );
+            existingNames.add(lowerName);
+            imported += 1;
+          }
+        } catch (_) {
+          failed += 1;
+        }
+
+        if (mounted) {
+          setState(() => _historicalImportDone += 1);
+        }
+      }
+    }
+
+    if (!mounted) return;
+    setState(() => _historicalImporting = false);
+    await _load();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Historical photo import: $imported imported'
+          '${skipped > 0 ? ', $skipped already present' : ''}'
+          '${failed > 0 ? ', $failed failed' : ''}.',
+        ),
+      ),
+    );
   }
 
   bool _matchesVehicle(Map<String, dynamic> row) {
@@ -697,6 +910,31 @@ class _CustomerServiceHistorySectionState
               ),
             )
           else ...[
+            if (_roleCode == 'owner' && Platform.isAndroid) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _historicalImporting
+                        ? null
+                        : _importHistoricalJobPhotos,
+                    icon: _historicalImporting
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.photo_library_outlined),
+                    label: Text(
+                      _historicalImporting
+                          ? 'Importing $_historicalImportDone of $_historicalImportTotal...'
+                          : 'Import historical job photos',
+                    ),
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+            ],
             _vehicleSelector(),
             _historyTypeSelector(),
             const Divider(height: 1),
