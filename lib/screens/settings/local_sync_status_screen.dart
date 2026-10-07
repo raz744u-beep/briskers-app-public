@@ -16,6 +16,8 @@ import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../../services/offline_customer_detail_write_service.dart';
 import '../../services/offline_financial_write_service.dart';
 import '../../services/offline_document_draft_service.dart';
+import '../../services/offline_document_edit_service.dart';
+import '../../services/local_tax_settings_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_work_findings_service.dart';
 
@@ -51,6 +53,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   final OfflineFinancialWriteService _financial = OfflineFinancialWriteService();
   final OfflineDocumentDraftService _documentDrafts =
       OfflineDocumentDraftService();
+  final OfflineDocumentEditService _documentEdits =
+      OfflineDocumentEditService();
+  final LocalTaxSettingsCache _taxSettings =
+      LocalTaxSettingsCache();
   final OfflineEstimateInvoiceService _estimateInvoice =
       OfflineEstimateInvoiceService();
 
@@ -265,6 +271,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       () => _documentDrafts.flush(widget.businessId),
     );
     await attempt(
+      'Cached estimate / invoice edits',
+      () => _documentEdits.flush(widget.businessId),
+    );
+    await attempt(
       'Estimate / invoice changes',
       () => _estimateInvoice.flush(widget.businessId),
     );
@@ -294,6 +304,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     await attempt(
       'Items / Catalog',
       () => _catalog.pull(widget.businessId),
+    );
+    await attempt(
+      'Tax settings',
+      () => _taxSettings.refresh(widget.businessId),
     );
     await attempt(
       'Estimates / Invoices',
