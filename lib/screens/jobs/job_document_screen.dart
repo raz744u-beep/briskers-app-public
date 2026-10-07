@@ -1094,8 +1094,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       builder: (_) => _EditLineDialog(
         line: line,
         accent: _documentActionColor,
-        title: 'Add item to invoice',
-        saveLabel: 'Add to Invoice',
+        title: _estimate ? 'Add item to estimate' : 'Add item to invoice',
+        saveLabel: _estimate ? 'Add to Estimate' : 'Add to Invoice',
         lockCatalogFields: true,
         clearNumericOnFirstTap: true,
       ),
