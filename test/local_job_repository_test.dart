@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_job_repository.dart';
+import 'package:briskers_app/services/local_document_repository.dart';
 
 void main() {
   test('local job repository rebuilds list and detail snapshots', () async {
@@ -252,4 +253,33 @@ void main() {
 
     await database.close();
   });
+
+  test('local document repository exposes creation time for stale detail recovery',
+      () async {
+    final database = BriskersLocalDatabase(NativeDatabase.memory());
+    final documents = LocalDocumentRepository(database: database);
+    final created =
+        DateTime.utc(2026, 10, 7, 0, 15).millisecondsSinceEpoch ~/ 1000;
+
+    await database.customStatement(
+      '''
+      INSERT INTO local_documents (
+        id, business_id, kind, status, converted, total,
+        created_at, row_version, sync_state
+      ) VALUES (?, ?, 'estimate', 'draft', 0, 0, ?, 1, 'synced')
+      ''',
+      ['estimate-1', 'business-1', created],
+    );
+
+    final value = await documents.createdAtForDocument(
+      'business-1',
+      'estimate-1',
+    );
+
+    expect(value, isNotNull);
+    expect(DateTime.parse(value!).toUtc(), DateTime.utc(2026, 10, 7, 0, 15));
+
+    await database.close();
+  });
+
 }
