@@ -271,6 +271,20 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       () => _documentDrafts.flush(widget.businessId),
     );
     await attempt(
+      'Tax settings',
+      () async {
+        final settings = await _taxSettings.refresh(widget.businessId);
+        final rate = num.tryParse(
+              settings['sales_tax_rate']?.toString() ?? '',
+            ) ??
+            0;
+        await _documentEdits.repairPendingCatalogTaxes(
+          widget.businessId,
+          rate,
+        );
+      },
+    );
+    await attempt(
       'Cached estimate / invoice edits',
       () => _documentEdits.flush(widget.businessId),
     );
