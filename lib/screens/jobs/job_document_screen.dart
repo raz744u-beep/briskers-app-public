@@ -198,9 +198,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         return;
       }
       final cachedTax = await _taxSettingsCache.load(widget.businessId);
+      final cachedRate = num.tryParse(
+            cachedTax?['sales_tax_rate']?.toString() ?? '',
+          ) ??
+          0;
+      if (cachedRate > 0) {
+        try {
+          await _offlineDocumentEdit.repairPendingCatalogTaxes(
+            widget.businessId,
+            cachedRate,
+          );
+        } catch (_) {}
+      }
+      final repairedCached =
+          await _detailCache.load(widget.businessId, widget.documentId) ??
+              cached;
       if (!mounted) return;
       setState(() {
-        _detail = cached;
+        _detail = repairedCached;
         if (!_notesDirty && !_notesFocusNode.hasFocus) {
           _notesController.text = cached['memo']?.toString() ?? '';
         }
@@ -210,10 +225,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _submissionReadiness = const {};
         _invoiceStyles = const [];
         _openFindings = const [];
-        _defaultTaxRate = num.tryParse(
-              cachedTax?['sales_tax_rate']?.toString() ?? '',
-            ) ??
-            0;
+        _defaultTaxRate = cachedRate;
         _taxSettingsCached = cachedTax != null;
         _loading = false;
         _error = null;
