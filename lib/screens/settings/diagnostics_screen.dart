@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../services/diagnostics_service.dart';
+import '../../services/functional_diagnostics_service.dart';
 import '../../widgets/briskers_page_header.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
@@ -24,12 +25,16 @@ class DiagnosticsScreen extends StatefulWidget {
 class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   final BriskersDiagnosticsService _diagnostics =
       BriskersDiagnosticsService();
+  final BriskersFunctionalDiagnosticsService _functionalDiagnostics =
+      const BriskersFunctionalDiagnosticsService();
 
   bool _running = false;
+  bool _functionalRunning = false;
   DiagnosticsReport? _report;
+  FunctionalDiagnosticsReport? _functionalReport;
 
   Future<void> _run({required bool full}) async {
-    if (_running || widget.roleCode != 'owner') return;
+    if (_running || _functionalRunning || widget.roleCode != 'owner') return;
     setState(() => _running = true);
     try {
       final report = await _diagnostics.run(
@@ -43,10 +48,26 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     }
   }
 
+  Future<void> _runFunctional() async {
+    if (_running || _functionalRunning || widget.roleCode != 'owner') return;
+    setState(() => _functionalRunning = true);
+    try {
+      final report = await _functionalDiagnostics.run();
+      if (!mounted) return;
+      setState(() => _functionalReport = report);
+    } finally {
+      if (mounted) setState(() => _functionalRunning = false);
+    }
+  }
+
   Future<void> _copyReport() async {
-    final report = _report;
-    if (report == null) return;
-    await Clipboard.setData(ClipboardData(text: report.toText()));
+    final parts = <String>[];
+    if (_report != null) parts.add(_report!.toText());
+    if (_functionalReport != null) {
+      parts.add(_functionalReport!.toText());
+    }
+    if (parts.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: parts.join('\n')));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Diagnostic report copied.')),
@@ -67,6 +88,43 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
       BriskersDiagnosticLevel.warning => Icons.warning_amber_rounded,
       BriskersDiagnosticLevel.fail => Icons.error_outline,
     };
+  }
+
+  Widget _checkCard(DiagnosticCheck check) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ExpansionTile(
+        leading: Icon(
+          _levelIcon(check.level),
+          color: _levelColor(check.level),
+        ),
+        title: Text(
+          check.id + ' • ' + check.title,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        subtitle: Text(check.summary),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        children: [
+          if (check.details.isEmpty)
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('No additional details.'),
+            )
+          else
+            for (final detail in check.details)
+              Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('•  '),
+                    Expanded(child: Text(detail)),
+                  ],
+                ),
+              ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -92,6 +150,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     }
 
     final report = _report;
+    final functionalReport = _functionalReport;
     final categories = <String, List<DiagnosticCheck>>{};
     if (report != null) {
       for (final check in report.checks) {
@@ -136,14 +195,14 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Read-only checks. Diagnostics does not modify shop records.',
+                    'Read-only checks against the real local shop data. Diagnostics does not modify shop records.',
                   ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: _running
+                          onPressed: _running || _functionalRunning
                               ? null
                               : () => _run(full: false),
                           icon: const Icon(Icons.bolt_outlined),
@@ -157,8 +216,9 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                             backgroundColor: BriskersColors.settings,
                             foregroundColor: Colors.white,
                           ),
-                          onPressed:
-                              _running ? null : () => _run(full: true),
+                          onPressed: _running || _functionalRunning
+                              ? null
+                              : () => _run(full: true),
                           icon: const Icon(Icons.fact_check_outlined),
                           label: const Text('Full Check'),
                         ),
@@ -169,12 +229,130 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                     const SizedBox(height: 12),
                     const LinearProgressIndicator(),
                     const SizedBox(height: 6),
-                    const Text('Running diagnostics…'),
+                    const Text('Running health diagnostics…'),
                   ],
                 ],
               ),
             ),
           ),
+          const SizedBox(height: 10),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(
+                        Icons.science_outlined,
+                        color: Color(0xFF1976D2),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Functional Sandbox',
+                          style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Runs 5 real workflow tests in a disposable in-memory database. It does not touch your customers, jobs, invoices, expenses or the network.',
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF1976D2),
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: _running || _functionalRunning
+                          ? null
+                          : _runFunctional,
+                      icon: const Icon(Icons.play_arrow_rounded),
+                      label: const Text('Run Functional Check'),
+                    ),
+                  ),
+                  if (_functionalRunning) ...[
+                    const SizedBox(height: 12),
+                    const LinearProgressIndicator(),
+                    const SizedBox(height: 6),
+                    const Text('Running isolated workflow tests…'),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          if (functionalReport != null) ...[
+            const SizedBox(height: 10),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _SummaryCount(
+                            label: 'Passed',
+                            count: functionalReport.passed,
+                            color: const Color(0xFF169B62),
+                          ),
+                        ),
+                        Expanded(
+                          child: _SummaryCount(
+                            label: 'Warnings',
+                            count: functionalReport.warnings,
+                            color: const Color(0xFFE58A00),
+                          ),
+                        ),
+                        Expanded(
+                          child: _SummaryCount(
+                            label: 'Failed',
+                            count: functionalReport.failed,
+                            color: const Color(0xFFC62828),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Functional Check • Isolated sandbox',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: _copyReport,
+                          icon: const Icon(Icons.copy_outlined),
+                          label: const Text('Copy'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(4, 12, 4, 6),
+              child: Text(
+                'Functional sandbox',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            for (final check in functionalReport.checks) _checkCard(check),
+          ],
           if (report != null) ...[
             const SizedBox(height: 10),
             Card(
@@ -243,44 +421,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                   ),
                 ),
               ),
-              for (final check in entry.value)
-                Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ExpansionTile(
-                    leading: Icon(
-                      _levelIcon(check.level),
-                      color: _levelColor(check.level),
-                    ),
-                    title: Text(
-                      check.id + ' • ' + check.title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    subtitle: Text(check.summary),
-                    childrenPadding:
-                        const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                    children: [
-                      if (check.details.isEmpty)
-                        const Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text('No additional details.'),
-                        )
-                      else
-                        for (final detail in check.details)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 5),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('•  '),
-                                Expanded(child: Text(detail)),
-                              ],
-                            ),
-                          ),
-                    ],
-                  ),
-                ),
+              for (final check in entry.value) _checkCard(check),
             ],
           ],
         ],
