@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:drift/drift.dart';
 
+import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_document_detail_cache.dart';
@@ -11,11 +12,14 @@ class OfflineDocumentEditService {
   OfflineDocumentEditService({
     BriskersApi api = const BriskersApi(),
     LocalDocumentDetailCache cache = const LocalDocumentDetailCache(),
+    BriskersLocalDatabase? database,
   })  : _api = api,
-        _cache = cache;
+        _cache = cache,
+        _database = database ?? localDatabase;
 
   final BriskersApi _api;
   final LocalDocumentDetailCache _cache;
+  final BriskersLocalDatabase _database;
   final Random _random = Random.secure();
 
   int _unixNow() =>
@@ -280,7 +284,7 @@ class OfflineDocumentEditService {
       'sync_state': 'pending',
     };
 
-    await localDatabase.customStatement(
+    await _database.customStatement(
       '''
       UPDATE local_documents
       SET total = ?, sync_state = 'pending'
@@ -299,7 +303,7 @@ class OfflineDocumentEditService {
     bool replaceSameOperation = false,
   }) async {
     if (replaceSameOperation) {
-      final existing = await localDatabase.customSelect(
+      final existing = await _database.customSelect(
         '''
         SELECT id
         FROM sync_outbox
@@ -318,7 +322,7 @@ class OfflineDocumentEditService {
         ],
       ).get();
       if (existing.isNotEmpty) {
-        await localDatabase.customStatement(
+        await _database.customStatement(
           '''
           UPDATE sync_outbox
           SET payload_json = ?, last_error = NULL
@@ -333,7 +337,7 @@ class OfflineDocumentEditService {
       }
     }
 
-    await localDatabase.customStatement(
+    await _database.customStatement(
       '''
       INSERT INTO sync_outbox (
         business_id, entity_type, entity_id, operation, payload_json,
@@ -351,7 +355,7 @@ class OfflineDocumentEditService {
   }
 
   Future<void> flush(String businessId) async {
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       '''
       SELECT *
       FROM sync_outbox
@@ -496,12 +500,12 @@ class OfflineDocumentEditService {
           serverDetail = await _api.documentDetail(businessId, documentId);
         }
 
-        await localDatabase.customStatement(
+        await _database.customStatement(
           'DELETE FROM sync_outbox WHERE id = ?',
           [outboxId],
         );
       } catch (error) {
-        await localDatabase.customStatement(
+        await _database.customStatement(
           '''
           UPDATE sync_outbox
           SET attempt_count = attempt_count + 1,
@@ -516,7 +520,7 @@ class OfflineDocumentEditService {
     }
 
     await _cache.save(businessId, documentId, serverDetail);
-    await localDatabase.customStatement(
+    await _database.customStatement(
       '''
       UPDATE local_documents
       SET status = ?, total = ?, row_version = ?,
@@ -538,7 +542,7 @@ class OfflineDocumentEditService {
     int outboxId,
     Map<String, dynamic> fallback,
   ) async {
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       'SELECT payload_json FROM sync_outbox WHERE id = ? LIMIT 1',
       variables: [Variable<int>(outboxId)],
     ).get();
@@ -594,7 +598,7 @@ class OfflineDocumentEditService {
     String localId,
     String serverId,
   ) async {
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       '''
       SELECT id, payload_json
       FROM sync_outbox
@@ -627,7 +631,7 @@ class OfflineDocumentEditService {
         }
       }
       if (changed) {
-        await localDatabase.customStatement(
+        await _database.customStatement(
           'UPDATE sync_outbox SET payload_json = ? WHERE id = ?',
           [jsonEncode(payload), row.read<int>('id')],
         );
