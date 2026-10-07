@@ -1751,6 +1751,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                     final invoice = invoices[index];
                     final number =
                         invoice['document_number']?.toString() ?? '';
+                    final customerName =
+                        invoice['customer_name']?.toString().trim().isNotEmpty ==
+                                true
+                            ? invoice['customer_name'].toString().trim()
+                            : estimate['customer_name']?.toString().trim() ?? '';
                     final vehicle =
                         invoice['vehicle']?.toString().trim() ?? '';
                     final jobNumber =
@@ -1784,9 +1789,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                               : Colors.grey.shade600,
                         ),
                         title: Text(
-                          number.isEmpty
-                              ? 'Open invoice'
-                              : 'Invoice #$number',
+                          <String>[
+                            number.isEmpty
+                                ? 'Open invoice'
+                                : 'Invoice #$number',
+                            if (customerName.isNotEmpty) customerName,
+                          ].join(' — '),
                           style: const TextStyle(
                             fontWeight: FontWeight.w800,
                           ),
@@ -5505,7 +5513,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             children: [
               if (!_readOnly)
                 ListTile(
-                  leading: const Icon(Icons.edit_outlined),
+                  leading: Icon(
+                    Icons.edit_outlined,
+                    color: _estimate
+                        ? BriskersColors.estimates
+                        : BriskersColors.invoices,
+                  ),
                   title: Text(
                     _estimate ? tr('editEstimate') : tr('editInvoice'),
                   ),
@@ -5535,19 +5548,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   title: Text(tr('addExpense')),
                   onTap: () => Navigator.pop(sheetContext, 'add_expense'),
                 ),
-              ListTile(
-                leading: const Icon(Icons.refresh),
-                title: Text(tr('refresh')),
-                onTap: () => Navigator.pop(sheetContext, 'refresh'),
-              ),
               if (_estimate && !_converted) ...[
                 ListTile(
-                  leading: const Icon(Icons.receipt_long_outlined),
+                  leading: const Icon(
+                    Icons.receipt_long_outlined,
+                    color: BriskersColors.invoices,
+                  ),
                   title: const Text('Convert to New Invoice'),
                   onTap: () => Navigator.pop(sheetContext, 'convert_new'),
                 ),
                 ListTile(
-                  leading: const Icon(Icons.post_add_outlined),
+                  leading: const Icon(
+                    Icons.post_add_outlined,
+                    color: BriskersColors.invoices,
+                  ),
                   title: const Text('Add to Existing Invoice'),
                   onTap: () => Navigator.pop(sheetContext, 'add_to_invoice'),
                 ),
@@ -5578,8 +5592,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     if (!mounted || action == null) return;
     switch (action) {
-      case 'refresh':
-        await _load();
       case 'convert':
         await _convertEstimate();
       case 'convert_new':
