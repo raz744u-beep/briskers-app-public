@@ -82,8 +82,11 @@ class OfflineFinancialWriteService {
 
   Future<List<Map<String, dynamic>>> _allTransactions(
     String businessId,
-  ) {
-    return _cache.loadTransactions(businessId);
+  ) async {
+    final rows = await _cache.loadTransactions(businessId);
+    return rows
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList(growable: true);
   }
 
   Future<void> _upsertSummary(
