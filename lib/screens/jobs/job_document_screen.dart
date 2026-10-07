@@ -1439,6 +1439,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       return null;
     }
 
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      final localDetail = _detail;
+      if (localDetail == null) return null;
+      return Map<String, dynamic>.from(localDetail);
+    }
+
     try {
       final currentStatus = _detail?['status']?.toString() ?? 'draft';
       final currentNumber =
