@@ -176,4 +176,108 @@ void main() {
 
     await database.close();
   });
+
+  test('pending taxable catalog line is repaired before reconnect sync',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+
+    final database = BriskersLocalDatabase(NativeDatabase.memory());
+    const cache = LocalDocumentDetailCache();
+    final service = OfflineDocumentEditService(
+      api: _FakeApi(),
+      cache: cache,
+      database: database,
+    );
+
+    await database.customStatement(
+      '''
+      INSERT INTO local_catalog_items (
+        id, business_id, name, description, item_type, selling_price,
+        pricing_unit, cost, taxable, category, barcode, active, sync_state
+      ) VALUES (?, ?, ?, NULL, 'non_inventory', 768.23, NULL, 0, 1,
+                'Drivetrain', NULL, 1, 'synced')
+      ''',
+      ['item-pan', 'business-1', 'Transmission Pan'],
+    );
+
+    await cache.save('business-1', 'estimate-tax', {
+      'id': 'estimate-tax',
+      'kind': 'estimate',
+      'status': 'draft',
+      'row_version': 1,
+      'net_amount': 768.23,
+      'tax_amount': 0,
+      'total_amount': 768.23,
+      'lines': <Map<String, dynamic>>[
+        {
+          'id': 'local-doc-line-tax',
+          'name': 'Transmission Pan',
+          'item_id': 'item-pan',
+          'quantity': 1,
+          'unit_price': 768.23,
+          'tax_rate': 0,
+          'net_amount': 768.23,
+          'tax_amount': 0,
+          'line_kind': 'item',
+          'position': 1,
+          '_local_pending': true,
+        },
+      ],
+    });
+
+    await database.customStatement(
+      '''
+      INSERT INTO local_documents (
+        id, business_id, job_id, customer_id, kind, status,
+        display_status_code, converted, total, row_version, sync_state
+      ) VALUES (?, ?, ?, ?, 'estimate', 'draft', 'draft', 0, 768.23, 1, 'pending')
+      ''',
+      ['estimate-tax', 'business-1', 'job-1', 'customer-1'],
+    );
+
+    await database.customStatement(
+      '''
+      INSERT INTO sync_outbox (
+        business_id, entity_type, entity_id, operation, payload_json,
+        state, attempt_count, created_at
+      ) VALUES (?, 'document_edit', ?, 'add_line', ?, 'pending', 0, ?)
+      ''',
+      [
+        'business-1',
+        'estimate-tax',
+        '{"local_line_id":"local-doc-line-tax","name":"Transmission Pan","item_id":"item-pan","quantity":1,"unit_price":768.23,"tax_rate":0,"line_kind":"item"}',
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+      ],
+    );
+
+    final repaired = await service.repairPendingCatalogTaxes(
+      'business-1',
+      0.0975,
+    );
+    expect(repaired, 1);
+
+    final cached = await cache.load('business-1', 'estimate-tax');
+    final lines = List<dynamic>.from(cached!['lines'] as List);
+    final line = Map<String, dynamic>.from(lines.single as Map);
+    expect((line['tax_rate'] as num).toDouble(), closeTo(0.0975, 0.000001));
+    expect((line['tax_amount'] as num).toDouble(), closeTo(74.902425, 0.0001));
+    expect((cached['tax_amount'] as num).toDouble(), closeTo(74.902425, 0.0001));
+    expect((cached['total_amount'] as num).toDouble(), closeTo(843.132425, 0.0001));
+
+    final outbox = await database.customSelect(
+      '''
+      SELECT payload_json
+      FROM sync_outbox
+      WHERE business_id = ? AND entity_id = ?
+      ''',
+      variables: [
+        const Variable<String>('business-1'),
+        const Variable<String>('estimate-tax'),
+      ],
+    ).getSingle();
+    expect(outbox.read<String>('payload_json'), contains('"tax_rate":0.0975'));
+
+    await database.close();
+  });
+
 }
