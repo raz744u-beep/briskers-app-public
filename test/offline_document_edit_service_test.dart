@@ -132,7 +132,13 @@ void main() {
     final cached = await cache.load('business-1', 'estimate-1');
     final lines = List<dynamic>.from(cached!['lines'] as List);
     expect(lines, hasLength(1));
-    expect((lines.single as Map)['name'], 'Oil filter');
+    final localLine = Map<String, dynamic>.from(lines.single as Map);
+    expect(localLine['name'], 'Oil filter');
+    expect((localLine['unit_price'] as num).toDouble(), closeTo(10.00, 0.001));
+    expect((localLine['net_amount'] as num).toDouble(), closeTo(10.00, 0.001));
+    expect((localLine['tax_amount'] as num).toDouble(), closeTo(0.90, 0.001));
+    expect((cached['net_amount'] as num).toDouble(), closeTo(10.00, 0.001));
+    expect((cached['tax_amount'] as num).toDouble(), closeTo(0.90, 0.001));
     expect((cached['total_amount'] as num).toDouble(), closeTo(10.90, 0.001));
 
     final outbox = await database.customSelect(
