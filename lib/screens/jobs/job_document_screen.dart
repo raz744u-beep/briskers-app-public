@@ -17,6 +17,7 @@ import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_document_repository.dart';
+import '../../services/local_invoice_status_styles_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_document_edit_service.dart';
@@ -54,6 +55,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       const LocalDocumentDetailCache();
   final LocalDocumentRepository _localDocuments =
       LocalDocumentRepository();
+  final LocalInvoiceStatusStylesCache _localInvoiceStyles =
+      LocalInvoiceStatusStylesCache();
   final OfflineEstimateInvoiceService _offlineEstimateInvoice =
       OfflineEstimateInvoiceService();
   final OfflineDocumentDraftService _offlineDocumentDraft =
@@ -238,6 +241,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         return;
       }
       final cachedTax = await _taxSettingsCache.load(widget.businessId);
+      final cachedInvoiceStyles =
+          await _localInvoiceStyles.load(widget.businessId);
       final cachedRate = num.tryParse(
             cachedTax?['sales_tax_rate']?.toString() ?? '',
           ) ??
@@ -265,7 +270,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _warrantyDetail = const {};
         _signatureStatus = const {};
         _submissionReadiness = const {};
-        _invoiceStyles = const [];
+        _invoiceStyles = cachedInvoiceStyles;
         _openFindings = const [];
         _defaultTaxRate = cachedRate;
         _taxSettingsCached = cachedTax != null;
@@ -294,6 +299,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       Map<String, dynamic> submissionReadiness = const {};
       if (detail['kind']?.toString() == 'invoice') {
         invoiceStyles = await _api.invoiceStatusStyles(widget.businessId);
+        await _localInvoiceStyles.save(
+          widget.businessId,
+          invoiceStyles,
+        );
         try {
           warrantyDetail = await _api.documentWarrantyDetail(
             widget.businessId,
@@ -3327,9 +3336,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       if (style != null) {
         return invoiceStatusColorFromHex(
           style['color_hex']?.toString(),
-          fallback: BriskersColors.invoices,
+          fallback: invoiceStatusDefaultColor(code),
         );
       }
+      return invoiceStatusDefaultColor(code);
     }
 
     switch (label) {
@@ -3354,6 +3364,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       if (style != null) {
         return invoiceStatusIcon(style['icon_key']?.toString());
       }
+      return invoiceStatusDefaultIcon(code);
     }
 
     switch (label) {
