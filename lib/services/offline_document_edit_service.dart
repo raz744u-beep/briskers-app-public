@@ -267,7 +267,8 @@ class OfflineDocumentEditService {
 
     var net = 0.0;
     var tax = 0.0;
-    for (final line in lines) {
+    for (var index = 0; index < lines.length; index++) {
+      final line = lines[index];
       final kind = line['line_kind']?.toString() ?? 'item';
       if (kind == 'discount') {
         net += _number(line['net_amount']).toDouble();
@@ -277,8 +278,16 @@ class OfflineDocumentEditService {
       final quantity = _number(line['quantity']);
       final unitPrice = _number(line['unit_price']);
       final amount = quantity * unitPrice;
+      final lineTax = amount * _number(line['tax_rate']);
+      final lineTotal = amount + lineTax;
+      lines[index] = <String, dynamic>{
+        ...line,
+        'net_amount': amount.toDouble(),
+        'tax_amount': lineTax.toDouble(),
+        'total_amount': lineTotal.toDouble(),
+      };
       net += amount.toDouble();
-      tax += (amount * _number(line['tax_rate'])).toDouble();
+      tax += lineTax.toDouble();
     }
 
     final total = net + tax;
