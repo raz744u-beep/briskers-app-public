@@ -3575,8 +3575,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final vehicle = _detail?['vehicle']?.toString().trim() ?? '';
     final vin = _detail?['vehicle_vin']?.toString().trim() ?? '';
     final mileage = _detail?['odometer_in']?.toString().trim() ?? '';
+    final documentDateRaw =
+        _detail?['document_date']?.toString().trim() ?? '';
+    final createdAtRaw =
+        _detail?['created_at']?.toString().trim() ?? '';
     final date = _dateLabel(
-      _detail?['document_date'] ?? _detail?['created_at'],
+      documentDateRaw.isNotEmpty ? documentDateRaw : createdAtRaw,
     );
     final job = _detail?['job_number']?.toString().trim() ?? '';
 
