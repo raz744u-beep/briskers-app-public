@@ -24,69 +24,51 @@ class DocumentIndexSyncService {
   final LocalDocumentDetailCache _detailCache = const LocalDocumentDetailCache();
 
   Future<void> pull(String businessId) async {
-    final state = await localDatabase.customSelect(
+    final results = await Future.wait<dynamic>([
+      _api.documents(businessId, kind: 'estimate'),
+      _api.documents(businessId, kind: 'invoice'),
+    ]);
+
+    final estimates =
+        List<Map<String, dynamic>>.from(results[0] as List);
+    final invoices =
+        List<Map<String, dynamic>>.from(results[1] as List);
+    final all = <Map<String, dynamic>>[
+      ...estimates,
+      ...invoices,
+    ];
+
+    await _repository.replaceFromServer(
+      businessId,
+      estimates,
+      kind: 'estimate',
+    );
+    await _repository.replaceFromServer(
+      businessId,
+      invoices,
+      kind: 'invoice',
+    );
+    await _prefetchOpenDocumentDetails(businessId, all);
+
+    await localDatabase.customStatement(
       '''
-      SELECT last_server_cursor
-      FROM local_sync_states
-      WHERE business_id = ? AND scope = ?
-      LIMIT 1
+      INSERT INTO local_sync_states (
+        business_id, scope, last_server_cursor, last_pull_at,
+        last_error, bootstrapped
+      ) VALUES (?, ?, NULL, ?, NULL, 1)
+      ON CONFLICT(business_id, scope) DO UPDATE SET
+        last_server_cursor=NULL,
+        last_pull_at=excluded.last_pull_at,
+        last_error=NULL,
+        bootstrapped=1
       ''',
-      variables: [
-        Variable<String>(businessId),
-        const Variable<String>(_scope),
-      ],
-    ).get();
-
-    var cursor = state.isEmpty
-        ? 0
-        : state.first.readNullable<int>('last_server_cursor') ?? 0;
-    var hasMore = true;
-
-    while (hasMore) {
-      final response = await _api.syncPullDocuments(
+      [
         businessId,
-        afterVersion: cursor,
-      );
-      final raw = List<dynamic>.from(
-        response['documents'] ?? const <dynamic>[],
-      );
-      final documents = raw
-          .whereType<Map>()
-          .map((value) => Map<String, dynamic>.from(value))
-          .toList();
-      final next = int.tryParse(
-            response['next_version']?.toString() ?? '',
-          ) ??
-          cursor;
+        _scope,
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+      ],
+    );
 
-      await _repository.upsertFromServer(businessId, documents);
-      await _prefetchOpenDocumentDetails(businessId, documents);
-      await localDatabase.customStatement(
-        '''
-        INSERT INTO local_sync_states (
-          business_id, scope, last_server_cursor, last_pull_at,
-          last_error, bootstrapped
-        ) VALUES (?, ?, ?, ?, NULL, 1)
-        ON CONFLICT(business_id, scope) DO UPDATE SET
-          last_server_cursor=excluded.last_server_cursor,
-          last_pull_at=excluded.last_pull_at,
-          last_error=NULL,
-          bootstrapped=1
-        ''',
-        [
-          businessId,
-          _scope,
-          next,
-          DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
-        ],
-      );
-
-      hasMore = response['has_more'] == true;
-      if (hasMore && next <= cursor) {
-        throw StateError('Document sync cursor did not advance.');
-      }
-      cursor = next;
-    }
     _syncEvents.add(businessId);
   }
 
