@@ -20,6 +20,8 @@ import '../services/offline_customer_detail_write_service.dart';
 import '../services/offline_financial_write_service.dart';
 import '../services/offline_estimate_invoice_service.dart';
 import '../services/offline_document_draft_service.dart';
+import '../services/offline_document_edit_service.dart';
+import '../services/local_tax_settings_cache.dart';
 import '../services/offline_work_findings_service.dart';
 import 'kiosk/kiosk_checkin_screen.dart';
 import 'shell_screen.dart';
@@ -54,6 +56,10 @@ class _BusinessGateState extends State<BusinessGate> {
       OfflineEstimateInvoiceService();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
+  final OfflineDocumentEditService _offlineDocumentEdit =
+      OfflineDocumentEditService();
+  final LocalTaxSettingsCache _taxSettingsCache =
+      LocalTaxSettingsCache();
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
   final OfflineWorkFindingsService _offlineWorkFindings =
       OfflineWorkFindingsService();
@@ -265,6 +271,12 @@ class _BusinessGateState extends State<BusinessGate> {
     }
 
     try {
+      await _offlineDocumentEdit.flush(businessId);
+    } catch (_) {
+      // Cached document edits stay queued and retry on reconnect.
+    }
+
+    try {
       await _offlineEstimateInvoice.flush(businessId);
     } catch (_) {
       // Estimate-to-invoice merges stay queued and retry on reconnect.
@@ -323,6 +335,12 @@ class _BusinessGateState extends State<BusinessGate> {
       await _catalogSync.pull(businessId);
     } catch (_) {
       // Keep the last saved catalog snapshot for offline estimates/invoices.
+    }
+
+    try {
+      await _taxSettingsCache.refresh(businessId);
+    } catch (_) {
+      // Keep the last saved tax settings for offline documents.
     }
 
     try {
