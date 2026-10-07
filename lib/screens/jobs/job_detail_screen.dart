@@ -4503,6 +4503,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       if (!mounted) return;
     }
 
+    if (!mounted) return;
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
