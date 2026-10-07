@@ -900,43 +900,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ].join(' • '),
                         ),
                         trailing: Text(
-                          NumberFormat.currency(symbol: r'$').format(total),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        onTap: () =>
-                            Navigator.pop(sheetContext, estimate),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    if (selected == null || !mounted) return;
-    final id = selected['id']?.toString() ?? '';
-    if (id.isEmpty) return;
-
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => JobDocumentScreen(
-          businessId: widget.businessId,
-          documentId: id,
-          isOwner: widget.roleCode == 'owner',
-          canManageExpenses: _canManage,
-          initialAction: 'add_to_invoice',
-        ),
-      ),
-    );
-  }
-
-  Future<void> _viewEstimates() async {
+                          NumberFormat.currency(symbol: r'
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
@@ -1738,14 +1702,7 @@ class _ActionDrawer extends StatelessWidget {
     );
   }
 }
-).format(
-                            num.tryParse(
-                                  estimate['total_amount']
-                                          ?.toString() ??
-                                      '',
-                                ) ??
-                                0,
-                          ),
+).format(total),
                           style: const TextStyle(
                             fontWeight: FontWeight.w800,
                           ),
