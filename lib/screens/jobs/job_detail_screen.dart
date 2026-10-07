@@ -14,6 +14,7 @@ import '../../services/job_sync_service.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/local_document_repository.dart';
+import '../../services/local_document_detail_cache.dart';
 import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
@@ -52,6 +53,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   final JobSyncService _jobSync = JobSyncService();
   final LocalJobRepository _localJobs = LocalJobRepository();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
+  final LocalDocumentDetailCache _documentDetailCache =
+      const LocalDocumentDetailCache();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
@@ -123,6 +126,61 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     super.dispose();
   }
 
+  Future<List<Map<String, dynamic>>> _localDocumentsForJob() async {
+    final direct = await _localDocuments.listByJob(
+      widget.businessId,
+      widget.jobId,
+    );
+    if (direct.isNotEmpty) return direct;
+
+    final candidates = <Map<String, dynamic>>[
+      ...await _localDocuments.listByKind(
+        widget.businessId,
+        kind: 'estimate',
+      ),
+      ...await _localDocuments.listByKind(
+        widget.businessId,
+        kind: 'invoice',
+      ),
+    ];
+
+    final repaired = <Map<String, dynamic>>[];
+    for (final row in candidates) {
+      if (row['job_id']?.toString() == widget.jobId) {
+        repaired.add(row);
+        continue;
+      }
+
+      final id = row['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+      final detail = await _documentDetailCache.load(
+        widget.businessId,
+        id,
+      );
+      if (detail?['job_id']?.toString() != widget.jobId) continue;
+
+      final merged = <String, dynamic>{
+        ...row,
+        ...detail!,
+        'total_amount':
+            detail['total_amount'] ?? row['total_amount'] ?? 0,
+        '_local_snapshot': true,
+      };
+      repaired.add(merged);
+
+      try {
+        await _localDocuments.upsertFromServer(
+          widget.businessId,
+          [detail],
+        );
+      } catch (_) {
+        // Showing the recovered document is more important than index repair.
+      }
+    }
+
+    return repaired;
+  }
+
   Future<void> _load() async {
     var localShown = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
@@ -137,10 +195,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       );
       if (snapshot != null && mounted) {
         final localDocuments = _canSeeFinancial
-            ? await _localDocuments.listByJob(
-                widget.businessId,
-                widget.jobId,
-              )
+            ? await _localDocumentsForJob()
             : const <Map<String, dynamic>>[];
         localShown = true;
         setState(() {
@@ -4431,6 +4486,17 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   Future<void> _openSectionModal(String key) async {
     if (_job == null) return;
+
+    if (key == 'documents' && _canSeeFinancial) {
+      try {
+        final localDocuments = await _localDocumentsForJob();
+        if (mounted) {
+          setState(() => _documents = localDocuments);
+        }
+      } catch (_) {
+        // Keep the last visible document list if local recovery fails.
+      }
+    }
 
     if (key == 'profit' && _owner) {
       await _reloadProfitability();
