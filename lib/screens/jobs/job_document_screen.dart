@@ -1687,15 +1687,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       estimate,
     );
 
-    if (invoices.isEmpty &&
-        !BriskersConnectionModeController.instance.forceOffline) {
+    if (!BriskersConnectionModeController.instance.forceOffline) {
       try {
+        // Online, use the server list so every eligible open invoice is shown
+        // and vehicle matching can fall back through the linked Job.
         invoices = await _api.eligibleInvoicesForEstimate(
           widget.businessId,
           widget.documentId,
         );
       } catch (_) {
-        // The local list remains authoritative if the network is unavailable.
+        // Fall back to the locally cached list if the network is unavailable.
       }
     }
 
@@ -1750,10 +1751,30 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                     final invoice = invoices[index];
                     final number =
                         invoice['document_number']?.toString() ?? '';
-                    final vehicle = invoice['vehicle']?.toString() ?? '';
+                    final vehicle =
+                        invoice['vehicle']?.toString().trim() ?? '';
                     final jobNumber =
-                        invoice['job_number']?.toString() ?? '';
-                    final sameVehicle = invoice['same_vehicle'] == true;
+                        invoice['job_number']?.toString().trim() ?? '';
+                    final jobTitle =
+                        invoice['job_title']?.toString().trim() ?? '';
+                    final rawStatus =
+                        invoice['status']?.toString().trim() ?? '';
+                    final status = rawStatus.isEmpty
+                        ? ''
+                        : rawStatus
+                            .split('_')
+                            .where((part) => part.isNotEmpty)
+                            .map((part) => part.length == 1
+                                ? part.toUpperCase()
+                                : part[0].toUpperCase() +
+                                    part.substring(1).toLowerCase())
+                            .join(' ');
+                    final sameJob = invoice['same_job'] == true ||
+                        (estimate['job_id']?.toString().isNotEmpty == true &&
+                            invoice['job_id']?.toString() ==
+                                estimate['job_id']?.toString());
+                    final sameVehicle =
+                        sameJob || invoice['same_vehicle'] == true;
                     return Card(
                       child: ListTile(
                         leading: Icon(
@@ -1772,10 +1793,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                         ),
                         subtitle: Text(
                           <String>[
+                            if (jobNumber.isNotEmpty || jobTitle.isNotEmpty)
+                              <String>[
+                                if (jobNumber.isNotEmpty) 'Job $jobNumber',
+                                if (jobTitle.isNotEmpty) jobTitle,
+                              ].join(' • '),
                             if (vehicle.isNotEmpty) vehicle,
-                            if (jobNumber.isNotEmpty) 'Job $jobNumber',
-                            if (sameVehicle) 'Same vehicle',
-                          ].join(' • '),
+                            <String>[
+                              if (status.isNotEmpty) status,
+                              if (sameJob)
+                                'Same job'
+                              else if (sameVehicle)
+                                'Same vehicle',
+                            ].join(' • '),
+                          ].where((line) => line.isNotEmpty).join('\n'),
+                          maxLines: 3,
                         ),
                         trailing: Text(
                           _money(invoice['total_amount']),
@@ -1797,7 +1829,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
     if (selected == null || !mounted) return;
 
-    if (selected['same_vehicle'] != true) {
+    final selectedSameJob = selected['same_job'] == true ||
+        (estimate['job_id']?.toString().isNotEmpty == true &&
+            selected['job_id']?.toString() ==
+                estimate['job_id']?.toString());
+    if (!selectedSameJob && selected['same_vehicle'] != true) {
       final continueDifferentVehicle = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
