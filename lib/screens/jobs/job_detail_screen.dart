@@ -13,6 +13,7 @@ import '../../services/briskers_api.dart';
 import '../../services/job_sync_service.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
+import '../../services/local_document_repository.dart';
 import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
@@ -50,6 +51,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       OfflineWorkFindingsService();
   final JobSyncService _jobSync = JobSyncService();
   final LocalJobRepository _localJobs = LocalJobRepository();
+  final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
@@ -124,6 +126,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Future<void> _load() async {
     var localShown = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
+    final forceOffline =
+        BriskersConnectionModeController.instance.forceOffline;
 
     if (!forceOnline) {
       try {
@@ -132,11 +136,18 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         widget.jobId,
       );
       if (snapshot != null && mounted) {
+        final localDocuments = _canSeeFinancial
+            ? await _localDocuments.listByJob(
+                widget.businessId,
+                widget.jobId,
+              )
+            : const <Map<String, dynamic>>[];
         localShown = true;
         setState(() {
           _job = snapshot.job;
           _preInspection = snapshot.preInspection;
           _statuses = snapshot.statuses;
+          _documents = localDocuments;
           _findings = snapshot.findings;
           _loading = false;
           _onlineReady = false;
@@ -149,6 +160,19 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     } catch (_) {
       // The online load below can still succeed without a local snapshot.
       }
+    }
+
+    if (forceOffline) {
+      if (!localShown && mounted) {
+        setState(() {
+          _loading = false;
+          _onlineReady = false;
+          _showingLocal = false;
+          _error =
+              'This job is not saved on this device yet. Open it online once to cache it.';
+        });
+      }
+      return;
     }
 
     try {
