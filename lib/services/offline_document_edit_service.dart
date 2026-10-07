@@ -7,19 +7,23 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_document_detail_cache.dart';
+import 'local_catalog_repository.dart';
 
 class OfflineDocumentEditService {
   OfflineDocumentEditService({
     BriskersApi api = const BriskersApi(),
     LocalDocumentDetailCache cache = const LocalDocumentDetailCache(),
     BriskersLocalDatabase? database,
+    LocalCatalogRepository? catalog,
   })  : _api = api,
         _cache = cache,
-        _database = database ?? localDatabase;
+        _database = database ?? localDatabase,
+        _catalog = catalog ?? LocalCatalogRepository(database: database);
 
   final BriskersApi _api;
   final LocalDocumentDetailCache _cache;
   final BriskersLocalDatabase _database;
+  final LocalCatalogRepository _catalog;
   final Random _random = Random.secure();
 
   int _unixNow() =>
@@ -369,6 +373,110 @@ class OfflineDocumentEditService {
         _unixNow(),
       ],
     );
+  }
+
+  Future<int> repairPendingCatalogTaxes(
+    String businessId,
+    num defaultTaxRate,
+  ) async {
+    if (defaultTaxRate <= 0) return 0;
+
+    final catalogItems = await _catalog.items(
+      businessId,
+      includeInactive: true,
+    );
+    final taxableById = <String, bool>{
+      for (final item in catalogItems)
+        if ((item['id']?.toString() ?? '').isNotEmpty)
+          item['id'].toString(): item['taxable'] == true,
+    };
+
+    final pendingRows = await _database.customSelect(
+      '''
+      SELECT DISTINCT entity_id
+      FROM sync_outbox
+      WHERE business_id = ?
+        AND entity_type = 'document_edit'
+        AND state = 'pending'
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
+    var repaired = 0;
+    for (final row in pendingRows) {
+      final documentId = row.read<String>('entity_id');
+      final detail = await _cache.load(businessId, documentId);
+      if (detail == null) continue;
+
+      final lines = _lines(detail);
+      final repairedIds = <String>{};
+      var changed = false;
+
+      for (var index = 0; index < lines.length; index++) {
+        final line = lines[index];
+        if (line['_local_pending'] != true) continue;
+        final itemId = line['item_id']?.toString() ?? '';
+        if (itemId.isEmpty || taxableById[itemId] != true) continue;
+        if (_number(line['tax_rate']) > 0) continue;
+
+        final quantity = _number(line['quantity']);
+        final unitPrice = _number(line['unit_price']);
+        final netAmount = quantity * unitPrice;
+        final taxAmount = netAmount * defaultTaxRate;
+        final lineId = line['id']?.toString() ?? '';
+
+        lines[index] = <String, dynamic>{
+          ...line,
+          'tax_rate': defaultTaxRate,
+          'net_amount': netAmount,
+          'tax_amount': taxAmount,
+        };
+        if (lineId.isNotEmpty) repairedIds.add(lineId);
+        repaired++;
+        changed = true;
+      }
+
+      if (!changed) continue;
+      await _saveDesired(businessId, documentId, detail, lines);
+
+      final queued = await _database.customSelect(
+        '''
+        SELECT id, operation, payload_json
+        FROM sync_outbox
+        WHERE business_id = ?
+          AND entity_type = 'document_edit'
+          AND entity_id = ?
+          AND state = 'pending'
+        ''',
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(documentId),
+        ],
+      ).get();
+
+      for (final queuedRow in queued) {
+        Map<String, dynamic> payload;
+        try {
+          payload = Map<String, dynamic>.from(
+            jsonDecode(queuedRow.read<String>('payload_json')) as Map,
+          );
+        } catch (_) {
+          continue;
+        }
+        final operation = queuedRow.read<String>('operation');
+        final targetId = operation == 'add_line'
+            ? payload['local_line_id']?.toString() ?? ''
+            : payload['line_id']?.toString() ?? '';
+        if (!repairedIds.contains(targetId)) continue;
+        payload['tax_rate'] = defaultTaxRate;
+        await _database.customStatement(
+          'UPDATE sync_outbox SET payload_json = ?, last_error = NULL WHERE id = ?',
+          [jsonEncode(payload), queuedRow.read<int>('id')],
+        );
+      }
+    }
+
+    return repaired;
   }
 
   Future<void> flush(String businessId) async {
