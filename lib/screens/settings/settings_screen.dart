@@ -6,6 +6,7 @@ import '../../core/connection_mode.dart';
 import '../../widgets/briskers_page_header.dart';
 import '../kiosk/kiosk_checkin_screen.dart';
 import 'catalog_settings_screen.dart';
+import 'diagnostics_screen.dart';
 import 'employees_settings_screen.dart';
 import 'expense_settings_screen.dart';
 import 'job_statuses_settings_screen.dart';
@@ -154,6 +155,29 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _chooseConnectionMode(context),
+                );
+              },
+            ),
+          if (roleCode == 'owner')
+            ListTile(
+              leading: const Icon(
+                Icons.health_and_safety_outlined,
+                color: BriskersColors.settings,
+              ),
+              title: const Text('Diagnostics'),
+              subtitle: const Text(
+                'Owner/developer health checks for offline data, sync and integrity',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => DiagnosticsScreen(
+                      businessId: businessId,
+                      roleCode: roleCode,
+                    ),
+                  ),
                 );
               },
             ),
