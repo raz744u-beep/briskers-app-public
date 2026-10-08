@@ -106,7 +106,7 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
           .whereType<Map>()
           .map((raw) => Map<String, dynamic>.from(raw))
           .toList();
-      if (!mounted) return;
+      if (!mounted || _customerId != customerId) return;
       setState(() {
         _vehicles = vehicles;
         if (_vehicles.length == 1) {
@@ -115,7 +115,7 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
         _loadingVehicles = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || _customerId != customerId) return;
       setState(() {
         _loadingVehicles = false;
         _error = error.toString();
