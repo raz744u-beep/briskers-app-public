@@ -7,6 +7,29 @@ import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/import_cache_repair_service.dart';
 
 class _RepairApi extends BriskersApi {
+  _RepairApi({this.changeCursorOnVerify = false});
+
+  final bool changeCursorOnVerify;
+  var inventoryCalls = 0;
+
+  @override
+  Future<Map<String, dynamic>> syncCacheInventory(
+    String businessId, {
+    required String entity,
+    String? afterId,
+    int limit = 250,
+  }) async {
+    inventoryCalls++;
+    return {
+      'entity': entity,
+      'ids': [entity == 'customers' ? 'current-customer' : 'current-job'],
+      'next_id': entity == 'customers' ? 'current-customer' : 'current-job',
+      'has_more': false,
+      'snapshot_cursor':
+          changeCursorOnVerify && limit == 1 ? 11 : 10,
+    };
+  }
+
   @override
   Future<Map<String, dynamic>> syncPullCustomersVehicles(
     String businessId, {
@@ -150,6 +173,22 @@ void main() {
     expect(await _rows(db, 'local_vehicles'), 1);
     expect(await _rows(db, 'local_jobs'), 1);
     expect(await _rows(db, 'local_documents'), 1);
+    await db.close();
+  });
+
+  test('blocks cleanup if server inventory changes during validation',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    await _seed(db);
+    await expectLater(
+      ImportCacheRepairService(
+        api: _RepairApi(changeCursorOnVerify: true),
+        database: db,
+      ).repair('business-1'),
+      throwsStateError,
+    );
+    expect(await _rows(db, 'local_customers'), 2);
+    expect(await _rows(db, 'local_jobs'), 2);
     await db.close();
   });
 
