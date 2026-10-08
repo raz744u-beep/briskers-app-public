@@ -593,7 +593,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
             await ensureExpenseIqSchema();
           }
         },
-        onOpen: (details) async {
+        beforeOpen: (details) async {
           // A previous APK may have advanced user_version without making the
           // tables. Self-heal without dropping any local records.
           await ensureExpenseIqSchema();
