@@ -371,6 +371,33 @@ class LocalCatalogItems extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+/// ExpenseIQ image bytes remain in their original Android document location.
+/// Only a persisted SAF document URI and expense link live in SQLite.
+class LocalExpenseIqPhotos extends Table {
+  TextColumn get businessId => text()();
+  TextColumn get transactionId => text()();
+  TextColumn get photoId => text()();
+  TextColumn get filename => text()();
+  TextColumn get sourceUri => text().nullable()();
+  TextColumn get state => text().withDefault(const Constant('pending'))();
+  IntColumn get attempts => integer().withDefault(const Constant(0))();
+  IntColumn get claimedAt => integer().nullable()();
+  TextColumn get lastError => text().nullable()();
+  IntColumn get updatedAt => integer()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {businessId, transactionId};
+}
+
+class LocalExpenseIqSyncSettings extends Table {
+  TextColumn get businessId => text()();
+  BoolColumn get enabled => boolean().withDefault(const Constant(true))();
+  BoolColumn get wifiOnly => boolean().withDefault(const Constant(true))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {businessId};
+}
+
 @DriftDatabase(
   tables: [
     LocalSyncStates,
@@ -391,6 +418,8 @@ class LocalCatalogItems extends Table {
     LocalFinancialCache,
     LocalCatalogItems,
     LocalDocuments,
+    LocalExpenseIqPhotos,
+    LocalExpenseIqSyncSettings,
   ],
 )
 class BriskersLocalDatabase extends _$BriskersLocalDatabase {
@@ -407,7 +436,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 17;
+  int get schemaVersion => 18;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
