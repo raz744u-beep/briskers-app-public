@@ -23,6 +23,30 @@ class CustomerVehicleSyncService {
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
 
+  /// Remove only server-absent, already-synced records after a *complete*
+  /// authoritative server snapshot has been verified by the repair service.
+  /// This is intentionally not part of ordinary incremental sync.
+  Future<int> pruneObsoleteCache(
+    String businessId,
+    Set<String> serverCustomerIds,
+  ) async {
+    final rows = await _database.customSelect(
+      'SELECT id FROM local_customers WHERE business_id = ?',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    final obsolete = rows
+        .map((row) => row.read<String>('id'))
+        .where((id) => !serverCustomerIds.contains(id))
+        .toList();
+    await _database.transaction(() async {
+      for (final id in obsolete) {
+        await _removeCustomer(businessId, id);
+      }
+    });
+    if (obsolete.isNotEmpty) _syncEvents.add(businessId);
+    return obsolete.length;
+  }
+
   Future<void> refreshCustomer(
     String businessId,
     String customerId,
