@@ -102,79 +102,83 @@ class ImportCacheRepairService {
     }
   }
 
-  Future<Set<String>> _serverCustomers(String businessId) async {
+  /// Fetch IDs only, never complete customer/job bundles. The previous
+  /// full-job bootstrap exceeded Postgres statement_timeout for 5k+ jobs.
+  Future<({Set<String> ids, int cursor})> _serverIds(
+    String businessId,
+    String entity,
+  ) async {
     final ids = <String>{};
     String? afterId;
     int? snapshotCursor;
     var pages = 0;
+
     while (true) {
       if (++pages > 10000) {
-        throw StateError('Customer snapshot exceeded page safety limit.');
+        throw StateError('$entity snapshot exceeded page safety limit.');
       }
-      final response = await _api.syncPullCustomersVehicles(
+      final response = await _api.syncCacheInventory(
         businessId,
-        afterCustomerId: afterId,
+        entity: entity,
+        afterId: afterId,
+        limit: 250,
       );
-      if (response['revoke_all'] == true ||
-          response['mode']?.toString() != 'bootstrap') {
-        throw StateError('Cannot verify a complete customer snapshot.');
+      if (response['entity']?.toString() != entity) {
+        throw StateError('Unexpected server inventory entity: $entity.');
       }
-      final cursor =
-          int.tryParse(response['bootstrap_cursor']?.toString() ?? '');
+      final cursor = int.tryParse(
+        response['snapshot_cursor']?.toString() ?? '',
+      );
       if (cursor == null ||
           (snapshotCursor != null && snapshotCursor != cursor)) {
         throw StateError(
-          'Customers changed during the snapshot. Retry the repair.',
+          '$entity changed during repair. Please retry.',
         );
       }
       snapshotCursor = cursor;
-      final bundles = response['bundles'];
-      if (bundles is! List) {
-        throw StateError('Invalid customer snapshot response.');
+
+      final rawIds = response['ids'];
+      if (rawIds is! List || rawIds.isEmpty && response['has_more'] == true) {
+        throw StateError('Incomplete $entity server inventory.');
       }
-      for (final bundle in bundles) {
-        if (bundle is! Map || bundle['customer'] is! Map) {
-          throw StateError('Invalid customer in server snapshot.');
-        }
-        final id = (bundle['customer'] as Map)['id']?.toString() ?? '';
+      for (final raw in rawIds) {
+        final id = raw?.toString() ?? '';
         if (id.isEmpty || !ids.add(id)) {
-          throw StateError('Duplicate or missing customer snapshot ID.');
+          throw StateError('Invalid or repeated $entity inventory ID.');
         }
       }
+
       if (response['has_more'] != true) break;
-      final nextId = response['next_customer_id']?.toString() ?? '';
-      if (nextId.isEmpty || nextId == afterId) {
-        throw StateError('Incomplete customer snapshot pagination.');
+
+      final nextId = response['next_id']?.toString() ?? '';
+      if (nextId.isEmpty ||
+          nextId == afterId ||
+          nextId != rawIds.last.toString()) {
+        throw StateError('$entity inventory paging stopped unexpectedly.');
       }
       afterId = nextId;
     }
-    return ids;
+
+    return (ids: ids, cursor: snapshotCursor!);
   }
 
-  Future<Set<String>> _serverJobs(String businessId) async {
-    final response = await _api.syncPullJobs(
+  Future<void> _verifyServerUnchanged(
+    String businessId,
+    String entity,
+    int expectedCursor,
+  ) async {
+    final response = await _api.syncCacheInventory(
       businessId,
-      afterCursor: null,
+      entity: entity,
+      limit: 1,
     );
-    if (response['mode']?.toString() != 'bootstrap' ||
-        response['has_more'] == true) {
-      throw StateError('Cannot verify a complete job snapshot.');
+    if (response['entity']?.toString() != entity ||
+        int.tryParse(response['snapshot_cursor']?.toString() ?? '') !=
+            expectedCursor) {
+      throw StateError(
+        '$entity changed during validation. No local cleanup was done.',
+      );
     }
-    final bundles = response['bundles'];
-    if (bundles is! List) {
-      throw StateError('Invalid job snapshot response.');
-    }
-    final ids = <String>{};
-    for (final bundle in bundles) {
-      if (bundle is! Map || bundle['job'] is! Map) {
-        throw StateError('Invalid job in server snapshot.');
-      }
-      final id = (bundle['job'] as Map)['id']?.toString() ?? '';
-      if (id.isEmpty || !ids.add(id)) {
-        throw StateError('Duplicate or missing job snapshot ID.');
-      }
-    }
-    return ids;
   }
 
   Future<void> _checkLocalCoverage(
@@ -205,8 +209,10 @@ class ImportCacheRepairService {
     await _assertNoLocalWork(businessId);
 
     // Snapshot all IDs before making any destructive local change.
-    final customerIds = await _serverCustomers(businessId);
-    final jobIds = await _serverJobs(businessId);
+    final customers = await _serverIds(businessId, 'customers');
+    final jobs = await _serverIds(businessId, 'jobs');
+    final customerIds = customers.ids;
+    final jobIds = jobs.ids;
     if (customerIds.isEmpty || jobIds.isEmpty) {
       throw StateError('Empty server snapshot: local cleanup is blocked.');
     }
@@ -217,6 +223,12 @@ class ImportCacheRepairService {
       businessId, 'local_jobs', jobIds,
     );
     await _assertNoLocalWork(businessId);
+    await _verifyServerUnchanged(
+      businessId, 'customers', customers.cursor,
+    );
+    await _verifyServerUnchanged(
+      businessId, 'jobs', jobs.cursor,
+    );
 
     final vehiclesBefore = await _count(
       businessId,
