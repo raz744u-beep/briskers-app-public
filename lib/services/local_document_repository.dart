@@ -28,8 +28,8 @@ class LocalDocumentRepository {
           '''
           INSERT INTO local_documents (
             id, business_id, job_id, customer_id, kind, document_number,
-            status, display_status_code, closed_at, converted, total, created_at, server_updated_at, row_version, sync_state
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+            status, display_status_code, closed_at, converted, total, document_date, created_at, server_updated_at, row_version, sync_state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
           ON CONFLICT(id) DO UPDATE SET
             job_id=excluded.job_id,
             customer_id=excluded.customer_id,
@@ -40,6 +40,7 @@ class LocalDocumentRepository {
             closed_at=excluded.closed_at,
             converted=excluded.converted,
             total=excluded.total,
+            document_date=excluded.document_date,
             created_at=excluded.created_at,
             server_updated_at=excluded.server_updated_at,
             row_version=excluded.row_version,
@@ -58,6 +59,7 @@ class LocalDocumentRepository {
             _unix(_date(document['closed_at'])),
             document['converted'] == true ? 1 : 0,
             _double(document['total_amount'] ?? document['total']) ?? 0,
+            _documentDate(document['document_date']),
             _unix(_date(document['created_at'])),
             _unix(_date(document['updated_at'])),
             _int(document['row_version']),
@@ -79,8 +81,8 @@ class LocalDocumentRepository {
           '''
           INSERT INTO local_documents (
             id, business_id, job_id, customer_id, kind, document_number,
-            status, display_status_code, closed_at, converted, total, created_at, server_updated_at, row_version, sync_state
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+            status, display_status_code, closed_at, converted, total, document_date, created_at, server_updated_at, row_version, sync_state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
           ON CONFLICT(id) DO UPDATE SET
             job_id=excluded.job_id,
             customer_id=excluded.customer_id,
@@ -91,6 +93,7 @@ class LocalDocumentRepository {
             closed_at=excluded.closed_at,
             converted=excluded.converted,
             total=excluded.total,
+            document_date=excluded.document_date,
             created_at=excluded.created_at,
             server_updated_at=excluded.server_updated_at,
             row_version=excluded.row_version,
@@ -106,6 +109,7 @@ class LocalDocumentRepository {
             _unix(_date(document['closed_at'])),
             document['converted'] == true ? 1 : 0,
             _double(document['total_amount'] ?? document['total']) ?? 0,
+            _documentDate(document['document_date']),
             _unix(_date(document['created_at'])),
             _unix(_date(document['updated_at'])),
             _int(document['row_version']),
@@ -126,7 +130,7 @@ class LocalDocumentRepository {
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
       WHERE d.business_id = ? AND d.kind = ?
-      ORDER BY d.created_at DESC, d.id
+      ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
       ''',
       variables: [
         Variable<String>(businessId),
@@ -165,7 +169,7 @@ class LocalDocumentRepository {
             'total_amount': row.read<double>('total'),
             'paid_amount': 0,
             'pending_payment': 0,
-            'document_date': _isoFromDb(row.data['created_at']),
+            'document_date': row.readNullable<String>('document_date'),
             'created_at': _isoFromDb(row.data['created_at']),
             'updated_at': _isoFromDb(row.data['server_updated_at']),
             'job_number': row.readNullable<String>('job_number'),
@@ -207,7 +211,7 @@ class LocalDocumentRepository {
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
       WHERE d.business_id = ? AND d.job_id = ?
-      ORDER BY d.created_at DESC, d.id
+      ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
       ''',
       variables: [
         Variable<String>(businessId),
@@ -244,7 +248,7 @@ class LocalDocumentRepository {
             'total_amount': row.read<double>('total'),
             'paid_amount': 0,
             'pending_payment': 0,
-            'document_date': _isoFromDb(row.data['created_at']),
+            'document_date': row.readNullable<String>('document_date'),
             'created_at': _isoFromDb(row.data['created_at']),
             'updated_at': _isoFromDb(row.data['server_updated_at']),
             'job_number': row.readNullable<String>('job_number'),
@@ -342,7 +346,7 @@ class LocalDocumentRepository {
           OR lower(COALESCE(j.job_number, '')) LIKE ?
           OR lower(COALESCE(j.customer_name, '')) LIKE ?
         )
-      ORDER BY d.created_at DESC, d.id
+      ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
       LIMIT ?
       ''',
       variables: [
@@ -367,6 +371,18 @@ class LocalDocumentRepository {
       'vehicle': row.readNullable<String>('vehicle_label'),
       '_local_snapshot': true,
     }).toList();
+  }
+
+  // Preserve YYYY-MM-DD without converting a calendar date across timezones.
+  // Legacy created_at is the Briskers import timestamp, not the issue date.
+  String? _documentDate(Object? value) {
+    final raw = value?.toString().trim() ?? '';
+    if (raw.length < 10) return null;
+    final date = raw.substring(0, 10);
+    if (!RegExp(r'^[0-9]{4}-[0-9]{2}-[0-9]{2}').hasMatch(date)) {
+      return null;
+    }
+    return DateTime.tryParse(date) == null ? null : date;
   }
 
   String? _isoFromDb(Object? value) {

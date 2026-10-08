@@ -299,7 +299,35 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       }).toList();
     }
 
-    if (!_estimate || _selectedStatus != null) return filtered;
+    if (!_estimate) {
+      // The invoice number sequence must agree online and offline.
+      // Import timestamps and anomalous legacy dates are not list order.
+      int? invoiceNumber(Map<String, dynamic> row) {
+        final value = row['document_number']?.toString() ?? '';
+        final matches = RegExp(r'[0-9]+').allMatches(value).toList();
+        if (matches.isEmpty) return null;
+        return int.tryParse(matches.last.group(0)!);
+      }
+
+      filtered.sort((a, b) {
+        final aNumber = invoiceNumber(a);
+        final bNumber = invoiceNumber(b);
+        if (aNumber != null && bNumber != null) {
+          final order = bNumber.compareTo(aNumber);
+          if (order != 0) return order;
+        } else if (aNumber == null && bNumber != null) {
+          return -1;
+        } else if (aNumber != null && bNumber == null) {
+          return 1;
+        }
+        return (b['created_at']?.toString() ?? '').compareTo(
+          a['created_at']?.toString() ?? '',
+        );
+      });
+      return filtered;
+    }
+
+    if (_selectedStatus != null) return filtered;
 
     filtered.sort((a, b) {
       final statusCompare = _estimateStatusRank(
@@ -1187,40 +1215,58 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             ),
             if (!_estimate &&
                 (widget.isOwner || widget.canManageExpenses)) ...[
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: BriskersColors.invoices,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
+              const SizedBox(height: 10),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final createInvoice = FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: BriskersColors.invoices,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                     ),
-                  ),
-                  onPressed: _createBlankInvoice,
-                  icon: const Icon(Icons.note_add_outlined, size: 18),
-                  label: const Text('New Invoice'),
-                ),
-              ),
-            ],
-            if (!_estimate && widget.isOwner) ...[
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: BriskersColors.invoices,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
+                    onPressed: _createBlankInvoice,
+                    icon: const Icon(Icons.note_add_outlined, size: 18),
+                    label: const Text('New Invoice'),
+                  );
+                  final closeInvoices = FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: BriskersColors.invoices,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                     ),
-                  ),
-                  onPressed: _showCloseInvoices,
-                  icon: const Icon(Icons.lock_outline, size: 18),
-                  label: const Text('Close invoices'),
-                ),
+                    onPressed: _showCloseInvoices,
+                    icon: const Icon(Icons.lock_outline, size: 18),
+                    label: const Text('Close invoices'),
+                  );
+                  if (widget.isOwner && constraints.maxWidth >= 315) {
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [createInvoice, closeInvoices],
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: createInvoice,
+                      ),
+                      if (widget.isOwner) ...[
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: closeInvoices,
+                        ),
+                      ],
+                    ],
+                  );
+                },
               ),
             ],
             if (_error != null)
