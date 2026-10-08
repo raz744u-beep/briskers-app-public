@@ -11,6 +11,8 @@ import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
 import '../services/local_attachment_cache.dart';
 import '../services/local_financial_cache.dart';
+import '../services/expenseiq_local_photo_sync.dart';
+import '../services/expenseiq_background_scheduler.dart';
 import '../widgets/briskers_page_header.dart';
 import 'expenses/expense_detail_screen.dart';
 import 'expenses/expense_entry_screen.dart';
@@ -50,11 +52,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   bool _loadingMore = false;
   bool _hasMore = true;
   bool _importing = false;
-  bool _pauseImportRequested = false;
-  int _importDone = 0;
-  int _importTotal = 0;
-  int _importUploaded = 0;
-  int _importFailed = 0;
+  bool _requestingPhotoSync = false;
+  final ExpenseIqLocalPhotoSync _photoSync = ExpenseIqLocalPhotoSync();
+  ExpenseIqSyncCounts? _photoCounts;
+  Timer? _photoCountTimer;
   String _filter = 'all';
   String _dateRange = '30d';
   DateTime? _customStartDate;
@@ -77,11 +78,19 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     super.initState();
     _scrollController.addListener(_handleScroll);
     _load();
+    _refreshPhotoCounts();
+    if (_owner && Platform.isAndroid) {
+      _photoCountTimer = Timer.periodic(
+        const Duration(seconds: 4),
+        (_) => _refreshPhotoCounts(),
+      );
+    }
   }
 
   @override
   void dispose() {
     _searchDebounce?.cancel();
+    _photoCountTimer?.cancel();
     _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -903,220 +912,158 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
   /// Safe to restart: the server excludes expenses with finalized photos.
   /// The source photos are never moved or deleted.
+  Future<void> _refreshPhotoCounts() async {
+    if (!_owner || !Platform.isAndroid) return;
+    try {
+      final counts = await _photoSync.counts(widget.businessId);
+      if (mounted) setState(() => _photoCounts = counts);
+    } catch (_) {
+      // Keep expenses available even if local photo diagnostics fail.
+    }
+  }
+
+  Future<void> _togglePhotoSync(bool enabled) async {
+    await _photoSync.setOptions(widget.businessId, enabled: enabled);
+    await _refreshPhotoCounts();
+    if (enabled) {
+      try {
+        await ExpenseIqBackgroundScheduler.schedule(widget.businessId);
+      } catch (error) {
+        if (mounted) setState(() => _error = error.toString());
+      }
+    }
+  }
+
+  Future<void> _toggleWifiOnly(bool wifiOnly) async {
+    await _photoSync.setOptions(widget.businessId, wifiOnly: wifiOnly);
+    await _refreshPhotoCounts();
+    if (_photoCounts?.enabled == true) {
+      try {
+        await ExpenseIqBackgroundScheduler.schedule(widget.businessId);
+      } catch (error) {
+        if (mounted) setState(() => _error = error.toString());
+      }
+    }
+  }
+
+  Future<void> _requestPhotoSync() async {
+    if (_requestingPhotoSync) return;
+    setState(() => _requestingPhotoSync = true);
+    try {
+      await ExpenseIqBackgroundScheduler.scheduleNext(widget.businessId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Android will upload when network and battery conditions allow.'),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _requestingPhotoSync = false);
+    }
+  }
+
   Future<void> _importExpenseIqReceipts() async {
     if (_importing || !_owner || !Platform.isAndroid) return;
     if (BriskersConnectionModeController.instance.forceOffline) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Connect to the internet before importing receipts.'),
-        ),
+        const SnackBar(content: Text('Connect once to index the photo mappings.')),
       );
       return;
     }
 
     List<Map<String, dynamic>> candidates;
     try {
-      candidates = await _api.expenseReceiptImportCandidates(
-        widget.businessId,
-      );
+      candidates = await _api.expenseReceiptImportCandidates(widget.businessId);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
       return;
     }
-
     if (!mounted) return;
     if (candidates.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('All mapped ExpenseIQ receipts are already imported.'),
-        ),
+        const SnackBar(content: Text('All mapped ExpenseIQ receipts are already uploaded.')),
       );
       return;
     }
 
-    List<dynamic>? pickedFiles;
+    List<dynamic>? picked;
     try {
-      pickedFiles = await _expenseIqChannel.invokeMethod<List<dynamic>>(
+      picked = await _expenseIqChannel.invokeMethod<List<dynamic>>(
         'pickExpenseIqFolder',
       );
     } catch (error) {
-      if (mounted) {
-        setState(() {
-          _error = 'Android could not open the ExpenseIQ folder.\n$error';
-        });
-      }
+      if (mounted) setState(() => _error = 'Could not scan ExpenseIQ folder: $error');
       return;
     }
-    if (pickedFiles == null || !mounted) return;
+    if (picked == null || !mounted) return;
+    final files = picked.whereType<Map>()
+        .map((x) => Map<String, dynamic>.from(x)).toList();
+    final fileKeys = files.map((x) => _photoKey(x['name']?.toString() ?? ''))
+        .where((key) => key.isNotEmpty).toSet();
+    final matches = candidates.where((candidate) => fileKeys.contains(
+        candidate['photo_id']?.toString().trim().toLowerCase() ?? '')).length;
+    final missing = candidates.length - matches;
 
-    final filesByPhotoId = <String, Map<String, dynamic>>{};
-    for (final raw in pickedFiles) {
-      if (raw is! Map) continue;
-      final file = Map<String, dynamic>.from(raw);
-      final filename = file['name']?.toString() ?? '';
-      final key = _photoKey(filename);
-      if (key.isNotEmpty) filesByPhotoId[key] = file;
-    }
-
-    final matches =
-        <(Map<String, dynamic>, Map<String, dynamic>)>[];
-    final missingIds = <String>[];
-    for (final candidate in candidates) {
-      final photoId = candidate['photo_id']?.toString().trim().toLowerCase();
-      if (photoId == null || photoId.isEmpty) continue;
-      final file = filesByPhotoId[photoId];
-      if (file == null) {
-        missingIds.add(photoId);
-      } else {
-        matches.add((candidate, file));
-      }
-    }
-
-    if (!mounted) return;
-    final examples = missingIds.take(5).join(', ');
-    final batchChoice = await showDialog<int>(
+    final approved = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Import ExpenseIQ receipts?'),
+        title: const Text('Index ExpenseIQ photos locally?'),
         content: SingleChildScrollView(
           child: Text(
-            'Matched ${matches.length} of ${candidates.length} '
-            'remaining expense photo references.\n'
-            'Unmatched: ${missingIds.length}.'
-            '${examples.isEmpty ? '' : '\nExamples: $examples'}'
-            '\n\nTest the first 50 photos, or import all in sequential '
-            'batches. Use Pause to stop between photos. '
-            'If interrupted, reopen this importer: previously uploaded '
-            'receipts are excluded automatically.\n\n'
-            'Keep Briskers open and your phone awake during uploading. '
-            'Original ExpenseIQ files remain on your phone.',
+            'Matched: $matches photos\n'
+            'Unmatched: $missing references\n\n'
+            'Briskers will save original photo locations and their existing '
+            'expense links to SQLite; it will NOT duplicate or move files. '
+            'Do not move or delete the ExpenseIQ folder.\n\n'
+            'Background sync will use Wi-Fi by default and can be paused. '
+            'Photos already uploaded to Supabase will be skipped.',
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
-          OutlinedButton(
-            onPressed: matches.isEmpty
-                ? null
-                : () => Navigator.pop(dialogContext, 50),
-            child: const Text('Test 50'),
-          ),
           FilledButton(
-            onPressed: matches.isEmpty
-                ? null
-                : () => Navigator.pop(dialogContext, -1),
-            child: const Text('Import all'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Index locally'),
           ),
         ],
       ),
     );
-    if (batchChoice == null || !mounted) return;
+    if (approved != true || !mounted) return;
 
-    final selected = batchChoice == -1
-        ? matches
-        : matches.take(batchChoice).toList();
-    setState(() {
-      _importing = true;
-      _pauseImportRequested = false;
-      _importDone = 0;
-      _importUploaded = 0;
-      _importFailed = 0;
-      _importTotal = selected.length;
-      _error = null;
-    });
-
-    final errors = <String>[];
-    var consecutiveFailures = 0;
-    var stoppedAfterErrors = false;
-
-    for (final match in selected) {
-      if (!mounted || _pauseImportRequested) break;
-      final candidate = match.$1;
-      final file = match.$2;
-      final filename = file['name']?.toString() ?? 'receipt.jpg';
-      final transactionId = candidate['transaction_id']?.toString() ?? '';
-
-      var uploaded = false;
-      String? lastError;
-      for (var attempt = 1; attempt <= 2; attempt++) {
-        if (!mounted || _pauseImportRequested) break;
-        try {
-          if (transactionId.isEmpty) {
-            throw StateError('Missing expense transaction ID.');
-          }
-          final uri = file['uri']?.toString() ?? '';
-          if (uri.isEmpty) throw StateError('Photo URI is missing.');
-          final bytes = await _expenseIqChannel.invokeMethod<Uint8List>(
-            'readExpenseIqFile',
-            {'uri': uri},
-          );
-          if (bytes == null || bytes.isEmpty) {
-            throw StateError('Could not read $filename.');
-          }
-          await _api.uploadExpensePhoto(
-            widget.businessId,
-            transactionId,
-            filename: filename,
-            mimeType: 'image/jpeg',
-            bytes: bytes,
-          );
-          uploaded = true;
-          break;
-        } catch (error) {
-          lastError = error.toString();
-          if (attempt < 2 && !_pauseImportRequested) {
-            await Future<void>.delayed(const Duration(seconds: 2));
-          }
-        }
+    setState(() => _importing = true);
+    try {
+      final index = await _photoSync.indexPhotos(
+        widget.businessId, candidates: candidates, files: files,
+      );
+      await _refreshPhotoCounts();
+      String scheduleError = '';
+      try {
+        await ExpenseIqBackgroundScheduler.schedule(widget.businessId);
+      } catch (error) {
+        scheduleError = ' Scheduling error: $error';
       }
-
-      if (!mounted) break;
-      if (uploaded) {
-        consecutiveFailures = 0;
-        _importUploaded++;
-      } else {
-        consecutiveFailures++;
-        _importFailed++;
-        if (errors.length < 5) {
-          errors.add('$filename: ${lastError ?? 'Not uploaded'}');
-        }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 10),
+            content: Text(
+              'Indexed ${index.matched} photos locally; '
+              '${index.missing} unmatched.$scheduleError',
+            ),
+          ),
+        );
       }
-      setState(() => _importDone++);
-      if (consecutiveFailures >= 5) {
-        stoppedAfterErrors = true;
-        break;
-      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _importing = false);
     }
-
-    if (!mounted) return;
-    final uploaded = _importUploaded;
-    final failed = _importFailed;
-    final attempted = _importDone;
-    final total = _importTotal;
-    final paused = _pauseImportRequested || stoppedAfterErrors;
-    setState(() => _importing = false);
-    await _load();
-
-    if (!mounted) return;
-    if (errors.isNotEmpty) {
-      setState(() {
-        _error = 'Receipt failures (first ${errors.length}): '
-            "${errors.join(' | ')}";
-      });
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        duration: const Duration(seconds: 10),
-        content: Text(
-          'ExpenseIQ: $uploaded uploaded, $failed failed; '
-          '$attempted of $total attempted. '
-          "${paused ? 'Paused. ' : ''}"
-          'Open Import photos again to resume.',
-        ),
-      ),
-    );
   }
 
   @override
