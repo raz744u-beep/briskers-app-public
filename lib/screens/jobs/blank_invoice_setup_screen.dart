@@ -130,13 +130,13 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: BriskersColors.invoices.withValues(alpha: 0.10),
-        title: const Text('New Blank Invoice'),
+        title: const Text('New Invoice'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
-            'Start a blank invoice and choose a customer.',
+            'Choose a customer and optional vehicle. After creating the invoice, you can add parts, labor, and other items.',
             style: TextStyle(color: Color(0xFF667085)),
           ),
           const SizedBox(height: 16),
@@ -217,7 +217,7 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.receipt_long_outlined),
-            label: const Text('Create Invoice'),
+            label: const Text('Create Invoice & Add Items'),
           ),
         ],
       ),
