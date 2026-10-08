@@ -361,6 +361,10 @@ class _JobsScreenState extends State<JobsScreen> {
     final controller = TextEditingController(
       text: job['planned_hours']?.toString() ?? '0',
     );
+    controller.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: controller.text.length,
+    );
     var clearedForEntry = false;
 
     final value = await showDialog<num?>(
@@ -372,7 +376,14 @@ class _JobsScreenState extends State<JobsScreen> {
           autofocus: true,
           onTap: () {
             if (!clearedForEntry) {
-              controller.clear();
+              if (controller.text.trim() == '0') {
+                controller.clear();
+              } else {
+                controller.selection = TextSelection(
+                  baseOffset: 0,
+                  extentOffset: controller.text.length,
+                );
+              }
               clearedForEntry = true;
             }
           },
@@ -397,7 +408,7 @@ class _JobsScreenState extends State<JobsScreen> {
               ),
             ),
             onPressed: () {
-              final parsed = num.tryParse(controller.text.trim());
+              final parsed = num.tryParse(controller.text.trim().isEmpty ? '0' : controller.text.trim());
               Navigator.pop(dialogContext, parsed);
             },
             child: const Text('Save'),
