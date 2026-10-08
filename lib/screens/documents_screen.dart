@@ -300,12 +300,33 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
 
     if (!_estimate) {
-      // Invoice numbers are the reliable chronological sequence. Historical
-      // MobileBiz rows can have anomalous dates, and server/local lists should
-      // not disagree about which invoices appear first.
+      // Sort invoices by their number, not the Briskers import timestamp.
       int? number(Map<String, dynamic> row) {
         final raw = row['document_number']?.toString() ?? '';
-        final matched = RegExp(r'(\\d+)
+        final matches = RegExp(r'[0-9]+').allMatches(raw).toList();
+        if (matches.isEmpty) return null;
+        return int.tryParse(matches.last.group(0)!);
+      }
+
+      filtered.sort((a, b) {
+        final left = number(a);
+        final right = number(b);
+        if (left != null && right != null) {
+          final compare = right.compareTo(left);
+          if (compare != 0) return compare;
+        } else if (left == null && right != null) {
+          return -1;
+        } else if (left != null && right == null) {
+          return 1;
+        }
+        final leftDate = a['created_at']?.toString() ?? '';
+        final rightDate = b['created_at']?.toString() ?? '';
+        return rightDate.compareTo(leftDate);
+      });
+      return filtered;
+    }
+
+    if (_selectedStatus != null) return filtered;
 
     filtered.sort((a, b) {
       final statusCompare = _estimateStatusRank(
