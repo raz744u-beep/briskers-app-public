@@ -13,6 +13,7 @@ import '../../services/local_attachment_cache.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/expenseiq_local_photo_sync.dart';
 import 'expense_entry_screen.dart';
+import 'transaction_recurring_dialog.dart';
 
 class ExpenseDetailScreen extends StatefulWidget {
   const ExpenseDetailScreen({
@@ -879,6 +880,52 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     }
   }
 
+  String _repeatLabel(Map<String, dynamic>? rule) {
+    if (rule == null || rule['is_repeating'] != true) {
+      return 'Not recurring';
+    }
+    final frequency = rule['frequency']?.toString() ?? '';
+    final interval = int.tryParse(
+      rule['interval_count']?.toString() ?? '',
+    ) ?? 1;
+    final label = switch (frequency) {
+      'daily' => 'Daily',
+      'weekly' when interval == 2 => 'Every 2 weeks',
+      'weekly' => 'Weekly',
+      'yearly' => 'Yearly',
+      _ => 'Monthly',
+    };
+    final next = rule['next_date']?.toString() ?? '';
+    return next.isEmpty ? label : '$label · next $next';
+  }
+
+  Future<void> _manageRecurring() async {
+    final detail = _detail;
+    if (detail == null || _busy || !widget.allowRecurring) return;
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Connect to change the recurring schedule. '
+            'The original transaction remains available offline.',
+          ),
+        ),
+      );
+      return;
+    }
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => TransactionRecurringDialog(
+        businessId: widget.businessId,
+        transactionId: widget.transactionId,
+        transaction: detail,
+      ),
+    );
+    if (changed == true && mounted) {
+      await _load();
+    }
+  }
+
   Future<void> _handleMenu(String value) async {
     if (value == 'edit') await _edit();
     if (value == 'copy') await _copy();
@@ -1035,6 +1082,13 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       if (documentNumber.isNotEmpty) 'Invoice #$documentNumber',
     ].join(' • ');
     final recurring = detail['recurring_rule'];
+    final recurringRule = recurring is Map
+        ? Map<String, dynamic>.from(recurring)
+        : null;
+    final mayManageRecurring = widget.allowRecurring &&
+        editable &&
+        (detail['job_id']?.toString() ?? '').isEmpty &&
+        (detail['document_id']?.toString() ?? '').isEmpty;
     final color =
         income ? const Color(0xFF169B62) : BriskersColors.expenses;
 
@@ -1151,14 +1205,25 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
             _DetailRow(label: 'Job', value: jobNumber),
           if (documentNumber.isNotEmpty)
             _DetailRow(label: 'Invoice', value: documentNumber),
-          if (widget.allowRecurring && recurring is Map)
+          if (mayManageRecurring)
+            Card(
+              margin: const EdgeInsets.only(top: 12),
+              child: ListTile(
+                leading: const Icon(Icons.event_repeat_outlined),
+                title: const Text('Recurring transaction'),
+                subtitle: Text(_repeatLabel(recurringRule)),
+                trailing: TextButton(
+                  onPressed: _manageRecurring,
+                  child: Text(recurringRule?['is_repeating'] == true
+                      ? 'Change' : 'Make recurring'),
+                ),
+                onTap: _manageRecurring,
+              ),
+            )
+          else if (widget.allowRecurring && recurringRule != null)
             _DetailRow(
               label: 'Repeating',
-              value: <String>[
-                recurring['frequency']?.toString() ?? '',
-                if ((recurring['next_date']?.toString() ?? '').isNotEmpty)
-                  'next ${recurring['next_date']}',
-              ].where((x) => x.isNotEmpty).join(' • '),
+              value: _repeatLabel(recurringRule),
             ),
           const SizedBox(height: 16),
           Row(
