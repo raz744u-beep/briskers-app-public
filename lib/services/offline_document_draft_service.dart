@@ -79,7 +79,7 @@ class OfflineDocumentDraftService {
     }
 
     final id = _localId();
-    final now = DateTime.now().toUtc();
+    final now = DateTime.now();
     final detail = <String, dynamic>{
       'id': id,
       'kind': 'estimate',
@@ -118,15 +118,16 @@ class OfflineDocumentDraftService {
         INSERT INTO local_documents (
           id, business_id, job_id, customer_id, kind, document_number,
           status, display_status_code, closed_at, converted, total,
-          created_at, server_updated_at, row_version, sync_state
+          document_date, created_at, server_updated_at, row_version, sync_state
         ) VALUES (?, ?, ?, ?, 'estimate', NULL, 'draft', 'draft',
-                  NULL, 0, 0, ?, NULL, 1, 'pending')
+                  NULL, 0, 0, ?, ?, NULL, 1, 'pending')
         ''',
         [
           id,
           businessId,
           jobId,
           customerId,
+          detail['document_date'],
           _unixNow(),
         ],
       );
