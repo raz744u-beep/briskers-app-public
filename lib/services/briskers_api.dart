@@ -45,6 +45,24 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  /// Full initial downloads use small UUID-keyset pages instead of asking
+  /// PostgreSQL to build every historical job in a single statement.
+  Future<Map<String, dynamic>> syncPullJobsBootstrap(
+    String businessId, {
+    String? afterJobId,
+    int limit = 25,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_sync_pull_jobs_bootstrap_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_after_job_id': afterJobId,
+        'p_limit': limit,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> syncPullJobs(
     String businessId, {
     int? afterCursor,

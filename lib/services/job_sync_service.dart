@@ -121,7 +121,11 @@ class JobSyncService {
       bootstrapped = (state.read<int>('bootstrapped')) == 1;
     }
 
-    if (!bootstrapped) cursor = null;
+    if (!bootstrapped) {
+      await _bootstrapPaged(businessId);
+      _syncEvents.add(businessId);
+      return;
+    }
 
     try {
       var hasMore = true;
@@ -185,6 +189,110 @@ class JobSyncService {
         businessId,
         cursor: cursor,
         bootstrapped: bootstrapped,
+        error: error.toString(),
+      );
+      rethrow;
+    }
+  }
+
+  /// Initial bootstrap is intentionally separated from incremental pulls.
+  /// The legacy v1 endpoint ignored its page size for initial downloads and
+  /// timed out while assembling thousands of historical service jobs.
+  Future<void> _bootstrapPaged(String businessId) async {
+    String? afterJobId;
+    int? initialCursor;
+    var firstPage = true;
+    var pageCount = 0;
+    var hasMore = true;
+
+    try {
+      // Do not destroy pending offline work on a device whose initial
+      // bootstrap was interrupted. No rows outside the jobs scope are cleared.
+      final dirty = await _database.customSelect(
+        '''
+        SELECT
+          (SELECT COUNT(*) FROM local_jobs
+           WHERE business_id = ? AND sync_state <> 'synced') +
+          (SELECT COUNT(*) FROM sync_outbox
+           WHERE business_id = ? AND state IN ('pending','conflict')) AS count
+        ''',
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(businessId),
+        ],
+      ).getSingle();
+      if (dirty.read<int>('count') > 0) {
+        throw StateError(
+          'Job bootstrap blocked because unsynced local work exists. '
+          'Synchronize or resolve it before rebuilding the job cache.',
+        );
+      }
+
+      while (hasMore) {
+        if (++pageCount > 10000) {
+          throw StateError('Job bootstrap exceeded page safety limit.');
+        }
+        final response = await _api.syncPullJobsBootstrap(
+          businessId,
+          afterJobId: afterJobId,
+          limit: 25,
+        );
+        if (response['mode']?.toString() != 'bootstrap') {
+          throw StateError('Invalid server job bootstrap response.');
+        }
+        final currentCursor =
+            int.tryParse(response['bootstrap_cursor']?.toString() ?? '');
+        if (currentCursor == null) {
+          throw StateError('Job bootstrap cursor is missing.');
+        }
+        // Use the *first* snapshot cursor. Changes made after that time
+        // will be replayed by the next incremental download.
+        initialCursor ??= currentCursor;
+
+        final rawBundles = response['bundles'];
+        if (rawBundles is! List || rawBundles.length > 25) {
+          throw StateError('Invalid job bootstrap batch size.');
+        }
+        final bundles = List<dynamic>.from(rawBundles);
+        hasMore = response['has_more'] == true;
+        final nextJobId = response['next_job_id']?.toString() ?? '';
+        if (hasMore &&
+            (nextJobId.isEmpty || nextJobId == afterJobId ||
+                bundles.isEmpty)) {
+          throw StateError('Job bootstrap continuation is incomplete.');
+        }
+
+        await _database.transaction(() async {
+          if (firstPage) {
+            await _clearBusinessJobCache(businessId);
+          }
+          for (final raw in bundles) {
+            if (raw is! Map) {
+              throw StateError('Invalid job bundle in bootstrap response.');
+            }
+            await _applyBundle(
+              businessId, Map<String, dynamic>.from(raw),
+            );
+          }
+        });
+        firstPage = false;
+        afterJobId = nextJobId.isEmpty ? null : nextJobId;
+      }
+
+      await _writeSyncState(
+        businessId,
+        cursor: initialCursor ?? 0,
+        bootstrapped: true,
+        error: null,
+      );
+
+      // Sync concurrent edits from the first page's snapshot onward.
+      // A normal subsequent Sync now call also replays these changes.
+    } catch (error) {
+      await _writeSyncState(
+        businessId,
+        cursor: null,
+        bootstrapped: false,
         error: error.toString(),
       );
       rethrow;

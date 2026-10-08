@@ -169,6 +169,32 @@ class CustomerVehicleSyncService {
     }
   }
 
+  // Short 401/42501 failures were observed between otherwise successful
+  // authorized customer pages on the second device. Retry transient RPC
+  // errors; never grant access or modify Supabase permissions from the client.
+  Future<Map<String, dynamic>> _bootstrapPage(
+    String businessId,
+    String? afterCustomerId,
+  ) async {
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        return await _api.syncPullCustomersVehicles(
+          businessId,
+          afterCustomerId: afterCustomerId,
+        );
+      } catch (error) {
+        final message = error.toString().toLowerCase();
+        final retryable = message.contains('42501') ||
+            message.contains('401') ||
+            message.contains('timeout') ||
+            message.contains('57014');
+        if (!retryable || attempt == 3) rethrow;
+        await Future<void>.delayed(Duration(seconds: attempt * 2));
+      }
+    }
+    throw StateError('Customer sync retry limit exceeded.');
+  }
+
   Future<void> _bootstrap(String businessId) async {
     String? afterCustomerId;
     int? bootstrapCursor;
@@ -177,9 +203,8 @@ class CustomerVehicleSyncService {
 
     try {
       while (hasMore) {
-        final response = await _api.syncPullCustomersVehicles(
-          businessId,
-          afterCustomerId: afterCustomerId,
+        final response = await _bootstrapPage(
+          businessId, afterCustomerId,
         );
 
         if (response['revoke_all'] == true) {
