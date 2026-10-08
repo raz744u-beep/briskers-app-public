@@ -159,7 +159,7 @@ class ImportCacheRepairService {
       afterId = nextId;
     }
 
-    return (ids: ids, cursor: snapshotCursor!);
+    return (ids: ids, cursor: snapshotCursor);
   }
 
   Future<void> _verifyServerUnchanged(
