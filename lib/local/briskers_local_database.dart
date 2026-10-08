@@ -436,7 +436,39 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 18;
+  int get schemaVersion => 19;
+
+  // v18 introduced the ExpenseIQ photo queue but omitted its onUpgrade
+  // migration, so user_version may be 18 while the tables are missing.
+  // Idempotent CREATEs preserve any existing queue or business data.
+  Future<void> ensureExpenseIqSchema() async {
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS local_expense_iq_photos (
+        business_id TEXT NOT NULL,
+        transaction_id TEXT NOT NULL,
+        photo_id TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        source_uri TEXT NULL,
+        state TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        claimed_at INTEGER NULL,
+        last_error TEXT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (business_id, transaction_id)
+      )
+    ''');
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS local_expense_iq_sync_settings (
+        business_id TEXT NOT NULL PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        wifi_only INTEGER NOT NULL DEFAULT 1
+      )
+    ''');
+    await customStatement('''
+      CREATE INDEX IF NOT EXISTS idx_local_expense_iq_photos_state
+        ON local_expense_iq_photos (business_id, state, updated_at)
+    ''');
+  }
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -557,6 +589,14 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
           if (from < 17) {
             await migrator.createTable(localFinancialCache);
           }
+          if (from < 19) {
+            await ensureExpenseIqSchema();
+          }
+        },
+        onOpen: (details) async {
+          // A previous APK may have advanced user_version without making the
+          // tables. Self-heal without dropping any local records.
+          await ensureExpenseIqSchema();
         },
       );
 }
