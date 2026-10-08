@@ -237,6 +237,9 @@ class ExpenseIqLocalPhotoSync {
     // Supabase sessions are loaded from its persistent secure local storage
     // inside the workmanager Flutter engine. No auth token is copied to jobs.
     final now = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+    // A unique microsecond lease prevents concurrent workers from freeing
+    // one another's in-flight rows within the same wall-clock second.
+    final claimToken = DateTime.now().toUtc().microsecondsSinceEpoch;
     final claimed = <Map<String, dynamic>>[];
     await _database.transaction(() async {
       final rows = await _database.customSelect(
@@ -257,7 +260,7 @@ class ExpenseIqLocalPhotoSync {
         variables: [
           Variable<String>(businessId),
           Variable<int>(now - 120),
-          Variable<int>(now - 1200),
+          Variable<int>(claimToken - 1200 * 1000000),
           Variable<int>(maxPhotos),
         ],
       ).get();
@@ -268,7 +271,7 @@ class ExpenseIqLocalPhotoSync {
           UPDATE $_table SET state='uploading', claimed_at=?, updated_at=?
           WHERE business_id=? AND transaction_id=?
           ''',
-          [now, now, businessId, row.read<String>('transaction_id')],
+          [claimToken, now, businessId, row.read<String>('transaction_id')],
         );
       }
     });
@@ -302,6 +305,8 @@ class ExpenseIqLocalPhotoSync {
 
     var uploaded = 0, failed = 0, sequentialFailures = 0;
     for (final row in claimed) {
+      // Switches on the Expenses screen pause safely between photos.
+      if (!(await counts(businessId)).enabled) break;
       final transactionId = row['transaction_id']?.toString() ?? '';
       final filename = row['filename']?.toString() ?? 'receipt.jpg';
       if (alreadyUploaded.contains(transactionId)) {
@@ -349,7 +354,7 @@ class ExpenseIqLocalPhotoSync {
       UPDATE $_table SET state='pending', claimed_at=NULL
       WHERE business_id=? AND state='uploading' AND claimed_at=?
       ''',
-      [businessId, now],
+      [businessId, claimToken],
     );
     final remaining = await _database.customSelect(
       '''
