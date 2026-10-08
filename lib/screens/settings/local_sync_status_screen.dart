@@ -9,6 +9,7 @@ import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/catalog_sync_service.dart';
 import '../../services/document_index_sync_service.dart';
 import '../../services/job_sync_service.dart';
+import '../../services/import_cache_repair_service.dart';
 import '../../services/kiosk_registration_service.dart';
 import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_job_admin_service.dart';
@@ -37,6 +38,7 @@ class LocalSyncStatusScreen extends StatefulWidget {
 
 class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   final JobSyncService _jobs = JobSyncService();
+  final ImportCacheRepairService _importRepair = ImportCacheRepairService();
   final AppointmentSyncService _appointments = AppointmentSyncService();
   final CustomerVehicleSyncService _customers = CustomerVehicleSyncService();
   final CatalogSyncService _catalog = CatalogSyncService();
@@ -229,6 +231,55 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         return tr('kioskWalkIn');
       default:
         return type.replaceAll('_', ' ');
+    }
+  }
+
+  Future<void> _repairImportedData() async {
+    if (_syncing) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('repairImportedData')),
+        content: Text(tr('repairImportedDataHelp')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(tr('cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(tr('repairImportedData')),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+
+    setState(() {
+      _syncing = true;
+      _syncMessage = null;
+      _error = null;
+    });
+    try {
+      final result = await _importRepair.repair(widget.businessId);
+      await _load();
+      if (!mounted) return;
+      setState(() {
+        _syncMessage = tr('repairImportedDataDone')
+            .replaceAll('{customers}', '${result.customersRemoved}')
+            .replaceAll('{vehicles}', '${result.vehiclesRemoved}')
+            .replaceAll('{jobs}', '${result.jobsRemoved}');
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString();
+        _syncMessage = tr('repairImportedDataBlocked');
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _syncing = false);
+      }
     }
   }
 
@@ -607,6 +658,12 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                     label: Text(
                       _syncing ? tr('syncing') : tr('syncNow'),
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _syncing ? null : _repairImportedData,
+                    icon: const Icon(Icons.cleaning_services_outlined),
+                    label: Text(tr('repairImportedData')),
                   ),
                 ],
               ),
