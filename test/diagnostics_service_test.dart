@@ -10,6 +10,48 @@ import 'package:briskers_app/services/local_tax_settings_cache.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('diagnostics detect v18-style missing ExpenseIQ tables', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    await db.customSelect('SELECT 1').getSingle();
+    await db.customStatement('DROP TABLE local_expense_iq_photos');
+    await db.customStatement('DROP TABLE local_expense_iq_sync_settings');
+    final report = await BriskersDiagnosticsService(
+      database: db,
+    ).run('business-1', full: false);
+    final schema = report.checks.firstWhere((x) => x.id == 'DB-003');
+    expect(schema.level, BriskersDiagnosticLevel.fail);
+    expect(schema.details.join(' '), contains('local_expense_iq_photos'));
+    final queue = report.checks.firstWhere((x) => x.id == 'PHOTOIQ-001');
+    expect(queue.level, BriskersDiagnosticLevel.fail);
+    await db.close();
+  });
+
+  test('diagnostics report ExpenseIQ queue counts and missing files', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    await db.customStatement('''
+      INSERT INTO local_expense_iq_photos
+        (business_id,transaction_id,photo_id,filename,source_uri,state,updated_at)
+      VALUES
+        ('business-1','txn-1','p-1','p-1.jpg','content://expenseiq/p-1.jpg','pending',1),
+        ('business-1','txn-2','p-2','p-2.jpg',NULL,'missing',1)
+    ''');
+    final report = await BriskersDiagnosticsService(
+      database: db,
+    ).run('business-1', full: true);
+    final schema = report.checks.firstWhere((x) => x.id == 'DB-003');
+    expect(schema.level, BriskersDiagnosticLevel.pass);
+    final queue = report.checks.firstWhere((x) => x.id == 'PHOTOIQ-001');
+    expect(queue.level, BriskersDiagnosticLevel.warning);
+    expect(queue.details.join(' '), contains('Pending: 1'));
+    expect(queue.details.join(' '), contains('unmatched: 1'));
+    final integrity = report.checks.firstWhere((x) => x.id == 'PHOTOIQ-002');
+    expect(integrity.level, BriskersDiagnosticLevel.pass);
+    await db.close();
+  });
+
+
 
   test('full diagnostics pass for a healthy local offline snapshot', () async {
     SharedPreferences.setMockInitialValues({});
