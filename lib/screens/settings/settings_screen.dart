@@ -122,7 +122,7 @@ class SettingsScreen extends StatelessWidget {
           if (roleCode == 'owner')
             ListTile(
               leading: const Icon(
-                Icons.pin_outlined,
+                Icons.numbers,
                 color: BriskersColors.settings,
               ),
               title: const Text('Document Numbering'),
