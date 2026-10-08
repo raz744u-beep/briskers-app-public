@@ -24,6 +24,80 @@ class JobSyncService {
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
 
+  /// Prune only jobs missing from a verified full server snapshot.
+  /// Refuse cleanup when a stale job still owns locally cached photo files.
+  Future<int> pruneObsoleteCache(
+    String businessId,
+    Set<String> serverJobIds,
+  ) async {
+    final rows = await _database.customSelect(
+      'SELECT id, vehicle_id FROM local_jobs WHERE business_id = ?',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    final obsolete = rows
+        .where((row) => !serverJobIds.contains(row.read<String>('id')))
+        .toList();
+
+    // A full import must never silently delete device-only photo files.
+    // Check every stale job before making any destructive changes.
+    for (final row in obsolete) {
+      final jobId = row.read<String>('id');
+      final vehicleId = row.readNullable<String>('vehicle_id');
+      final inspectionPhotos = await _database.customSelect(
+        '''
+        SELECT COUNT(*) AS count
+        FROM local_pre_inspection_photos p
+        JOIN local_pre_inspections i
+          ON i.business_id = p.business_id
+         AND i.id = p.inspection_id
+        WHERE i.business_id = ? AND i.job_id = ?
+          AND p.local_file_path IS NOT NULL AND p.local_file_path <> ''
+        ''',
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(jobId),
+        ],
+      ).getSingle();
+      if (inspectionPhotos.read<int>('count') > 0) {
+        throw StateError(
+          'Old job $jobId has locally stored photos. '
+          'Import or back them up before repairing this device.',
+        );
+      }
+      if (vehicleId != null && vehicleId.isNotEmpty) {
+        final findingPhotos = await _database.customSelect(
+          '''
+          SELECT COUNT(*) AS count
+          FROM local_finding_photos p
+          JOIN local_findings f
+            ON f.business_id = p.business_id
+           AND f.id = p.finding_id
+          WHERE f.business_id = ? AND f.vehicle_id = ?
+            AND p.local_file_path IS NOT NULL AND p.local_file_path <> ''
+          ''',
+          variables: [
+            Variable<String>(businessId),
+            Variable<String>(vehicleId),
+          ],
+        ).getSingle();
+        if (findingPhotos.read<int>('count') > 0) {
+          throw StateError(
+            'Old job $jobId has locally cached finding photos. '
+            'Import or back them up before repairing this device.',
+          );
+        }
+      }
+    }
+
+    await _database.transaction(() async {
+      for (final row in obsolete) {
+        await _removeJob(businessId, row.read<String>('id'));
+      }
+    });
+    if (obsolete.isNotEmpty) _syncEvents.add(businessId);
+    return obsolete.length;
+  }
+
   Future<void> pull(String businessId) async {
     int? cursor;
     var bootstrapped = false;
