@@ -56,6 +56,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   final ExpenseIqLocalPhotoSync _photoSync = ExpenseIqLocalPhotoSync();
   ExpenseIqSyncCounts? _photoCounts;
   Timer? _photoCountTimer;
+  bool _photoCountsReading = false;
+  String? _photoQueueError;
+  int _indexProcessed = 0;
+  int _indexExpected = 0;
   String _filter = 'all';
   String _dateRange = '30d';
   DateTime? _customStartDate;
@@ -912,13 +916,27 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
   /// Safe to restart: the server excludes expenses with finalized photos.
   /// The source photos are never moved or deleted.
-  Future<void> _refreshPhotoCounts() async {
-    if (!_owner || !Platform.isAndroid) return;
+  Future<void> _refreshPhotoCounts({bool force = false}) async {
+    if (!_owner || !Platform.isAndroid ||
+        _photoCountsReading || (_importing && !force)) {
+      return;
+    }
+    _photoCountsReading = true;
     try {
       final counts = await _photoSync.counts(widget.businessId);
-      if (mounted) setState(() => _photoCounts = counts);
-    } catch (_) {
-      // Keep expenses available even if local photo diagnostics fail.
+      if (mounted) {
+        setState(() {
+          _photoCounts = counts;
+          _photoQueueError = null;
+        });
+      }
+    } catch (error) {
+      // Never silently leave the owner stuck on "Reading local photo queue".
+      if (mounted) {
+        setState(() => _photoQueueError = error.toString());
+      }
+    } finally {
+      _photoCountsReading = false;
     }
   }
 
@@ -1036,12 +1054,26 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     );
     if (approved != true || !mounted) return;
 
-    setState(() => _importing = true);
+    setState(() {
+      _importing = true;
+      _indexProcessed = 0;
+      _indexExpected = candidates.length;
+      _photoQueueError = null;
+    });
     try {
       final index = await _photoSync.indexPhotos(
-        widget.businessId, candidates: candidates, files: files,
+        widget.businessId,
+        candidates: candidates,
+        files: files,
+        onProgress: (processed, total) {
+          if (!mounted) return;
+          setState(() {
+            _indexProcessed = processed;
+            _indexExpected = total;
+          });
+        },
       );
-      await _refreshPhotoCounts();
+      await _refreshPhotoCounts(force: true);
       String scheduleError = '';
       try {
         await ExpenseIqBackgroundScheduler.schedule(widget.businessId);
@@ -1252,15 +1284,26 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                             const EdgeInsets.fromLTRB(16, 4, 16, 12),
                         children: [
                           Text(
-                            _photoCounts == null
-                                ? 'Reading local photo queue...'
-                                : 'Indexed: ${_photoCounts!.indexed}  •  '
-                                    'Uploaded: ${_photoCounts!.uploaded}  •  '
-                                    'Waiting: ${_photoCounts!.pending}\n'
-                                    'Uploading: ${_photoCounts!.uploading}  •  '
-                                    'Failed: ${_photoCounts!.failed}  •  '
-                                    'Unmatched: ${_photoCounts!.missing}',
+                            _importing
+                                ? 'Indexing locally: $_indexProcessed '
+                                    'of $_indexExpected references saved'
+                                : _photoQueueError != null
+                                    ? 'Local photo queue error: $_photoQueueError'
+                                    : _photoCounts == null
+                                        ? 'Reading local photo queue...'
+                                        : 'Indexed: ${_photoCounts!.indexed}  •  '
+                                            'Uploaded: ${_photoCounts!.uploaded}  •  '
+                                            'Waiting: ${_photoCounts!.pending}\n'
+                                            'Uploading: ${_photoCounts!.uploading}  •  '
+                                            'Failed: ${_photoCounts!.failed}  •  '
+                                            'Unmatched: ${_photoCounts!.missing}',
                           ),
+                          if (_importing && _indexExpected > 0) ...[
+                            const SizedBox(height: 8),
+                            LinearProgressIndicator(
+                              value: _indexProcessed / _indexExpected,
+                            ),
+                          ],
                           const SizedBox(height: 8),
                           SwitchListTile(
                             dense: true,
@@ -1268,14 +1311,16 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                             title: const Text('Automatic background sync'),
                             subtitle: const Text('Android uploads in small batches'),
                             value: _photoCounts?.enabled ?? true,
-                            onChanged: _togglePhotoSync,
+                            onChanged: _importing || _photoCounts == null
+                                ? null : _togglePhotoSync,
                           ),
                           SwitchListTile(
                             dense: true,
                             contentPadding: EdgeInsets.zero,
                             title: const Text('Wi-Fi only'),
                             value: _photoCounts?.wifiOnly ?? true,
-                            onChanged: _toggleWifiOnly,
+                            onChanged: _importing || _photoCounts == null
+                                ? null : _toggleWifiOnly,
                           ),
                           Row(
                             children: [
@@ -1300,6 +1345,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                               Expanded(
                                 child: FilledButton.icon(
                                   onPressed: _requestingPhotoSync ||
+                                          _photoCounts == null ||
                                           _photoCounts?.enabled == false ||
                                           _photoCounts?.pending == 0
                                       ? null : _requestPhotoSync,
