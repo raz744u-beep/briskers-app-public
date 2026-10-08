@@ -1,7 +1,7 @@
 name: briskers_app
 description: Briskers auto repair office and owner app
 publish_to: none
-version: 0.10.0+1000
+version: 0.10.1+1010
 
 environment:
   sdk: '>=3.9.0 <4.0.0'
@@ -12,6 +12,7 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: ^0.20.2
+  package_info_plus: ^8.3.1
   image_picker: ^1.2.0
   image: ^4.10.1
   mobile_scanner: ^7.4.2
