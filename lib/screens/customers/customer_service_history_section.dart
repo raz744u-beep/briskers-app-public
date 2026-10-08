@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -292,7 +291,7 @@ class _CustomerServiceHistorySectionState
             'Exact completed-job matches: ${matches.length}\n'
             'Jobs matched: ${byJob.length}\n'
             'Unmatched files left untouched: $unmatched'
-            '${previewLines.isEmpty ? '' : '\n\n' + previewLines.join('\n')}'
+            '${previewLines.isEmpty ? '' : '\n\n${previewLines.join('\n')}'}'
             '\n\nOnly exact job-number matches will be imported. '
             'Photos are copied into Briskers private storage and tagged as historical MobileBiz photos.',
           ),
