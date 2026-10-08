@@ -107,6 +107,12 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         'documents': await _count('local_documents'),
         'findings': await _count('local_findings'),
         'inspections': await _count('local_pre_inspections'),
+        'photoPending': await _count('local_expense_iq_photos',
+            where: "state IN ('pending','uploading')"),
+        'photoUploaded': await _count('local_expense_iq_photos',
+            where: "state = 'uploaded'"),
+        'photoFailed': await _count('local_expense_iq_photos',
+            where: "state IN ('failed','missing')"),
         'pending': await _count(
           'sync_outbox',
           where: "state = 'pending'",
@@ -529,6 +535,24 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                     Icons.warning_amber_rounded,
                     tr('syncConflicts'),
                     _counts['conflicts'] ?? 0,
+                    color: Colors.red,
+                  ),
+                  _countTile(
+                    Icons.photo_library_outlined,
+                    'ExpenseIQ photos awaiting cloud sync',
+                    _counts['photoPending'] ?? 0,
+                    color: Colors.orange,
+                  ),
+                  _countTile(
+                    Icons.cloud_done_outlined,
+                    'ExpenseIQ photos uploaded from this phone',
+                    _counts['photoUploaded'] ?? 0,
+                    color: Colors.green,
+                  ),
+                  _countTile(
+                    Icons.report_problem_outlined,
+                    'ExpenseIQ photos needing attention',
+                    _counts['photoFailed'] ?? 0,
                     color: Colors.red,
                   ),
                   if (_outbox.isNotEmpty) ...[

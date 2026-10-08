@@ -1,14 +1,17 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:saf/saf.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_financial_cache.dart';
+import '../../services/expenseiq_local_photo_sync.dart';
 import 'expense_entry_screen.dart';
 
 class ExpenseDetailScreen extends StatefulWidget {
@@ -36,6 +39,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   final _picker = ImagePicker();
   final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
+  final ExpenseIqLocalPhotoSync _localExpenseIq = ExpenseIqLocalPhotoSync();
+  Map<String, dynamic>? _localExpenseIqPhoto;
 
   Map<String, dynamic>? _detail;
   bool _loading = true;
@@ -55,6 +60,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     } else {
       _load();
     }
+    _loadLocalExpenseIqPhoto();
   }
 
   Future<void> _loadCached(Map<String, dynamic> summary) async {
@@ -114,6 +120,75 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         _error = error.toString();
       });
     }
+  }
+
+  Future<void> _loadLocalExpenseIqPhoto() async {
+    try {
+      final photo = await _localExpenseIq.localForExpense(
+        widget.businessId, widget.transactionId,
+      );
+      if (mounted) setState(() => _localExpenseIqPhoto = photo);
+    } catch (_) {
+      // Online receipt view remains available.
+    }
+  }
+
+  Future<void> _openLocalExpenseIqPhoto(String uri) async {
+    try {
+      final bytes = await Saf().readFileBytes(uri);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => Dialog(
+          child: InteractiveViewer(
+            minScale: 0.5,
+            maxScale: 5,
+            child: Image.memory(bytes, fit: BoxFit.contain),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Original photo unavailable: $error')),
+        );
+      }
+    }
+  }
+
+  Widget _localExpenseIqReceiptCard() {
+    final photo = _localExpenseIqPhoto!;
+    final uri = photo['source_uri']?.toString() ?? '';
+    final state = photo['state']?.toString() ?? 'pending';
+    return Card(
+      child: ListTile(
+        leading: uri.isEmpty
+            ? const Icon(Icons.image_not_supported_outlined)
+            : FutureBuilder<Uint8List>(
+                future: Saf().readFileBytes(uri),
+                builder: (context, snapshot) =>
+                    snapshot.hasData
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: Image.memory(
+                              snapshot.data!,
+                              width: 50, height: 50,
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        : const Icon(Icons.image_outlined),
+              ),
+        title: Text(photo['filename']?.toString() ?? 'ExpenseIQ photo'),
+        subtitle: Text(
+          state == 'uploaded' ? 'Synced to cloud' :
+          state == 'missing' ? 'Original file not found' :
+          state == 'failed' ? 'Upload pending retry' :
+          'Available locally · awaiting sync',
+        ),
+        trailing: const Icon(Icons.zoom_in_outlined),
+        onTap: uri.isEmpty ? null : () => _openLocalExpenseIqPhoto(uri),
+      ),
+    );
   }
 
   String _attachmentCacheKey(Map<String, dynamic> attachment) {
@@ -1105,7 +1180,11 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                 ),
             ],
           ),
-          if (attachments.isEmpty)
+          if (_localExpenseIqPhoto != null &&
+              (attachments.isEmpty ||
+                  _localExpenseIqPhoto!['state'] != 'uploaded'))
+            _localExpenseIqReceiptCard(),
+          if (attachments.isEmpty && _localExpenseIqPhoto == null)
             const Card(
               child: Padding(
                 padding: EdgeInsets.all(18),
