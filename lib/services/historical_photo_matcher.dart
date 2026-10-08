@@ -29,7 +29,7 @@ class HistoricalPhotoMatcher {
   bool pathContainsJobNumber(String path, String jobNumberKey) {
     if (jobNumberKey.isEmpty) return false;
     final pattern = RegExp(
-      '(^|[^0-9])' + RegExp.escape(jobNumberKey) + r'([^0-9]|$)',
+      '(^|[^0-9])${RegExp.escape(jobNumberKey)}' r'([^0-9]|$)',
       caseSensitive: false,
     );
     return pattern.hasMatch(path);
