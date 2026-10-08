@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
@@ -18,6 +20,11 @@ class BlankInvoiceSetupScreen extends StatefulWidget {
 
 class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
   static const _api = BriskersApi();
+  final TextEditingController _customerSearch = TextEditingController();
+  Timer? _searchDebounce;
+  int _searchGeneration = 0;
+  int _customerDropdownVersion = 0;
+  bool _searchingCustomers = false;
 
   List<Map<String, dynamic>> _customers = const [];
   List<Map<String, dynamic>> _vehicles = const [];
@@ -34,18 +41,52 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
     _loadCustomers();
   }
 
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _customerSearch.dispose();
+    super.dispose();
+  }
+
+  void _onCustomerSearch(String _) {
+    _searchDebounce?.cancel();
+    // Discard responses from any prior query before the debounce fires.
+    _searchGeneration++;
+    setState(() {
+      _customerDropdownVersion++;
+      _customerId = null;
+      _vehicleId = null;
+      _vehicles = const [];
+      _customers = const [];
+      _searchingCustomers = true;
+      _error = null;
+    });
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 350),
+      _loadCustomers,
+    );
+  }
+
   Future<void> _loadCustomers() async {
+    final generation = ++_searchGeneration;
+    final term = _customerSearch.text.trim();
     try {
-      final customers = await _api.customers(widget.businessId, limit: 200);
-      if (!mounted) return;
+      final customers = await _api.customers(
+        widget.businessId,
+        search: term.isEmpty ? null : term,
+        limit: 75,
+      );
+      if (!mounted || generation != _searchGeneration) return;
       setState(() {
         _customers = customers;
         _loading = false;
+        _searchingCustomers = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _searchGeneration) return;
       setState(() {
         _loading = false;
+        _searchingCustomers = false;
         _error = error.toString();
       });
     }
@@ -140,7 +181,34 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
             style: TextStyle(color: Color(0xFF667085)),
           ),
           const SizedBox(height: 16),
+          TextField(
+            controller: _customerSearch,
+            enabled: !_saving,
+            onChanged: _onCustomerSearch,
+            decoration: InputDecoration(
+              labelText: 'Find customer',
+              hintText: 'Search by name, phone or email',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _customerSearch.text.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: () {
+                        _customerSearch.clear();
+                        _onCustomerSearch('');
+                      },
+                      icon: const Icon(Icons.close),
+                    ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (_searchingCustomers)
+            const LinearProgressIndicator()
+          else if (_customers.isEmpty)
+            const Text('No matching customers. Try another search.'),
+          if (!_searchingCustomers && _customers.isNotEmpty)
           DropdownButtonFormField<String>(
+            key: ValueKey(_customerDropdownVersion),
             initialValue: _customerId,
             isExpanded: true,
             decoration: const InputDecoration(
@@ -172,6 +240,7 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
             const LinearProgressIndicator()
           else
             DropdownButtonFormField<String?>(
+              key: ValueKey(_customerId),
               initialValue: _vehicleId,
               isExpanded: true,
               decoration: const InputDecoration(
