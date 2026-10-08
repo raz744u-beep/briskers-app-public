@@ -626,4 +626,4 @@ jobs:
           name: briskers-android-debug
           path: generated/build/app/outputs/flutter-apk/Briskers-v*.apk
           if-no-files-found: error
-          retention-days: 2
+          retention-days: 30
