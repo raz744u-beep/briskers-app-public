@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../core/supabase_config.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
@@ -36,16 +36,15 @@ class _DocumentNumberingSettingsScreenState
   Future<void> _reload() async {
     if (mounted) setState(() { _loading = true; _error = null; });
     try {
-      final rows = await Supabase.instance.client
-          .schema('briskers')
-          .from('document_counters')
-          .select('document_kind,prefix,next_number')
-          .eq('business_id', widget.businessId);
+      final rows = await networkSupabase.rpc(
+        'briskers_document_counters',
+        params: {'p_business_id': widget.businessId},
+      ) as List<dynamic>;
       if (!mounted) return;
       setState(() {
         _counters.clear();
         for (final raw in rows) {
-          final record = Map<String, dynamic>.from(raw);
+          final record = Map<String, dynamic>.from(raw as Map);
           _counters[record['document_kind'].toString()] = record;
         }
       });
@@ -110,12 +109,12 @@ class _DocumentNumberingSettingsScreenState
     }
     setState(() => _saving = true);
     try {
-      await Supabase.instance.client.schema('briskers').rpc(
-        'owner_set_next_number',
+      await networkSupabase.rpc(
+        'briskers_owner_set_next_number',
         params: {
-          'b': widget.businessId,
-          'k': kind,
-          'requested_next': number,
+          'p_business_id': widget.businessId,
+          'p_kind': kind,
+          'p_next_number': number,
         },
       );
       await _reload();
