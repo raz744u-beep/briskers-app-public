@@ -25,6 +25,26 @@ class BriskersApi {
         .toList();
   }
 
+  /// Lightweight, paginated and permission-checked inventory for
+  /// reconciling cache IDs after a bulk legacy import.
+  Future<Map<String, dynamic>> syncCacheInventory(
+    String businessId, {
+    required String entity,
+    String? afterId,
+    int limit = 250,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_sync_cache_inventory_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_entity': entity,
+        'p_after_id': afterId,
+        'p_limit': limit,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> syncPullJobs(
     String businessId, {
     int? afterCursor,
