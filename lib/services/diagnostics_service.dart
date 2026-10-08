@@ -126,6 +126,20 @@ class BriskersDiagnosticsService {
     );
     await _safeGroup(
       checks,
+      fallbackId: 'DB-003',
+      category: 'Local database',
+      title: 'ExpenseIQ schema migration',
+      action: () => _checkExpenseIqSchema(checks),
+    );
+    await _safeGroup(
+      checks,
+      fallbackId: 'PHOTOIQ-000',
+      category: 'ExpenseIQ photo sync',
+      title: 'ExpenseIQ local queue',
+      action: () => _checkExpenseIqQueue(businessId, checks, full: full),
+    );
+    await _safeGroup(
+      checks,
       fallbackId: 'OFF-000',
       category: 'Offline readiness',
       title: 'Offline cache readiness',
@@ -307,6 +321,192 @@ class BriskersDiagnosticsService {
             .toList(),
       ),
     );
+  }
+
+  // This runs in QUICK and FULL diagnostics. Schema version alone is not
+  // proof of a successful upgrade: v18 previously omitted both queue tables.
+  Future<void> _checkExpenseIqSchema(List<DiagnosticCheck> checks) async {
+    const names = [
+      'local_expense_iq_photos',
+      'local_expense_iq_sync_settings',
+    ];
+    final rows = await _database.customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table' "
+      "AND name IN ('local_expense_iq_photos', "
+      "'local_expense_iq_sync_settings')",
+    ).get();
+    final existing = rows.map((row) => row.read<String>('name')).toSet();
+    final missing = names.where((name) => !existing.contains(name)).toList();
+
+    final missingColumns = <String>[];
+    if (existing.contains('local_expense_iq_photos')) {
+      final columns = await _database.customSelect(
+        'PRAGMA table_info(local_expense_iq_photos)',
+      ).get();
+      final present = columns
+          .map((row) => row.read<String>('name')).toSet();
+      for (final required in const [
+        'business_id', 'transaction_id', 'photo_id', 'filename',
+        'source_uri', 'state', 'attempts', 'claimed_at',
+        'last_error', 'updated_at',
+      ]) {
+        if (!present.contains(required)) {
+          missingColumns.add('local_expense_iq_photos.$required');
+        }
+      }
+    }
+    if (existing.contains('local_expense_iq_sync_settings')) {
+      final columns = await _database.customSelect(
+        'PRAGMA table_info(local_expense_iq_sync_settings)',
+      ).get();
+      final present = columns
+          .map((row) => row.read<String>('name')).toSet();
+      for (final required in const [
+        'business_id', 'enabled', 'wifi_only',
+      ]) {
+        if (!present.contains(required)) {
+          missingColumns.add('local_expense_iq_sync_settings.$required');
+        }
+      }
+    }
+    final versionRow = await _database.customSelect(
+      'PRAGMA user_version',
+    ).getSingle();
+    final actualVersion = versionRow.read<int>('user_version');
+    final healthy = missing.isEmpty && missingColumns.isEmpty &&
+        actualVersion == _database.schemaVersion;
+    checks.add(DiagnosticCheck(
+      id: 'DB-003',
+      category: 'Local database',
+      title: 'ExpenseIQ photo queue schema',
+      level: healthy
+          ? BriskersDiagnosticLevel.pass
+          : BriskersDiagnosticLevel.fail,
+      summary: healthy
+          ? 'Both ExpenseIQ queue tables and required columns are available.'
+          : 'ExpenseIQ queue schema is incomplete or the migration version '
+              'does not match.',
+      details: [
+        'SQLite user_version: $actualVersion; expected: '
+            '${_database.schemaVersion}',
+        if (missing.isNotEmpty) 'Missing tables: ${missing.join(', ')}',
+        if (missingColumns.isNotEmpty)
+          'Missing columns: ${missingColumns.join(', ')}',
+        if (!healthy)
+          'Do not clear app data. Install the migration repair build; '
+              'the queue tables can be recreated without deleting records.',
+      ],
+    ));
+  }
+
+  Future<void> _checkExpenseIqQueue(
+    String businessId,
+    List<DiagnosticCheck> checks, {
+    required bool full,
+  }) async {
+    final table = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' "
+      "AND name='local_expense_iq_photos' LIMIT 1",
+    ).get();
+    if (table.isEmpty) {
+      checks.add(const DiagnosticCheck(
+        id: 'PHOTOIQ-001',
+        category: 'ExpenseIQ photo sync',
+        title: 'Local ExpenseIQ queue health',
+        level: BriskersDiagnosticLevel.fail,
+        summary: 'ExpenseIQ queue table is missing.',
+        details: ['Run DB-003 and install the non-destructive migration fix.'],
+      ));
+      return;
+    }
+    final rows = await _database.customSelect(
+      '''
+      SELECT state, COUNT(*) AS quantity
+      FROM local_expense_iq_photos
+      WHERE business_id = ?
+      GROUP BY state
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    final states = <String, int>{
+      for (final row in rows)
+        row.read<String>('state'): row.read<int>('quantity'),
+    };
+    const validStates = <String>{
+      'pending','uploading','uploaded','failed','missing',
+    };
+    final unknown = states.entries
+        .where((entry) => !validStates.contains(entry.key))
+        .toList();
+    final failed = states['failed'] ?? 0;
+    final missing = states['missing'] ?? 0;
+    final pending = states['pending'] ?? 0;
+    final uploading = states['uploading'] ?? 0;
+    final uploaded = states['uploaded'] ?? 0;
+    final total = states.values.fold<int>(0,(sum,count)=>sum+count);
+    checks.add(DiagnosticCheck(
+      id: 'PHOTOIQ-001',
+      category: 'ExpenseIQ photo sync',
+      title: 'Local ExpenseIQ upload queue',
+      level: unknown.isNotEmpty
+          ? BriskersDiagnosticLevel.fail
+          : (failed > 0 || missing > 0
+              ? BriskersDiagnosticLevel.warning
+              : BriskersDiagnosticLevel.pass),
+      summary: total == 0
+          ? 'ExpenseIQ photo queue has no indexed records yet.'
+          : '$total receipt references indexed locally.',
+      details: [
+        'Pending: $pending; uploading: $uploading; uploaded: $uploaded; '
+            'failed: $failed; unmatched: $missing',
+        if (unknown.isNotEmpty)
+          'Invalid states: ${unknown.map((row)=>row.key).join(', ')}',
+      ],
+    ));
+
+    if (!full) return;
+    final invalid = await _database.customSelect(
+      '''
+      SELECT
+        SUM(CASE WHEN state IN ('pending','uploading','failed')
+                     AND (source_uri IS NULL OR TRIM(source_uri) = '')
+                  THEN 1 ELSE 0 END) AS bad_uri,
+        SUM(CASE WHEN state = 'uploading' AND
+                     (claimed_at IS NULL OR claimed_at < ?)
+                  THEN 1 ELSE 0 END) AS stale_claim,
+        SUM(CASE WHEN photo_id = '' OR transaction_id = ''
+                  THEN 1 ELSE 0 END) AS missing_identity
+      FROM local_expense_iq_photos WHERE business_id = ?
+      ''',
+      variables: [
+        Variable<int>(
+          DateTime.now().toUtc().microsecondsSinceEpoch -
+              20 * 60 * 1000000,
+        ),
+        Variable<String>(businessId),
+      ],
+    ).getSingle();
+    final badUri = invalid.readNullable<int>('bad_uri') ?? 0;
+    final staleClaims = invalid.readNullable<int>('stale_claim') ?? 0;
+    final missingId = invalid.readNullable<int>('missing_identity') ?? 0;
+    checks.add(DiagnosticCheck(
+      id: 'PHOTOIQ-002',
+      category: 'ExpenseIQ photo sync',
+      title: 'ExpenseIQ queue integrity and stuck uploads',
+      level: badUri > 0 || missingId > 0
+          ? BriskersDiagnosticLevel.fail
+          : staleClaims > 0
+              ? BriskersDiagnosticLevel.warning
+              : BriskersDiagnosticLevel.pass,
+      summary: badUri + staleClaims + missingId == 0
+          ? 'No broken photo references or stale upload claims.'
+          : 'ExpenseIQ queue needs attention.',
+      details: [
+        'Queued photos missing source URI: $badUri',
+        'Expired upload claims: $staleClaims',
+        'References missing transaction/photo IDs: $missingId',
+      ],
+    ));
   }
 
   Future<void> _checkOfflineReadiness(
@@ -803,10 +1003,10 @@ class BriskersDiagnosticsService {
       DiagnosticCheck(
         id: 'PHOTO-001',
         category: 'Photos',
-        title: 'Pending photo uploads',
+        title: 'Preinspection and finding photo uploads',
         level: level,
         summary: rows.isEmpty
-            ? 'No photos are waiting to upload.'
+            ? 'No preinspection or finding photos are waiting to upload.'
             : rows.length.toString() + ' photo(s) are waiting to upload.',
         details: [
           if (missingFiles > 0)
