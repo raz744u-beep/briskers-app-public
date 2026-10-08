@@ -67,6 +67,9 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
 
   bool _loading = true;
   bool _syncing = false;
+  static const int _syncStepCount = 18;
+  int _syncStep = 0;
+  String? _syncStage;
   String? _error;
   String? _syncMessage;
 
@@ -293,6 +296,8 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     if (_syncing) return;
     setState(() {
       _syncing = true;
+      _syncStep = 0;
+      _syncStage = 'Preparing sync';
       _syncMessage = null;
       _error = null;
     });
@@ -303,10 +308,13 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       String label,
       Future<void> Function() action,
     ) async {
+      if (mounted) setState(() => _syncStage = label);
       try {
         await action();
       } catch (error) {
         failures.add('$label: $error');
+      } finally {
+        if (mounted) setState(() => _syncStep += 1);
       }
     }
 
@@ -397,6 +405,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
 
     setState(() {
       _syncing = false;
+      _syncStage = null;
       _syncMessage =
           failures.isEmpty ? tr('syncCompleted') : tr('syncPartial');
       if (failures.isNotEmpty) {
@@ -450,6 +459,37 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 28),
                 children: [
+                  if (_syncing)
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(
+                              children: [
+                                SizedBox.square(
+                                  dimension: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                  ),
+                                ),
+                                SizedBox(width: 12),
+                                Text('Synchronization in progress'),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Text(_syncStage ?? 'Working…'),
+                            const SizedBox(height: 8),
+                            LinearProgressIndicator(
+                              value: _syncStep / _syncStepCount,
+                            ),
+                            const SizedBox(height: 6),
+                            Text('Step $_syncStep of $_syncStepCount completed'),
+                          ],
+                        ),
+                      ),
+                    ),
                   Card(
                     child: ListTile(
                       leading: const Icon(Icons.storage_outlined),
