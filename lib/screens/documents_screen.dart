@@ -1201,7 +1201,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   ),
                   onPressed: _createBlankInvoice,
                   icon: const Icon(Icons.note_add_outlined, size: 18),
-                  label: const Text('New Blank Invoice'),
+                  label: const Text('New Invoice'),
                 ),
               ),
             ],
