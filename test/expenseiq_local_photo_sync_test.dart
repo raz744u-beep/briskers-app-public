@@ -5,6 +5,46 @@ import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/expenseiq_local_photo_sync.dart';
 
 void main() {
+  test('indexing 255 photos reports committed batches and resumes safely',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final service = ExpenseIqLocalPhotoSync(database: db);
+    final candidates = <Map<String, dynamic>>[];
+    final photos = <Map<String, dynamic>>[];
+    for (var i = 0; i < 255; i++) {
+      candidates.add({
+        'transaction_id': 'expense-$i',
+        'photo_id': 'receipt-$i',
+      });
+      photos.add({
+        'name': 'receipt-$i.jpg',
+        'uri': 'content://test/receipt-$i',
+      });
+    }
+    final progress = <int>[];
+    final index = await service.indexPhotos(
+      'business-1',
+      candidates: candidates,
+      files: photos,
+      onProgress: (done, total) {
+        expect(total, 255);
+        progress.add(done);
+      },
+    );
+    expect(index.matched, 255);
+    expect(progress, [0, 100, 200, 255]);
+    expect((await service.counts('business-1')).pending, 255);
+
+    // Re-running the import never duplicates existing indexed receipts.
+    await service.indexPhotos(
+      'business-1',
+      candidates: candidates,
+      files: photos,
+    );
+    expect((await service.counts('business-1')).indexed, 255);
+    await db.close();
+  });
+
   test('ExpenseIQ indexes local SAF URIs without uploading or copying files',
       () async {
     final database = BriskersLocalDatabase(NativeDatabase.memory());

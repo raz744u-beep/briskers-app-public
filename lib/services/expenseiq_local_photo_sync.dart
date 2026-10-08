@@ -65,83 +65,101 @@ class ExpenseIqLocalPhotoSync {
     return '';
   }
 
+  /// Index file references in small, restart-safe SQLite transactions.
+  ///
+  /// Previous versions tried ~10,000 statements in one transaction, leaving
+  /// slower phones showing no progress for extended periods. Committed batches
+  /// survive interruption and can safely be resumed with another scan.
   Future<ExpenseIqIndexResult> indexPhotos(
     String businessId, {
     required List<Map<String, dynamic>> candidates,
     required List<Map<String, dynamic>> files,
+    void Function(int processed, int total)? onProgress,
   }) async {
     final byKey = <String, Map<String, dynamic>>{};
     for (final file in files) {
       final key = _photoKey(file['name']?.toString() ?? '');
       if (key.isNotEmpty) byKey[key] = file;
     }
-    final now = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
-    var matched = 0, missing = 0;
-    final seenTransactions = <String>{};
 
-    // Drift batches the 9k+ changes in a single transaction, so a crash
-    // cannot leave the photo index half-built.
-    await _database.batch((batch) {
-      for (final candidate in candidates) {
-        final transactionId = candidate['transaction_id']?.toString() ?? '';
-        final photoId = candidate['photo_id']?.toString().trim().toLowerCase() ?? '';
-        if (transactionId.isEmpty ||
-            photoId.isEmpty ||
-            !seenTransactions.add(transactionId)) {
-          continue;
-        }
-        final file = byKey[photoId];
-        final uri = file?['uri']?.toString();
-        final filename = file?['name']?.toString() ?? '$photoId.jpg';
-        if (uri == null || uri.isEmpty) {
-          missing++;
-        } else {
-          matched++;
-        }
-        batch.customStatement(
-          '''
-          INSERT INTO $_table
-            (business_id, transaction_id, photo_id, filename, source_uri,
-             state, attempts, claimed_at, last_error, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?)
-          ON CONFLICT(business_id, transaction_id) DO UPDATE SET
-            photo_id=excluded.photo_id,
-            filename=CASE WHEN excluded.source_uri IS NOT NULL
-                          THEN excluded.filename ELSE $_table.filename END,
-            source_uri=coalesce(excluded.source_uri, $_table.source_uri),
-            state=CASE
-              WHEN $_table.state='uploaded' THEN 'uploaded'
-              WHEN coalesce(excluded.source_uri,$_table.source_uri) IS NULL
-                THEN 'missing'
-              WHEN $_table.state='uploading' THEN 'uploading'
-              ELSE 'pending'
-            END,
-            attempts=CASE
-              WHEN $_table.state='uploaded' THEN $_table.attempts
-              ELSE 0
-            END,
-            updated_at=excluded.updated_at
-          ''',
-          [
-            businessId,
-            transactionId,
-            photoId,
-            filename,
-            uri,
-            uri == null || uri.isEmpty ? 'missing' : 'pending',
-            now,
-          ],
-        );
+    final items = <List<Object?>>[];
+    final seenTransactions = <String>{};
+    final now = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+    var matched = 0;
+    var missing = 0;
+    for (final candidate in candidates) {
+      final transactionId = candidate['transaction_id']?.toString() ?? '';
+      final photoId = candidate['photo_id']?.toString().trim().toLowerCase() ?? '';
+      if (transactionId.isEmpty ||
+          photoId.isEmpty ||
+          !seenTransactions.add(transactionId)) {
+        continue;
       }
-      batch.customStatement(
-        '''
-        INSERT OR IGNORE INTO local_expense_iq_sync_settings
-          (business_id, enabled, wifi_only)
-        VALUES (?, 1, 1)
-        ''',
-        [businessId],
-      );
-    });
+      final file = byKey[photoId];
+      final uri = file?['uri']?.toString();
+      final filename = file?['name']?.toString() ?? '$photoId.jpg';
+      if (uri == null || uri.isEmpty) {
+        missing++;
+      } else {
+        matched++;
+      }
+      items.add([
+        businessId,
+        transactionId,
+        photoId,
+        filename,
+        uri,
+        uri == null || uri.isEmpty ? 'missing' : 'pending',
+        now,
+      ]);
+    }
+
+    await _database.customStatement(
+      '''
+      INSERT OR IGNORE INTO local_expense_iq_sync_settings
+        (business_id, enabled, wifi_only)
+      VALUES (?, 1, 1)
+      ''',
+      [businessId],
+    );
+    onProgress?.call(0, items.length);
+    const batchSize = 100;
+    const upsertSql = '''
+      INSERT INTO $_table
+        (business_id, transaction_id, photo_id, filename, source_uri,
+         state, attempts, claimed_at, last_error, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?)
+      ON CONFLICT(business_id, transaction_id) DO UPDATE SET
+        photo_id=excluded.photo_id,
+        filename=CASE WHEN excluded.source_uri IS NOT NULL
+                      THEN excluded.filename ELSE $_table.filename END,
+        source_uri=coalesce(excluded.source_uri, $_table.source_uri),
+        state=CASE
+          WHEN $_table.state='uploaded' THEN 'uploaded'
+          WHEN coalesce(excluded.source_uri,$_table.source_uri) IS NULL
+            THEN 'missing'
+          WHEN $_table.state='uploading' THEN 'uploading'
+          ELSE 'pending'
+        END,
+        attempts=CASE
+          WHEN $_table.state='uploaded' THEN $_table.attempts
+          ELSE 0
+        END,
+        updated_at=excluded.updated_at
+    ''';
+    for (var offset = 0; offset < items.length; offset += batchSize) {
+      final end = offset + batchSize < items.length
+          ? offset + batchSize
+          : items.length;
+      await _database.batch((batch) {
+        for (final values in items.sublist(offset, end)) {
+          batch.customStatement(upsertSql, values);
+        }
+      });
+      onProgress?.call(end, items.length);
+      // Yield between committed batches so the screen can paint progress.
+      await Future<void>.delayed(Duration.zero);
+    }
     return ExpenseIqIndexResult(matched, missing);
   }
 
