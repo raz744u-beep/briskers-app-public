@@ -331,6 +331,9 @@ class LocalDocuments extends Table {
   DateTimeColumn get closedAt => dateTime().nullable()();
   BoolColumn get converted => boolean().withDefault(const Constant(false))();
   RealColumn get total => real().withDefault(const Constant(0))();
+  // Preserve the issued/business date separately from the import timestamp.
+  // A YYYY-MM-DD string is timezone-independent.
+  TextColumn get documentDate => text().nullable()();
   DateTimeColumn get createdAt => dateTime().nullable()();
   DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
   IntColumn get rowVersion => integer().nullable()();
@@ -436,7 +439,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 19;
+  int get schemaVersion => 20;
 
   // v18 introduced the ExpenseIQ photo queue but omitted its onUpgrade
   // migration, so user_version may be 18 while the tables are missing.
@@ -483,6 +486,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
           await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_number ON local_documents (business_id, document_number)');
           await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_job ON local_documents (business_id, job_id)');
           await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_customer ON local_documents (business_id, customer_id)');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_local_documents_business_date ON local_documents (business_id, kind, document_date DESC)');
         },
         onUpgrade: (migrator, from, to) async {
           if (from < 2) {
@@ -591,6 +595,22 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
           }
           if (from < 19) {
             await ensureExpenseIqSchema();
+          }
+          if (from < 20) {
+            // Existing imported documents cannot derive their historical date
+            // from created_at. Keep document_date NULL until the next pull.
+            await migrator.addColumn(
+              localDocuments,
+              localDocuments.documentDate,
+            );
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_local_documents_business_date '
+              'ON local_documents (business_id, kind, document_date DESC)',
+            );
+            await customStatement(
+              "UPDATE local_sync_states SET bootstrapped = 0 "
+              "WHERE scope = 'documents'",
+            );
           }
         },
         beforeOpen: (details) async {
