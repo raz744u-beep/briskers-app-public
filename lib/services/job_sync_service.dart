@@ -195,6 +195,35 @@ class JobSyncService {
     }
   }
 
+  /// A transient 401/session-refresh or SQL timeout should not discard
+  /// progress on a large first-device download after one failed page.
+  Future<Map<String, dynamic>> _fetchBootstrapPage(
+    String businessId,
+    String? afterJobId,
+  ) async {
+    for (var attempt = 1; attempt <= 4; attempt++) {
+      try {
+        return await _api.syncPullJobsBootstrap(
+          businessId,
+          afterJobId: afterJobId,
+          limit: 25,
+        );
+      } catch (error) {
+        final message = error.toString().toLowerCase();
+        final retryable = message.contains('42501') ||
+            message.contains('unauthorized') ||
+            message.contains('57014') ||
+            message.contains('timeout') ||
+            message.contains('connection reset') ||
+            message.contains('socketexception') ||
+            message.contains('503');
+        if (!retryable || attempt == 4) rethrow;
+        await Future<void>.delayed(Duration(seconds: 2 * attempt));
+      }
+    }
+    throw StateError('Job bootstrap retry limit reached.');
+  }
+
   /// Initial bootstrap is intentionally separated from incremental pulls.
   /// The legacy v1 endpoint ignored its page size for initial downloads and
   /// timed out while assembling thousands of historical service jobs.
@@ -232,10 +261,8 @@ class JobSyncService {
         if (++pageCount > 10000) {
           throw StateError('Job bootstrap exceeded page safety limit.');
         }
-        final response = await _api.syncPullJobsBootstrap(
-          businessId,
-          afterJobId: afterJobId,
-          limit: 25,
+        final response = await _fetchBootstrapPage(
+          businessId, afterJobId,
         );
         if (response['mode']?.toString() != 'bootstrap') {
           throw StateError('Invalid server job bootstrap response.');
