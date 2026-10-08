@@ -1243,43 +1243,81 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           color: BriskersColors.expenses,
                         ),
                         title: const Text(
-                          'Import Expense IQ receipt photos',
+                          'ExpenseIQ photos • Local & sync',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
                         childrenPadding:
-                            const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                            const EdgeInsets.fromLTRB(16, 4, 16, 12),
                         children: [
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              _importing
-                                  ? 'Uploaded $_importUploaded, failed $_importFailed '
-                                      '($_importDone/$_importTotal attempted)'
-                                  : '/storage/emulated/0/ExpenseIQ/photos',
-                            ),
+                          Text(
+                            _photoCounts == null
+                                ? 'Reading local photo queue...'
+                                : 'Indexed: ${_photoCounts!.indexed}  •  '
+                                    'Uploaded: ${_photoCounts!.uploaded}  •  '
+                                    'Waiting: ${_photoCounts!.pending}\n'
+                                    'Uploading: ${_photoCounts!.uploading}  •  '
+                                    'Failed: ${_photoCounts!.failed}  •  '
+                                    'Unmatched: ${_photoCounts!.missing}',
                           ),
                           const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: _importing
-                                  ? () => setState(
-                                        () => _pauseImportRequested = true,
-                                      )
-                                  : _importExpenseIqReceipts,
-                              icon: Icon(_importing
-                                  ? Icons.pause_circle_outline
-                                  : Icons.file_download_outlined),
-                              label: Text(
-                                _importing
-                                    ? (_pauseImportRequested
-                                        ? 'Pausing after current photo...'
-                                        : 'Pause import')
-                                    : 'Import photos',
+                          SwitchListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Automatic background sync'),
+                            subtitle: const Text('Android uploads in small batches'),
+                            value: _photoCounts?.enabled ?? true,
+                            onChanged: _togglePhotoSync,
+                          ),
+                          SwitchListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Wi-Fi only'),
+                            value: _photoCounts?.wifiOnly ?? true,
+                            onChanged: _toggleWifiOnly,
+                          ),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: _importing
+                                      ? null : _importExpenseIqReceipts,
+                                  icon: _importing
+                                      ? const SizedBox.square(
+                                          dimension: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(Icons.folder_outlined),
+                                  label: Text(
+                                    _importing ? 'Indexing...' : 'Index locally',
+                                  ),
+                                ),
                               ),
-                            ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: _requestingPhotoSync ||
+                                          _photoCounts?.enabled == false ||
+                                          _photoCounts?.pending == 0
+                                      ? null : _requestPhotoSync,
+                                  icon: const Icon(Icons.cloud_upload_outlined),
+                                  label: Text(
+                                    _requestingPhotoSync
+                                        ? 'Scheduling...' : 'Sync now',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Leave the original ExpenseIQ folder in place. '
+                            'Android may postpone background transfers to '
+                            'save battery; the queue will resume later.',
+                            style: TextStyle(fontSize: 12),
                           ),
                         ],
                       ),
