@@ -1866,6 +1866,26 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  /// Server-side idempotence guard for locally queued ExpenseIQ receipts.
+  /// Returns transactions that already have a finalized photo attachment.
+  Future<Set<String>> uploadedExpenseIqTransactions(
+    String businessId,
+    Iterable<String> transactionIds,
+  ) async {
+    final ids = transactionIds.toList();
+    if (ids.isEmpty) return <String>{};
+    final result = await networkSupabase.rpc(
+      'briskers_expenseiq_uploaded_ids_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_transaction_ids': ids,
+      },
+    );
+    return List<dynamic>.from(result as List)
+        .map((id) => id.toString())
+        .toSet();
+  }
+
   Future<void> uploadExpensePhoto(
     String businessId,
     String transactionId, {
