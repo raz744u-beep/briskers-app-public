@@ -82,6 +82,10 @@ String jobStatusLabel(String? code, String fallback) {
 
 const Map<String, Map<String, String>> _translations = {
   'en': {
+    'repairImportedData': 'Repair imported data',
+    'repairImportedDataHelp': 'Compare the phone with server records. Remove only obsolete local customers and jobs. Unsent changes or device photos block cleanup. No server records are changed.',
+    'repairImportedDataDone': 'Removed {customers} old customers, {vehicles} vehicles and {jobs} jobs from this device.',
+    'repairImportedDataBlocked': 'Repair stopped. No server records were changed.',
     'dashboard': 'Dashboard',
     'customers': 'Customers',
     'customer': 'Customer',
@@ -451,6 +455,10 @@ const Map<String, Map<String, String>> _translations = {
         'No AI receipt samples yet. Add a vendor receipt or invoice to teach Briskers that layout.',
   },
   'es': {
+    'repairImportedData': 'Reparar datos importados',
+    'repairImportedDataHelp': 'Compara el teléfono con el servidor. Elimina solo clientes y trabajos locales obsoletos. Los cambios pendientes o fotos locales detienen la limpieza. No cambia el servidor.',
+    'repairImportedDataDone': 'Eliminados del dispositivo: {customers} clientes, {vehicles} vehículos y {jobs} trabajos obsoletos.',
+    'repairImportedDataBlocked': 'Reparación detenida. No se modificaron los registros del servidor.',
     'dashboard': 'Panel',
     'customers': 'Clientes',
     'customer': 'Cliente',
