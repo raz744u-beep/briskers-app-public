@@ -599,10 +599,20 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
           if (from < 20) {
             // Existing imported documents cannot derive their historical date
             // from created_at. Keep document_date NULL until the next pull.
-            await migrator.addColumn(
-              localDocuments,
-              localDocuments.documentDate,
+            // Tolerate partially migrated devices and schema-version
+            // downgrades without attempting to add an existing column.
+            final existingColumns = await customSelect(
+              'PRAGMA table_info(local_documents)',
+            ).get();
+            final hasDocumentDate = existingColumns.any(
+              (row) => row.read<String>('name') == 'document_date',
             );
+            if (!hasDocumentDate) {
+              await migrator.addColumn(
+                localDocuments,
+                localDocuments.documentDate,
+              );
+            }
             await customStatement(
               'CREATE INDEX IF NOT EXISTS idx_local_documents_business_date '
               'ON local_documents (business_id, kind, document_date DESC)',
