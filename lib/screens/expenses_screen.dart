@@ -50,8 +50,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   bool _loadingMore = false;
   bool _hasMore = true;
   bool _importing = false;
+  bool _pauseImportRequested = false;
   int _importDone = 0;
   int _importTotal = 0;
+  int _importUploaded = 0;
+  int _importFailed = 0;
   String _filter = 'all';
   String _dateRange = '30d';
   DateTime? _customStartDate;
@@ -898,13 +901,24 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     return '';
   }
 
+  /// Safe to restart: the server excludes expenses with finalized photos.
+  /// The source photos are never moved or deleted.
   Future<void> _importExpenseIqReceipts() async {
-    if (_importing) return;
+    if (_importing || !_owner || !Platform.isAndroid) return;
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Connect to the internet before importing receipts.'),
+        ),
+      );
+      return;
+    }
 
     List<Map<String, dynamic>> candidates;
     try {
-      candidates =
-          await _api.expenseReceiptImportCandidates(widget.businessId);
+      candidates = await _api.expenseReceiptImportCandidates(
+        widget.businessId,
+      );
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
       return;
@@ -914,7 +928,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     if (candidates.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No Expense IQ receipt photos are waiting to import.'),
+          content: Text('All mapped ExpenseIQ receipts are already imported.'),
         ),
       );
       return;
@@ -928,8 +942,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     } catch (error) {
       if (mounted) {
         setState(() {
-          _error =
-              'Android could not open the ExpenseIQ photos folder.\n$error';
+          _error = 'Android could not open the ExpenseIQ folder.\n$error';
         });
       }
       return;
@@ -947,81 +960,160 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
     final matches =
         <(Map<String, dynamic>, Map<String, dynamic>)>[];
+    final missingIds = <String>[];
     for (final candidate in candidates) {
       final photoId = candidate['photo_id']?.toString().trim().toLowerCase();
       if (photoId == null || photoId.isEmpty) continue;
       final file = filesByPhotoId[photoId];
-      if (file != null) matches.add((candidate, file));
+      if (file == null) {
+        missingIds.add(photoId);
+      } else {
+        matches.add((candidate, file));
+      }
     }
 
     if (!mounted) return;
-
-    final proceed = await showDialog<bool>(
+    final examples = missingIds.take(5).join(', ');
+    final batchChoice = await showDialog<int>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Import Expense IQ receipts?'),
-        content: Text(
-          'Briskers found ${matches.length} matching JPG/JPEG receipt photo(s) for ${candidates.length} expense record(s).\n\nThe photos will be copied into Briskers private storage so they will also be available on iPhone, iPad, and future phones.',
+        title: const Text('Import ExpenseIQ receipts?'),
+        content: SingleChildScrollView(
+          child: Text(
+            'Matched ${matches.length} of ${candidates.length} '
+            'remaining expense photo references.\n'
+            'Unmatched: ${missingIds.length}.'
+            '${examples.isEmpty ? '' : '\nExamples: $examples'}'
+            '\n\nTest the first 50 photos, or import all in sequential '
+            'batches. Use Pause to stop between photos. '
+            'If interrupted, reopen this importer: previously uploaded '
+            'receipts are excluded automatically.\n\n'
+            'Keep Briskers open and your phone awake during uploading. '
+            'Original ExpenseIQ files remain on your phone.',
+          ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
+          OutlinedButton(
+            onPressed: matches.isEmpty
+                ? null
+                : () => Navigator.pop(dialogContext, 50),
+            child: const Text('Test 50'),
+          ),
           FilledButton(
-            onPressed:
-                matches.isEmpty ? null : () => Navigator.pop(dialogContext, true),
-            child: const Text('Import'),
+            onPressed: matches.isEmpty
+                ? null
+                : () => Navigator.pop(dialogContext, -1),
+            child: const Text('Import all'),
           ),
         ],
       ),
     );
-    if (proceed != true || !mounted) return;
+    if (batchChoice == null || !mounted) return;
 
+    final selected = batchChoice == -1
+        ? matches
+        : matches.take(batchChoice).toList();
     setState(() {
       _importing = true;
+      _pauseImportRequested = false;
       _importDone = 0;
-      _importTotal = matches.length;
+      _importUploaded = 0;
+      _importFailed = 0;
+      _importTotal = selected.length;
       _error = null;
     });
 
-    var failed = 0;
-    for (final match in matches) {
+    final errors = <String>[];
+    var consecutiveFailures = 0;
+    var stoppedAfterErrors = false;
+
+    for (final match in selected) {
+      if (!mounted || _pauseImportRequested) break;
       final candidate = match.$1;
       final file = match.$2;
-      try {
-        final filename = file['name']?.toString() ?? 'receipt.jpg';
-        final uri = file['uri']?.toString() ?? '';
-        if (uri.isEmpty) throw Exception('Receipt file URI is missing.');
-        final bytes = await _expenseIqChannel.invokeMethod<Uint8List>(
-          'readExpenseIqFile',
-          {'uri': uri},
-        );
-        if (bytes == null) throw Exception('Could not read $filename.');
-        await _api.uploadExpensePhoto(
-          widget.businessId,
-          candidate['transaction_id'].toString(),
-          filename: filename,
-          mimeType: 'image/jpeg',
-          bytes: bytes,
-        );
-      } catch (_) {
-        failed += 1;
+      final filename = file['name']?.toString() ?? 'receipt.jpg';
+      final transactionId = candidate['transaction_id']?.toString() ?? '';
+
+      var uploaded = false;
+      String? lastError;
+      for (var attempt = 1; attempt <= 2; attempt++) {
+        if (!mounted || _pauseImportRequested) break;
+        try {
+          if (transactionId.isEmpty) {
+            throw StateError('Missing expense transaction ID.');
+          }
+          final uri = file['uri']?.toString() ?? '';
+          if (uri.isEmpty) throw StateError('Photo URI is missing.');
+          final bytes = await _expenseIqChannel.invokeMethod<Uint8List>(
+            'readExpenseIqFile',
+            {'uri': uri},
+          );
+          if (bytes == null || bytes.isEmpty) {
+            throw StateError('Could not read $filename.');
+          }
+          await _api.uploadExpensePhoto(
+            widget.businessId,
+            transactionId,
+            filename: filename,
+            mimeType: 'image/jpeg',
+            bytes: bytes,
+          );
+          uploaded = true;
+          break;
+        } catch (error) {
+          lastError = error.toString();
+          if (attempt < 2 && !_pauseImportRequested) {
+            await Future<void>.delayed(const Duration(seconds: 2));
+          }
+        }
       }
-      if (mounted) setState(() => _importDone += 1);
+
+      if (!mounted) break;
+      if (uploaded) {
+        consecutiveFailures = 0;
+        _importUploaded++;
+      } else {
+        consecutiveFailures++;
+        _importFailed++;
+        if (errors.length < 5) {
+          errors.add('$filename: ${lastError ?? 'Not uploaded'}');
+        }
+      }
+      setState(() => _importDone++);
+      if (consecutiveFailures >= 5) {
+        stoppedAfterErrors = true;
+        break;
+      }
     }
 
     if (!mounted) return;
+    final uploaded = _importUploaded;
+    final failed = _importFailed;
+    final attempted = _importDone;
+    final total = _importTotal;
+    final paused = _pauseImportRequested || stoppedAfterErrors;
     setState(() => _importing = false);
     await _load();
 
     if (!mounted) return;
+    if (errors.isNotEmpty) {
+      setState(() {
+        _error = 'Receipt failures (first ${errors.length}): '
+            "${errors.join(' | ')}";
+      });
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
+        duration: const Duration(seconds: 10),
         content: Text(
-          failed == 0
-              ? 'Imported ${matches.length} receipt photo(s).'
-              : 'Imported ${matches.length - failed} receipt photo(s); $failed failed.',
+          'ExpenseIQ: $uploaded uploaded, $failed failed; '
+          '$attempted of $total attempted. '
+          "${paused ? 'Paused. ' : ''}"
+          'Open Import photos again to resume.',
         ),
       ),
     );
@@ -1216,7 +1308,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                             alignment: Alignment.centerLeft,
                             child: Text(
                               _importing
-                                  ? 'Importing $_importDone of $_importTotal...'
+                                  ? 'Uploaded $_importUploaded, failed $_importFailed '
+                                      '($_importDone/$_importTotal attempted)'
                                   : '/storage/emulated/0/ExpenseIQ/photos',
                             ),
                           ),
@@ -1224,18 +1317,20 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
-                              onPressed:
-                                  _importing ? null : _importExpenseIqReceipts,
-                              icon: _importing
-                                  ? const SizedBox.square(
-                                      dimension: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.file_download_outlined),
+                              onPressed: _importing
+                                  ? () => setState(
+                                        () => _pauseImportRequested = true,
+                                      )
+                                  : _importExpenseIqReceipts,
+                              icon: Icon(_importing
+                                  ? Icons.pause_circle_outline
+                                  : Icons.file_download_outlined),
                               label: Text(
-                                _importing ? 'Importing...' : 'Import photos',
+                                _importing
+                                    ? (_pauseImportRequested
+                                        ? 'Pausing after current photo...'
+                                        : 'Pause import')
+                                    : 'Import photos',
                               ),
                             ),
                           ),
