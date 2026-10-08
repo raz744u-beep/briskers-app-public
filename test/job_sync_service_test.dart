@@ -15,57 +15,62 @@ class _FakeBriskersApi extends BriskersApi {
   var calls = 0;
 
   @override
+  Future<Map<String, dynamic>> syncPullJobsBootstrap(
+    String businessId, {
+    String? afterJobId,
+    int limit = 25,
+  }) async {
+    expect(afterJobId, isNull);
+    return {
+      'mode': 'bootstrap',
+      'bootstrap_cursor': 10,
+      'next_job_id': 'job-1',
+      'has_more': false,
+      'revoked_job_ids': <dynamic>[],
+      'bundles': [
+        {
+          'job': {
+            'id': 'job-1',
+            'job_number': '1001',
+            'title': 'Brake repair',
+            'requested_work': 'Brake noise',
+            'status': 'open',
+            'status_name': 'Open',
+            'status_color': '#2563EB',
+            'status_icon': 'build',
+            'customer_id': 'customer-1',
+            'customer_name': 'Test Customer',
+            'vehicle_id': 'vehicle-1',
+            'vehicle': '2020 BMW X5',
+            'vehicle_vin': 'TESTVIN',
+            'vehicle_plate': 'ABC123',
+            'planned_hours': 2,
+            'odometer_in': 50000,
+            'is_unassigned': true,
+            'assignments': <dynamic>[],
+            'visits': <dynamic>[],
+            'capabilities': {
+              'manage_job': false,
+              'request_job': true,
+            },
+            'row_version': 3,
+            'updated_at': '2026-09-30T15:00:00Z',
+            'created_at': '2026-09-30T14:00:00Z',
+          },
+          'pre_inspection': null,
+          'findings': <dynamic>[],
+        },
+      ],
+    };
+  }
+
+  @override
   Future<Map<String, dynamic>> syncPullJobs(
     String businessId, {
     int? afterCursor,
     int limit = 250,
   }) async {
     calls++;
-
-    if (calls == 1) {
-      expect(afterCursor, isNull);
-      return {
-        'mode': 'bootstrap',
-        'next_cursor': 10,
-        'has_more': false,
-        'revoked_job_ids': <dynamic>[],
-        'bundles': [
-          {
-            'job': {
-              'id': 'job-1',
-              'job_number': '1001',
-              'title': 'Brake repair',
-              'requested_work': 'Brake noise',
-              'status': 'open',
-              'status_name': 'Open',
-              'status_color': '#2563EB',
-              'status_icon': 'build',
-              'customer_id': 'customer-1',
-              'customer_name': 'Test Customer',
-              'vehicle_id': 'vehicle-1',
-              'vehicle': '2020 BMW X5',
-              'vehicle_vin': 'TESTVIN',
-              'vehicle_plate': 'ABC123',
-              'planned_hours': 2,
-              'odometer_in': 50000,
-              'is_unassigned': true,
-              'assignments': <dynamic>[],
-              'visits': <dynamic>[],
-              'capabilities': {
-                'manage_job': false,
-                'request_job': true,
-              },
-              'row_version': 3,
-              'updated_at': '2026-09-30T15:00:00Z',
-              'created_at': '2026-09-30T14:00:00Z',
-            },
-            'pre_inspection': null,
-            'findings': <dynamic>[],
-          },
-        ],
-      };
-    }
-
     expect(afterCursor, 10);
     return {
       'mode': 'incremental',
@@ -75,9 +80,85 @@ class _FakeBriskersApi extends BriskersApi {
       'revoked_job_ids': ['job-1'],
     };
   }
+
+}
+
+class _PagedApi extends BriskersApi {
+  final requestedAfterIds = <String?>[];
+
+  @override
+  Future<Map<String, dynamic>> syncPullJobsBootstrap(
+    String businessId, {
+    String? afterJobId,
+    int limit = 25,
+  }) async {
+    requestedAfterIds.add(afterJobId);
+    final second = afterJobId != null;
+    return {
+      'mode': 'bootstrap',
+      'bootstrap_cursor': second ? 21 : 20,
+      'next_job_id': second ? 'job-2' : 'job-1',
+      'has_more': !second,
+      'bundles': [
+        {
+          'job': {
+            'id': second ? 'job-2' : 'job-1',
+            'job_number': second ? '1002' : '1001',
+            'title': 'Service',
+            'status': 'completed',
+            'customer_id': 'customer-1',
+            'vehicle_id': 'vehicle-1',
+            'assignments': <dynamic>[],
+            'visits': <dynamic>[],
+            'capabilities': {'manage_job': true},
+          },
+          'findings': <dynamic>[],
+        },
+      ],
+    };
+  }
+
+  @override
+  Future<Map<String, dynamic>> syncPullJobs(
+    String businessId, {
+    int? afterCursor,
+    int limit = 250,
+  }) async {
+    expect(afterCursor, 20);
+    return {
+      'mode': 'incremental',
+      'next_cursor': 21,
+      'has_more': false,
+      'bundles': <dynamic>[],
+      'revoked_job_ids': <dynamic>[],
+    };
+  }
 }
 
 void main() {
+  test('paged bootstrap keeps all jobs and original snapshot cursor',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final api = _PagedApi();
+    final sync = JobSyncService(api: api, database: db);
+    await sync.pull('business-1');
+    expect(api.requestedAfterIds, [null, 'job-1']);
+    final rows = await db.customSelect(
+      'SELECT id FROM local_jobs WHERE business_id=? ORDER BY id',
+      variables: [const Variable<String>('business-1')],
+    ).get();
+    expect(rows.map((r) => r.read<String>('id')).toList(),
+        ['job-1', 'job-2']);
+    final state = await db.customSelect(
+      "SELECT last_server_cursor,bootstrapped FROM local_sync_states "
+      "WHERE business_id='business-1' AND scope='jobs'",
+    ).getSingle();
+    expect(state.read<int>('last_server_cursor'), 20);
+    expect(state.read<int>('bootstrapped'), 1);
+    await sync.pull('business-1');
+    await db.close();
+  });
+
   test('job sync bootstraps and later revokes local job access', () async {
     final database = BriskersLocalDatabase(NativeDatabase.memory());
     final api = _FakeBriskersApi();
