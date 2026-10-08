@@ -379,33 +379,7 @@ class LocalDocumentRepository {
     final raw = value?.toString().trim() ?? '';
     if (raw.length < 10) return null;
     final date = raw.substring(0, 10);
-    if (!RegExp(r'^\d{4}-\d{2}-\d{2}
-    if (value == null) return null;
-    if (value is DateTime) return value.toUtc().toIso8601String();
-    if (value is int) {
-      return DateTime.fromMillisecondsSinceEpoch(
-        value * 1000,
-        isUtc: true,
-      ).toIso8601String();
-    }
-    return DateTime.tryParse(value.toString())
-        ?.toUtc()
-        .toIso8601String();
-  }
-
-  String? _text(Object? value) {
-    final text = value?.toString();
-    return text == null || text.isEmpty || text == 'null' ? null : text;
-  }
-
-  int? _int(Object? value) => int.tryParse(value?.toString() ?? '');
-  double? _double(Object? value) => double.tryParse(value?.toString() ?? '');
-  DateTime? _date(Object? value) => DateTime.tryParse(value?.toString() ?? '');
-  int? _unix(DateTime? value) => value == null
-      ? null
-      : value.toUtc().millisecondsSinceEpoch ~/ 1000;
-}
-).hasMatch(date)) {
+    if (!RegExp(r'^[0-9]{4}-[0-9]{2}-[0-9]{2}').hasMatch(date)) {
       return null;
     }
     return DateTime.tryParse(date) == null ? null : date;
