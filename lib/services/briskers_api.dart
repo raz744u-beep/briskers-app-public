@@ -2985,7 +2985,7 @@ class BriskersApi {
     String documentId,
   ) async {
     final result = await networkSupabase.rpc(
-      'briskers_document_detail_v2',
+      'briskers_document_detail_v3',
       params: {
         'p_business_id': businessId,
         'p_document_id': documentId,

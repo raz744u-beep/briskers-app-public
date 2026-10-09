@@ -90,7 +90,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   bool get _estimate => _detail?['kind']?.toString() == 'estimate';
   bool get _converted => _detail?['converted'] == true;
-  bool get _readOnly => _estimate && _converted;
+  bool get _readOnly => (_estimate && _converted) ||
+      _detail?['legacy_read_only'] == true;
   bool get _canManageInvoiceExpenses =>
       widget.isOwner || widget.canManageExpenses;
 
@@ -5816,6 +5817,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 child: Column(
                   children: [
                   _customerHeader(),
+                  if (_detail?['legacy_read_only'] == true)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: Text(
+                        'Historical imported document: editing and warranty '
+                        'changes are restricted by the server. The original '
+                        'invoice remains available for viewing.',
+                        style: TextStyle(
+                          color: Color(0xFF8A5200),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   if (!_estimate)
                     InvoiceWarrantyPanel(
                       businessId: widget.businessId,

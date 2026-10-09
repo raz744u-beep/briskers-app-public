@@ -419,6 +419,11 @@ const Map<String, Map<String, String>> _translations = {
     'offlineStep4':
         'Make an offline-capable change, reopen the app, then reconnect and use Sync now.',
     'customersVehicles': 'Customers & vehicles',
+    'jobCustomerComplaint': 'Customer Complaint',
+    'jobHistory': 'Work / Visit History',
+    'jobDocuments': 'Estimate / Invoice',
+    'jobExpensesTile': 'Job Expenses',
+    'jobProfitabilityTile': 'Job Profitability',
     'workPerformed': 'Work performed',
     'vehicleFindings': 'Vehicle findings',
     'findingPhotos': 'Finding photos',
@@ -802,6 +807,11 @@ const Map<String, Map<String, String>> _translations = {
     'offlineStep4':
         'Haz un cambio permitido sin conexión, reabre la aplicación, vuelve a conectarte y usa Sincronizar ahora.',
     'customersVehicles': 'Clientes y vehículos',
+    'jobCustomerComplaint': 'Queja del cliente',
+    'jobHistory': 'Historial de trabajo / visitas',
+    'jobDocuments': 'Presupuesto / Factura',
+    'jobExpensesTile': 'Gastos del trabajo',
+    'jobProfitabilityTile': 'Rentabilidad del trabajo',
     'workPerformed': 'Trabajo realizado',
     'vehicleFindings': 'Hallazgos del vehículo',
     'findingPhotos': 'Fotos de hallazgos',

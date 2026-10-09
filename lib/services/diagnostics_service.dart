@@ -217,6 +217,13 @@ class BriskersDiagnosticsService {
       }
       await _safeGroup(
         checks,
+        fallbackId: 'JOB-003',
+        category: 'Job history and findings',
+        title: 'Finding duplicates and completed-job visit coverage',
+        action: () => _checkHistoricalJobContent(businessId, checks),
+      );
+      await _safeGroup(
+        checks,
         fallbackId: 'PHOTO-000',
         category: 'Photos',
         title: 'Photo queue integrity',
@@ -1159,6 +1166,78 @@ class BriskersDiagnosticsService {
         if (state.isNotEmpty &&
             state.first.readNullable<String>('last_error') != null)
           'Last sync error: ${state.first.readNullable<String>('last_error')}',
+      ],
+    ));
+  }
+
+  Future<void> _checkHistoricalJobContent(
+    String businessId,
+    List<DiagnosticCheck> checks,
+  ) async {
+    final duplicates = await _database.customSelect(
+      '''
+      SELECT f.vehicle_id, lower(trim(f.body)) AS message,
+             COUNT(*) AS copies,
+             SUM(CASE WHEN f.sync_state = 'pending' THEN 1 ELSE 0 END)
+               AS pending_count
+      FROM local_findings f
+      WHERE f.business_id = ?
+        AND f.vehicle_id IS NOT NULL
+        AND trim(f.body) <> ''
+      GROUP BY f.vehicle_id, lower(trim(f.body))
+      HAVING COUNT(*) > 1
+      ORDER BY COUNT(*) DESC
+      LIMIT 12
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    checks.add(DiagnosticCheck(
+      id: 'JOB-003',
+      category: 'Jobs',
+      title: 'Duplicate vehicle finding candidates',
+      level: duplicates.isEmpty
+          ? BriskersDiagnosticLevel.pass
+          : BriskersDiagnosticLevel.warning,
+      summary: duplicates.isEmpty
+          ? 'No identical finding text repeated on the same vehicle.'
+          : '${duplicates.length} vehicle/text group(s) may be duplicated.',
+      details: [
+        for (final row in duplicates)
+          'Vehicle ${row.read<String>('vehicle_id')}: '
+              '${row.read<int>('copies')} copies, '
+              '${row.readNullable<int>('pending_count') ?? 0} pending; '
+              '${row.read<String>('message')}',
+        if (duplicates.isNotEmpty)
+          'Review IDs and timestamps before deleting; repeated text '
+              'does not always mean duplicate work.',
+      ],
+    ));
+
+    final gap = await _database.customSelect(
+      '''
+      SELECT
+        COUNT(*) AS finished_jobs,
+        SUM(CASE WHEN NOT EXISTS (
+          SELECT 1 FROM local_job_visits v
+          WHERE v.business_id = j.business_id AND v.job_id = j.id
+        ) THEN 1 ELSE 0 END) AS no_visit
+      FROM local_jobs j
+      WHERE j.business_id = ? AND j.status = 'completed'
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).getSingle();
+    final count = gap.read<int>('finished_jobs');
+    final missing = gap.readNullable<int>('no_visit') ?? 0;
+    checks.add(DiagnosticCheck(
+      id: 'JOB-004',
+      category: 'Jobs',
+      title: 'Completed-job visit history inventory',
+      level: BriskersDiagnosticLevel.pass,
+      summary: '$missing of $count completed jobs have no visit record.',
+      details: [
+        'Historical MobileBiz imports may not include explicit job visits.',
+        'Do not invent work-performed text or visit dates from invoices.',
+        'Investigate missing source history before attempting an import.',
       ],
     ));
   }
