@@ -177,6 +177,13 @@ class BriskersDiagnosticsService {
       );
       await _safeGroup(
         checks,
+        fallbackId: 'DOC-004',
+        category: 'Documents',
+        title: 'All invoice and estimate offline detail coverage',
+        action: () => _checkAllDocumentDetailCoverage(businessId, checks),
+      );
+      await _safeGroup(
+        checks,
         fallbackId: 'PHOTO-000',
         category: 'Photos',
         title: 'Photo queue integrity',
@@ -958,6 +965,87 @@ class BriskersDiagnosticsService {
                 ' cached document(s) have line/net/tax total differences.',
       ),
     );
+  }
+
+  // The older DOC-001 checks only open documents. That missed the actual
+  // production bug: closed historical invoices appear in the list but cannot
+  // be opened offline. Count every record, including closed and converted.
+  // No network access or data modifications are performed here.
+  Future<void> _checkAllDocumentDetailCoverage(
+    String businessId,
+    List<DiagnosticCheck> checks,
+  ) async {
+    final documents = await _database.customSelect(
+      '''
+      SELECT id, kind, document_number, closed_at, sync_state
+      FROM local_documents
+      WHERE business_id = ? AND kind IN ('estimate','invoice')
+      ORDER BY kind, document_number DESC
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
+    var cached = 0;
+    var missing = 0;
+    var invalid = 0;
+    var closedMissing = 0;
+    var invoicesMissing = 0;
+    var estimatesMissing = 0;
+    final examples = <String>[];
+
+    for (final row in documents) {
+      final id = row.read<String>('id');
+      final kind = row.read<String>('kind');
+      final number = row.readNullable<String>('document_number') ?? id;
+      final snapshot = await _detailCache.load(businessId, id);
+      if (snapshot == null) {
+        missing++;
+        if (kind == 'invoice') invoicesMissing++; else estimatesMissing++;
+        if (kind == 'invoice' &&
+            row.readNullable<DateTime>('closed_at') != null) {
+          closedMissing++;
+        }
+        if (examples.length < 12) examples.add('$kind #$number');
+        continue;
+      }
+      final lines = snapshot['lines'];
+      if (snapshot['id']?.toString() != id ||
+          snapshot['kind']?.toString() != kind ||
+          lines is! List) {
+        invalid++;
+        if (examples.length < 12) examples.add('$kind #$number (invalid)');
+        continue;
+      }
+      cached++;
+    }
+
+    final complete = missing == 0 && invalid == 0;
+    final indexed = documents.length;
+    checks.add(DiagnosticCheck(
+      id: 'DOC-004',
+      category: 'Documents',
+      title: 'Full offline invoice and estimate coverage',
+      level: complete
+          ? BriskersDiagnosticLevel.pass
+          : BriskersDiagnosticLevel.fail,
+      summary: complete
+          ? 'All $indexed indexed document(s) have usable local detail.'
+          : '${missing + invalid} of $indexed indexed document(s) cannot '
+              'be opened reliably offline.',
+      details: [
+        'Cached and valid: $cached / $indexed',
+        'Missing detail: $missing (invoices: $invoicesMissing; '
+            'estimates: $estimatesMissing)',
+        'Closed invoices missing detail: $closedMissing',
+        'Invalid/incomplete detail: $invalid',
+        if (examples.isNotEmpty)
+          'Examples: ${examples.join(', ')}',
+        if (!complete)
+          'Offline document index sync is not sufficient. '
+              'Full invoice/estimate detail download must finish '
+              'before offline coverage is reported complete.',
+      ],
+    ));
   }
 
   Future<void> _checkPhotos(
