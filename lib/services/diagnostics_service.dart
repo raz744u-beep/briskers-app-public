@@ -6,7 +6,6 @@ import 'package:drift/drift.dart';
 
 import '../core/connection_mode.dart';
 import '../core/document_search.dart';
-import 'local_document_repository.dart';
 import '../local/briskers_local_database.dart' hide LocalFinancialCache;
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
