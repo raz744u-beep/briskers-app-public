@@ -9,6 +9,7 @@ import '../core/invoice_status_style.dart';
 import '../core/briskers_i18n.dart';
 import '../core/document_future_date.dart';
 import '../services/briskers_api.dart';
+import '../services/local_financial_cache.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_invoice_status_styles_cache.dart';
 import '../widgets/briskers_page_header.dart';
@@ -892,10 +893,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   Future<void> _showExpensesFromList(Map<String, dynamic> row) async {
     try {
-      final expenses = await _api.documentExpenses(
+      final offline = BriskersConnectionModeController.instance.forceOffline;
+      final cached = await LocalFinancialCache().loadLinkedExpenses(
         widget.businessId,
-        row['id'].toString(),
       );
+      final related = cached?.where((item) =>
+        item['document_id']?.toString() == row['id'].toString() ||
+        (row['job_id']?.toString() != null &&
+          item['job_id']?.toString() == row['job_id']?.toString())
+      ).toList() ?? const <Map<String, dynamic>>[];
+      final expenses = offline
+          ? related
+          : await _api.documentExpenses(
+              widget.businessId,
+              row['id'].toString(),
+            );
       if (!mounted) return;
 
       if (expenses.isEmpty) {
