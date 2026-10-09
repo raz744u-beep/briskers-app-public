@@ -267,17 +267,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         }
 
         try {
-          final transactions = await _api.transactions(
+          jobExpenses = await _api.jobLinkedExpenses(
             widget.businessId,
-            limit: 1000,
+            widget.jobId,
           );
-          jobExpenses = transactions
-              .where(
-                (row) =>
-                    row['direction']?.toString() == 'expense' &&
-                    row['job_id']?.toString() == widget.jobId,
-              )
-              .toList();
         } catch (_) {
           jobExpenses = const [];
         }
