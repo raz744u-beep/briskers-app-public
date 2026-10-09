@@ -175,11 +175,16 @@ class _JobsScreenState extends State<JobsScreen> {
         _localJobs.jobStatusCounts(widget.businessId),
       ]);
 
+      final onlineDocumentMatches = query.isEmpty
+          ? <Map<String, dynamic>>[]
+          : await _localDocuments.search(
+              widget.businessId, query, limit: 30,
+            );
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _rows = List<Map<String, dynamic>>.from(refreshed[0] as List);
         _statuses = onlineStatuses;
-        _documentMatches = query.isEmpty ? const [] : _documentMatches;
+        _documentMatches = onlineDocumentMatches;
         _totalCount = refreshed[1] as int;
         _statusCounts = Map<String, int>.from(refreshed[2] as Map);
         _showingLocal = false;
