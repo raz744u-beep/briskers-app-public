@@ -91,6 +91,60 @@ jobs:
                           else -> result.notImplemented()
                       }
                   }
+
+                  MethodChannel(
+                      flutterEngine.dartExecutor.binaryMessenger,
+                      "com.briskers/pdf"
+                  ).setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "openPdfInApp" -> openPdfInApp(call.arguments, result)
+                          else -> result.notImplemented()
+                      }
+                  }
+              }
+
+              private fun openPdfInApp(
+                  arguments: Any?,
+                  result: MethodChannel.Result
+              ) {
+                  try {
+                      @Suppress("UNCHECKED_CAST")
+                      val args = arguments as? Map<String, Any?>
+                      val bytes = args?.get("bytes") as? ByteArray
+                      val rawName = (args?.get("filename") as? String) ?: "Briskers-Invoice.pdf"
+                      val filename = File(rawName).name.replace(
+                          Regex("[^A-Za-z0-9._-]"), "_"
+                      )
+
+                      if (bytes == null || bytes.isEmpty()) {
+                          result.error("invalid_pdf", "The invoice PDF is empty.", null)
+                          return
+                      }
+
+                      val directory = File(cacheDir, "pdf-open")
+                      if (!directory.exists()) directory.mkdirs()
+                      val pdf = File(directory, filename)
+                      pdf.writeBytes(bytes)
+                      val uri = FileProvider.getUriForFile(
+                          this,
+                          "${applicationContext.packageName}.fileprovider",
+                          pdf
+                      )
+
+                      val view = Intent(Intent.ACTION_VIEW).apply {
+                          setDataAndType(uri, "application/pdf")
+                          clipData = ClipData.newUri(contentResolver, filename, uri)
+                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                      }
+                      startActivity(Intent.createChooser(view, "Open PDF with"))
+                      result.success(true)
+                  } catch (error: Exception) {
+                      result.error(
+                          "pdf_open_failed",
+                          error.message ?: "No compatible PDF app could be opened.",
+                          null
+                      )
+                  }
               }
 
               private fun composeGmailPdf(
@@ -468,6 +522,9 @@ jobs:
               <cache-path
                   name="briskers_warranty_email"
                   path="warranty-email/" />
+              <cache-path
+                  name="briskers_pdf_open"
+                  path="pdf-open/" />
           </paths>
           XML
 
