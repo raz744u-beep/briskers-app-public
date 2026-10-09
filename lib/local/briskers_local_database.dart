@@ -334,6 +334,8 @@ class LocalDocuments extends Table {
   // Preserve the issued/business date separately from the import timestamp.
   // A YYYY-MM-DD string is timezone-independent.
   TextColumn get documentDate => text().nullable()();
+  BoolColumn get futureDateFlag =>
+      boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime().nullable()();
   DateTimeColumn get serverUpdatedAt => dateTime().nullable()();
   IntColumn get rowVersion => integer().nullable()();
@@ -439,7 +441,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 20;
+  int get schemaVersion => 21;
 
   // v18 introduced the ExpenseIQ photo queue but omitted its onUpgrade
   // migration, so user_version may be 18 while the tables are missing.
@@ -621,7 +623,26 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
               "UPDATE local_sync_states SET bootstrapped = 0 "
               "WHERE scope = 'documents'",
             );
+          }          if (from < 21) {
+            final columns = await customSelect(
+              'PRAGMA table_info(local_documents)',
+            ).get();
+            if (!columns.any(
+              (row) => row.read<String>('name') == 'future_date_flag',
+            )) {
+              await migrator.addColumn(
+                localDocuments,
+                localDocuments.futureDateFlag,
+              );
+            }
+            // A normal Auto sync fills the stored permanent tags. Existing
+            // local records stay intact, including any pending offline edits.
+            await customStatement(
+              "UPDATE local_sync_states SET bootstrapped = 0 "
+              "WHERE scope = 'documents'",
+            );
           }
+
         },
         beforeOpen: (details) async {
           // A previous APK may have advanced user_version without making the

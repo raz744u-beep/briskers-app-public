@@ -1,7 +1,7 @@
 name: briskers_app
 description: Briskers auto repair office and owner app
 publish_to: none
-version: 0.10.2+1011
+version: 0.10.3+1012
 
 environment:
   sdk: '>=3.9.0 <4.0.0'
