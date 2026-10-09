@@ -2165,6 +2165,53 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     });
   }
 
+  Future<void> _finalizeEnteredPayments() async {
+    await _collapseWorkspaceHeader();
+    if (_estimate || _busy || _number(_detail?['pending_payment']) <= 0.005) {
+      return;
+    }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (mounted) {
+        setState(() => _error =
+            'Connect to the internet before finalizing a payment.');
+      }
+      return;
+    }
+
+    final amount = _number(_detail?['pending_payment']);
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Finalize received payment?'),
+            content: Text(
+              'Confirm that ${_money(amount)} was actually received. '
+              'Finalizing records the payment as income, replaces the '
+              'pending entry, and updates the invoice PDF to show it as paid. '
+              'Do not finalize an authorization or unpaid promise.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Finalize Payment'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
+    await _run(() async {
+      await _api.finalizePendingInvoicePayment(
+        widget.businessId,
+        widget.documentId,
+      );
+    });
+  }
+
   Future<void> _enterWarrantyPayment() async {
     await _collapseWorkspaceHeader();
     if (_estimate || _warrantyDetail['extended_warranty'] != true || _busy) {
@@ -4440,11 +4487,23 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                     value: _money(total),
                   ),
                   _AmountRow(
-                    label: tr('paid'),
+                    label: pendingPaid > 0.005
+                        ? 'Payments recorded'
+                        : tr('paid'),
                     value: _money(shownPaid),
                     valueColor:
                         shownPaid > 0 ? const Color(0xFF0C9A43) : null,
                   ),
+                  if (pendingPaid > 0.005) ...[
+                    _AmountRow(
+                      label: 'Finalized paid',
+                      value: _money(finalizedPaid),
+                    ),
+                    _AmountRow(
+                      label: 'Entered (not finalized)',
+                      value: _money(pendingPaid),
+                    ),
+                  ],
                   const Divider(height: 18),
                   _AmountRow(
                     label: tr('balance'),
@@ -4648,6 +4707,34 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
             ),
           const SizedBox(height: 16),
+          if (pendingPaid > 0.005) ...[
+            Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              color: const Color(0xFFFFF4DE),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      '${_money(pendingPaid)} has been entered but is not '
+                      'yet finalized as a received payment.',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    FilledButton.icon(
+                      onPressed: _busy ? null : _finalizeEnteredPayments,
+                      icon: const Icon(Icons.check_circle_outline),
+                      label: const Text('Finalize Received Payment'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           if (safeBalance > 0.005)
             SizedBox(
               width: double.infinity,
