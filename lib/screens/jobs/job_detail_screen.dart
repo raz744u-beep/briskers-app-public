@@ -4443,21 +4443,21 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   String _sectionTitle(String key) {
     switch (key) {
       case 'inspection':
-        return 'Pre-Inspection';
+        return tr('preInspection');
       case 'complaint':
-        return 'Customer Complaint';
+        return tr('jobCustomerComplaint');
       case 'findings':
-        return 'Vehicle Findings';
+        return tr('vehicleFindings');
       case 'work':
-        return 'Work Performed';
+        return tr('workPerformed');
       case 'history':
-        return 'Work / Visit History';
+        return tr('jobHistory');
       case 'documents':
-        return 'Estimate / Invoice';
+        return tr('jobDocuments');
       case 'expenses':
-        return 'Job Expenses';
+        return tr('jobExpensesTile');
       default:
-        return 'Job Profitability';
+        return tr('jobProfitabilityTile');
     }
   }
 
