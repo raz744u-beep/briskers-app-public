@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/briskers_colors.dart';
@@ -11,6 +12,8 @@ import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/customer_detail_cache.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
+import '../../services/offline_document_draft_service.dart';
+import '../../local/local_database_provider.dart';
 import '../appointments/appointment_create_screen.dart';
 import '../jobs/job_create_screen.dart';
 import '../jobs/job_document_screen.dart';
@@ -51,6 +54,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       LocalCustomerRepository();
   final OfflineCustomerVehicleAdminService _offlineAdmin =
       OfflineCustomerVehicleAdminService();
+  final OfflineDocumentDraftService _offlineDrafts = OfflineDocumentDraftService();
 
   Map<String, dynamic>? _data;
   String? _error;
@@ -572,7 +576,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _createInvoiceForCustomer() async {
-    if (!_onlineReady || !_canManageQuickActions) return;
+    if (_data == null || !_canManageQuickActions) return;
     final customer = Map<String, dynamic>.from(
       _data?['customer'] ?? const <String, dynamic>{},
     );
@@ -605,13 +609,17 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _createEstimateForCustomer() async {
-    if (!_onlineReady || !_canManageQuickActions) return;
+    if (_data == null || !_canManageQuickActions) return;
     final customer = Map<String, dynamic>.from(
       _data?['customer'] ?? const <String, dynamic>{},
     );
     final vehicles = List<dynamic>.from(_data?['vehicles'] ?? const []);
     String? jobId;
     try {
+      if (BriskersConnectionModeController.instance.forceOffline) {
+        await _createOfflineEstimateForCustomer();
+        return;
+      }
       final history = await _api.customerServiceHistory(
         widget.businessId, widget.customerId,
       );
@@ -719,6 +727,82 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     }
   }
 
+  Future<void> _createOfflineEstimateForCustomer() async {
+    final saved = await localDatabase.customSelect(
+      '''
+      SELECT id, job_number, title, vehicle_label
+      FROM local_jobs
+      WHERE business_id=? AND customer_id=?
+        AND status NOT IN ('completed','cancelled')
+      ORDER BY created_at DESC
+      LIMIT 50
+      ''',
+      variables: [
+        Variable<String>(widget.businessId),
+        Variable<String>(widget.customerId),
+      ],
+    ).get();
+    if (!mounted) return;
+    if (saved.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(
+          'To create an estimate offline, this customer needs an existing saved active job. Creating a new job requires an internet connection.',
+        )),
+      );
+      return;
+    }
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(sheetContext).height * 0.60,
+          child: ListView(
+            children: [
+              const ListTile(
+                title: Text('Offline estimate'),
+                subtitle: Text('Choose a saved active job.'),
+              ),
+              for (final job in saved)
+                ListTile(
+                  leading: const Icon(Icons.build_outlined),
+                  title: Text(
+                    '${job.readNullable<String>('job_number') ?? ''} • '
+                    '${job.read<String>('title')}',
+                  ),
+                  subtitle: Text(
+                    job.readNullable<String>('vehicle_label') ?? '',
+                  ),
+                  onTap: () => Navigator.pop(
+                    sheetContext,job.read<String>('id'),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    final documentId = await _offlineDrafts.createEstimate(
+      widget.businessId,selected,
+    );
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: documentId,
+          isOwner: widget.roleCode == 'owner',
+          canManageExpenses: _canManageQuickActions,
+          initialAction: 'add_item',
+        ),
+      ),
+    );
+    if (mounted) await _load();
+  }
+
   void _openCustomerNoteComposer() {
     setState(() => _expandQuickNotes = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -734,13 +818,14 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _showQuickActions() async {
-    if (!_onlineReady || !_canManageQuickActions) return;
+    if (_data == null || !_canManageQuickActions) return;
     final action = await showModalBottomSheet<CustomerQuickAction>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
       builder: (sheetContext) => CustomerQuickActionsSheet(
         roleCode: widget.roleCode,
+        offline: BriskersConnectionModeController.instance.forceOffline,
         onSelected: (choice) => Navigator.pop(sheetContext, choice),
       ),
     );
@@ -813,7 +898,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           ],
         ),
       ),
-      floatingActionButton: _data == null || !_onlineReady || !_canManageQuickActions
+      floatingActionButton: _data == null || !_canManageQuickActions
           ? null
           : FloatingActionButton(
               onPressed: _showQuickActions,
