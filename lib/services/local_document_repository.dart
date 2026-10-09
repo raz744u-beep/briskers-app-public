@@ -28,8 +28,8 @@ class LocalDocumentRepository {
           '''
           INSERT INTO local_documents (
             id, business_id, job_id, customer_id, kind, document_number,
-            status, display_status_code, closed_at, converted, total, document_date, created_at, server_updated_at, row_version, sync_state
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+            status, display_status_code, closed_at, converted, total, document_date, future_date_flag, created_at, server_updated_at, row_version, sync_state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
           ON CONFLICT(id) DO UPDATE SET
             job_id=excluded.job_id,
             customer_id=excluded.customer_id,
@@ -41,6 +41,7 @@ class LocalDocumentRepository {
             converted=excluded.converted,
             total=excluded.total,
             document_date=excluded.document_date,
+            future_date_flag=excluded.future_date_flag,
             created_at=excluded.created_at,
             server_updated_at=excluded.server_updated_at,
             row_version=excluded.row_version,
@@ -60,6 +61,7 @@ class LocalDocumentRepository {
             document['converted'] == true ? 1 : 0,
             _double(document['total_amount'] ?? document['total']) ?? 0,
             _documentDate(document['document_date']),
+            document['future_date_flag'] == true ? 1 : 0,
             _unix(_date(document['created_at'])),
             _unix(_date(document['updated_at'])),
             _int(document['row_version']),
@@ -81,8 +83,8 @@ class LocalDocumentRepository {
           '''
           INSERT INTO local_documents (
             id, business_id, job_id, customer_id, kind, document_number,
-            status, display_status_code, closed_at, converted, total, document_date, created_at, server_updated_at, row_version, sync_state
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+            status, display_status_code, closed_at, converted, total, document_date, future_date_flag, created_at, server_updated_at, row_version, sync_state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
           ON CONFLICT(id) DO UPDATE SET
             job_id=excluded.job_id,
             customer_id=excluded.customer_id,
@@ -94,6 +96,7 @@ class LocalDocumentRepository {
             converted=excluded.converted,
             total=excluded.total,
             document_date=excluded.document_date,
+            future_date_flag=excluded.future_date_flag,
             created_at=excluded.created_at,
             server_updated_at=excluded.server_updated_at,
             row_version=excluded.row_version,
@@ -110,6 +113,7 @@ class LocalDocumentRepository {
             document['converted'] == true ? 1 : 0,
             _double(document['total_amount'] ?? document['total']) ?? 0,
             _documentDate(document['document_date']),
+            document['future_date_flag'] == true ? 1 : 0,
             _unix(_date(document['created_at'])),
             _unix(_date(document['updated_at'])),
             _int(document['row_version']),
@@ -170,6 +174,7 @@ class LocalDocumentRepository {
             'paid_amount': 0,
             'pending_payment': 0,
             'document_date': row.readNullable<String>('document_date'),
+            'future_date_flag': row.read<int>('future_date_flag') == 1,
             'created_at': _isoFromDb(row.data['created_at']),
             'updated_at': _isoFromDb(row.data['server_updated_at']),
             'job_number': row.readNullable<String>('job_number'),
@@ -249,6 +254,7 @@ class LocalDocumentRepository {
             'paid_amount': 0,
             'pending_payment': 0,
             'document_date': row.readNullable<String>('document_date'),
+            'future_date_flag': row.read<int>('future_date_flag') == 1,
             'created_at': _isoFromDb(row.data['created_at']),
             'updated_at': _isoFromDb(row.data['server_updated_at']),
             'job_number': row.readNullable<String>('job_number'),
