@@ -2370,7 +2370,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Widget _statusControl() {
     final color = colorFromHex(_job?['status_color']?.toString());
     final icon = jobStatusIcon(_job?['status_icon']?.toString());
-    final name = _job?['status_name']?.toString() ?? 'Status';
+    final name = jobStatusLabel(
+      _job?['status']?.toString(),
+      _job?['status_name']?.toString() ?? 'Status',
+    );
 
     final child = Container(
       margin: const EdgeInsets.only(right: 10),
