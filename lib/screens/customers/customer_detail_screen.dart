@@ -13,6 +13,10 @@ import '../../services/local_customer_repository.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../appointments/appointment_create_screen.dart';
 import '../jobs/job_create_screen.dart';
+import '../jobs/job_document_screen.dart';
+import '../jobs/blank_invoice_setup_screen.dart';
+import '../jobs/estimate_job_setup_screen.dart';
+import 'customer_quick_actions.dart';
 import 'customer_account_section.dart';
 import 'customer_appointments_section.dart';
 import 'customer_notes_section.dart';
@@ -27,10 +31,12 @@ class CustomerDetailScreen extends StatefulWidget {
     super.key,
     required this.businessId,
     required this.customerId,
+    required this.roleCode,
   });
 
   final String businessId;
   final String customerId;
+  final String roleCode;
 
   @override
   State<CustomerDetailScreen> createState() => _CustomerDetailScreenState();
@@ -52,6 +58,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   bool _showingLocal = false;
 
   bool get _canEditLocal => _data != null;
+  bool get _canManageQuickActions => canManageCustomerActions(widget.roleCode);
+  final GlobalKey _notesSectionKey = GlobalKey();
+  bool _expandQuickNotes = false;
 
   Future<Map<String, dynamic>> _loadOfflineSections() async {
     Future<List<Map<String, dynamic>>> listSection(String key) async {
@@ -557,120 +566,193 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     }
   }
 
-  Widget _quickActionIcon(IconData icon, Color color) {
-    return CircleAvatar(
-      backgroundColor: color.withValues(alpha: 0.14),
-      child: Icon(icon, color: color),
+  Future<void> _createInvoiceForCustomer() async {
+    if (!_onlineReady || !_canManageQuickActions) return;
+    final customer = Map<String, dynamic>.from(
+      _data?['customer'] ?? const <String, dynamic>{},
     );
-  }
-
-  void _showPlannedAction(String name) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '$name is the next workflow step to be connected.',
+    final vehicles = List<dynamic>.from(_data?['vehicles'] ?? const []);
+    final invoiceId = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BlankInvoiceSetupScreen(
+          businessId: widget.businessId,
+          initialCustomerId: widget.customerId,
+          initialCustomerName: customer['name']?.toString() ?? 'Customer',
+          initialVehicles: vehicles,
         ),
       ),
     );
+    if (!mounted || invoiceId == null || invoiceId.isEmpty) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: invoiceId,
+          isOwner: widget.roleCode == 'owner',
+          canManageExpenses: _canManageQuickActions,
+          initialAction: 'add_item',
+        ),
+      ),
+    );
+    if (mounted) await _load();
   }
 
-  Future<void> _showQuickActions() async {
-    if (!_onlineReady) return;
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        final maxHeight = MediaQuery.sizeOf(sheetContext).height * 0.72;
-        return SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: maxHeight),
-            child: ListView(
-              shrinkWrap: true,
-              padding: const EdgeInsets.only(bottom: 8),
+  Future<void> _createEstimateForCustomer() async {
+    if (!_onlineReady || !_canManageQuickActions) return;
+    final customer = Map<String, dynamic>.from(
+      _data?['customer'] ?? const <String, dynamic>{},
+    );
+    final vehicles = List<dynamic>.from(_data?['vehicles'] ?? const []);
+    String? jobId;
+    try {
+      final history = await _api.customerServiceHistory(
+        widget.businessId, widget.customerId,
+      );
+      if (!mounted) return;
+      final active = history.where((job) {
+        final status = job['status']?.toString() ?? '';
+        return status != 'completed' && status != 'cancelled';
+      }).toList();
+
+      if (active.isNotEmpty) {
+        final choice = await showModalBottomSheet<String>(
+          context: context,
+          showDragHandle: true,
+          builder: (sheetContext) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                ListTile(
-                  leading: _quickActionIcon(
-                    Icons.calendar_month_outlined,
-                    BriskersColors.appointments,
-                  ),
-                  title: const Text('Schedule appointment'),
-                  onTap: () => Navigator.pop(sheetContext, 'appointment'),
+                const ListTile(
+                  title: Text('Create estimate'),
+                  subtitle: Text('Use an existing job or create a new job.'),
                 ),
                 ListTile(
-                  leading: _quickActionIcon(
-                    Icons.build_outlined,
-                    BriskersColors.jobs,
-                  ),
-                  title: const Text('Create job'),
-                  onTap: () => Navigator.pop(sheetContext, 'job'),
+                  leading: const Icon(Icons.build_outlined),
+                  title: const Text('Existing customer job'),
+                  onTap: () => Navigator.pop(sheetContext, 'existing'),
                 ),
                 ListTile(
-                  leading: _quickActionIcon(
-                    Icons.request_quote_outlined,
-                    BriskersColors.estimates,
-                  ),
-                  title: const Text('Create estimate'),
-                  onTap: () => Navigator.pop(sheetContext, 'estimate'),
-                ),
-                ListTile(
-                  leading: _quickActionIcon(
-                    Icons.receipt_long_outlined,
-                    BriskersColors.invoices,
-                  ),
-                  title: const Text('Create invoice'),
-                  onTap: () => Navigator.pop(sheetContext, 'invoice'),
-                ),
-                ListTile(
-                  leading: _quickActionIcon(
-                    Icons.directions_car_outlined,
-                    BriskersColors.vehicles,
-                  ),
-                  title: const Text('Add vehicle'),
-                  onTap: () => Navigator.pop(sheetContext, 'vehicle'),
-                ),
-                ListTile(
-                  leading: _quickActionIcon(
-                    Icons.note_add_outlined,
-                    BriskersColors.notes,
-                  ),
-                  title: const Text('Add note'),
-                  onTap: () => Navigator.pop(sheetContext, 'note'),
+                  leading: const Icon(Icons.add_circle_outline),
+                  title: const Text('New job for estimate'),
+                  onTap: () => Navigator.pop(sheetContext, 'new'),
                 ),
               ],
             ),
           ),
         );
-      },
-    );
+        if (!mounted || choice == null) return;
+        if (choice == 'existing') {
+          final picked = await showModalBottomSheet<Map<String, dynamic>>(
+            context: context,
+            showDragHandle: true,
+            isScrollControlled: true,
+            builder: (sheetContext) => SafeArea(
+              child: SizedBox(
+                height: MediaQuery.sizeOf(sheetContext).height * 0.65,
+                child: ListView(
+                  children: [
+                    const ListTile(title: Text('Select an active job')),
+                    for (final job in active)
+                      ListTile(
+                        leading: const Icon(Icons.build_outlined),
+                        title: Text(
+                          '${job['job_number'] ?? ''} • ${job['title'] ?? 'Job'}',
+                        ),
+                        subtitle: Text(job['vehicle']?.toString() ?? ''),
+                        onTap: () => Navigator.pop(sheetContext, job),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          );
+          if (!mounted || picked == null) return;
+          jobId = picked['id']?.toString();
+        }
+      }
 
-    if (!mounted || action == null) return;
-
-    switch (action) {
-      case 'vehicle':
-        await _addVehicle();
-        break;
-      case 'appointment':
-        await _scheduleAppointment();
-        break;
-      case 'job':
-        await _createJob();
-        break;
-      case 'estimate':
-        _showPlannedAction('Estimate creation');
-        break;
-      case 'invoice':
-        _showPlannedAction('Invoice creation');
-        break;
-      case 'note':
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Open Customer notes to add a note for now.',
+      if (jobId == null) {
+        final job = await Navigator.push<Map<String, dynamic>>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => EstimateJobSetupScreen(
+              businessId: widget.businessId,
+              initialCustomerId: widget.customerId,
+              initialCustomerName: customer['name']?.toString() ?? 'Customer',
+              initialVehicles: vehicles,
             ),
           ),
         );
-        break;
+        if (!mounted || job == null) return;
+        jobId = job['id']?.toString();
+      }
+      if (jobId == null || jobId.isEmpty) {
+        throw StateError('No job was selected for the estimate.');
+      }
+      final documentId = await _api.createEstimate(widget.businessId, jobId);
+      if (!mounted) return;
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => JobDocumentScreen(
+            businessId: widget.businessId,
+            documentId: documentId,
+            isOwner: widget.roleCode == 'owner',
+            canManageExpenses: _canManageQuickActions,
+            initialAction: 'add_item',
+          ),
+        ),
+      );
+      if (mounted) await _load();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not create estimate: $error')),
+      );
+    }
+  }
+
+  void _openCustomerNoteComposer() {
+    setState(() => _expandQuickNotes = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final target = _notesSectionKey.currentContext;
+      if (mounted && target != null) {
+        Scrollable.ensureVisible(
+          target,
+          duration: const Duration(milliseconds: 250),
+          alignment: 0.08,
+        );
+      }
+    });
+  }
+
+  Future<void> _showQuickActions() async {
+    if (!_onlineReady || !_canManageQuickActions) return;
+    final action = await showModalBottomSheet<CustomerQuickAction>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => CustomerQuickActionsSheet(
+        roleCode: widget.roleCode,
+        onSelected: (choice) => Navigator.pop(sheetContext, choice),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case CustomerQuickAction.appointment:
+        await _scheduleAppointment();
+      case CustomerQuickAction.job:
+        await _createJob();
+      case CustomerQuickAction.estimate:
+        await _createEstimateForCustomer();
+      case CustomerQuickAction.invoice:
+        await _createInvoiceForCustomer();
+      case CustomerQuickAction.vehicle:
+        await _addVehicle();
+      case CustomerQuickAction.note:
+        _openCustomerNoteComposer();
     }
   }
 
@@ -726,7 +808,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           ],
         ),
       ),
-      floatingActionButton: _data == null || !_onlineReady
+      floatingActionButton: _data == null || !_onlineReady || !_canManageQuickActions
           ? null
           : FloatingActionButton(
               onPressed: _showQuickActions,
@@ -883,9 +965,16 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     vehicles: vehicles,
                   ),
                   const SizedBox(height: 18),
-                  CustomerNotesSection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
+                  Container(
+                    key: _notesSectionKey,
+                    child: KeyedSubtree(
+                      key: ValueKey(_expandQuickNotes),
+                      child: CustomerNotesSection(
+                        businessId: widget.businessId,
+                        customerId: widget.customerId,
+                        initiallyExpanded: _expandQuickNotes,
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 18),
                   if (BriskersConnectionModeController.instance.forceOffline)
