@@ -9,9 +9,15 @@ class BlankInvoiceSetupScreen extends StatefulWidget {
   const BlankInvoiceSetupScreen({
     super.key,
     required this.businessId,
+    this.initialCustomerId,
+    this.initialCustomerName,
+    this.initialVehicles = const [],
   });
 
   final String businessId;
+  final String? initialCustomerId;
+  final String? initialCustomerName;
+  final List<dynamic> initialVehicles;
 
   @override
   State<BlankInvoiceSetupScreen> createState() =>
@@ -38,7 +44,26 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
   @override
   void initState() {
     super.initState();
-    _loadCustomers();
+    final selected = widget.initialCustomerId;
+    if (selected != null) {
+      _customerId = selected;
+      _customers = [
+        <String, dynamic>{
+          'id': selected,
+          'display_name': widget.initialCustomerName ?? 'Customer',
+        },
+      ];
+      _vehicles = widget.initialVehicles
+          .whereType<Map>()
+          .map((value) => Map<String, dynamic>.from(value))
+          .toList();
+      if (_vehicles.length == 1) {
+        _vehicleId = _vehicles.first['id']?.toString();
+      }
+      _loading = false;
+    } else {
+      _loadCustomers();
+    }
   }
 
   @override
@@ -181,6 +206,7 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
             style: TextStyle(color: Color(0xFF667085)),
           ),
           const SizedBox(height: 16),
+          if (widget.initialCustomerId == null)
           TextField(
             controller: _customerSearch,
             enabled: !_saving,
@@ -202,11 +228,17 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          if (_searchingCustomers)
+          if (widget.initialCustomerId != null)
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('Customer'),
+              subtitle: Text(widget.initialCustomerName ?? 'Customer'),
+            ),
+          if (widget.initialCustomerId == null && _searchingCustomers)
             const LinearProgressIndicator()
-          else if (_customers.isEmpty)
+          else if (widget.initialCustomerId == null && _customers.isEmpty)
             const Text('No matching customers. Try another search.'),
-          if (!_searchingCustomers && _customers.isNotEmpty)
+          if (widget.initialCustomerId == null && !_searchingCustomers && _customers.isNotEmpty)
           DropdownButtonFormField<String>(
             key: ValueKey(_customerDropdownVersion),
             initialValue: _customerId,
