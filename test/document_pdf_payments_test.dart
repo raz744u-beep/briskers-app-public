@@ -42,13 +42,13 @@ void main() {
 
     test('fully entered debit-card payment is recorded but not yet finalized', () {
       final amounts = DocumentPdfService.invoicePaymentAmounts({
-        'total_amount': '2976.65',
+        'total_amount': '317.49',
         'paid_amount': '0.00',
-        'pending_payment': '2976.65',
+        'pending_payment': '317.49',
       });
       expect(amounts['paid'], 0);
-      expect(amounts['pending'], 2976.65);
-      expect(amounts['paid']! + amounts['pending']!, 2976.65);
+      expect(amounts['pending'], 317.49);
+      expect(amounts['paid']! + amounts['pending']!, 317.49);
       expect(amounts['remaining'], 0);
     });
 
