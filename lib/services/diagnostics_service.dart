@@ -1008,8 +1008,7 @@ class BriskersDiagnosticsService {
     final available = rows != null;
     final valid = rows?.where((row) =>
         row['allocation_id']?.toString().isNotEmpty == true &&
-        row['job_id'] != null &&
-        row['transaction_id'] != null).length ?? 0;
+        row['transaction_id']?.toString().isNotEmpty == true).length ?? 0;
     final count = rows?.length ?? 0;
     final healthy = ready && available && valid == count;
     checks.add(DiagnosticCheck(
@@ -1026,7 +1025,7 @@ class BriskersDiagnosticsService {
           : 'Full linked-expense snapshot has not completed successfully.',
       details: [
         'Cached linked allocations: $count',
-        'Valid job/transaction identifiers: $valid',
+        'Valid expense allocation IDs: $valid',
         'Sync completed: $ready',
         if (!ready)
           'Run Auto sync before testing Force Offline.',
