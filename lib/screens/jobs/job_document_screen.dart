@@ -97,7 +97,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       !_offlineDocumentDraft.isLocalDraftId(widget.documentId) &&
       !_detail!.containsKey('legacy_read_only');
   bool get _readOnly => (_estimate && _converted) ||
-      _detail?['legacy_read_only'] == true || _editLockUnverified;
+      _detail?['legacy_read_only'] == true ||
+      (!_estimate && _detail?['closed_at'] != null) ||
+      _editLockUnverified;
+  bool get _canForceReopen => widget.isOwner &&
+      !_estimate &&
+      _detail?['status']?.toString() != 'void' &&
+      (_detail?['legacy_read_only'] == true ||
+       _detail?['closed_at'] != null);
   bool get _canManageInvoiceExpenses =>
       widget.isOwner || widget.canManageExpenses;
 
@@ -473,6 +480,63 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final parsed = DateTime.tryParse(value);
     if (parsed == null) return '';
     return DateFormat('MMM d, yyyy  h:mm a').format(parsed.toLocal());
+  }
+
+  Future<void> _ownerForceReopen() async {
+    if (!_canForceReopen || _busy) return;
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (mounted) setState(() => _error = tr('forceReopenRequiresOnline'));
+      return;
+    }
+    final reason = TextEditingController();
+    final confirmed = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(tr('forceReopenInvoiceTitle')),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(tr('forceReopenInvoiceHelp')),
+              const SizedBox(height: 14),
+              TextField(
+                controller: reason,
+                minLines: 2,
+                maxLines: 4,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: tr('forceReopenReason'),
+                  hintText: tr('forceReopenReasonHint'),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(tr('forceReopenCancel')),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = reason.text.trim();
+              if (value.length < 10) return;
+              Navigator.pop(dialogContext, value);
+            },
+            child: Text(tr('forceReopenConfirm')),
+          ),
+        ],
+      ),
+    );
+    reason.dispose();
+    if (!mounted || confirmed == null) return;
+    await _run(() => _api.ownerForceReopenInvoice(
+      widget.businessId,
+      widget.documentId,
+      expectedVersion: _version,
+      reason: confirmed,
+    ));
   }
 
   Future<void> _enableImportedInvoiceEditing() async {
@@ -5663,6 +5727,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   ),
                   onTap: () => Navigator.pop(sheetContext, 'edit'),
                 ),
+              if (_canForceReopen)
+                ListTile(
+                  leading: const Icon(Icons.lock_open_outlined),
+                  title: Text(tr('forceReopenInvoice')),
+                  onTap: () => Navigator.pop(sheetContext, 'force_reopen'),
+                ),
               if (!_estimate)
                 ListTile(
                   leading: const Icon(Icons.copy_outlined),
@@ -5747,6 +5817,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         await _showInvoiceExpenses();
       case 'add_expense':
         await _addInvoiceExpense();
+      case 'force_reopen':
+        await _ownerForceReopen();
+        break;
       case 'delete':
         if (_estimate) {
           await _deleteEstimate();
@@ -5850,6 +5923,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 tooltip: 'Add linked expense',
                 onPressed: _busy ? null : _addInvoiceExpense,
                 icon: const Icon(Icons.add_card_outlined),
+              ),
+            if (_canForceReopen)
+              IconButton(
+                tooltip: tr('forceReopenInvoice'),
+                onPressed: _busy ? null : _ownerForceReopen,
+                icon: const Icon(Icons.lock_open_outlined),
               ),
             if (!_readOnly)
               IconButton(
