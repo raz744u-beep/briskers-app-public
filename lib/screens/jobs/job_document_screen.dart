@@ -11,6 +11,7 @@ import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
 import '../../services/briskers_api.dart';
+import '../../services/local_financial_cache.dart';
 import '../../services/document_pdf_service.dart';
 import '../../services/gmail_compose_service.dart';
 import '../../services/catalog_sync_service.dart';
@@ -820,10 +821,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _showInvoiceExpenses() async {
     if (_estimate || !_canManageInvoiceExpenses) return;
     try {
-      final expenses = await _api.documentExpenses(
+      final offline = BriskersConnectionModeController.instance.forceOffline;
+      final cached = await LocalFinancialCache().loadLinkedExpenses(
         widget.businessId,
-        widget.documentId,
       );
+      final related = cached?.where((item) =>
+        item['document_id']?.toString() == widget.documentId ||
+        (_detail?['job_id']?.toString() != null &&
+          item['job_id']?.toString() == _detail?['job_id']?.toString())
+      ).toList() ?? const <Map<String, dynamic>>[];
+      final expenses = offline
+          ? related
+          : await _api.documentExpenses(
+              widget.businessId,
+              widget.documentId,
+            );
       if (!mounted) return;
 
       if (expenses.isEmpty) {
