@@ -60,10 +60,12 @@ class CustomerQuickActionsSheet extends StatelessWidget {
     super.key,
     required this.roleCode,
     required this.onSelected,
+    this.offline = false,
   });
 
   final String roleCode;
   final ValueChanged<CustomerQuickAction> onSelected;
+  final bool offline;
 
   @override
   Widget build(BuildContext context) {
@@ -97,7 +99,12 @@ class CustomerQuickActionsSheet extends StatelessWidget {
                   ),
                 ),
                 title: Text(customerQuickActionLabel(action)),
-                onTap: () => onSelected(action),
+                subtitle: offline && (action == CustomerQuickAction.appointment ||
+                    action == CustomerQuickAction.job)
+                    ? const Text('Requires an internet connection') : null,
+                onTap: offline && (action == CustomerQuickAction.appointment ||
+                    action == CustomerQuickAction.job)
+                    ? null : () => onSelected(action),
               ),
           ],
         ),
