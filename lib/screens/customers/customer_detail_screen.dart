@@ -326,7 +326,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       } catch (_) {
         // Pending edits stay queued if the connection is not ready yet.
       }
-      await _sync.pull(widget.businessId);
+      // Full customer/vehicle dataset sync belongs to the background Sync Now
+      // workflow, not to opening every individual customer profile.
+      if (!await _localCustomers.hasBootstrap(widget.businessId)) {
+        await _sync.pull(widget.businessId);
+      }
       Map<String, dynamic>? fullDetail;
       try {
         fullDetail = await _api.customerDetail(
@@ -337,6 +341,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         await _sync.refreshCustomer(
           widget.businessId,
           widget.customerId,
+          fetchedDetail: fullDetail,
         );
       } catch (_) {
         // The regular local snapshot is still usable if a focused refresh fails.
