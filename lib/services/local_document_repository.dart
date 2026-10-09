@@ -339,7 +339,9 @@ class LocalDocumentRepository {
   }) async {
     final value = query.trim().toLowerCase();
     if (value.isEmpty) return const [];
-    final numeric = RegExp(r'^[0-9]+
+    final numeric = RegExp(r'^[0-9]+$').hasMatch(value);
+    final like = '%$value%';
+    final rows = await _database.customSelect(
       '''
       SELECT d.*, j.job_number, j.customer_name, j.vehicle_label
       FROM local_documents d
@@ -372,85 +374,6 @@ class LocalDocumentRepository {
         Variable<String>('I-$value'),
         Variable<String>('MB-$value'),
         Variable<int>(numeric ? 0 : 1),
-        Variable<String>(like),
-        Variable<String>(like),
-        Variable<String>(like),
-        Variable<int>(limit),
-      ],
-    ).get();
-
-    return rows.map((row) => <String, dynamic>{
-      'id': row.read<String>('id'),
-      'job_id': row.readNullable<String>('job_id'),
-      'customer_id': row.readNullable<String>('customer_id'),
-      'kind': row.read<String>('kind'),
-      'document_number': row.readNullable<String>('document_number'),
-      'status': row.readNullable<String>('status'),
-      'total': row.read<double>('total'),
-      'job_number': row.readNullable<String>('job_number'),
-      'customer_name': row.readNullable<String>('customer_name'),
-      'vehicle': row.readNullable<String>('vehicle_label'),
-      '_local_snapshot': true,
-    }).toList();
-  }
-
-  // Preserve YYYY-MM-DD without converting a calendar date across timezones.
-  // Legacy created_at is the Briskers import timestamp, not the issue date.
-  String? _documentDate(Object? value) {
-    final raw = value?.toString().trim() ?? '';
-    if (raw.length < 10) return null;
-    final date = raw.substring(0, 10);
-    if (!RegExp(r'^[0-9]{4}-[0-9]{2}-[0-9]{2}').hasMatch(date)) {
-      return null;
-    }
-    return DateTime.tryParse(date) == null ? null : date;
-  }
-
-  String? _isoFromDb(Object? value) {
-    if (value == null) return null;
-    if (value is DateTime) return value.toUtc().toIso8601String();
-    if (value is int) {
-      return DateTime.fromMillisecondsSinceEpoch(
-        value * 1000,
-        isUtc: true,
-      ).toIso8601String();
-    }
-    return DateTime.tryParse(value.toString())
-        ?.toUtc()
-        .toIso8601String();
-  }
-
-  String? _text(Object? value) {
-    final text = value?.toString();
-    return text == null || text.isEmpty || text == 'null' ? null : text;
-  }
-
-  int? _int(Object? value) => int.tryParse(value?.toString() ?? '');
-  double? _double(Object? value) => double.tryParse(value?.toString() ?? '');
-  DateTime? _date(Object? value) => DateTime.tryParse(value?.toString() ?? '');
-  int? _unix(DateTime? value) => value == null
-      ? null
-      : value.toUtc().millisecondsSinceEpoch ~/ 1000;
-}
-).hasMatch(value);
-    final like = numeric ? value : '%$value%';
-    final rows = await _database.customSelect(
-      '''
-      SELECT d.*, j.job_number, j.customer_name, j.vehicle_label
-      FROM local_documents d
-      LEFT JOIN local_jobs j
-        ON j.business_id = d.business_id AND j.id = d.job_id
-      WHERE d.business_id = ?
-        AND (
-          lower(COALESCE(d.document_number, '')) LIKE ?
-          OR lower(COALESCE(j.job_number, '')) LIKE ?
-          OR lower(COALESCE(j.customer_name, '')) LIKE ?
-        )
-      ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
-      LIMIT ?
-      ''',
-      variables: [
-        Variable<String>(businessId),
         Variable<String>(like),
         Variable<String>(like),
         Variable<String>(like),
