@@ -69,6 +69,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   List<Map<String, dynamic>> _documents = const [];
   List<Map<String, dynamic>> _findings = const [];
   List<Map<String, dynamic>> _jobExpenses = const [];
+  bool _linkedExpensesCached = false;
   final ImagePicker _picker = ImagePicker();
 
   final ScrollController _scrollController = ScrollController();
@@ -211,6 +212,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           _statuses = snapshot.statuses;
           _documents = localDocuments;
           _jobExpenses = cachedLinked ?? const [];
+          _linkedExpensesCached = cachedLinked != null;
           _findings = snapshot.findings;
           _loading = false;
           _onlineReady = false;
@@ -469,6 +471,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         _documents = documents;
         _findings = findings;
         _jobExpenses = jobExpenses;
+        _linkedExpensesCached = true;
         _loading = false;
         _onlineReady = true;
         _showingLocal = false;
@@ -3559,9 +3562,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   Widget _jobExpensesDrawer() {
     if (_jobExpenses.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
-        child: Text('No expenses are linked to this job yet.'),
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(
+          _showingLocal && !_linkedExpensesCached
+              ? 'Linked expenses have not been synchronized to this device. '
+                  'Connect using Auto and run Local Database Sync.'
+              : 'No expenses are linked to this job yet.',
+        ),
       );
     }
 
