@@ -73,6 +73,29 @@ void main() {
     await db.close();
   });
 
+
+  test('older cached invoices missing lock metadata warn instead of passing',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    await db.customStatement("""
+      INSERT INTO local_documents
+        (id, business_id, kind, document_number, status, closed_at, total, sync_state)
+      VALUES ('old-cache','shop-stale','invoice','3203','issued',
+              1790000000,1006.19,'synced')
+    """);
+    await const LocalDocumentDetailCache().save('shop-stale','old-cache',{
+      'id':'old-cache','kind':'invoice','total_amount':1006.19,
+      'lines':<Map<String,dynamic>>[]
+    });
+    final report = await BriskersDiagnosticsService(database: db)
+        .run('shop-stale',full:true);
+    final check = report.checks.firstWhere((c) => c.id == 'DOC-006');
+    expect(check.level, BriskersDiagnosticLevel.warning);
+    expect(check.details.join(' '), contains('lack legacy edit-lock metadata'));
+    await db.close();
+  });
+
   test('closed imported invoice flagged as editable fails diagnostics', () async {
     SharedPreferences.setMockInitialValues({});
     final db = BriskersLocalDatabase(NativeDatabase.memory());
