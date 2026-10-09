@@ -5828,6 +5828,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 child: Column(
                   children: [
                   _customerHeader(),
+                  if (_editLockUnverified)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: Text(
+                        tr('documentLockNeedsRefresh'),
+                        style: const TextStyle(
+                          color: Color(0xFF8A5200),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   if (_detail?['legacy_editable'] == true)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
