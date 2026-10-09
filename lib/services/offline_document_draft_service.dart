@@ -27,7 +27,7 @@ class OfflineDocumentDraftService {
   final LocalDocumentRepository _documents;
   final Random _random = Random.secure();
 
-  bool isLocalDraftId(String id) => id.startsWith('local-estimate-');
+  bool isLocalDraftId(String id) => id.startsWith('local-estimate-') || id.startsWith('local-invoice-');
 
   int _unixNow() =>
       DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
@@ -36,6 +36,97 @@ class OfflineDocumentDraftService {
     final now = DateTime.now().toUtc().microsecondsSinceEpoch;
     final salt = _random.nextInt(1 << 32).toRadixString(16);
     return 'local-estimate-$now-$salt';
+  }
+
+  String _offlineOperationUuid() {
+    final values = List<int>.generate(16, (_) => _random.nextInt(256));
+    values[6] = (values[6] & 0x0f) | 0x40;
+    values[8] = (values[8] & 0x3f) | 0x80;
+    final hex = values.map((v) => v.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0,8)}-${hex.substring(8,12)}-'
+        '${hex.substring(12,16)}-${hex.substring(16,20)}-${hex.substring(20)}';
+  }
+
+  /// Store a blank invoice with a temporary local ID; the server allocates
+  /// its number atomically after reconnecting. No fake invoice number is used.
+  Future<String> createQuickInvoice(
+    String businessId, {
+    required String customerId,
+    required String customerName,
+    String? vehicleId,
+    String? vehicleLabel,
+  }) async {
+    if (customerId.isEmpty) {
+      throw StateError('Select a saved customer before creating an invoice.');
+    }
+    final operationId = _offlineOperationUuid();
+    final id = 'local-invoice-$operationId';
+    final now = DateTime.now();
+    final date = now.toIso8601String().split('T').first;
+    final detail = <String, dynamic>{
+      'id': id,
+      'kind': 'invoice',
+      'document_number': null,
+      'status': 'issued',
+      'display_status': 'Pending sync',
+      'display_status_code': 'open',
+      'job_id': null,
+      'customer_id': customerId,
+      'customer_name': customerName,
+      'vehicle_id': vehicleId,
+      'vehicle': vehicleLabel,
+      'document_date': date,
+      'created_at': now.toIso8601String(),
+      'updated_at': now.toIso8601String(),
+      'memo': null,
+      'lines': <Map<String, dynamic>>[],
+      'net_amount': 0,
+      'tax_amount': 0,
+      'total_amount': 0,
+      'paid_amount': 0,
+      'pending_payment': 0,
+      'row_version': 1,
+      'origin': 'native',
+      'closed_at': null,
+      'legacy_read_only': false,
+      'legacy_editable': false,
+      'sync_state': 'pending',
+      '_local_snapshot': true,
+      '_local_draft': true,
+    };
+
+    await _database.transaction(() async {
+      await _database.customStatement(
+        '''
+        INSERT INTO local_documents (
+          id,business_id,job_id,customer_id,kind,document_number,
+          status,display_status_code,closed_at,converted,total,
+          document_date,created_at,server_updated_at,row_version,sync_state
+        ) VALUES (?, ?, NULL, ?, 'invoice', NULL, 'issued', 'open',
+                  NULL, 0, 0, ?, ?, NULL, 1, 'pending')
+        ''',
+        [id,businessId,customerId,date,_unixNow()],
+      );
+      await _database.customStatement(
+        '''
+        INSERT INTO sync_outbox (
+          business_id,entity_type,entity_id,operation,payload_json,
+          base_row_version,state,attempt_count,created_at,
+          last_attempt_at,last_error
+        ) VALUES (?, 'document_draft_create', ?, 'create_quick_invoice', ?,
+                  NULL, 'pending', 0, ?, NULL, NULL)
+        ''',
+        [
+          businessId,id,jsonEncode({
+            'local_id':id,'kind':'invoice',
+            'customer_id':customerId,'vehicle_id':vehicleId,
+            'operation_id':operationId,'document_date':date,
+          }),_unixNow(),
+        ],
+      );
+    });
+    await _cache.save(businessId,id,detail);
+    return id;
   }
 
   String _lineId() {
@@ -379,52 +470,69 @@ class OfflineDocumentDraftService {
         final payload = Map<String, dynamic>.from(
           jsonDecode(row.read<String>('payload_json')) as Map,
         );
-        final jobId = payload['job_id']?.toString() ?? '';
-        if (jobId.isEmpty) {
-          throw StateError('The offline estimate has no linked job.');
-        }
-
         final localDetail = await _cache.load(businessId, localId);
         if (localDetail == null) {
-          throw StateError('The offline estimate detail is missing.');
+          throw StateError('The offline document draft is missing.');
         }
 
-        final serverId = await _api.createEstimate(businessId, jobId);
-        var serverDetail =
-            await _api.documentDetail(businessId, serverId);
-
-        final lines = _lines(localDetail);
-        for (final line in lines) {
-          final version =
-              int.tryParse(serverDetail['row_version']?.toString() ?? '') ?? 1;
-          await _api.addDocumentLine(
+        late final String serverId;
+        late Map<String, dynamic> serverDetail;
+        if (payload['kind'] == 'invoice') {
+          final operationId = payload['operation_id']?.toString() ?? '';
+          final customerId = payload['customer_id']?.toString() ?? '';
+          if (operationId.isEmpty || customerId.isEmpty) {
+            throw StateError('Offline invoice is missing its sync identity.');
+          }
+          serverId = await _api.syncOfflineQuickInvoice(
             businessId,
-            serverId,
-            expectedVersion: version,
-            name: line['name']?.toString() ?? 'Item',
-            description: line['description']?.toString(),
-            itemId: line['item_id']?.toString(),
-            quantity: _number(line['quantity']),
-            unitPrice: _number(line['unit_price']),
-            taxRate: _number(line['tax_rate']),
-            lineKind: line['line_kind']?.toString() ?? 'item',
+            customerId: customerId,
+            vehicleId: payload['vehicle_id']?.toString(),
+            operationId: operationId,
+            documentDate: payload['document_date']?.toString() ?? '',
+            lines: _lines(localDetail),
+            memo: localDetail['memo']?.toString(),
           );
-          serverDetail =
-              await _api.documentDetail(businessId, serverId);
-        }
+          serverDetail = await _api.documentDetail(businessId,serverId);
+        } else {
+          final jobId = payload['job_id']?.toString() ?? '';
+          if (jobId.isEmpty) {
+            throw StateError('The offline estimate has no linked job.');
+          }
 
-        final memo = localDetail['memo']?.toString().trim() ?? '';
-        if (memo.isNotEmpty) {
-          final version =
-              int.tryParse(serverDetail['row_version']?.toString() ?? '') ?? 1;
-          await _api.updateDocumentNotes(
-            businessId,
-            serverId,
-            expectedVersion: version,
-            memo: memo,
-          );
-          serverDetail =
-              await _api.documentDetail(businessId, serverId);
+          serverId = await _api.createEstimate(businessId, jobId);
+          serverDetail = await _api.documentDetail(businessId, serverId);
+
+          final lines = _lines(localDetail);
+          for (final line in lines) {
+            final version =
+                int.tryParse(serverDetail['row_version']?.toString() ?? '') ?? 1;
+            await _api.addDocumentLine(
+              businessId,
+              serverId,
+              expectedVersion: version,
+              name: line['name']?.toString() ?? 'Item',
+              description: line['description']?.toString(),
+              itemId: line['item_id']?.toString(),
+              quantity: _number(line['quantity']),
+              unitPrice: _number(line['unit_price']),
+              taxRate: _number(line['tax_rate']),
+              lineKind: line['line_kind']?.toString() ?? 'item',
+            );
+            serverDetail = await _api.documentDetail(businessId,serverId);
+          }
+
+          final memo = localDetail['memo']?.toString().trim() ?? '';
+          if (memo.isNotEmpty) {
+            final version =
+                int.tryParse(serverDetail['row_version']?.toString() ?? '') ?? 1;
+            await _api.updateDocumentNotes(
+              businessId,
+              serverId,
+              expectedVersion: version,
+              memo: memo,
+            );
+            serverDetail = await _api.documentDetail(businessId,serverId);
+          }
         }
 
         await _documents.upsertFromServer(
@@ -441,11 +549,13 @@ class OfflineDocumentDraftService {
           },
         );
 
-        await _remapPendingEstimateMerges(
-          businessId,
-          localId,
-          serverId,
-        );
+        if (payload['kind'] == 'estimate') {
+          await _remapPendingEstimateMerges(
+            businessId,
+            localId,
+            serverId,
+          );
+        }
 
         await _database.transaction(() async {
           await _database.customStatement(
