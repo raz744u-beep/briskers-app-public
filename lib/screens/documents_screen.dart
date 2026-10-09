@@ -147,7 +147,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     return Icons.circle;
   }
 
-  String get _cacheKey => '${widget.businessId}:${widget.kind}';
 
   @override
   void initState() {
