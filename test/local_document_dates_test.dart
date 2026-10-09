@@ -43,6 +43,7 @@ void main() {
           'kind': 'invoice',
           'document_number': '5180',
           'document_date': '2026-12-25',
+          'future_date_flag': true,
           'created_at': importTime,
           'status': 'issued',
           'total_amount': 1130.74,
@@ -60,6 +61,8 @@ void main() {
     expect(byNumber['6330']?['document_date'], '2026-10-08');
     // Do not silently rewrite an anomalous MobileBiz source date.
     expect(byNumber['5180']?['document_date'], '2026-12-25');
+    expect(byNumber['5180']?['future_date_flag'], isTrue);
+    expect(byNumber['6330']?['future_date_flag'], isFalse);
     expect(byNumber['5969']?['created_at'], isNotNull);
 
     await repository.upsertFromServer(business, [
