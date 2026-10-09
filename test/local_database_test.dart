@@ -37,7 +37,7 @@ void main() {
       ).getSingle();
       expect(customers.read<int>('n'), 1);
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 20);
+      expect(version.read<int>('user_version'), 21);
       await db.close();
     } finally {
       await folder.delete(recursive: true);
