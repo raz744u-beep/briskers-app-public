@@ -88,8 +88,17 @@ class DocumentIndexSyncService {
           cached['id']?.toString() == id &&
           cached['kind']?.toString() == expectedKind &&
           cached['lines'] is List;
-      // Pending local edits must not be overwritten by a server snapshot.
-      if (!cachedValid) missing.add(document);
+      // Never overwrite pending offline edits. Otherwise refresh server data
+      // when its version changed (not on every index synchronization).
+      final hasLocalEdits =
+          cached?['sync_state']?.toString() == 'pending';
+      final serverVersion = document['row_version']?.toString();
+      final cachedVersion = cached?['row_version']?.toString();
+      final current = cachedValid &&
+          (hasLocalEdits ||
+              serverVersion == null ||
+              serverVersion == cachedVersion);
+      if (!current) missing.add(document);
     }
     if (missing.isEmpty) return;
 
