@@ -4969,7 +4969,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'inspection',
-                      'Pre-Inspection',
+                      tr('preInspection'),
                       Icons.search,
                       const Color(0xFF6B4BC3),
                       badge(inspectionCount),
@@ -4979,7 +4979,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'complaint',
-                      'Customer Complaint',
+                      tr('jobCustomerComplaint'),
                       Icons.description_outlined,
                       BriskersColors.customers,
                       badge(complaintCount),
@@ -4989,7 +4989,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'findings',
-                      'Vehicle Findings',
+                      tr('vehicleFindings'),
                       Icons.car_repair_outlined,
                       Colors.deepOrange,
                       badge(activeFindings),
@@ -4999,7 +4999,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'work',
-                      'Work Performed',
+                      tr('workPerformed'),
                       Icons.build_outlined,
                       const Color(0xFF15988F),
                       badge(workCount),
@@ -5014,7 +5014,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'history',
-                      'Work / Visit History',
+                      tr('jobHistory'),
                       Icons.history_outlined,
                       const Color(0xFF2585D8),
                       badge(visits.length),
@@ -5024,7 +5024,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'documents',
-                      'Estimate / Invoice',
+                      tr('jobDocuments'),
                       Icons.receipt_long_outlined,
                       const Color(0xFFE5A400),
                       badge(_documents.length),
@@ -5034,7 +5034,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'expenses',
-                      'Job Expenses',
+                      tr('jobExpensesTile'),
                       Icons.payments_outlined,
                       const Color(0xFFC62828),
                       badge(_jobExpenses.length),
@@ -5044,7 +5044,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'profit',
-                      'Job Profitability',
+                      tr('jobProfitabilityTile'),
                       Icons.analytics_outlined,
                       BriskersColors.reports,
                       null,
