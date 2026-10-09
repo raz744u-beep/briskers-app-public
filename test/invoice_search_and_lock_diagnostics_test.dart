@@ -23,7 +23,7 @@ void main() {
     final report = await BriskersDiagnosticsService(database: db).run('shop');
     final check = report.checks.firstWhere((c) => c.id == 'DOC-005');
     expect(check.level, BriskersDiagnosticLevel.fail);
-    expect(check.details.join(' '), contains('6321 (2)'));
+    expect(check.details.join(' '), contains('6321 (2; dates:'));
     await db.close();
   });
 
