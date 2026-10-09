@@ -1425,9 +1425,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Future<void> _editComplaint() async {
     if (!_canQuickAdmin || _job == null || _busy) return;
     final value = await _editTextSheet(
-      title: 'Customer complaint',
+      title: tr('customerComplaint'),
       initialValue: _job!['requested_work']?.toString() ?? '',
-      hint: 'What did the customer ask us to check or repair?',
+      hint: tr('complaintHint'),
     );
     if (value == null || _job == null) return;
 
@@ -1463,9 +1463,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final current = Map<String, dynamic>.from(visits.first as Map);
 
     final value = await _editTextSheet(
-      title: 'Work performed',
+      title: tr('workPerformed'),
       initialValue: current['work_summary']?.toString() ?? '',
-      hint: 'Describe the work completed on this visit.',
+      hint: tr('workPerformedHint'),
     );
     if (value == null) return;
 
@@ -1485,7 +1485,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Work Performed saved on this device.'),
+            content: Text(tr('workSavedLocally')),
             duration: Duration(seconds: 2),
           ),
         );
@@ -1784,7 +1784,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     if (!_canEditFindings || _job == null || _busy) return;
     final vehicleId = _job!['vehicle_id']?.toString() ?? '';
     if (vehicleId.isEmpty) {
-      setState(() => _error = 'Select a vehicle before adding a finding.');
+      setState(() => _error = tr('selectVehicleFirst'));
       return;
     }
 
@@ -1810,10 +1810,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Align(
+                  Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Add vehicle finding',
+                      tr('addVehicleFinding'),
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w700,
@@ -1826,16 +1826,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     autofocus: true,
                     minLines: 3,
                     maxLines: 7,
-                    decoration: const InputDecoration(
-                      labelText: 'Finding',
-                      hintText:
-                          'Example: Oil leak visible around valve cover',
+                    decoration: InputDecoration(
+                      labelText: tr('finding'),
+                      hintText: tr('findingExample'),
                     ),
                   ),
                   if (_canSeeFinancial)
                     CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Include on invoice notes'),
+                      title: Text(tr('includeOnInvoiceNotes')),
                       value: includeOnInvoice,
                       onChanged: (value) => setSheetState(
                         () => includeOnInvoice = value == true,
@@ -1909,7 +1908,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         Navigator.pop(sheetContext, true);
                       },
                       icon: const Icon(Icons.add),
-                      label: const Text('Add finding'),
+                      label: Text(tr('addFinding')),
                     ),
                   ),
                 ],
@@ -1956,7 +1955,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Finding saved on this device.'),
+            content: Text(tr('findingSavedLocally')),
             duration: Duration(seconds: 2),
           ),
         );
@@ -1994,7 +1993,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               const Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Edit finding',
+                  tr('editFinding'),
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
@@ -2007,8 +2006,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 autofocus: true,
                 minLines: 3,
                 maxLines: 7,
-                decoration:
-                    const InputDecoration(labelText: 'Finding'),
+                decoration: InputDecoration(labelText: tr('finding')),
               ),
               const SizedBox(height: 12),
               SizedBox(
