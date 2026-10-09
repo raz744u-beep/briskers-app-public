@@ -1,6 +1,8 @@
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MethodChannel, MissingPluginException, PlatformException;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:image_picker/image_picker.dart';
@@ -1644,6 +1646,31 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       bytes: bytes,
       filename: DocumentPdfService.fileName(detail),
     );
+  }
+
+  /// On Android, offers installed PDF-handling apps (including compatible
+  /// printer apps) via ACTION_VIEW. The system print dialog remains available
+  /// separately because some printer plugins expose only a print service.
+  Future<void> _openPdfInApp() async {
+    final detail = await _preparePdf();
+    if (detail == null) return;
+    final bytes = await DocumentPdfService.build(detail);
+    final filename = DocumentPdfService.fileName(detail);
+
+    if (Platform.isAndroid) {
+      try {
+        await const MethodChannel('com.briskers/pdf').invokeMethod<void>(
+          'openPdfInApp',
+          <String, dynamic>{'bytes': bytes, 'filename': filename},
+        );
+        return;
+      } on MissingPluginException {
+        // Compatible with older Android shells before the native handler.
+      } on PlatformException {
+        // No suitable PDF app: fall through to Android's share chooser.
+      }
+    }
+    await Printing.sharePdf(bytes: bytes, filename: filename);
   }
 
   Future<void> _convertEstimateToNewInvoice() async {
@@ -3365,16 +3392,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
               const Divider(height: 1),
               ListTile(
-                leading: const Icon(Icons.picture_as_pdf_outlined),
+                leading: const Icon(Icons.print_outlined),
                 title: const Text('Print PDF'),
+                subtitle: const Text('Android print service • US Letter'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.pop(sheetContext, 'print'),
               ),
               const Divider(height: 1),
               ListTile(
+                leading: const Icon(Icons.picture_as_pdf_outlined),
+                title: const Text('Open in printer / PDF app'),
+                subtitle: const Text('Choose an installed app that opens PDFs'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.pop(sheetContext, 'open_app'),
+              ),
+              const Divider(height: 1),
+              ListTile(
                 leading: const Icon(Icons.share_outlined),
-                title: const Text('Open in app / Share PDF'),
-                subtitle: const Text('Choose your installed printer app if available'),
+                title: const Text('Share PDF'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.pop(sheetContext, 'share'),
               ),
@@ -3390,6 +3425,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     }
     if (action == 'email') await _emailPdf();
     if (action == 'print') await _printPdf();
+    if (action == 'open_app') await _openPdfInApp();
     if (action == 'share') await _sharePdf();
   }
 
