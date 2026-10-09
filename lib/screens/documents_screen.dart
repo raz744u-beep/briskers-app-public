@@ -7,6 +7,7 @@ import '../core/briskers_colors.dart';
 import '../core/connection_mode.dart';
 import '../core/invoice_status_style.dart';
 import '../core/briskers_i18n.dart';
+import '../core/document_future_date.dart';
 import '../services/briskers_api.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_invoice_status_styles_cache.dart';
@@ -273,7 +274,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 
   bool _hasFutureDateTag(Map<String, dynamic> row) =>
-      row['future_date_flag'] == true;
+      isFutureDatedDocument(row);
 
   int get _futureDatedCount =>
       (_rows ?? const <Map<String, dynamic>>[])
@@ -1338,7 +1339,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(18),
-                  child: Text('No ${_title.toLowerCase()} in this status.'),
+                  child: Text(_futureDatedOnly
+                      ? 'No future-dated invoices found. Refresh to check for updates.'
+                      : 'No ${_title.toLowerCase()} in this status.'),
                 ),
               )
             else
