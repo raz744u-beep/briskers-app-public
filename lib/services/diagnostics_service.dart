@@ -852,18 +852,50 @@ class BriskersDiagnosticsService {
     String businessId,
     List<DiagnosticCheck> checks,
   ) async {
-    final invoices = await LocalDocumentRepository(database: _database)
-        .listByKind(businessId, kind: 'invoice');
-    final duplicateNumbers = <String, int>{};
+    // Check the raw index: a legacy import can legitimately contain two
+    // distinct, closed documents with the same printed invoice number.
+    // Such collisions are still visible in search, but must never hide
+    // an active duplicate number or an unrelated numeric search result.
+    final records = await _database.customSelect(
+      '''
+      SELECT id, document_number, document_date, closed_at, sync_state
+      FROM local_documents
+      WHERE business_id = ? AND kind = 'invoice'
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
+    final invoices = <Map<String, dynamic>>[];
     final byNumber = <BigInt, List<Map<String, dynamic>>>{};
-    for (final invoice in invoices) {
+    for (final row in records) {
+      final invoice = <String, dynamic>{
+        'id': row.read<String>('id'),
+        'document_number': row.readNullable<String>('document_number'),
+        'document_date': row.readNullable<String>('document_date'),
+        'closed': row.readNullable<int>('closed_at') != null,
+        'sync_state': row.read<String>('sync_state'),
+      };
+      invoices.add(invoice);
       final number = normalizedDocumentNumber(invoice['document_number']);
       if (number == null) continue;
       byNumber.putIfAbsent(number, () => []).add(invoice);
     }
+
+    final historicalCollisions = <String>[];
+    final unsafeCollisions = <String>[];
     for (final entry in byNumber.entries) {
-      if (entry.value.length > 1) {
-        duplicateNumbers[entry.key.toString()] = entry.value.length;
+      if (entry.value.length < 2) continue;
+      final allClosedAndSynced = entry.value.every(
+        (row) => row['closed'] == true && row['sync_state'] == 'synced',
+      );
+      final dates = entry.value
+          .map((row) => row['document_date']?.toString() ?? '?')
+          .join(', ');
+      final label = '${entry.key} (${entry.value.length}; dates: $dates)';
+      if (allClosedAndSynced) {
+        historicalCollisions.add(label);
+      } else {
+        unsafeCollisions.add(label);
       }
     }
 
@@ -881,21 +913,32 @@ class BriskersDiagnosticsService {
         unexpected.add(query);
       }
     }
-    final failed = duplicateNumbers.isNotEmpty || unexpected.isNotEmpty;
+
+    final failed = unsafeCollisions.isNotEmpty || unexpected.isNotEmpty;
+    final warning = historicalCollisions.isNotEmpty;
     checks.add(DiagnosticCheck(
       id: 'DOC-005',
       category: 'Documents',
-      title: 'Exact invoice number search and unique invoice numbers',
-      level: failed ? BriskersDiagnosticLevel.fail : BriskersDiagnosticLevel.pass,
+      title: 'Exact invoice search and historical number collisions',
+      level: failed
+          ? BriskersDiagnosticLevel.fail
+          : warning
+              ? BriskersDiagnosticLevel.warning
+              : BriskersDiagnosticLevel.pass,
       summary: failed
-          ? 'Invoice search or numbering integrity failed.'
-          : '$checked sample invoice-number searches returned no unrelated records.',
+          ? 'An active/unsynced invoice number collides, or numeric search returned unrelated records.'
+          : warning
+              ? '${historicalCollisions.length} reused historical invoice number(s); exact search is working.'
+              : '$checked sample invoice-number searches returned no unrelated records.',
       details: [
-        if (duplicateNumbers.isNotEmpty)
-          'Duplicate numbers: ${duplicateNumbers.entries.take(10).map((e) => '${e.key} (${e.value})').join(', ')}',
+        if (historicalCollisions.isNotEmpty)
+          'Closed historical duplicates (preserved): ${historicalCollisions.take(10).join('; ')}',
+        if (unsafeCollisions.isNotEmpty)
+          'Active/unsynced collisions: ${unsafeCollisions.take(10).join('; ')}',
         if (unexpected.isNotEmpty)
           'Unexpected matches for: ${unexpected.take(10).join(', ')}',
         'Only invoice numbers may match an all-digit invoice search.',
+        'Preserve original historical documents; new invoices must have unique numbers.',
       ],
     ));
   }
@@ -1126,6 +1169,7 @@ class BriskersDiagnosticsService {
     var missingCache = 0;
     var relationshipMismatch = 0;
     var mathMismatch = 0;
+    final mathExamples = <String>[];
 
     for (final row in rows) {
       final id = row.read<String>('id');
@@ -1183,7 +1227,16 @@ class BriskersDiagnosticsService {
               (lineTax - documentTax.toDouble()).abs() > 0.05 ||
               ((lineNet + lineTax) - documentTotal.toDouble()).abs() >
                   0.05;
-          if (mismatch) mathMismatch++;
+          if (mismatch) {
+            mathMismatch++;
+            if (mathExamples.length < 12) {
+              final kind = detail['kind']?.toString() ?? 'document';
+              final number = detail['document_number']?.toString() ??
+                  row.read<String>('id');
+              final delta = (lineTax - documentTax.toDouble()).toStringAsFixed(2);
+              mathExamples.add('$kind #$number: line tax minus header tax $delta');
+            }
+          }
         }
       }
     }
@@ -1232,6 +1285,15 @@ class BriskersDiagnosticsService {
             ? 'Cached line totals agree with document totals.'
             : mathMismatch.toString() +
                 ' cached document(s) have line/net/tax total differences.',
+        details: [
+          if (mathExamples.isNotEmpty)
+            'Review examples: ${mathExamples.join('; ')}',
+          if (mathMismatch > mathExamples.length)
+            '${mathMismatch - mathExamples.length} additional document(s) not shown.',
+          if (mathMismatch > 0)
+            'Imported MobileBiz estimates may use discounted tax totals. '
+                'Compare historical discounts before changing their values.',
+        ],
       ),
     );
   }
