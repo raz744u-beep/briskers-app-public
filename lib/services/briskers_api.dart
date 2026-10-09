@@ -1341,6 +1341,24 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<List<Map<String, dynamic>>> linkedExpensesPage(
+    String businessId, {
+    int limit = 500,
+    int offset = 0,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_linked_expenses_page',
+      params: {
+        'p_business_id': businessId,
+        'p_limit': limit,
+        'p_offset': offset,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
   Future<List<Map<String, dynamic>>> jobLinkedExpenses(
     String businessId,
     String jobId,
