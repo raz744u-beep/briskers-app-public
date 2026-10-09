@@ -1002,7 +1002,7 @@ class BriskersDiagnosticsService {
         missing++;
         if (kind == 'invoice') invoicesMissing++; else estimatesMissing++;
         if (kind == 'invoice' &&
-            row.readNullable<DateTime>('closed_at') != null) {
+            row.data['closed_at'] != null) {
           closedMissing++;
         }
         if (examples.length < 12) examples.add('$kind #$number');
