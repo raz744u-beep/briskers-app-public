@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
+import '../../core/connection_mode.dart';
+import '../../services/offline_document_draft_service.dart';
+import '../../services/local_customer_repository.dart';
 
 class BlankInvoiceSetupScreen extends StatefulWidget {
   const BlankInvoiceSetupScreen({
@@ -26,6 +29,8 @@ class BlankInvoiceSetupScreen extends StatefulWidget {
 
 class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
   static const _api = BriskersApi();
+  final _offlineDrafts = OfflineDocumentDraftService();
+  final _localCustomers = LocalCustomerRepository();
   final TextEditingController _customerSearch = TextEditingController();
   Timer? _searchDebounce;
   int _searchGeneration = 0;
@@ -96,11 +101,15 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
     final generation = ++_searchGeneration;
     final term = _customerSearch.text.trim();
     try {
-      final customers = await _api.customers(
-        widget.businessId,
-        search: term.isEmpty ? null : term,
-        limit: 75,
-      );
+      final customers = BriskersConnectionModeController.instance.forceOffline
+          ? await _localCustomers.customers(
+              widget.businessId, search: term.isEmpty ? null : term,
+            )
+          : await _api.customers(
+              widget.businessId,
+              search: term.isEmpty ? null : term,
+              limit: 75,
+            );
       if (!mounted || generation != _searchGeneration) return;
       setState(() {
         _customers = customers;
@@ -126,8 +135,10 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
     });
 
     try {
-      final detail = await _api.customerDetail(widget.businessId, customerId);
-      final vehicles = List<dynamic>.from(detail['vehicles'] ?? const [])
+      final detail = BriskersConnectionModeController.instance.forceOffline
+          ? await _localCustomers.customerDetail(widget.businessId, customerId)
+          : await _api.customerDetail(widget.businessId, customerId);
+      final vehicles = List<dynamic>.from(detail?['vehicles'] ?? const [])
           .whereType<Map>()
           .map((raw) => Map<String, dynamic>.from(raw))
           .toList();
@@ -169,11 +180,24 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
     });
 
     try {
-      final invoiceId = await _api.createQuickInvoice(
-        widget.businessId,
-        customerId: customerId,
-        vehicleId: _vehicleId,
-      );
+      final invoiceId = BriskersConnectionModeController.instance.forceOffline
+          ? await _offlineDrafts.createQuickInvoice(
+              widget.businessId,
+              customerId: customerId,
+              customerName: widget.initialCustomerName ??
+                  _customers.where((row) => row['id']?.toString() == customerId)
+                      .map((row) => row['display_name']?.toString() ??
+                          row['name']?.toString() ?? 'Customer')
+                      .firstOrNull ?? 'Customer',
+              vehicleId: _vehicleId,
+              vehicleLabel: _vehicles.where((v) => v['id']?.toString() == _vehicleId)
+                  .map(_vehicleName).firstOrNull,
+            )
+          : await _api.createQuickInvoice(
+              widget.businessId,
+              customerId: customerId,
+              vehicleId: _vehicleId,
+            );
       if (!mounted) return;
       Navigator.pop<String>(context, invoiceId);
     } catch (error) {
