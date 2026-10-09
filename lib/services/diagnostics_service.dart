@@ -164,6 +164,13 @@ class BriskersDiagnosticsService {
     );
     await _safeGroup(
       checks,
+      fallbackId: 'JOB-002',
+      category: 'Jobs',
+      title: 'Exact numeric job search results',
+      action: () => _checkNumericJobSearch(businessId, checks),
+    );
+    await _safeGroup(
+      checks,
       fallbackId: 'REL-000',
       category: 'Relationships',
       title: 'Local relationship integrity',
@@ -538,6 +545,55 @@ class BriskersDiagnosticsService {
         'Queued photos missing source URI: $badUri',
         'Expired upload claims: $staleClaims',
         'References missing transaction/photo IDs: $missingId',
+      ],
+    ));
+  }
+
+  Future<void> _checkNumericJobSearch(
+    String businessId,
+    List<DiagnosticCheck> checks,
+  ) async {
+    final examples = await _database.customSelect(
+      '''
+      SELECT job_number
+      FROM local_jobs
+      WHERE business_id = ? AND job_number GLOB 'MB-[0-9]*'
+      ORDER BY job_number DESC LIMIT 5
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    final repository = LocalJobRepository(database: _database);
+    final bad = <String>[];
+    var checked = 0;
+    for (final example in examples) {
+      final number = example.read<String>('job_number');
+      final search = number.substring(3);
+      final jobs = await repository.listJobs(
+        businessId, search: search, limit: 50,
+      );
+      checked++;
+      for (final job in jobs) {
+        if (job['job_number']?.toString() != number) {
+          if (bad.length < 10) {
+            bad.add('$search returned ${job['job_number']}');
+          }
+        }
+      }
+    }
+    checks.add(DiagnosticCheck(
+      id: 'JOB-002',
+      category: 'Jobs',
+      title: 'Exact job number search',
+      level: bad.isEmpty
+          ? BriskersDiagnosticLevel.pass
+          : BriskersDiagnosticLevel.fail,
+      summary: bad.isEmpty
+          ? '$checked numeric job searches returned only matching job numbers.'
+          : '${bad.length} unrelated job results were found.',
+      details: [
+        if (bad.isNotEmpty) 'Unexpected results: ${bad.join('; ')}',
+        'Numeric searches must not return phone, vehicle, title, or other '
+            'unrelated textual matches.',
       ],
     ));
   }

@@ -5789,6 +5789,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ),
           ),
           actions: [
+            if (!_estimate && _canManageInvoiceExpenses)
+              IconButton(
+                tooltip: 'Add linked expense',
+                onPressed: _busy ? null : _addInvoiceExpense,
+                icon: const Icon(Icons.add_card_outlined),
+              ),
             if (!_readOnly)
               IconButton(
                 tooltip: _estimate ? 'Estimate actions' : tr('editInvoice'),

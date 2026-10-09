@@ -8,6 +8,37 @@ import 'package:briskers_app/services/local_job_repository.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
 
 void main() {
+  test('numeric job search excludes unrelated customer, title and phone matches',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final repository = LocalJobRepository(database: db);
+    for (final data in [
+      ('a', 'MB-6327', 'Michael Nuss', 'Smoke test'),
+      ('b', 'MB-6224', 'Nais Cameron', 'Battery'),
+      ('c', 'MB-5500', 'Customer 6327', 'Customer 6327 repair'),
+      ('d', 'MB-5501', '6224 Customer', 'Unrelated'),
+    ]) {
+      await db.customStatement(
+        '''
+        INSERT INTO local_jobs (
+          id, business_id, access_scope, job_number,
+          title, status, customer_name
+        ) VALUES (?, 'shop', 'all', ?, ?, 'completed', ?)
+        ''',
+        [data.$1, data.$2, data.$4, data.$3],
+      );
+    }
+    final found6327 = await repository.listJobs('shop', search: '6327');
+    final found6224 = await repository.listJobs('shop', search: '6224');
+    expect(found6327.map((job) => job['job_number']).toList(),
+        ['MB-6327']);
+    expect(found6224.map((job) => job['job_number']).toList(),
+        ['MB-6224']);
+    expect(await repository.jobCount('shop', search: '6327'), 1);
+    await db.close();
+  });
+
+
   test('imported completed jobs sort by number, not created timestamp',
       () async {
     final database = BriskersLocalDatabase(NativeDatabase.memory());
