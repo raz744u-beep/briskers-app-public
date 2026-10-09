@@ -65,4 +65,28 @@ void main() {
     expect(await cache.loadLinkedExpenses('shop', jobId: 'unknown'), isEmpty);
     await db.close();
   });
+  test('interrupted pull leaves the last completed snapshot intact', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final cache = LocalFinancialCache(database: db);
+    await cache.saveLinkedExpenses('shop', [
+      {
+        'allocation_id': 'old-allocation',
+        'id': 'old-transaction',
+        'transaction_id': 'old-transaction',
+        'job_id': 'job-6306',
+        'amount': 19.0,
+      },
+    ]);
+    final service = LinkedExpenseSyncService(
+      database: db,
+      cache: cache,
+      api: _PagedExpenseApi(failOnOffset: 0),
+    );
+    await expectLater(service.pull('shop'), throwsStateError);
+    final cached = await cache.loadLinkedExpenses('shop', jobId: 'job-6306');
+    expect(cached, hasLength(1));
+    expect(cached!.single['amount'], 19.0);
+    await db.close();
+  });
+
 }
