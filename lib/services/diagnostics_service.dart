@@ -955,38 +955,64 @@ class BriskersDiagnosticsService {
       ''',
       variables: [Variable<String>(businessId)],
     ).get();
+
     final violations = <String>[];
-    var cached = 0;
+    var importedSnapshots = 0;
     var eligible = 0;
+    var staleMetadata = 0;
+    var missingDetail = 0;
     for (final doc in docs) {
       final id = doc.read<String>('id');
       final detail = await _detailCache.load(businessId, id);
-      if (detail == null || detail['legacy_read_only'] != true) continue;
-      cached++;
+      if (detail == null) {
+        missingDetail++;
+        continue;
+      }
+      // Older imported invoice snapshots may predate the server's edit-lock
+      // metadata. Never assume a missing legacy_read_only flag means editable.
+      if (!detail.containsKey('legacy_read_only')) {
+        staleMetadata++;
+        continue;
+      }
+      if (detail['legacy_read_only'] != true) continue;
+
+      importedSnapshots++;
       final number = doc.readNullable<String>('document_number') ?? id;
       final closed = doc.readNullable<int>('closed_at') != null ||
           detail['closed_at'] != null;
       final paid = num.tryParse(detail['paid_amount']?.toString() ?? '') ?? 0;
-      final pending = num.tryParse(detail['pending_payment']?.toString() ?? '') ?? 0;
+      final pending =
+          num.tryParse(detail['pending_payment']?.toString() ?? '') ?? 0;
       final canEdit = detail['legacy_editable'] == true;
       if (canEdit) eligible++;
       if (canEdit && (closed || paid > 0.005 || pending > 0.005)) {
         violations.add(number);
       }
     }
+
+    final incomplete = staleMetadata > 0 || missingDetail > 0;
     checks.add(DiagnosticCheck(
       id: 'DOC-006',
       category: 'Documents',
-      title: 'Imported invoice edit safeguards',
-      level: violations.isEmpty
-          ? BriskersDiagnosticLevel.pass
-          : BriskersDiagnosticLevel.fail,
-      summary: violations.isEmpty
-          ? '$cached imported invoice detail snapshots checked; $eligible marked eligible to edit.'
-          : '${violations.length} paid/closed imported invoices are incorrectly editable.',
+      title: 'Imported invoice edit safeguards and cache freshness',
+      level: violations.isNotEmpty
+          ? BriskersDiagnosticLevel.fail
+          : incomplete
+              ? BriskersDiagnosticLevel.warning
+              : BriskersDiagnosticLevel.pass,
+      summary: violations.isNotEmpty
+          ? '${violations.length} paid/closed imported invoices are incorrectly editable.'
+          : incomplete
+              ? '${staleMetadata + missingDetail} invoice snapshot(s) cannot verify the current edit-lock policy.'
+              : '$importedSnapshots imported invoice detail snapshots checked; $eligible marked eligible to edit.',
       details: [
         if (violations.isNotEmpty)
           'Unsafe invoices: ${violations.take(10).join(', ')}',
+        if (staleMetadata > 0)
+          '$staleMetadata offline details lack legacy edit-lock metadata; keep read-only until refreshed.',
+        if (missingDetail > 0)
+          '$missingDetail invoice details are not available in offline cache.',
+        '$importedSnapshots imported snapshots verified; $eligible eligible to enable editing.',
         'Unpaid, open imported invoices may be enabled for editing; paid or closed invoices stay locked.',
       ],
     ));
