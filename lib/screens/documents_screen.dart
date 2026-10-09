@@ -1339,7 +1339,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(18),
-                  child: Text('No ${_title.toLowerCase()} in this status.'),
+                  child: Text(_futureDatedOnly
+                      ? 'No future-dated invoices found. Refresh to check for updates.'
+                      : 'No ${_title.toLowerCase()} in this status.'),
                 ),
               )
             else
