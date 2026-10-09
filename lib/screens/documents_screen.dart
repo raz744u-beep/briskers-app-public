@@ -22,8 +22,10 @@ class DocumentsScreen extends StatefulWidget {
     required this.kind,
     required this.isOwner,
     this.canManageExpenses = false,
+    this.showAppBar = true,
   });
 
+  final bool showAppBar;
   final String businessId;
   final String kind;
   final bool isOwner;
@@ -44,6 +46,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
+  bool _futureDatedOnly = false;
   String? _error;
   final TextEditingController _search = TextEditingController();
 
@@ -269,6 +272,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
   }
 
+  bool _hasFutureDateTag(Map<String, dynamic> row) =>
+      row['future_date_flag'] == true;
+
+  int get _futureDatedCount =>
+      (_rows ?? const <Map<String, dynamic>>[])
+          .where(_hasFutureDateTag)
+          .length;
+
   List<Map<String, dynamic>> get _visibleRows {
     final rows = List<Map<String, dynamic>>.from(
       _rows ?? const <Map<String, dynamic>>[],
@@ -282,6 +293,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   row['display_status']?.toString() == _selectedStatus,
             )
             .toList();
+
+    if (_futureDatedOnly) {
+      filtered = filtered.where(_hasFutureDateTag).toList();
+    }
 
     final query = _search.text.trim().toLowerCase();
     if (query.isNotEmpty) {
@@ -1071,17 +1086,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   @override
   Widget build(BuildContext context) {
     final visible = _visibleRows;
-    final selectedLabel = _selectedStatus == null
-        ? tr('all')
-        : _localizedStatusLabel(_selectedStatus!);
+    final selectedLabel = _futureDatedOnly
+        ? 'Future-dated'
+        : (_selectedStatus == null
+            ? tr('all')
+            : _localizedStatusLabel(_selectedStatus!));
     final accent = _estimate ? BriskersColors.estimates : BriskersColors.invoices;
 
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        toolbarHeight: 68,
-        title: BriskersPageTitle(title: _title, logoHeight: 40),
-      ),
+      appBar: widget.showAppBar
+          ? AppBar(
+              toolbarHeight: 68,
+              title: BriskersPageTitle(title: _title, logoHeight: 40),
+            )
+          : null,
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
@@ -1099,9 +1118,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 const SizedBox(width: 8),
                 PopupMenuButton<String>(
                   tooltip: 'Filter $_title',
-                  onSelected: (value) => setState(
-                    () => _selectedStatus = value == '__all__' ? null : value,
-                  ),
+                  onSelected: (value) => setState(() {
+                    _futureDatedOnly = value == '__future__';
+                    _selectedStatus =
+                        value == '__all__' || value == '__future__'
+                            ? null
+                            : value;
+                  }),
                   itemBuilder: (_) => [
                     PopupMenuItem<String>(
                       value: '__all__',
@@ -1117,6 +1140,24 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         ],
                       ),
                     ),
+                    if (!_estimate)
+                      PopupMenuItem<String>(
+                        value: '__future__',
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.flag_outlined,
+                              color: Color(0xFFB26A00),
+                            ),
+                            const SizedBox(width: 10),
+                            const Expanded(child: Text('Future-dated')),
+                            _menuCount(
+                              _futureDatedCount,
+                              alwaysShow: true,
+                            ),
+                          ],
+                        ),
+                      ),
                     ..._statuses.map((status) {
                       final count = _statusCount(status);
                       return PopupMenuItem<String>(
@@ -1148,14 +1189,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(999),
                       border: Border.all(
-                        color: (_selectedStatus == null
-                                ? accent
-                                : _statusColor(_selectedStatus!))
+                        color: (_futureDatedOnly
+                                ? const Color(0xFFB26A00)
+                                : (_selectedStatus == null
+                                    ? accent
+                                    : _statusColor(_selectedStatus!)))
                             .withValues(alpha: 0.50),
                       ),
-                      color: (_selectedStatus == null
-                              ? accent
-                              : _statusColor(_selectedStatus!))
+                      color: (_futureDatedOnly
+                              ? const Color(0xFFB26A00)
+                              : (_selectedStatus == null
+                                  ? accent
+                                  : _statusColor(_selectedStatus!)))
                           .withValues(alpha: 0.08),
                     ),
                     child: Row(
@@ -1164,9 +1209,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         Text(
                           selectedLabel,
                           style: TextStyle(
-                            color: _selectedStatus == null
-                                ? accent
-                                : _statusColor(_selectedStatus!),
+                            color: _futureDatedOnly
+                                ? const Color(0xFFB26A00)
+                                : (_selectedStatus == null
+                                    ? accent
+                                    : _statusColor(_selectedStatus!)),
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -1174,9 +1221,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         Icon(
                           Icons.chevron_right,
                           size: 18,
-                          color: _selectedStatus == null
-                              ? accent
-                              : _statusColor(_selectedStatus!),
+                          color: _futureDatedOnly
+                              ? const Color(0xFFB26A00)
+                              : (_selectedStatus == null
+                                  ? accent
+                                  : _statusColor(_selectedStatus!)),
                         ),
                       ],
                     ),
@@ -1378,6 +1427,28 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
+                                if (_hasFutureDateTag(row)) ...[
+                                  const SizedBox(height: 4),
+                                  const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.flag_outlined,
+                                        size: 14,
+                                        color: Color(0xFFB26A00),
+                                      ),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        'Future-dated',
+                                        style: TextStyle(
+                                          color: Color(0xFFB26A00),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                                 if (jobNumber.isNotEmpty ||
                                     documentDate.isNotEmpty) ...[
                                   const SizedBox(height: 3),
