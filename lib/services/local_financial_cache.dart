@@ -98,6 +98,50 @@ class LocalFinancialCache {
     return rows.where(matches).toList();
   }
 
+  static const _linkedExpensesKey = 'linked_expenses_complete_v1';
+
+  Future<void> saveLinkedExpenses(
+    String businessId,
+    List<Map<String, dynamic>> rows,
+  ) async {
+    await _save(businessId, _linkedExpensesKey, jsonEncode(rows));
+  }
+
+  Future<List<Map<String, dynamic>>?> loadLinkedExpenses(
+    String businessId, {
+    String? jobId,
+    String? documentId,
+  }) async {
+    final raw = await _load(businessId, _linkedExpensesKey);
+    List<Map<String, dynamic>> rows;
+    if (raw == null) {
+      rows = <Map<String, dynamic>>[];
+    } else {
+      try {
+        rows = (jsonDecode(raw) as List<dynamic>)
+            .whereType<Map>()
+            .map((value) => Map<String, dynamic>.from(value))
+            .toList();
+      } catch (_) {
+        return null;
+      }
+    }
+
+    // Preserve newly created offline expenses alongside the last full
+    // server snapshot. Do not replace pending outbox records during sync.
+    final pending = await loadTransactions(businessId, direction: 'expense');
+    rows.addAll(pending.where((row) =>
+        row['sync_state']?.toString() == 'pending' &&
+        (row['id']?.toString().startsWith('local-') ?? false) &&
+        (row['job_id'] != null || row['document_id'] != null)));
+
+    if (raw == null && rows.isEmpty) return null;
+    return rows.where((row) =>
+        (jobId == null || row['job_id']?.toString() == jobId) &&
+        (documentId == null ||
+            row['document_id']?.toString() == documentId)).toList();
+  }
+
   Future<void> saveTransactionDetail(
     String businessId,
     String transactionId,

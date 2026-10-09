@@ -13,6 +13,7 @@ import '../services/catalog_sync_service.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/job_sync_service.dart';
 import '../services/local_financial_cache.dart';
+import '../services/linked_expense_sync_service.dart';
 import '../services/offline_preinspection_service.dart';
 import '../services/offline_job_admin_service.dart';
 import '../services/offline_customer_vehicle_admin_service.dart';
@@ -64,6 +65,7 @@ class _BusinessGateState extends State<BusinessGate> {
   final LocalInvoiceStatusStylesCache _invoiceStatusStyles =
       LocalInvoiceStatusStylesCache();
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
+  final LinkedExpenseSyncService _linkedExpenses = LinkedExpenseSyncService();
   final OfflineWorkFindingsService _offlineWorkFindings =
       OfflineWorkFindingsService();
 
@@ -330,6 +332,11 @@ class _BusinessGateState extends State<BusinessGate> {
       } catch (_) {
         // Keep the last saved transaction snapshot for offline use.
       }
+    }
+
+    if (<String>{'owner', 'manager', 'office'}.contains(roleCode)) {
+      // Do not hold up entry into the shop while downloading history.
+      unawaited(_linkedExpenses.refreshBestEffort(businessId));
     }
 
     try {

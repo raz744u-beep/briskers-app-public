@@ -15,6 +15,7 @@ import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/local_document_repository.dart';
 import '../../services/local_document_detail_cache.dart';
+import '../../services/local_financial_cache.dart';
 import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
@@ -53,6 +54,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   final JobSyncService _jobSync = JobSyncService();
   final LocalJobRepository _localJobs = LocalJobRepository();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
+  final LocalFinancialCache _linkedExpensesCache = LocalFinancialCache();
   final LocalDocumentDetailCache _documentDetailCache =
       const LocalDocumentDetailCache();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
@@ -67,6 +69,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   List<Map<String, dynamic>> _documents = const [];
   List<Map<String, dynamic>> _findings = const [];
   List<Map<String, dynamic>> _jobExpenses = const [];
+  bool _linkedExpensesCached = false;
   final ImagePicker _picker = ImagePicker();
 
   final ScrollController _scrollController = ScrollController();
@@ -197,12 +200,19 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         final localDocuments = _canSeeFinancial
             ? await _localDocumentsForJob()
             : const <Map<String, dynamic>>[];
+        final cachedLinked = _canSeeFinancial
+            ? await _linkedExpensesCache.loadLinkedExpenses(
+                widget.businessId, jobId: widget.jobId,
+              )
+            : null;
         localShown = true;
         setState(() {
           _job = snapshot.job;
           _preInspection = snapshot.preInspection;
           _statuses = snapshot.statuses;
           _documents = localDocuments;
+          _jobExpenses = cachedLinked ?? const [];
+          _linkedExpensesCached = cachedLinked != null;
           _findings = snapshot.findings;
           _loading = false;
           _onlineReady = false;
@@ -461,6 +471,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         _documents = documents;
         _findings = findings;
         _jobExpenses = jobExpenses;
+        _linkedExpensesCached = true;
         _loading = false;
         _onlineReady = true;
         _showingLocal = false;
@@ -3551,9 +3562,14 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   Widget _jobExpensesDrawer() {
     if (_jobExpenses.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
-        child: Text('No expenses are linked to this job yet.'),
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(
+          _showingLocal && !_linkedExpensesCached
+              ? 'Linked expenses have not been synchronized to this device. '
+                  'Connect using Auto and run Local Database Sync.'
+              : 'No expenses are linked to this job yet.',
+        ),
       );
     }
 

@@ -8,6 +8,7 @@ import '../../services/appointment_sync_service.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/catalog_sync_service.dart';
 import '../../services/document_index_sync_service.dart';
+import '../../services/linked_expense_sync_service.dart';
 import '../../services/job_sync_service.dart';
 import '../../services/import_cache_repair_service.dart';
 import '../../services/kiosk_registration_service.dart';
@@ -43,6 +44,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   final CustomerVehicleSyncService _customers = CustomerVehicleSyncService();
   final CatalogSyncService _catalog = CatalogSyncService();
   final DocumentIndexSyncService _documents = DocumentIndexSyncService();
+  final LinkedExpenseSyncService _linkedExpenses = LinkedExpenseSyncService();
   final OfflinePreInspectionService _preInspections =
       OfflinePreInspectionService();
   final OfflineWorkFindingsService _workFindings =
@@ -67,7 +69,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
 
   bool _loading = true;
   bool _syncing = false;
-  static const int _syncStepCount = 18;
+  static const int _syncStepCount = 19;
   int _syncStep = 0;
   String? _syncStage;
   String? _error;
@@ -394,6 +396,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     await attempt(
       'Estimates / Invoices',
       () => _documents.pull(widget.businessId),
+    );
+    await attempt(
+      'Linked job / invoice expenses',
+      () async { await _linkedExpenses.pull(widget.businessId); },
     );
     await attempt(
       'Invoice status styles',
