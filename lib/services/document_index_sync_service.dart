@@ -50,6 +50,11 @@ class DocumentIndexSyncService {
     // A list index alone is not an offline document snapshot.
     // Download details for every synced invoice and estimate, including closed
     // historical documents. Cached details make retries resumable.
+    await localDatabase.customStatement(
+      "UPDATE local_sync_states SET bootstrapped = 0 "
+      "WHERE business_id = ? AND scope = ?",
+      [businessId, _scope],
+    );
     await _prefetchAllDocumentDetails(businessId, all);
 
     await localDatabase.customStatement(
