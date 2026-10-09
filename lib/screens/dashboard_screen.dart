@@ -327,14 +327,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       child: Column(
         children: [
-          Row(
+          const Row(
             children: [
-              const Text(
+              Text(
                 'Needs Attention',
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
               ),
-              const Spacer(),
-
             ],
           ),
           Row(
@@ -868,6 +866,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               builder: (_) => CustomerDetailScreen(
                 businessId: widget.businessId,
                 customerId: existing['id'].toString(),
+                roleCode: widget.roleCode,
               ),
             ),
           );
@@ -918,6 +917,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           builder: (_) => CustomerDetailScreen(
             businessId: widget.businessId,
             customerId: customerId,
+            roleCode: widget.roleCode,
           ),
         ),
       );
