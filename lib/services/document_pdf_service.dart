@@ -742,11 +742,31 @@ class DocumentPdfService {
           _totalRow('Total', _money(total), bold: true),
           if (payments != null) ...[
             pw.Divider(height: 8, color: PdfColors.grey600),
-            _totalRow('Total Paid', _money(paid)),
-            if (pending > 0.005)
+            _totalRow('Total Paid (Finalized)', _money(paid)),
+            if (pending > 0.005) ...[
               _totalRow('Payment Entered (Pending)', _money(pending)),
+              _totalRow(
+                'Total Payments Recorded',
+                _money(paid + pending),
+                bold: true,
+              ),
+            ],
             pw.Divider(height: 8, color: PdfColors.grey600),
-            _totalRow('Remaining Balance', _money(remaining), bold: true),
+            _totalRow(
+              pending > 0.005
+                  ? 'Balance After Entered Payments'
+                  : 'Remaining Balance',
+              _money(remaining),
+              bold: true,
+            ),
+            if (pending > 0.005)
+              pw.Align(
+                alignment: pw.Alignment.centerRight,
+                child: pw.Text(
+                  'Payment entered but not finalized',
+                  style: const pw.TextStyle(fontSize: 8),
+                ),
+              ),
             if (isPartial)
               pw.Align(
                 alignment: pw.Alignment.centerRight,
