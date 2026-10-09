@@ -571,7 +571,7 @@ class BriskersDiagnosticsService {
         'completed', 'cancelled'
       }.contains(after['status']?.toString()) ? 1 : 0;
       if (beforeGroup != afterGroup ||
-          before['status_sort_order'] != after['status_sort_order']) {
+          before['status'] != after['status']) {
         continue;
       }
       final first = numericPart(before['job_number']?.toString());
