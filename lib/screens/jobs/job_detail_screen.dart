@@ -1484,8 +1484,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(tr('workSavedLocally')),
+          SnackBar(
+            content: Text(tr('workSavedLocally')), 
             duration: Duration(seconds: 2),
           ),
         );
@@ -1954,8 +1954,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(tr('findingSavedLocally')),
+          SnackBar(
+            content: Text(tr('findingSavedLocally')), 
             duration: Duration(seconds: 2),
           ),
         );
@@ -1990,7 +1990,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Align(
+              Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
                   tr('editFinding'),
