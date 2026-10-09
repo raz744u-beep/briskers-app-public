@@ -1000,7 +1000,11 @@ class BriskersDiagnosticsService {
       final snapshot = await _detailCache.load(businessId, id);
       if (snapshot == null) {
         missing++;
-        if (kind == 'invoice') invoicesMissing++; else estimatesMissing++;
+        if (kind == 'invoice') {
+          invoicesMissing++;
+        } else {
+          estimatesMissing++;
+        }
         if (kind == 'invoice' &&
             row.data['closed_at'] != null) {
           closedMissing++;
