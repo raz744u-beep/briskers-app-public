@@ -910,6 +910,26 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             );
       if (!mounted) return;
 
+      if (offline && cached == null) {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Offline expenses not synchronized'),
+            content: const Text(
+              'Connect using Auto and run Local Database Sync to save '
+              'the linked expense history before working offline.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
       if (expenses.isEmpty) {
         await showDialog<void>(
           context: context,
