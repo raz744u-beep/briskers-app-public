@@ -7,6 +7,7 @@ import 'package:drift/drift.dart';
 import '../core/connection_mode.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
+import 'briskers_api.dart';
 import 'local_document_detail_cache.dart';
 import 'local_invoice_status_styles_cache.dart';
 import 'local_tax_settings_cache.dart';
@@ -182,6 +183,15 @@ class BriskersDiagnosticsService {
         title: 'All invoice and estimate offline detail coverage',
         action: () => _checkAllDocumentDetailCoverage(businessId, checks),
       );
+      if (!_connectionMode.forceOffline) {
+        await _safeGroup(
+          checks,
+          fallbackId: 'EXP-001',
+          category: 'Linked expenses',
+          title: 'Invoice/job expense allocation integrity',
+          action: () => _checkExpenseLinkIntegrity(businessId, checks),
+        );
+      }
       await _safeGroup(
         checks,
         fallbackId: 'PHOTO-000',
@@ -971,6 +981,40 @@ class BriskersDiagnosticsService {
   // production bug: closed historical invoices appear in the list but cannot
   // be opened offline. Count every record, including closed and converted.
   // No network access or data modifications are performed here.
+  Future<void> _checkExpenseLinkIntegrity(
+    String businessId,
+    List<DiagnosticCheck> checks,
+  ) async {
+    final result = await const BriskersApi().expenseLinkIntegrity(businessId);
+    int count(String key) => (result[key] as num?)?.toInt() ?? 0;
+    final total = count('total');
+    final missingJob = count('missing_job');
+    final missingInvoice = count('missing_invoice');
+    final mismatch = count('invoice_wrong_job');
+    final unlinked = count('unlinked');
+    final bad = missingJob + missingInvoice + mismatch;
+    checks.add(DiagnosticCheck(
+      id: 'EXP-001',
+      category: 'Linked expenses',
+      title: 'Invoice/job expense allocation integrity',
+      level: bad == 0
+          ? BriskersDiagnosticLevel.pass
+          : BriskersDiagnosticLevel.fail,
+      summary: bad == 0
+          ? 'All $total expense allocations have valid linked IDs.'
+          : '$bad broken expense relationships require investigation.',
+      details: [
+        'Missing linked jobs: $missingJob',
+        'Missing linked invoices: $missingInvoice',
+        'Invoice linked to another job: $mismatch',
+        'Unassigned allocations: $unlinked',
+        if (bad != 0) 'Affected rows: ${result['sample']}',
+        'Run only online; the job screen must retrieve allocations '
+            'by job ID, not by filtering a limited transaction list.',
+      ],
+    ));
+  }
+
   Future<void> _checkAllDocumentDetailCoverage(
     String businessId,
     List<DiagnosticCheck> checks,
