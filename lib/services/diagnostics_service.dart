@@ -9,6 +9,7 @@ import '../local/briskers_local_database.dart' hide LocalFinancialCache;
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_financial_cache.dart';
+import 'local_job_repository.dart';
 import 'local_document_detail_cache.dart';
 import 'local_invoice_status_styles_cache.dart';
 import 'local_tax_settings_cache.dart';
@@ -153,6 +154,13 @@ class BriskersDiagnosticsService {
       category: 'Sync',
       title: 'Sync health',
       action: () => _checkSync(businessId, checks),
+    );
+    await _safeGroup(
+      checks,
+      fallbackId: 'JOB-001',
+      category: 'Jobs',
+      title: 'Job list numeric order',
+      action: () => _checkJobOrder(businessId, checks),
     );
     await _safeGroup(
       checks,
@@ -530,6 +538,69 @@ class BriskersDiagnosticsService {
         'Queued photos missing source URI: $badUri',
         'Expired upload claims: $staleClaims',
         'References missing transaction/photo IDs: $missingId',
+      ],
+    ));
+  }
+
+  Future<void> _checkJobOrder(
+    String businessId,
+    List<DiagnosticCheck> checks,
+  ) async {
+    // Exercise the exact repository method used by the Owner/Secretary
+    // screen, rather than validating the server's unrelated ordering.
+    final repository = LocalJobRepository(database: _database);
+    final jobs = await repository.listJobs(businessId, limit: 50);
+    int? numericPart(String? raw) {
+      if (raw == null) return null;
+      final value = raw.contains('-')
+          ? raw.substring(raw.indexOf('-') + 1)
+          : raw;
+      final match = RegExp(r'^[0-9]+').firstMatch(value);
+      return match == null ? null : int.tryParse(match.group(0)!);
+    }
+
+    var inversions = 0;
+    final examples = <String>[];
+    for (var i = 1; i < jobs.length; i++) {
+      final before = jobs[i - 1];
+      final after = jobs[i];
+      final beforeGroup = <String>{
+        'completed', 'cancelled'
+      }.contains(before['status']?.toString()) ? 1 : 0;
+      final afterGroup = <String>{
+        'completed', 'cancelled'
+      }.contains(after['status']?.toString()) ? 1 : 0;
+      if (beforeGroup != afterGroup ||
+          before['status'] != after['status']) {
+        continue;
+      }
+      final first = numericPart(before['job_number']?.toString());
+      final second = numericPart(after['job_number']?.toString());
+      if (first != null && second != null && first < second) {
+        inversions++;
+        if (examples.length < 5) {
+          examples.add(
+            '${before['job_number']} precedes ${after['job_number']}',
+          );
+        }
+      }
+    }
+    checks.add(DiagnosticCheck(
+      id: 'JOB-001',
+      category: 'Jobs',
+      title: 'Job list numeric sequence',
+      level: inversions == 0
+          ? BriskersDiagnosticLevel.pass
+          : BriskersDiagnosticLevel.fail,
+      summary: inversions == 0
+          ? 'The first ${jobs.length} jobs follow numeric sequence '
+              'within their status groups.'
+          : '$inversions incorrectly ordered job pair(s) in the first '
+              '${jobs.length} records.',
+      details: [
+        'Active jobs retain priority over completed jobs.',
+        if (examples.isNotEmpty) 'Examples: ${examples.join('; ')}',
+        'MobileBiz import timestamps are not used to choose the newest job.',
       ],
     ));
   }

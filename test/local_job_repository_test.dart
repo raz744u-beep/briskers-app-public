@@ -8,6 +8,45 @@ import 'package:briskers_app/services/local_job_repository.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
 
 void main() {
+  test('imported completed jobs sort by number, not created timestamp',
+      () async {
+    final database = BriskersLocalDatabase(NativeDatabase.memory());
+    final repository = LocalJobRepository(database: database);
+    // All imported with nearly identical timestamps in an order unrelated
+    // to their historical job numbers.
+    for (final item in [
+      ('6330', 300),
+      ('6329', 299),
+      ('6220', 298),
+      ('6328', 297),
+      ('6187', 296),
+      ('6327', 295),
+    ]) {
+      await database.customStatement(
+        '''
+        INSERT INTO local_jobs (
+          id, business_id, access_scope, job_number, title,
+          status, created_at, sync_state
+        ) VALUES (?, ?, 'all', ?, 'Service', 'completed', ?, 'synced')
+        ''',
+        [
+          'job-${item.$1}',
+          'shop-1',
+          'MB-${item.$1}',
+          item.$2,
+        ],
+      );
+    }
+    final rows = await repository.listJobs('shop-1');
+    expect(
+      rows.map((row) => row['job_number']).toList(),
+      ['MB-6330', 'MB-6329', 'MB-6328', 'MB-6327',
+       'MB-6220', 'MB-6187'],
+    );
+    await database.close();
+  });
+
+
   test('local job repository rebuilds list and detail snapshots', () async {
     final database = BriskersLocalDatabase(NativeDatabase.memory());
     final repository = LocalJobRepository(database: database);
