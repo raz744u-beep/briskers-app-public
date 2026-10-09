@@ -49,6 +49,7 @@ class _JobsScreenState extends State<JobsScreen> {
   String? _selectedStatus;
   final TextEditingController _search = TextEditingController();
   Timer? _searchDebounce;
+  int _loadGeneration = 0;
   int _totalCount = 0;
   Map<String, int> _statusCounts = const {};
   List<Map<String, dynamic>> _documentMatches = const [];
@@ -84,6 +85,7 @@ class _JobsScreenState extends State<JobsScreen> {
   }
 
   Future<void> _load() async {
+    final generation = ++_loadGeneration;
     var localAvailable = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
@@ -120,7 +122,7 @@ class _JobsScreenState extends State<JobsScreen> {
 
       localAvailable = bootstrapped || localRows.isNotEmpty;
 
-      if (mounted && localAvailable) {
+      if (mounted && localAvailable && generation == _loadGeneration) {
         setState(() {
           _rows = localRows;
           _statuses = localStatuses;
@@ -173,10 +175,11 @@ class _JobsScreenState extends State<JobsScreen> {
         _localJobs.jobStatusCounts(widget.businessId),
       ]);
 
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _rows = List<Map<String, dynamic>>.from(refreshed[0] as List);
         _statuses = onlineStatuses;
+        _documentMatches = query.isEmpty ? const [] : _documentMatches;
         _totalCount = refreshed[1] as int;
         _statusCounts = Map<String, int>.from(refreshed[2] as Map);
         _showingLocal = false;
@@ -184,7 +187,7 @@ class _JobsScreenState extends State<JobsScreen> {
         _error = null;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _onlineReady = false;
         if (localAvailable && !forceOnline) {
