@@ -8,6 +8,7 @@ import '../core/connection_mode.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_financial_cache.dart';
 import 'local_document_detail_cache.dart';
 import 'local_invoice_status_styles_cache.dart';
 import 'local_tax_settings_cache.dart';
@@ -175,6 +176,13 @@ class BriskersDiagnosticsService {
         category: 'Documents',
         title: 'Document cache integrity',
         action: () => _checkDocuments(businessId, checks),
+      );
+      await _safeGroup(
+        checks,
+        fallbackId: 'EXP-002',
+        category: 'Linked expenses',
+        title: 'Offline job and invoice expense coverage',
+        action: () => _checkOfflineLinkedExpenses(businessId, checks),
       );
       await _safeGroup(
         checks,
@@ -981,6 +989,54 @@ class BriskersDiagnosticsService {
   // production bug: closed historical invoices appear in the list but cannot
   // be opened offline. Count every record, including closed and converted.
   // No network access or data modifications are performed here.
+  Future<void> _checkOfflineLinkedExpenses(
+    String businessId,
+    List<DiagnosticCheck> checks,
+  ) async {
+    final cache = LocalFinancialCache(database: _database);
+    final rows = await cache.loadLinkedExpenses(businessId);
+    final state = await _database.customSelect(
+      'SELECT bootstrapped, last_pull_at, last_error '
+      'FROM local_sync_states WHERE business_id=? AND scope=?',
+      variables: [
+        Variable<String>(businessId),
+        const Variable<String>('linked_expenses'),
+      ],
+    ).get();
+    final ready = state.isNotEmpty &&
+        state.first.read<int>('bootstrapped') == 1;
+    final available = rows != null;
+    final valid = rows?.where((row) =>
+        row['allocation_id']?.toString().isNotEmpty == true &&
+        row['job_id'] != null &&
+        row['transaction_id'] != null).length ?? 0;
+    final count = rows?.length ?? 0;
+    final healthy = ready && available && valid == count;
+    checks.add(DiagnosticCheck(
+      id: 'EXP-002',
+      category: 'Linked expenses',
+      title: 'Offline linked expense snapshot',
+      level: healthy
+          ? BriskersDiagnosticLevel.pass
+          : ready
+              ? BriskersDiagnosticLevel.fail
+              : BriskersDiagnosticLevel.warning,
+      summary: healthy
+          ? '$count expense allocation(s) ready for offline job/invoice views.'
+          : 'Full linked-expense snapshot has not completed successfully.',
+      details: [
+        'Cached linked allocations: $count',
+        'Valid job/transaction identifiers: $valid',
+        'Sync completed: $ready',
+        if (!ready)
+          'Run Auto sync before testing Force Offline.',
+        if (state.isNotEmpty &&
+            state.first.readNullable<String>('last_error') != null)
+          'Last sync error: ${state.first.readNullable<String>('last_error')}',
+      ],
+    ));
+  }
+
   Future<void> _checkExpenseLinkIntegrity(
     String businessId,
     List<DiagnosticCheck> checks,
