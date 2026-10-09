@@ -6,7 +6,6 @@ import 'package:drift/drift.dart';
 
 import '../core/connection_mode.dart';
 import '../core/document_search.dart';
-import 'local_document_repository.dart';
 import '../local/briskers_local_database.dart' hide LocalFinancialCache;
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
@@ -852,18 +851,50 @@ class BriskersDiagnosticsService {
     String businessId,
     List<DiagnosticCheck> checks,
   ) async {
-    final invoices = await LocalDocumentRepository(database: _database)
-        .listByKind(businessId, kind: 'invoice');
-    final duplicateNumbers = <String, int>{};
+    // Check the raw index: a legacy import can legitimately contain two
+    // distinct, closed documents with the same printed invoice number.
+    // Such collisions are still visible in search, but must never hide
+    // an active duplicate number or an unrelated numeric search result.
+    final records = await _database.customSelect(
+      '''
+      SELECT id, document_number, document_date, closed_at, sync_state
+      FROM local_documents
+      WHERE business_id = ? AND kind = 'invoice'
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
+    final invoices = <Map<String, dynamic>>[];
     final byNumber = <BigInt, List<Map<String, dynamic>>>{};
-    for (final invoice in invoices) {
+    for (final row in records) {
+      final invoice = <String, dynamic>{
+        'id': row.read<String>('id'),
+        'document_number': row.readNullable<String>('document_number'),
+        'document_date': row.readNullable<String>('document_date'),
+        'closed': row.readNullable<int>('closed_at') != null,
+        'sync_state': row.read<String>('sync_state'),
+      };
+      invoices.add(invoice);
       final number = normalizedDocumentNumber(invoice['document_number']);
       if (number == null) continue;
       byNumber.putIfAbsent(number, () => []).add(invoice);
     }
+
+    final historicalCollisions = <String>[];
+    final unsafeCollisions = <String>[];
     for (final entry in byNumber.entries) {
-      if (entry.value.length > 1) {
-        duplicateNumbers[entry.key.toString()] = entry.value.length;
+      if (entry.value.length < 2) continue;
+      final allClosedAndSynced = entry.value.every(
+        (row) => row['closed'] == true && row['sync_state'] == 'synced',
+      );
+      final dates = entry.value
+          .map((row) => row['document_date']?.toString() ?? '?')
+          .join(', ');
+      final label = '${entry.key} (${entry.value.length}; dates: $dates)';
+      if (allClosedAndSynced) {
+        historicalCollisions.add(label);
+      } else {
+        unsafeCollisions.add(label);
       }
     }
 
@@ -881,21 +912,32 @@ class BriskersDiagnosticsService {
         unexpected.add(query);
       }
     }
-    final failed = duplicateNumbers.isNotEmpty || unexpected.isNotEmpty;
+
+    final failed = unsafeCollisions.isNotEmpty || unexpected.isNotEmpty;
+    final warning = historicalCollisions.isNotEmpty;
     checks.add(DiagnosticCheck(
       id: 'DOC-005',
       category: 'Documents',
-      title: 'Exact invoice number search and unique invoice numbers',
-      level: failed ? BriskersDiagnosticLevel.fail : BriskersDiagnosticLevel.pass,
+      title: 'Exact invoice search and historical number collisions',
+      level: failed
+          ? BriskersDiagnosticLevel.fail
+          : warning
+              ? BriskersDiagnosticLevel.warning
+              : BriskersDiagnosticLevel.pass,
       summary: failed
-          ? 'Invoice search or numbering integrity failed.'
-          : '$checked sample invoice-number searches returned no unrelated records.',
+          ? 'An active/unsynced invoice number collides, or numeric search returned unrelated records.'
+          : warning
+              ? '${historicalCollisions.length} reused historical invoice number(s); exact search is working.'
+              : '$checked sample invoice-number searches returned no unrelated records.',
       details: [
-        if (duplicateNumbers.isNotEmpty)
-          'Duplicate numbers: ${duplicateNumbers.entries.take(10).map((e) => '${e.key} (${e.value})').join(', ')}',
+        if (historicalCollisions.isNotEmpty)
+          'Closed historical duplicates (preserved): ${historicalCollisions.take(10).join('; ')}',
+        if (unsafeCollisions.isNotEmpty)
+          'Active/unsynced collisions: ${unsafeCollisions.take(10).join('; ')}',
         if (unexpected.isNotEmpty)
           'Unexpected matches for: ${unexpected.take(10).join(', ')}',
         'Only invoice numbers may match an all-digit invoice search.',
+        'Preserve original historical documents; new invoices must have unique numbers.',
       ],
     ));
   }
@@ -912,38 +954,64 @@ class BriskersDiagnosticsService {
       ''',
       variables: [Variable<String>(businessId)],
     ).get();
+
     final violations = <String>[];
-    var cached = 0;
+    var importedSnapshots = 0;
     var eligible = 0;
+    var staleMetadata = 0;
+    var missingDetail = 0;
     for (final doc in docs) {
       final id = doc.read<String>('id');
       final detail = await _detailCache.load(businessId, id);
-      if (detail == null || detail['legacy_read_only'] != true) continue;
-      cached++;
+      if (detail == null) {
+        missingDetail++;
+        continue;
+      }
+      // Older imported invoice snapshots may predate the server's edit-lock
+      // metadata. Never assume a missing legacy_read_only flag means editable.
+      if (!detail.containsKey('legacy_read_only')) {
+        staleMetadata++;
+        continue;
+      }
+      if (detail['legacy_read_only'] != true) continue;
+
+      importedSnapshots++;
       final number = doc.readNullable<String>('document_number') ?? id;
       final closed = doc.readNullable<int>('closed_at') != null ||
           detail['closed_at'] != null;
       final paid = num.tryParse(detail['paid_amount']?.toString() ?? '') ?? 0;
-      final pending = num.tryParse(detail['pending_payment']?.toString() ?? '') ?? 0;
+      final pending =
+          num.tryParse(detail['pending_payment']?.toString() ?? '') ?? 0;
       final canEdit = detail['legacy_editable'] == true;
       if (canEdit) eligible++;
       if (canEdit && (closed || paid > 0.005 || pending > 0.005)) {
         violations.add(number);
       }
     }
+
+    final incomplete = staleMetadata > 0 || missingDetail > 0;
     checks.add(DiagnosticCheck(
       id: 'DOC-006',
       category: 'Documents',
-      title: 'Imported invoice edit safeguards',
-      level: violations.isEmpty
-          ? BriskersDiagnosticLevel.pass
-          : BriskersDiagnosticLevel.fail,
-      summary: violations.isEmpty
-          ? '$cached imported invoice detail snapshots checked; $eligible marked eligible to edit.'
-          : '${violations.length} paid/closed imported invoices are incorrectly editable.',
+      title: 'Imported invoice edit safeguards and cache freshness',
+      level: violations.isNotEmpty
+          ? BriskersDiagnosticLevel.fail
+          : incomplete
+              ? BriskersDiagnosticLevel.warning
+              : BriskersDiagnosticLevel.pass,
+      summary: violations.isNotEmpty
+          ? '${violations.length} paid/closed imported invoices are incorrectly editable.'
+          : incomplete
+              ? '${staleMetadata + missingDetail} invoice snapshot(s) cannot verify the current edit-lock policy.'
+              : '$importedSnapshots imported invoice detail snapshots checked; $eligible marked eligible to edit.',
       details: [
         if (violations.isNotEmpty)
           'Unsafe invoices: ${violations.take(10).join(', ')}',
+        if (staleMetadata > 0)
+          '$staleMetadata offline details lack legacy edit-lock metadata; keep read-only until refreshed.',
+        if (missingDetail > 0)
+          '$missingDetail invoice details are not available in offline cache.',
+        '$importedSnapshots imported snapshots verified; $eligible eligible to enable editing.',
         'Unpaid, open imported invoices may be enabled for editing; paid or closed invoices stay locked.',
       ],
     ));
@@ -1126,6 +1194,7 @@ class BriskersDiagnosticsService {
     var missingCache = 0;
     var relationshipMismatch = 0;
     var mathMismatch = 0;
+    final mathExamples = <String>[];
 
     for (final row in rows) {
       final id = row.read<String>('id');
@@ -1183,7 +1252,16 @@ class BriskersDiagnosticsService {
               (lineTax - documentTax.toDouble()).abs() > 0.05 ||
               ((lineNet + lineTax) - documentTotal.toDouble()).abs() >
                   0.05;
-          if (mismatch) mathMismatch++;
+          if (mismatch) {
+            mathMismatch++;
+            if (mathExamples.length < 12) {
+              final kind = detail['kind']?.toString() ?? 'document';
+              final number = detail['document_number']?.toString() ??
+                  row.read<String>('id');
+              final delta = (lineTax - documentTax.toDouble()).toStringAsFixed(2);
+              mathExamples.add('$kind #$number: line tax minus header tax $delta');
+            }
+          }
         }
       }
     }
@@ -1232,6 +1310,15 @@ class BriskersDiagnosticsService {
             ? 'Cached line totals agree with document totals.'
             : mathMismatch.toString() +
                 ' cached document(s) have line/net/tax total differences.',
+        details: [
+          if (mathExamples.isNotEmpty)
+            'Review examples: ${mathExamples.join('; ')}',
+          if (mathMismatch > mathExamples.length)
+            '${mathMismatch - mathExamples.length} additional document(s) not shown.',
+          if (mathMismatch > 0)
+            'Imported MobileBiz estimates may use discounted tax totals. '
+                'Compare historical discounts before changing their values.',
+        ],
       ),
     );
   }

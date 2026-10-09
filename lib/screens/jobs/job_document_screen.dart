@@ -90,8 +90,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   bool get _estimate => _detail?['kind']?.toString() == 'estimate';
   bool get _converted => _detail?['converted'] == true;
+  bool get _editLockUnverified => _detail != null &&
+      !_offlineDocumentDraft.isLocalDraftId(widget.documentId) &&
+      !_detail!.containsKey('legacy_read_only');
   bool get _readOnly => (_estimate && _converted) ||
-      _detail?['legacy_read_only'] == true;
+      _detail?['legacy_read_only'] == true || _editLockUnverified;
   bool get _canManageInvoiceExpenses =>
       widget.isOwner || widget.canManageExpenses;
 
@@ -5825,6 +5828,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 child: Column(
                   children: [
                   _customerHeader(),
+                  if (_editLockUnverified)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: Text(
+                        tr('documentLockNeedsRefresh'),
+                        style: const TextStyle(
+                          color: Color(0xFF8A5200),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   if (_detail?['legacy_editable'] == true)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
