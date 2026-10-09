@@ -19,20 +19,64 @@ class LinkedExpenseSyncService {
   final BriskersLocalDatabase _database;
   static const scope = 'linked_expenses';
 
-  Future<int> pull(String businessId) async {
+  // Share ongoing snapshot pulls across pages/screens. Multiple simultaneous
+  // large full-history requests can compete for database resources.
+  static final Map<String, Future<int>> _inFlight = {};
+
+  Future<int> pull(String businessId) {
+    final previous = _inFlight[businessId];
+    if (previous != null) return previous;
+    final work = _pullSnapshot(businessId);
+    _inFlight[businessId] = work;
+    return work.whenComplete(() {
+      if (identical(_inFlight[businessId], work)) {
+        _inFlight.remove(businessId);
+      }
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> _pageWithTimeoutRetry(
+    String businessId, String? cursor,
+  ) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await _api.linkedExpensesAfterPage(
+          businessId, afterAllocationId: cursor, limit: 500,
+        );
+      } catch (error) {
+        final timeout = error.toString().contains('57014') ||
+            error.toString().toLowerCase().contains('statement timeout');
+        if (!timeout || attempt >= 1) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      }
+    }
+  }
+
+  Future<int> _pullSnapshot(String businessId) async {
     const pageSize = 500;
     final all = <Map<String, dynamic>>[];
-    var offset = 0;
+    final seenIds = <String>{};
+    String? cursor;
     while (true) {
-      final page = await _api.linkedExpensesPage(
-        businessId, limit: pageSize, offset: offset,
-      );
+      final page = await _pageWithTimeoutRetry(businessId, cursor);
+      for (final allocation in page) {
+        final id = allocation['allocation_id']?.toString() ?? '';
+        if (id.isEmpty || !seenIds.add(id)) {
+          throw StateError(
+            'Linked expense sync returned a missing/duplicate allocation ID.',
+          );
+        }
+      }
       all.addAll(page);
-      offset += page.length;
       if (page.length < pageSize) break;
+      final next = page.last['allocation_id']?.toString();
+      if (next == null || next.isEmpty || next == cursor) {
+        throw StateError('Linked expense sync cursor did not advance.');
+      }
+      cursor = next;
     }
-    // Publish only after all pages succeeded. A failed/interrupted pull
-    // retains the last complete cache instead of replacing it partially.
+    // Publish only when every page was received. An error preserves the last
+    // complete snapshot and all pending expense edits.
     await _cache.saveLinkedExpenses(businessId, all);
     await _database.customStatement(
       '''

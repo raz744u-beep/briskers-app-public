@@ -7,15 +7,15 @@ import 'package:briskers_app/services/linked_expense_sync_service.dart';
 import 'package:briskers_app/services/local_financial_cache.dart';
 
 class _PagedExpenseApi extends BriskersApi {
-  _PagedExpenseApi({this.failOnOffset = -1});
-  final int failOnOffset;
+  _PagedExpenseApi({this.failFirstPage = false});
+  final bool failFirstPage;
 
   @override
-  Future<List<Map<String, dynamic>>> linkedExpensesPage(
-    String businessId, {int limit = 500, int offset = 0}
+  Future<List<Map<String, dynamic>>> linkedExpensesAfterPage(
+    String businessId, {int limit = 500, String? afterAllocationId}
   ) async {
-    if (offset == failOnOffset) throw StateError('Network interruption');
-    if (offset != 0) return const [];
+    if (failFirstPage) throw StateError('Network interruption');
+    if (afterAllocationId != null) return const [];
     return [
       {
         'allocation_id': 'allocation-1',
@@ -38,6 +38,39 @@ class _PagedExpenseApi extends BriskersApi {
         'vendor': 'Peake BMW',
       },
     ];
+  }
+}
+
+
+/// Simulates a complete 500-row page and a short trailing page.
+class _MultiPageExpenseApi extends BriskersApi {
+  _MultiPageExpenseApi({this.repeatLastId = false});
+  final bool repeatLastId;
+  final List<String?> cursors = [];
+  @override
+  Future<List<Map<String, dynamic>>> linkedExpensesAfterPage(
+    String businessId, {int limit = 500, String? afterAllocationId}
+  ) async {
+    cursors.add(afterAllocationId);
+    if (afterAllocationId == null) {
+      return List.generate(limit, (i) => <String, dynamic>{
+        'allocation_id': 'allocation-${i.toString().padLeft(4, '0')}',
+        'transaction_id': 'txn-$i',
+        'job_id': 'job-6306',
+        'amount': 1,
+      });
+    }
+    if (afterAllocationId == 'allocation-0499') {
+      return [
+        <String, dynamic>{
+          'allocation_id': repeatLastId ? afterAllocationId : 'allocation-0500',
+          'transaction_id': 'txn-500',
+          'job_id': 'job-6306',
+          'amount': 2,
+        },
+      ];
+    }
+    throw StateError('Unexpected cursor: $afterAllocationId');
   }
 }
 
@@ -80,12 +113,42 @@ void main() {
     final service = LinkedExpenseSyncService(
       database: db,
       cache: cache,
-      api: _PagedExpenseApi(failOnOffset: 0),
+      api: _PagedExpenseApi(failFirstPage: true),
     );
     await expectLater(service.pull('shop'), throwsStateError);
     final cached = await cache.loadLinkedExpenses('shop', jobId: 'job-6306');
     expect(cached, hasLength(1));
     expect(cached!.single['amount'], 19.0);
+    await db.close();
+  });
+
+  test('keyset sync fetches every page without repeating allocations',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final api = _MultiPageExpenseApi();
+    final cache = LocalFinancialCache(database: db);
+    final svc = LinkedExpenseSyncService(database: db, cache: cache, api: api);
+    expect(await svc.pull('shop-pages'), 501);
+    expect(api.cursors, [null, 'allocation-0499']);
+    final items = await cache.loadLinkedExpenses('shop-pages');
+    expect(items, hasLength(501));
+    expect(items!.last['allocation_id'], 'allocation-0500');
+    await db.close();
+  });
+
+  test('duplicate allocation across pages leaves prior snapshot untouched',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final api = _MultiPageExpenseApi(repeatLastId: true);
+    final cache = LocalFinancialCache(database: db);
+    await cache.saveLinkedExpenses('shop-dup', [
+      <String, dynamic>{'allocation_id':'previous','amount':7},
+    ]);
+    final svc = LinkedExpenseSyncService(database: db,cache:cache,api:api);
+    await expectLater(svc.pull('shop-dup'), throwsStateError);
+    final rows = await cache.loadLinkedExpenses('shop-dup');
+    expect(rows, hasLength(1));
+    expect(rows!.single['allocation_id'], 'previous');
     await db.close();
   });
 

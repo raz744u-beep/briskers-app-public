@@ -1359,6 +1359,25 @@ class BriskersApi {
         .toList();
   }
 
+  /// Read allocation IDs in stable keyset order rather than large offsets.
+  Future<List<Map<String, dynamic>>> linkedExpensesAfterPage(
+    String businessId, {
+    String? afterAllocationId,
+    int limit = 500,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_linked_expenses_after_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_after_allocation_id': afterAllocationId,
+        'p_limit': limit,
+      },
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
   Future<List<Map<String, dynamic>>> jobLinkedExpenses(
     String businessId,
     String jobId,
