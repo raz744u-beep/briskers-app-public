@@ -57,7 +57,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   bool _onlineReady = false;
   bool _showingLocal = false;
 
-  bool get _canEditLocal => _data != null;
+  bool get _canEditLocal => _data != null && _canManageQuickActions;
   bool get _canManageQuickActions => canManageCustomerActions(widget.roleCode);
   final GlobalKey _notesSectionKey = GlobalKey();
   bool _expandQuickNotes = false;
@@ -990,7 +990,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                       customerId: widget.customerId,
                       vehicles: vehicles,
                     ),
-                    if (_onlineReady) ...[
+                    if (_onlineReady && widget.roleCode == 'owner') ...[
                       const SizedBox(height: 18),
                       CustomerAccountSection(
                         businessId: widget.businessId,
