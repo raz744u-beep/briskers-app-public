@@ -359,6 +359,7 @@ class _ShellScreenState extends State<ShellScreen> {
               businessId: widget.businessId,
               kind: 'invoice',
               isOwner: widget.roleCode == 'owner',
+              showAppBar: false,
             );
           default:
             return MoreScreen(
