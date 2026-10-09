@@ -1005,25 +1005,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               fit: BoxFit.contain,
                             ),
                             const Spacer(),
-                            IconButton(
-                              tooltip: 'Notifications',
-                              onPressed: () {},
-                              icon: const Badge(
-                                smallSize: 8,
-                                child: Icon(
-                                  Icons.notifications_none,
-                                  size: 28,
-                                ),
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: 'Profile',
-                              onPressed: () {},
-                              icon: const Icon(
-                                Icons.account_circle_outlined,
-                                size: 31,
-                              ),
-                            ),
                           ],
                         ),
                         const SizedBox(height: 8),

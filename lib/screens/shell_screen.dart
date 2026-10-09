@@ -339,6 +339,7 @@ class _ShellScreenState extends State<ShellScreen> {
           case 1:
             return CustomersScreen(
               businessId: widget.businessId,
+              roleCode: widget.roleCode,
               refreshToken: _customersRefreshToken,
             );
           case 2:

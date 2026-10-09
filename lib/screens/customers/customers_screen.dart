@@ -16,10 +16,12 @@ class CustomersScreen extends StatefulWidget {
   const CustomersScreen({
     super.key,
     required this.businessId,
+    required this.roleCode,
     this.refreshToken = 0,
   });
 
   final String businessId;
+  final String roleCode;
   final int refreshToken;
 
   @override
@@ -40,6 +42,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
   String? _error;
   bool _onlineReady = false;
   bool _showingLocal = false;
+  bool get _canManageCustomers => const {'owner', 'manager', 'office'}.contains(widget.roleCode);
 
   @override
   void initState() {
@@ -191,6 +194,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
         builder: (_) => CustomerDetailScreen(
           businessId: widget.businessId,
           customerId: '${customer['id']}',
+          roleCode: widget.roleCode,
         ),
       ),
     );
@@ -244,7 +248,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   backgroundColor: BriskersColors.actionBlue,
                   foregroundColor: Colors.white,
                 ),
-                onPressed: _onlineReady ? _add : null,
+                onPressed: _onlineReady && _canManageCustomers ? _add : null,
                 tooltip: tr('addCustomer'),
                 icon: const Icon(Icons.person_add),
               ),

@@ -482,6 +482,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   Future<void> _runInitialAction(String action) async {
     switch (action) {
+      case 'add_item':
+        await _addCustomLine();
+        break;
       case 'edit':
         await _editDocumentHeader();
         break;

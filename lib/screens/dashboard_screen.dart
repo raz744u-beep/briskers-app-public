@@ -127,19 +127,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       fit: BoxFit.contain,
                     ),
                     const Spacer(),
-                    IconButton(
-                      tooltip: 'Notifications',
-                      onPressed: () {},
-                      icon: const Badge(
-                        smallSize: 8,
-                        child: Icon(Icons.notifications_none, size: 28),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Profile',
-                      onPressed: () {},
-                      icon: const Icon(Icons.account_circle_outlined, size: 31),
-                    ),
                   ],
                 ),
                 const Spacer(),
@@ -340,16 +327,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       child: Column(
         children: [
-          Row(
+          const Row(
             children: [
-              const Text(
+              Text(
                 'Needs Attention',
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-              ),
-              const Spacer(),
-              TextButton(
-                onPressed: () {},
-                child: const Text('View All'),
               ),
             ],
           ),
@@ -884,6 +866,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               builder: (_) => CustomerDetailScreen(
                 businessId: widget.businessId,
                 customerId: existing['id'].toString(),
+                roleCode: widget.roleCode,
               ),
             ),
           );
@@ -934,6 +917,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           builder: (_) => CustomerDetailScreen(
             businessId: widget.businessId,
             customerId: customerId,
+            roleCode: widget.roleCode,
           ),
         ),
       );

@@ -16,10 +16,12 @@ class CustomerNotesSection extends StatefulWidget {
     super.key,
     required this.businessId,
     required this.customerId,
+    this.initiallyExpanded = false,
   });
 
   final String businessId;
   final String customerId;
+  final bool initiallyExpanded;
 
   @override
   State<CustomerNotesSection> createState() => _CustomerNotesSectionState();
@@ -602,7 +604,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
 
     return Card(
       child: ExpansionTile(
-        initiallyExpanded: false,
+        initiallyExpanded: widget.initiallyExpanded,
         maintainState: false,
         leading: const Icon(
           Icons.note_alt_outlined,

@@ -17,6 +17,7 @@ import 'offline_financial_write_service.dart';
 import 'offline_job_admin_service.dart';
 import 'weather_service.dart';
 import 'historical_photo_matcher.dart';
+import '../screens/customers/customer_quick_actions.dart';
 
 class FunctionalDiagnosticsReport {
   const FunctionalDiagnosticsReport({
@@ -121,6 +122,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkHistoricalPhotoMatching,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-008',
+      title: 'Customer quick-action wiring and role permissions',
+      success: 'All six customer shortcuts have unique destinations; owner and secretary routes are enabled and mechanic actions are hidden.',
+      action: _checkCustomerQuickActions,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -171,6 +180,43 @@ class BriskersFunctionalDiagnosticsService {
       await _cleanupPreferences(businessId);
       await database.close();
     }
+  }
+
+  Future<void> _checkCustomerQuickActions(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final expected = <CustomerQuickAction, String>{
+      CustomerQuickAction.appointment: 'appointment_create',
+      CustomerQuickAction.job: 'job_create',
+      CustomerQuickAction.estimate: 'estimate_create',
+      CustomerQuickAction.invoice: 'blank_invoice_create',
+      CustomerQuickAction.vehicle: 'vehicle_create',
+      CustomerQuickAction.note: 'customer_note_composer',
+    };
+    if (customerQuickActions.length != expected.length ||
+        customerQuickActions.toSet().length != expected.length) {
+      throw StateError('Customer action inventory is incomplete or duplicated.');
+    }
+    final destinations = <String>{};
+    for (final action in customerQuickActions) {
+      final destination = customerQuickActionDestination(action);
+      if (destination != expected[action] ||
+          !destinations.add(destination) ||
+          customerQuickActionLabel(action).trim().isEmpty) {
+        throw StateError('Customer action ${action.name} has no verified destination.');
+      }
+    }
+    if (!canManageCustomerActions('owner') ||
+        !canManageCustomerActions('office') ||
+        !canManageCustomerActions('manager') ||
+        canManageCustomerActions('mechanic') ||
+        canManageCustomerActions('porter')) {
+      throw StateError('Customer quick-action role visibility is incorrect.');
+    }
+    // No production actions are executed: widget regression tests verify
+    // every sheet tap returns its matching action, and the typed exhaustive
+    // screen dispatcher must handle each value.
   }
 
   Future<void> _cleanupPreferences(String businessId) async {
