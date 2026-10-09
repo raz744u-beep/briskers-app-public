@@ -15,6 +15,7 @@ import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/local_document_repository.dart';
 import '../../services/local_document_detail_cache.dart';
+import '../../services/local_financial_cache.dart';
 import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
@@ -53,6 +54,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   final JobSyncService _jobSync = JobSyncService();
   final LocalJobRepository _localJobs = LocalJobRepository();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
+  final LocalFinancialCache _linkedExpensesCache = LocalFinancialCache();
   final LocalDocumentDetailCache _documentDetailCache =
       const LocalDocumentDetailCache();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
@@ -197,12 +199,18 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         final localDocuments = _canSeeFinancial
             ? await _localDocumentsForJob()
             : const <Map<String, dynamic>>[];
+        final cachedLinked = _canSeeFinancial
+            ? await _linkedExpensesCache.loadLinkedExpenses(
+                widget.businessId, jobId: widget.jobId,
+              )
+            : null;
         localShown = true;
         setState(() {
           _job = snapshot.job;
           _preInspection = snapshot.preInspection;
           _statuses = snapshot.statuses;
           _documents = localDocuments;
+          _jobExpenses = cachedLinked ?? const [];
           _findings = snapshot.findings;
           _loading = false;
           _onlineReady = false;
