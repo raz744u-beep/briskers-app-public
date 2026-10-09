@@ -1331,6 +1331,16 @@ class BriskersApi {
     return Map<String, dynamic>.from(result as Map);
   }
 
+  Future<Map<String, dynamic>> expenseLinkIntegrity(
+    String businessId,
+  ) async {
+    final result = await networkSupabase.rpc(
+      'briskers_expense_link_integrity',
+      params: {'p_business_id': businessId},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<List<Map<String, dynamic>>> jobLinkedExpenses(
     String businessId,
     String jobId,
