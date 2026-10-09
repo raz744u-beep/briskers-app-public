@@ -16,10 +16,12 @@ class CustomersScreen extends StatefulWidget {
   const CustomersScreen({
     super.key,
     required this.businessId,
+    required this.roleCode,
     this.refreshToken = 0,
   });
 
   final String businessId;
+  final String roleCode;
   final int refreshToken;
 
   @override
@@ -191,6 +193,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
         builder: (_) => CustomerDetailScreen(
           businessId: widget.businessId,
           customerId: '${customer['id']}',
+          roleCode: widget.roleCode,
         ),
       ),
     );
