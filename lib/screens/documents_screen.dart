@@ -7,6 +7,7 @@ import '../core/briskers_colors.dart';
 import '../core/connection_mode.dart';
 import '../core/invoice_status_style.dart';
 import '../core/briskers_i18n.dart';
+import '../core/document_future_date.dart';
 import '../services/briskers_api.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_invoice_status_styles_cache.dart';
@@ -272,22 +273,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
   }
 
-  bool _hasFutureDateTag(Map<String, dynamic> row) {
-    // Preserve explicit MobileBiz anomalies even if their date later passes.
-    // Also fall back to the actual document date when a device has an older
-    // local snapshot that predates the source metadata flag.
-    final flag = row['future_date_flag'];
-    if (flag == true || flag == 1 ||
-        flag?.toString().toLowerCase() == 'true') {
-      return true;
-    }
-    final date = DateTime.tryParse(row['document_date']?.toString() ?? '');
-    if (date == null) return false;
-    final now = DateTime.now();
-    return DateTime(date.year, date.month, date.day).isAfter(
-      DateTime(now.year, now.month, now.day),
-    );
-  }
+  bool _hasFutureDateTag(Map<String, dynamic> row) =>
+      isFutureDatedDocument(row);
 
   int get _futureDatedCount =>
       (_rows ?? const <Map<String, dynamic>>[])
