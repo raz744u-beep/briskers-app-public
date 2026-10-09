@@ -47,7 +47,15 @@ class DocumentIndexSyncService {
       invoices,
       kind: 'invoice',
     );
-    await _prefetchOpenDocumentDetails(businessId, all);
+    // A list index alone is not an offline document snapshot.
+    // Download details for every synced invoice and estimate, including closed
+    // historical documents. Cached details make retries resumable.
+    await localDatabase.customStatement(
+      "UPDATE local_sync_states SET bootstrapped = 0 "
+      "WHERE business_id = ? AND scope = ?",
+      [businessId, _scope],
+    );
+    await _prefetchAllDocumentDetails(businessId, all);
 
     await localDatabase.customStatement(
       '''
@@ -71,31 +79,75 @@ class DocumentIndexSyncService {
     _syncEvents.add(businessId);
   }
 
-  Future<void> _prefetchOpenDocumentDetails(
+  Future<void> _prefetchAllDocumentDetails(
     String businessId,
     List<Map<String, dynamic>> documents,
   ) async {
+    final missing = <Map<String, dynamic>>[];
     for (final document in documents) {
       final id = document['id']?.toString() ?? '';
       if (id.isEmpty) continue;
+      final cached = await _detailCache.load(businessId, id);
+      final expectedKind = document['kind']?.toString() ?? '';
+      final cachedValid = cached != null &&
+          cached['id']?.toString() == id &&
+          cached['kind']?.toString() == expectedKind &&
+          cached['lines'] is List;
+      // Never overwrite pending offline edits. Otherwise refresh server data
+      // when its version changed (not on every index synchronization).
+      final hasLocalEdits =
+          cached?['sync_state']?.toString() == 'pending';
+      final serverVersion = document['row_version']?.toString();
+      final cachedVersion = cached?['row_version']?.toString();
+      final current = cachedValid &&
+          (hasLocalEdits ||
+              serverVersion == null ||
+              serverVersion == cachedVersion);
+      if (!current) missing.add(document);
+    }
+    if (missing.isEmpty) return;
 
-      final kind = document['kind']?.toString() ?? '';
-      final status = document['status']?.toString().toLowerCase() ?? '';
-      final closed = document['closed_at'] != null;
-      final converted = document['converted'] == true;
-      final activeEstimate = kind == 'estimate' &&
-          !converted &&
-          !<String>{'accepted', 'declined', 'expired', 'void'}.contains(status);
-      final activeInvoice =
-          kind == 'invoice' && !closed && status != 'void';
-      if (!activeEstimate && !activeInvoice) continue;
+    // Bound concurrent requests to avoid swamping Supabase and keep failures
+    // isolated; successful details stay cached across interrupted syncs.
+    var cursor = 0;
+    var failures = 0;
+    final examples = <String>[];
 
-      try {
-        final detail = await _api.documentDetail(businessId, id);
-        await _detailCache.save(businessId, id, detail);
-      } catch (_) {
-        // Keep the previous local detail snapshot if one already exists.
+    Future<void> worker() async {
+      while (cursor < missing.length) {
+        final document = missing[cursor++];
+        final id = document['id']?.toString() ?? '';
+        if (id.isEmpty) continue;
+        try {
+          final detail = await _api.documentDetail(businessId, id);
+          if (detail['id']?.toString() != id ||
+              detail['lines'] is! List) {
+            throw StateError('Invalid document detail response');
+          }
+          await _detailCache.save(businessId, id, detail);
+        } catch (_) {
+          failures++;
+          if (examples.length < 5) {
+            examples.add(document['document_number']?.toString() ?? id);
+          }
+        }
       }
+    }
+
+    const concurrency = 4;
+    await Future.wait(
+      List.generate(
+        missing.length < concurrency ? missing.length : concurrency,
+        (_) => worker(),
+      ),
+    );
+    if (failures != 0) {
+      throw StateError(
+        'Offline document details incomplete: $failures of '
+        '${missing.length} downloads failed. '
+        'Retry synchronization to resume. '
+        'Example document numbers: ${examples.join(', ')}',
+      );
     }
   }
 

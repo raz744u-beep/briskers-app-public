@@ -10,6 +10,65 @@ import 'package:briskers_app/services/local_tax_settings_cache.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('full diagnostics catches closed invoices missing offline detail',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    await db.customStatement(
+      '''
+      INSERT INTO local_documents (
+        id, business_id, kind, document_number,
+        status, closed_at, total, sync_state
+      ) VALUES (
+        'closed-1', 'shop-1', 'invoice', '5180',
+        'issued', 1790000000, 1130.74, 'synced'
+      )
+      ''',
+    );
+    final report = await BriskersDiagnosticsService(
+      database: db,
+    ).run('shop-1', full: true);
+    final coverage = report.checks.firstWhere(
+      (check) => check.id == 'DOC-004',
+    );
+    expect(coverage.level, BriskersDiagnosticLevel.fail);
+    expect(coverage.details.join(' '), contains('Closed invoices missing detail: 1'));
+    expect(coverage.details.join(' '), contains('invoice #5180'));
+    await db.close();
+  });
+
+  test('full diagnostics accepts closed invoices with cached detail',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    await db.customStatement(
+      '''
+      INSERT INTO local_documents (
+        id, business_id, kind, document_number,
+        status, closed_at, total, sync_state
+      ) VALUES (
+        'closed-2', 'shop-2', 'invoice', '4199',
+        'issued', 1790000000, 5710.27, 'synced'
+      )
+      ''',
+    );
+    await const LocalDocumentDetailCache().save('shop-2', 'closed-2', {
+      'id': 'closed-2',
+      'kind': 'invoice',
+      'lines': <Map<String, dynamic>>[],
+      'total_amount': 5710.27,
+    });
+    final report = await BriskersDiagnosticsService(
+      database: db,
+    ).run('shop-2', full: true);
+    final coverage = report.checks.firstWhere(
+      (check) => check.id == 'DOC-004',
+    );
+    expect(coverage.level, BriskersDiagnosticLevel.pass);
+    expect(coverage.details.join(' '), contains('Cached and valid: 1 / 1'));
+    await db.close();
+  });
+
   test('diagnostics detect v18-style missing ExpenseIQ tables', () async {
     SharedPreferences.setMockInitialValues({});
     final db = BriskersLocalDatabase(NativeDatabase.memory());
