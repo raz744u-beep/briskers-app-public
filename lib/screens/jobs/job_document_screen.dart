@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
 
@@ -1600,6 +1601,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               title: Text(_estimate ? 'Estimate PDF' : 'Invoice PDF'),
             ),
             body: PdfPreview(
+              initialPageFormat: PdfPageFormat.letter,
               build: (format) async => bytes,
               pdfFileName: DocumentPdfService.fileName(detail),
               canChangeOrientation: false,
@@ -1628,6 +1630,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final bytes = await DocumentPdfService.build(detail);
     await Printing.layoutPdf(
       name: DocumentPdfService.fileName(detail),
+      format: PdfPageFormat.letter,
+      dynamicLayout: false,
       onLayout: (format) async => bytes,
     );
   }
@@ -3369,7 +3373,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.share_outlined),
-                title: const Text('Share PDF'),
+                title: const Text('Open in app / Share PDF'),
+                subtitle: const Text('Choose your installed printer app if available'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.pop(sheetContext, 'share'),
               ),

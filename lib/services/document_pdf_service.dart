@@ -10,6 +10,27 @@ import '../core/formatters.dart';
 class DocumentPdfService {
   const DocumentPdfService._();
 
+  /// Amounts shown on an invoice. Entered-but-unfinalized payments are
+  /// separate from confirmed paid amounts and are subtracted exactly once.
+  /// This mirrors the balance calculation on JobDocumentScreen.
+  static Map<String, num> invoicePaymentAmounts(Map<String, dynamic> detail) {
+    num nonNegative(Object? raw) {
+      final value = num.tryParse(raw?.toString() ?? '') ?? 0;
+      return value.isFinite && value > 0 ? value : 0;
+    }
+
+    final total = nonNegative(detail['total_amount']);
+    final paid = nonNegative(detail['paid_amount']);
+    final pending = nonNegative(detail['pending_payment']);
+    final difference = total - paid - pending;
+    return <String, num>{
+      'total': total,
+      'paid': paid,
+      'pending': pending,
+      'remaining': difference > 0 ? difference : 0,
+    };
+  }
+
   static String _money(Object? raw) {
     final value = num.tryParse(raw?.toString() ?? '') ?? 0;
     return '\u0024${value.toStringAsFixed(2)}';
@@ -143,6 +164,8 @@ class DocumentPdfService {
     final kind =
         detail['kind']?.toString() == 'estimate' ? 'ESTIMATE' : 'INVOICE';
     final kindTitle = kind == 'INVOICE' ? 'Invoice' : 'Estimate';
+    final invoicePayments =
+        kind == 'INVOICE' ? invoicePaymentAmounts(detail) : null;
     final rawDocumentNumber =
         detail['document_number']?.toString().trim() ?? '';
     final documentNumber = _displayNumber(kind, rawDocumentNumber);
@@ -401,6 +424,7 @@ class DocumentPdfService {
                   taxLabel: _taxLabel(allLines),
                   tax: detail['tax_amount'],
                   total: detail['total_amount'],
+                  payments: invoicePayments,
                 ),
               ),
             ],
@@ -695,9 +719,17 @@ class DocumentPdfService {
     required String taxLabel,
     required Object? tax,
     required Object? total,
+    required Map<String, num>? payments,
   }) {
+    final paid = payments?['paid'] ?? 0;
+    final pending = payments?['pending'] ?? 0;
+    final remaining = payments?['remaining'] ?? 0;
+    final isPartial = paid + pending > 0.005 && remaining > 0.005;
+
     return pw.Container(
-      height: 76,
+      // Payment breakdown can be taller than the standard estimate totals.
+      // Never clip it to the 76pt estimate-only totals box.
+      height: payments == null ? 76 : null,
       padding: const pw.EdgeInsets.fromLTRB(10, 8, 10, 7),
       decoration: pw.BoxDecoration(
         border: pw.Border.all(color: PdfColors.grey600, width: 0.6),
@@ -708,6 +740,22 @@ class DocumentPdfService {
           _totalRow(taxLabel, _money(tax)),
           pw.Divider(height: 10, color: PdfColors.grey600),
           _totalRow('Total', _money(total), bold: true),
+          if (payments != null) ...[
+            pw.Divider(height: 8, color: PdfColors.grey600),
+            _totalRow('Total Paid', _money(paid)),
+            if (pending > 0.005)
+              _totalRow('Payment Entered (Pending)', _money(pending)),
+            pw.Divider(height: 8, color: PdfColors.grey600),
+            _totalRow('Remaining Balance', _money(remaining), bold: true),
+            if (isPartial)
+              pw.Align(
+                alignment: pw.Alignment.centerRight,
+                child: pw.Text(
+                  'Partial Payment',
+                  style: const pw.TextStyle(fontSize: 8),
+                ),
+              ),
+          ],
         ],
       ),
     );
