@@ -5,6 +5,7 @@ import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_document_repository.dart';
 import 'local_document_detail_cache.dart';
+import 'document_edit_permission_cache.dart';
 
 class DocumentIndexSyncService {
   DocumentIndexSyncService({
@@ -103,7 +104,17 @@ class DocumentIndexSyncService {
           (hasLocalEdits ||
               serverVersion == null ||
               serverVersion == cachedVersion);
-      if (!current) missing.add(document);
+      if (current) {
+        // Server index carries the same permission metadata as full detail.
+        // Update only lock/provenance fields on a version-matched snapshot,
+        // retaining its historical lines and local offline edits.
+        final hydrated = withVerifiedDocumentEditMetadata(document, cached);
+        if (hydrated != null) {
+          await _detailCache.save(businessId, id, hydrated);
+        }
+      } else {
+        missing.add(document);
+      }
     }
     if (missing.isEmpty) return;
 
