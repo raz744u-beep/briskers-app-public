@@ -127,19 +127,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       fit: BoxFit.contain,
                     ),
                     const Spacer(),
-                    IconButton(
-                      tooltip: 'Notifications',
-                      onPressed: () {},
-                      icon: const Badge(
-                        smallSize: 8,
-                        child: Icon(Icons.notifications_none, size: 28),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Profile',
-                      onPressed: () {},
-                      icon: const Icon(Icons.account_circle_outlined, size: 31),
-                    ),
                   ],
                 ),
                 const Spacer(),
@@ -347,10 +334,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
               ),
               const Spacer(),
-              TextButton(
-                onPressed: () {},
-                child: const Text('View All'),
-              ),
+
             ],
           ),
           Row(
