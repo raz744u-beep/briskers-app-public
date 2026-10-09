@@ -98,6 +98,36 @@ class LocalFinancialCache {
     return rows.where(matches).toList();
   }
 
+  static const _linkedExpensesKey = 'linked_expenses_complete_v1';
+
+  Future<void> saveLinkedExpenses(
+    String businessId,
+    List<Map<String, dynamic>> rows,
+  ) async {
+    await _save(businessId, _linkedExpensesKey, jsonEncode(rows));
+  }
+
+  Future<List<Map<String, dynamic>>?> loadLinkedExpenses(
+    String businessId, {
+    String? jobId,
+    String? documentId,
+  }) async {
+    final raw = await _load(businessId, _linkedExpensesKey);
+    if (raw == null) return null; // Not yet synchronized.
+    try {
+      final rows = (jsonDecode(raw) as List<dynamic>)
+          .whereType<Map>()
+          .map((value) => Map<String, dynamic>.from(value))
+          .toList();
+      return rows.where((row) =>
+          (jobId == null || row['job_id']?.toString() == jobId) &&
+          (documentId == null ||
+              row['document_id']?.toString() == documentId)).toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> saveTransactionDetail(
     String businessId,
     String transactionId,
