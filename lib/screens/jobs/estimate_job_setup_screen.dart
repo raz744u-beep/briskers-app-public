@@ -7,9 +7,15 @@ class EstimateJobSetupScreen extends StatefulWidget {
   const EstimateJobSetupScreen({
     super.key,
     required this.businessId,
+    this.initialCustomerId,
+    this.initialCustomerName,
+    this.initialVehicles = const [],
   });
 
   final String businessId;
+  final String? initialCustomerId;
+  final String? initialCustomerName;
+  final List<dynamic> initialVehicles;
 
   @override
   State<EstimateJobSetupScreen> createState() => _EstimateJobSetupScreenState();
@@ -32,7 +38,26 @@ class _EstimateJobSetupScreenState extends State<EstimateJobSetupScreen> {
   @override
   void initState() {
     super.initState();
-    _loadCustomers();
+    final selected = widget.initialCustomerId;
+    if (selected != null) {
+      _customerId = selected;
+      _customers = [
+        <String, dynamic>{
+          'id': selected,
+          'display_name': widget.initialCustomerName ?? 'Customer',
+        },
+      ];
+      _vehicles = widget.initialVehicles
+          .whereType<Map>()
+          .map((value) => Map<String, dynamic>.from(value))
+          .toList();
+      if (_vehicles.length == 1) {
+        _vehicleId = _vehicles.first['id']?.toString();
+      }
+      _loading = false;
+    } else {
+      _loadCustomers();
+    }
   }
 
   @override
@@ -217,7 +242,7 @@ class _EstimateJobSetupScreenState extends State<EstimateJobSetupScreen> {
                   ),
                 )
                 .toList(),
-            onChanged: _saving
+            onChanged: _saving || widget.initialCustomerId != null
                 ? null
                 : (value) {
                     setState(() => _customerId = value);
