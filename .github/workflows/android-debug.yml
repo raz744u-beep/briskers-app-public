@@ -562,6 +562,9 @@ jobs:
         working-directory: generated
         run: dart run build_runner build --delete-conflicting-outputs
 
+      - name: Audit UI action placeholders
+        run: python3 tools/audit_ui_actions.py
+
       - name: Analyze Dart
         working-directory: generated
         run: flutter analyze
