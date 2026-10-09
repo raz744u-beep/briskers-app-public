@@ -57,7 +57,7 @@ class LocalJobRepository {
     final query = search?.trim().toLowerCase() ?? '';
     if (RegExp(r'^[0-9]+$').hasMatch(query)) {
       where.add(
-        "($column = ? OR $column = ? OR $column = ?)",
+        "(j.job_number = ? OR j.job_number = ? OR j.job_number = ?)",
       );
       variables.add(Variable<String>(query));
       variables.add(Variable<String>('J-$query'));
@@ -141,7 +141,7 @@ class LocalJobRepository {
     final query = search?.trim().toLowerCase() ?? '';
     if (RegExp(r'^[0-9]+$').hasMatch(query)) {
       where.add(
-        "($column = ? OR $column = ? OR $column = ?)",
+        "(job_number = ? OR job_number = ? OR job_number = ?)",
       );
       variables.add(Variable<String>(query));
       variables.add(Variable<String>('J-$query'));
