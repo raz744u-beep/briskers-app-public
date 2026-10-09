@@ -985,7 +985,27 @@ class BriskersDiagnosticsService {
     String businessId,
     List<DiagnosticCheck> checks,
   ) async {
-    final result = await const BriskersApi().expenseLinkIntegrity(businessId);
+    Map<String, dynamic> result;
+    try {
+      result = await const BriskersApi().expenseLinkIntegrity(businessId);
+    } catch (error) {
+      // A network/auth failure is not evidence that local expense links are
+      // broken. Mark the server audit unavailable instead of failing the
+      // entire diagnostic report (including offline/sandbox test runs).
+      checks.add(DiagnosticCheck(
+        id: 'EXP-001',
+        category: 'Linked expenses',
+        title: 'Invoice/job expense allocation integrity',
+        level: BriskersDiagnosticLevel.warning,
+        summary: 'Server expense-link audit could not be verified.',
+        details: [
+          'The expense records were not changed.',
+          'Retry Full Diagnostics when signed in and online.',
+          error.toString(),
+        ],
+      ));
+      return;
+    }
     int count(String key) => (result[key] as num?)?.toInt() ?? 0;
     final total = count('total');
     final missingJob = count('missing_job');
