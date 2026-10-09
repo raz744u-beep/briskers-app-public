@@ -102,6 +102,16 @@ class LocalJobRepository {
       ORDER BY
         CASE WHEN j.status IN ('completed','cancelled') THEN 1 ELSE 0 END,
         COALESCE(s.sort_order, 9999),
+        -- Imported MobileBiz created_at records when the import ran, not
+        -- when jobs were originally opened. Use the sequential job number.
+        CASE
+          WHEN substr(j.job_number, instr(j.job_number, '-') + 1)
+               GLOB '[0-9]*'
+          THEN CAST(
+            substr(j.job_number, instr(j.job_number, '-') + 1) AS INTEGER
+          )
+          ELSE -1
+        END DESC,
         j.created_at DESC, j.id
       LIMIT ? OFFSET ?
       ''',
