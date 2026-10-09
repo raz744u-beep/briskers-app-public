@@ -3202,6 +3202,31 @@ class BriskersApi {
     );
   }
 
+  /// Upload an offline invoice atomically. Repeating the same UUID is safe.
+  Future<String> syncOfflineQuickInvoice(
+    String businessId, {
+    required String customerId,
+    String? vehicleId,
+    required String operationId,
+    required String documentDate,
+    required List<Map<String, dynamic>> lines,
+    String? memo,
+  }) async {
+    final id = await networkSupabase.rpc(
+      'briskers_sync_offline_quick_invoice_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_operation_id': operationId,
+        'p_document_date': documentDate,
+        'p_lines': lines,
+        'p_memo': memo,
+      },
+    );
+    return id.toString();
+  }
+
   Future<String> createQuickInvoice(
     String businessId, {
     required String customerId,
