@@ -227,15 +227,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _load() async {
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
+    var unsyncedDraft = false;
 
-    if (!forceOffline &&
-        _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+    if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
       final cached = await _detailCache.load(
         widget.businessId,
         widget.documentId,
       );
       final serverId = cached?['_server_document_id']?.toString() ?? '';
-      if (serverId.isNotEmpty && serverId != widget.documentId) {
+      if (serverId.isNotEmpty && serverId != widget.documentId && !forceOffline) {
         if (!mounted) return;
         await Navigator.pushReplacement<void, void>(
           context,
@@ -251,9 +251,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         );
         return;
       }
+      // A never-synced invoice must stay editable locally even in Auto mode,
+      // rather than querying the server with a temporary local ID.
+      unsyncedDraft = serverId.isEmpty;
     }
 
-    if (forceOffline) {
+    if (forceOffline || unsyncedDraft) {
       final cached = await _detailCache.load(
         widget.businessId,
         widget.documentId,
