@@ -3013,6 +3013,24 @@ class BriskersApi {
     );
   }
 
+  /// Owner-only, audited override for a closed or imported invoice.
+  Future<void> ownerForceReopenInvoice(
+    String businessId,
+    String documentId, {
+    required int expectedVersion,
+    required String reason,
+  }) async {
+    await networkSupabase.rpc(
+      'briskers_owner_force_reopen_invoice',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_expected_version': expectedVersion,
+        'p_reason': reason,
+      },
+    );
+  }
+
   Future<Map<String, dynamic>> documentDetail(
     String businessId,
     String documentId,
