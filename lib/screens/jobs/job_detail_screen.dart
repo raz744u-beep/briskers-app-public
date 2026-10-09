@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
+import '../../core/briskers_i18n.dart';
 import '../../core/employee_role_style.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
@@ -1402,6 +1403,25 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     });
   }
 
+  Future<String> _jobTextForStorage(String original) async {
+    final text = original.trim();
+    if (text.isEmpty || !BriskersLanguageController.instance.isSpanish) {
+      return text;
+    }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // Do not claim that Spanish was converted while offline. The local
+      // text stays intact and needs translation on a later online sync.
+      return text;
+    }
+    final translated = await _api.translateManualDocumentText(
+      widget.businessId, [text],
+    );
+    if (translated.length != 1 || translated.first.trim().isEmpty) {
+      throw StateError('Spanish-to-English translation did not complete.');
+    }
+    return translated.first.trim();
+  }
+
   Future<void> _editComplaint() async {
     if (!_canQuickAdmin || _job == null || _busy) return;
     final value = await _editTextSheet(
@@ -1416,10 +1436,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       _error = null;
     });
     try {
+      final translated = await _jobTextForStorage(value);
       await _offlineJobAdmin.queueCore(
         widget.businessId,
         widget.jobId,
-        requestedWork: value.trim().isEmpty ? null : value.trim(),
+        requestedWork: translated.isEmpty ? null : translated,
         replaceRequestedWork: true,
       );
       if (!BriskersConnectionModeController.instance.forceOffline) {
@@ -1457,7 +1478,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       await _offlineWorkFindings.saveLocalWorkSummary(
         widget.businessId,
         widget.jobId,
-        workSummary: value,
+        workSummary: await _jobTextForStorage(value),
       );
       await _refreshLocalWorkFindings();
 
@@ -1914,7 +1935,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         widget.businessId,
         widget.jobId,
         vehicleId: vehicleId,
-        body: body,
+        body: await _jobTextForStorage(body),
         includeOnInvoice: includeOnInvoice,
       );
       final localFindingId = localFinding['id'].toString();
@@ -2021,7 +2042,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         widget.businessId,
         widget.jobId,
         finding['id'].toString(),
-        body: body,
+        body: await _jobTextForStorage(body),
       );
       await _refreshLocalWorkFindings();
       unawaited(_flushWorkFindingsQueue());
