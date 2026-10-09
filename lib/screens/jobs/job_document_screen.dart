@@ -469,6 +469,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     return DateFormat('MMM d, yyyy  h:mm a').format(parsed.toLocal());
   }
 
+  Future<void> _enableImportedInvoiceEditing() async {
+    if (_busy || _detail?['legacy_editable'] != true) return;
+    await _run(() => _api.enableImportedInvoiceEditing(
+      widget.businessId,
+      widget.documentId,
+    ));
+  }
+
   Future<void> _runInitialAction(String action) async {
     switch (action) {
       case 'edit':
@@ -5817,14 +5825,28 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 child: Column(
                   children: [
                   _customerHeader(),
-                  if (_detail?['legacy_read_only'] == true)
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  if (_detail?['legacy_editable'] == true)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(tr('importedInvoiceOpenHelp')),
+                          const SizedBox(height: 8),
+                          OutlinedButton.icon(
+                            onPressed: _busy ? null : _enableImportedInvoiceEditing,
+                            icon: const Icon(Icons.edit_outlined),
+                            label: Text(tr('enableImportedInvoiceEdit')),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (_detail?['legacy_read_only'] == true)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                       child: Text(
-                        'Historical imported document: editing and warranty '
-                        'changes are restricted by the server. The original '
-                        'invoice remains available for viewing.',
-                        style: TextStyle(
+                        tr('importedInvoiceLockedHelp'),
+                        style: const TextStyle(
                           color: Color(0xFF8A5200),
                           fontWeight: FontWeight.w600,
                         ),

@@ -1425,9 +1425,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Future<void> _editComplaint() async {
     if (!_canQuickAdmin || _job == null || _busy) return;
     final value = await _editTextSheet(
-      title: 'Customer complaint',
+      title: tr('customerComplaint'),
       initialValue: _job!['requested_work']?.toString() ?? '',
-      hint: 'What did the customer ask us to check or repair?',
+      hint: tr('complaintHint'),
     );
     if (value == null || _job == null) return;
 
@@ -1463,9 +1463,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final current = Map<String, dynamic>.from(visits.first as Map);
 
     final value = await _editTextSheet(
-      title: 'Work performed',
+      title: tr('workPerformed'),
       initialValue: current['work_summary']?.toString() ?? '',
-      hint: 'Describe the work completed on this visit.',
+      hint: tr('workPerformedHint'),
     );
     if (value == null) return;
 
@@ -1484,9 +1484,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Work Performed saved on this device.'),
-            duration: Duration(seconds: 2),
+          SnackBar(
+            content: Text(tr('workSavedLocally')),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -1784,7 +1784,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     if (!_canEditFindings || _job == null || _busy) return;
     final vehicleId = _job!['vehicle_id']?.toString() ?? '';
     if (vehicleId.isEmpty) {
-      setState(() => _error = 'Select a vehicle before adding a finding.');
+      setState(() => _error = tr('selectVehicleFirst'));
       return;
     }
 
@@ -1810,11 +1810,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Align(
+                  Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Add vehicle finding',
-                      style: TextStyle(
+                      tr('addVehicleFinding'),
+                      style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w700,
                       ),
@@ -1826,16 +1826,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     autofocus: true,
                     minLines: 3,
                     maxLines: 7,
-                    decoration: const InputDecoration(
-                      labelText: 'Finding',
-                      hintText:
-                          'Example: Oil leak visible around valve cover',
+                    decoration: InputDecoration(
+                      labelText: tr('finding'),
+                      hintText: tr('findingExample'),
                     ),
                   ),
                   if (_canSeeFinancial)
                     CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Include on invoice notes'),
+                      title: Text(tr('includeOnInvoiceNotes')),
                       value: includeOnInvoice,
                       onChanged: (value) => setSheetState(
                         () => includeOnInvoice = value == true,
@@ -1909,7 +1908,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                         Navigator.pop(sheetContext, true);
                       },
                       icon: const Icon(Icons.add),
-                      label: const Text('Add finding'),
+                      label: Text(tr('addFinding')),
                     ),
                   ),
                 ],
@@ -1955,9 +1954,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Finding saved on this device.'),
-            duration: Duration(seconds: 2),
+          SnackBar(
+            content: Text(tr('findingSavedLocally')),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -1991,11 +1990,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Align(
+              Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Edit finding',
-                  style: TextStyle(
+                  tr('editFinding'),
+                  style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
                   ),
@@ -2007,8 +2006,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 autofocus: true,
                 minLines: 3,
                 maxLines: 7,
-                decoration:
-                    const InputDecoration(labelText: 'Finding'),
+                decoration: InputDecoration(labelText: tr('finding')),
               ),
               const SizedBox(height: 12),
               SizedBox(
@@ -2372,7 +2370,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Widget _statusControl() {
     final color = colorFromHex(_job?['status_color']?.toString());
     final icon = jobStatusIcon(_job?['status_icon']?.toString());
-    final name = _job?['status_name']?.toString() ?? 'Status';
+    final name = jobStatusLabel(
+      _job?['status']?.toString(),
+      _job?['status_name']?.toString() ?? 'Status',
+    );
 
     final child = Container(
       margin: const EdgeInsets.only(right: 10),
@@ -4968,7 +4969,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'inspection',
-                      'Pre-Inspection',
+                      tr('preInspection'),
                       Icons.search,
                       const Color(0xFF6B4BC3),
                       badge(inspectionCount),
@@ -4978,7 +4979,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'complaint',
-                      'Customer Complaint',
+                      tr('jobCustomerComplaint'),
                       Icons.description_outlined,
                       BriskersColors.customers,
                       badge(complaintCount),
@@ -4988,7 +4989,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'findings',
-                      'Vehicle Findings',
+                      tr('vehicleFindings'),
                       Icons.car_repair_outlined,
                       Colors.deepOrange,
                       badge(activeFindings),
@@ -4998,7 +4999,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'work',
-                      'Work Performed',
+                      tr('workPerformed'),
                       Icons.build_outlined,
                       const Color(0xFF15988F),
                       badge(workCount),
@@ -5013,7 +5014,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'history',
-                      'Work / Visit History',
+                      tr('jobHistory'),
                       Icons.history_outlined,
                       const Color(0xFF2585D8),
                       badge(visits.length),
@@ -5023,7 +5024,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'documents',
-                      'Estimate / Invoice',
+                      tr('jobDocuments'),
                       Icons.receipt_long_outlined,
                       const Color(0xFFE5A400),
                       badge(_documents.length),
@@ -5033,7 +5034,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'expenses',
-                      'Job Expenses',
+                      tr('jobExpensesTile'),
                       Icons.payments_outlined,
                       const Color(0xFFC62828),
                       badge(_jobExpenses.length),
@@ -5043,7 +5044,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   Expanded(
                     child: categoryTile(
                       'profit',
-                      'Job Profitability',
+                      tr('jobProfitabilityTile'),
                       Icons.analytics_outlined,
                       BriskersColors.reports,
                       null,

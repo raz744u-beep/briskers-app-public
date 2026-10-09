@@ -7,6 +7,7 @@ import '../core/briskers_colors.dart';
 import '../core/connection_mode.dart';
 import '../core/invoice_status_style.dart';
 import '../core/briskers_i18n.dart';
+import '../core/document_search.dart';
 import '../core/document_future_date.dart';
 import '../services/briskers_api.dart';
 import '../services/local_financial_cache.dart';
@@ -42,7 +43,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
   final LocalInvoiceStatusStylesCache _localInvoiceStyles =
       LocalInvoiceStatusStylesCache();
-  static final Map<String, List<Map<String, dynamic>>> _rowCache = {};
   static final Map<String, List<Map<String, dynamic>>> _styleCache = {};
 
   List<Map<String, dynamic>>? _rows;
@@ -51,6 +51,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   bool _futureDatedOnly = false;
   String? _error;
   final TextEditingController _search = TextEditingController();
+  final FocusNode _searchFocus = FocusNode(debugLabel: 'document-search');
 
   bool get _estimate => widget.kind == 'estimate';
 
@@ -146,16 +147,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     return Icons.circle;
   }
 
-  String get _cacheKey => '${widget.businessId}:${widget.kind}';
 
   @override
   void initState() {
     super.initState();
-    final cachedRows = _rowCache[_cacheKey];
     final cachedStyles = _styleCache[widget.businessId];
-    if (cachedRows != null) {
-      _rows = List<Map<String, dynamic>>.from(cachedRows);
-    }
     if (!_estimate && cachedStyles != null) {
       _invoiceStyles = List<Map<String, dynamic>>.from(cachedStyles);
     }
@@ -165,6 +161,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   @override
   void dispose() {
     _search.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -191,7 +188,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           widget.businessId,
           kind: widget.kind,
         );
-        if (mounted && local.isNotEmpty) {
+        if (mounted) {
           localShown = true;
           setState(() {
             _rows = local;
@@ -226,12 +223,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       final rows = List<Map<String, dynamic>>.from(results[0] as List);
       final styles = List<Map<String, dynamic>>.from(results[1] as List);
 
-      await _localDocuments.upsertFromServer(
+      // A complete server snapshot must evict stale synced MobileBiz rows.
+      // Any locally pending documents are preserved by the repository.
+      await _localDocuments.replaceFromServer(
         widget.businessId,
         rows,
+        kind: widget.kind,
       );
-
-      _rowCache[_cacheKey] = List<Map<String, dynamic>>.from(rows);
       if (!_estimate) {
         _styleCache[widget.businessId] =
             List<Map<String, dynamic>>.from(styles);
@@ -247,7 +245,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _rows ??= _rowCache[_cacheKey] ?? const [];
+        _rows ??= const [];
         _error = (_rows!.isEmpty && !localShown)
             ? 'Could not refresh documents. Pull down to try again.'
             : null;
@@ -302,18 +300,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     final query = _search.text.trim().toLowerCase();
     if (query.isNotEmpty) {
-      filtered = filtered.where((row) {
-        final haystack = <Object?>[
-          row['document_number'],
-          row['customer_name'],
-          row['vehicle'],
-          row['job_number'],
-          row['display_status'],
-          row['document_date'],
-        ].whereType<Object>().map((value) => value.toString().toLowerCase())
-            .join(' ');
-        return haystack.contains(query);
-      }).toList();
+      filtered = filtered.where((row) => matchesDocumentSearch(row, query)).toList();
     }
 
     if (!_estimate) {
@@ -1277,7 +1264,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             ),
             const SizedBox(height: 10),
             SearchBar(
+              key: const ValueKey('persistent-document-search'),
               controller: _search,
+              focusNode: _searchFocus,
               hintText: _estimate
                   ? 'Search estimate #, customer, job or vehicle'
                   : 'Search invoice #, customer, job or vehicle',

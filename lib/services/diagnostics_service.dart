@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:drift/drift.dart';
 
 import '../core/connection_mode.dart';
+import '../core/document_search.dart';
+import 'local_document_repository.dart';
 import '../local/briskers_local_database.dart' hide LocalFinancialCache;
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
@@ -171,6 +173,13 @@ class BriskersDiagnosticsService {
     );
     await _safeGroup(
       checks,
+      fallbackId: 'DOC-005',
+      category: 'Documents',
+      title: 'Exact invoice number search and duplicate numbers',
+      action: () => _checkInvoiceSearch(businessId, checks),
+    );
+    await _safeGroup(
+      checks,
       fallbackId: 'REL-000',
       category: 'Relationships',
       title: 'Local relationship integrity',
@@ -191,6 +200,13 @@ class BriskersDiagnosticsService {
         category: 'Documents',
         title: 'Document cache integrity',
         action: () => _checkDocuments(businessId, checks),
+      );
+      await _safeGroup(
+        checks,
+        fallbackId: 'DOC-006',
+        category: 'Documents',
+        title: 'Imported invoice edit eligibility',
+        action: () => _checkImportedInvoiceEditEligibility(businessId, checks),
       );
       await _safeGroup(
         checks,
@@ -830,6 +846,107 @@ class BriskersDiagnosticsService {
             .toList(),
       ),
     );
+  }
+
+  Future<void> _checkInvoiceSearch(
+    String businessId,
+    List<DiagnosticCheck> checks,
+  ) async {
+    final invoices = await LocalDocumentRepository(database: _database)
+        .listByKind(businessId, kind: 'invoice');
+    final duplicateNumbers = <String, int>{};
+    final byNumber = <BigInt, List<Map<String, dynamic>>>{};
+    for (final invoice in invoices) {
+      final number = normalizedDocumentNumber(invoice['document_number']);
+      if (number == null) continue;
+      byNumber.putIfAbsent(number, () => []).add(invoice);
+    }
+    for (final entry in byNumber.entries) {
+      if (entry.value.length > 1) {
+        duplicateNumbers[entry.key.toString()] = entry.value.length;
+      }
+    }
+
+    final unexpected = <String>[];
+    var checked = 0;
+    for (final entry in byNumber.entries.take(30)) {
+      checked++;
+      final query = entry.key.toString();
+      final matched = invoices.where(
+        (row) => matchesDocumentSearch(row, query),
+      );
+      if (matched.any(
+        (row) => normalizedDocumentNumber(row['document_number']) != entry.key,
+      )) {
+        unexpected.add(query);
+      }
+    }
+    final failed = duplicateNumbers.isNotEmpty || unexpected.isNotEmpty;
+    checks.add(DiagnosticCheck(
+      id: 'DOC-005',
+      category: 'Documents',
+      title: 'Exact invoice number search and unique invoice numbers',
+      level: failed ? BriskersDiagnosticLevel.fail : BriskersDiagnosticLevel.pass,
+      summary: failed
+          ? 'Invoice search or numbering integrity failed.'
+          : '$checked sample invoice-number searches returned no unrelated records.',
+      details: [
+        if (duplicateNumbers.isNotEmpty)
+          'Duplicate numbers: ${duplicateNumbers.entries.take(10).map((e) => '${e.key} (${e.value})').join(', ')}',
+        if (unexpected.isNotEmpty)
+          'Unexpected matches for: ${unexpected.take(10).join(', ')}',
+        'Only invoice numbers may match an all-digit invoice search.',
+      ],
+    ));
+  }
+
+  Future<void> _checkImportedInvoiceEditEligibility(
+    String businessId,
+    List<DiagnosticCheck> checks,
+  ) async {
+    final docs = await _database.customSelect(
+      '''
+      SELECT id, document_number, closed_at
+      FROM local_documents
+      WHERE business_id = ? AND kind = 'invoice'
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    final violations = <String>[];
+    var cached = 0;
+    var eligible = 0;
+    for (final doc in docs) {
+      final id = doc.read<String>('id');
+      final detail = await _detailCache.load(businessId, id);
+      if (detail == null || detail['legacy_read_only'] != true) continue;
+      cached++;
+      final number = doc.readNullable<String>('document_number') ?? id;
+      final closed = doc.readNullable<int>('closed_at') != null ||
+          detail['closed_at'] != null;
+      final paid = num.tryParse(detail['paid_amount']?.toString() ?? '') ?? 0;
+      final pending = num.tryParse(detail['pending_payment']?.toString() ?? '') ?? 0;
+      final canEdit = detail['legacy_editable'] == true;
+      if (canEdit) eligible++;
+      if (canEdit && (closed || paid > 0.005 || pending > 0.005)) {
+        violations.add(number);
+      }
+    }
+    checks.add(DiagnosticCheck(
+      id: 'DOC-006',
+      category: 'Documents',
+      title: 'Imported invoice edit safeguards',
+      level: violations.isEmpty
+          ? BriskersDiagnosticLevel.pass
+          : BriskersDiagnosticLevel.fail,
+      summary: violations.isEmpty
+          ? '$cached imported invoice detail snapshots checked; $eligible marked eligible to edit.'
+          : '${violations.length} paid/closed imported invoices are incorrectly editable.',
+      details: [
+        if (violations.isNotEmpty)
+          'Unsafe invoices: ${violations.take(10).join(', ')}',
+        'Unpaid, open imported invoices may be enabled for editing; paid or closed invoices stay locked.',
+      ],
+    ));
   }
 
   Future<void> _checkRelationships(

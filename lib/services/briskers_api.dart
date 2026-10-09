@@ -2980,6 +2980,20 @@ class BriskersApi {
         .toList();
   }
 
+  /// Explicit, audited activation of an open/unpaid MobileBiz invoice.
+  Future<void> enableImportedInvoiceEditing(
+    String businessId,
+    String documentId,
+  ) async {
+    await networkSupabase.rpc(
+      'briskers_enable_open_imported_invoice_edit',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+      },
+    );
+  }
+
   Future<Map<String, dynamic>> documentDetail(
     String businessId,
     String documentId,
