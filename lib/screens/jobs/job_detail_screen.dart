@@ -1485,8 +1485,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(tr('workSavedLocally')), 
-            duration: Duration(seconds: 2),
+            content: Text(tr('workSavedLocally')),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -1814,7 +1814,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       tr('addVehicleFinding'),
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w700,
                       ),
@@ -1955,8 +1955,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(tr('findingSavedLocally')), 
-            duration: Duration(seconds: 2),
+            content: Text(tr('findingSavedLocally')),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -1994,7 +1994,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   tr('editFinding'),
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
                   ),
