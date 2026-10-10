@@ -12,6 +12,7 @@ import 'briskers_api.dart';
 import 'local_financial_cache.dart';
 import 'local_job_repository.dart';
 import 'local_document_detail_cache.dart';
+import 'local_document_repository.dart';
 import 'invoice_performance_metrics.dart';
 import 'local_invoice_status_styles_cache.dart';
 import 'local_tax_settings_cache.dart';
@@ -114,6 +115,49 @@ class BriskersDiagnosticsService {
   final LocalTaxSettingsCache _taxSettingsCache;
   final LocalInvoiceStatusStylesCache _invoiceStatusStylesCache;
   final BriskersConnectionModeController _connectionMode;
+
+  Future<void> _checkPendingCloseAttention(
+    String businessId,
+    List<DiagnosticCheck> checks,
+  ) async {
+    final local = await LocalDocumentRepository(database: _database)
+        .pendingCloseAttention(businessId);
+    final cachedCount = local['count'] as int? ?? 0;
+    int? serverCount;
+    if (!_connectionMode.forceOffline) {
+      try {
+        final online = await const BriskersApi().needsAttention(businessId);
+        final counts = online['counts'];
+        if (counts is Map) {
+          serverCount = int.tryParse(
+            counts['pending_close_invoices']?.toString() ?? '',
+          );
+        }
+      } catch (_) {
+        // Offline cache must still be checked if server temporarily fails.
+      }
+    }
+    final mismatch = serverCount != null && serverCount != cachedCount;
+    checks.add(DiagnosticCheck(
+      id: 'ATT-001',
+      category: 'Offline attention',
+      title: 'Pending Close invoices saved for offline',
+      level: mismatch || cachedCount == 0
+          ? BriskersDiagnosticLevel.warning
+          : BriskersDiagnosticLevel.pass,
+      summary: serverCount == null
+          ? '$cachedCount Pending Close invoices in local cache.'
+          : '$cachedCount cached; $serverCount currently reported online.',
+      details: [
+        if (mismatch)
+          'Run a complete document sync before testing Needs Attention offline.',
+        if (cachedCount == 0)
+          'No local Pending Close invoices are indexed; verify sync coverage.',
+        for (final row in (local['items'] as List).take(8))
+          'Cached invoice ${(row as Map)['document_number']}',
+      ],
+    ));
+  }
 
   Future<void> _checkInvoicePerformance(
     String businessId,
@@ -222,6 +266,13 @@ class BriskersDiagnosticsService {
     );
 
     if (full) {
+      await _safeGroup(
+        checks,
+        fallbackId: 'ATT-001',
+        category: 'Offline attention',
+        title: 'Cached Pending Close invoice coverage',
+        action: () => _checkPendingCloseAttention(businessId, checks),
+      );
       await _safeGroup(
         checks,
         fallbackId: 'PERF-001',
