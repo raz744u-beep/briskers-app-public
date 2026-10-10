@@ -136,7 +136,7 @@ class BriskersFunctionalDiagnosticsService {
       checks,
       id: 'FUNC-009',
       title: 'Offline blank invoice draft and unique sync identity',
-      success: 'Invoice, items and notes saved locally with one sync identity.',
+      success: 'Invoice, linked pending Job, first visit, items and notes saved locally with one retry-safe sync identity.',
       action: _checkOfflineInvoiceDraft,
     );
 
@@ -240,7 +240,7 @@ class BriskersFunctionalDiagnosticsService {
       lines.length == 3 &&
           lines[0]['label'] == 'Payment - Cash' &&
           lines[1]['label'] == 'Payment - Check' &&
-          lines[2]['label'] == 'Payment - Credit card (Pending)',
+          lines[2]['label'] == 'Payment - Credit card',
       'The PDF did not retain the individual methods and pending state.',
     );
     _require(
@@ -384,8 +384,35 @@ class BriskersFunctionalDiagnosticsService {
     );
     await drafts.saveMemo(businessId, id, 'Sandbox invoice note');
     final snapshot = await cache.load(businessId, id);
-    _require(snapshot != null, 'Offline invoice detail not cached.');
-    _require(snapshot!['kind'] == 'invoice', 'Invoice kind was lost.');
+    if (snapshot == null) {
+      throw StateError('Offline invoice detail not cached.');
+    }
+    final localJobId = snapshot['job_id']?.toString() ?? '';
+    _require(
+      localJobId.startsWith('local-job-') &&
+          localJobId == id.replaceFirst('local-invoice-', 'local-job-'),
+      'The offline Quick Invoice has no deterministic linked Job.',
+    );
+    final linked = await database.customSelect(
+      '''
+      SELECT j.id, j.sync_state, d.job_id,
+             (SELECT COUNT(*) FROM local_job_visits v
+              WHERE v.business_id = j.business_id AND v.job_id = j.id) AS visits
+      FROM local_documents d
+      JOIN local_jobs j
+        ON j.business_id = d.business_id AND j.id = d.job_id
+      WHERE d.business_id = ? AND d.id = ?
+      ''',
+      variables: [Variable<String>(businessId), Variable<String>(id)],
+    ).get();
+    _require(
+      linked.length == 1 &&
+          linked.single.read<String>('id') == localJobId &&
+          linked.single.read<String>('sync_state') == 'pending' &&
+          linked.single.read<int>('visits') == 1,
+      'Offline invoice, pending Job and initial visit were not created atomically.',
+    );
+    _require(snapshot['kind'] == 'invoice', 'Invoice kind was lost.');
     _require(
       (snapshot['total_amount'] as num).toDouble() > 109,
       'Offline invoice math was not saved.',
@@ -413,8 +440,9 @@ class BriskersFunctionalDiagnosticsService {
     ) as Map<String, dynamic>;
     final operationId = payload['operation_id']?.toString() ?? '';
     _require(
-      operationId.length == 36 && operationId.split('-').length == 5,
-      'Offline operation ID is not suitable for safe retry.',
+      operationId.length == 36 && operationId.split('-').length == 5 &&
+          payload['provisional_job_id'] == localJobId,
+      'Offline operation ID or provisional Job mapping is missing for safe retry.',
     );
   }
 

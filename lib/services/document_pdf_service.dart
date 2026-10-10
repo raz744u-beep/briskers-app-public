@@ -77,7 +77,7 @@ class DocumentPdfService {
             method.isEmpty ? 'Method not recorded' : method;
         rows.add({
           'label':
-              'Payment - $displayMethod${pending ? ' (Pending)' : ''}',
+              'Payment - $displayMethod',
           'amount': amountCents / 100,
           'pending': pending,
         });
@@ -104,7 +104,7 @@ class DocumentPdfService {
         },
       if (pendingCents > 0)
         {
-          'label': 'Payment - Method not recorded (Pending)',
+          'label': 'Payment - Method not recorded',
           'amount': pendingCents / 100,
           'pending': true,
         },
@@ -838,14 +838,6 @@ class DocumentPdfService {
               bold: true,
             ),
             _totalRow('Balance Due', _money(remaining), bold: true),
-            if (pending > 0.005)
-              pw.Align(
-                alignment: pw.Alignment.centerRight,
-                child: pw.Text(
-                  'Pending entries are not yet finalized',
-                  style: const pw.TextStyle(fontSize: 8),
-                ),
-              ),
           ],
         ],
       ),

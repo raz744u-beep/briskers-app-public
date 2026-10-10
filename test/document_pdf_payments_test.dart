@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/services/document_pdf_service.dart';
@@ -98,6 +99,28 @@ void main() {
   });
 
   group('PDF-001 individual payment methods and presentation math', () {
+    test('customer-facing PDF has no unapproved pending text', () async {
+      final source = await File('lib/services/document_pdf_service.dart')
+          .readAsString();
+      expect(source, isNot(contains('Pending entries are not yet finalized')));
+      expect(source, isNot(contains('Method not recorded (Pending)')));
+      final rows = DocumentPdfService.invoicePaymentLines({
+        'total_amount': 100,
+        'paid_amount': 0,
+        'pending_payment': 40,
+        'payments': [
+          {
+            'amount': 40,
+            'state': 'pending',
+            'payment_method_name': 'Debit card',
+          },
+        ],
+      });
+      expect(rows.single['label'], 'Payment - Debit card');
+      expect(rows.single['pending'], isTrue);
+      expect(rows.single['amount'], 40);
+    });
+
     test('two finalized methods plus one pending card stay itemized', () {
       final detail = <String, dynamic>{
         'total_amount': 972,
@@ -116,7 +139,7 @@ void main() {
       expect(lines.map((row) => row['label']), [
         'Payment - Cash',
         'Payment - Check',
-        'Payment - Credit card (Pending)',
+        'Payment - Credit card',
       ]);
       expect(lines.map((row) => row['amount']), [250, 250, 150]);
       expect(lines.last['pending'], isTrue);
@@ -139,7 +162,7 @@ void main() {
       final lines = DocumentPdfService.invoicePaymentLines(detail);
       expect(lines.map((row) => row['label']), [
         'Payment - Method not recorded',
-        'Payment - Method not recorded (Pending)',
+        'Payment - Method not recorded',
       ]);
       expect(lines.map((row) => row['amount']), [600, 100]);
       expect(DocumentPdfService.invoicePaymentAmounts(detail)['remaining'],
