@@ -5642,7 +5642,43 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _saveInlineNotes() async {
     if (_readOnly || _busy || !_notesDirty) return;
     final value = _notesController.text.trim();
-    final translatedValue = await _translateManualNote(value);
+    final action = invoiceNoteDraftAction(
+      value,
+      _detail?['memo']?.toString(),
+    );
+    if (action == InvoiceNoteDraftAction.none) {
+      if (mounted) setState(() => _notesDirty = false);
+      return;
+    }
+
+    if (action == InvoiceNoteDraftAction.clear) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(tr('clearInvoiceNoteTitle')),
+          content: Text(tr('clearInvoiceNoteWarning')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(tr('cancel')),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(tr('clearInvoiceNote')),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || confirmed != true) return;
+    }
+
+    final translatedValue = action == InvoiceNoteDraftAction.clear
+        ? ''
+        : await _translateManualNote(value);
     if (translatedValue == null || !mounted) return;
 
     await _run(
@@ -5671,6 +5707,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final signedAt = DateTime.tryParse(
       _signatureStatus['signed_at']?.toString() ?? '',
     );
+    final draftAction = invoiceNoteDraftAction(
+      _notesController.text,
+      _detail?['memo']?.toString(),
+    );
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -5692,11 +5732,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             maxLines: 7,
             keyboardType: TextInputType.multiline,
             textCapitalization: TextCapitalization.sentences,
-            onChanged: (_) {
-              if (!_notesDirty) {
-                setState(() => _notesDirty = true);
-              }
-            },
+            onChanged: (_) => setState(() {
+              _notesDirty = invoiceNoteDraftAction(
+                _notesController.text,
+                _detail?['memo']?.toString(),
+              ) != InvoiceNoteDraftAction.none;
+            }),
             decoration: InputDecoration(
               hintText: _estimate
                   ? tr('noEstimateNotes')
@@ -5724,31 +5765,44 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
             ),
           ),
-          if (!_readOnly && _notesDirty) ...[
+          if (!_readOnly &&
+              draftAction != InvoiceNoteDraftAction.none) ...[
             const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton.icon(
+                key: const ValueKey('invoice-note-save-or-clear'),
                 style: FilledButton.styleFrom(
-                  backgroundColor: _estimate
-                      ? BriskersColors.estimates
-                      : BriskersColors.invoices,
+                  backgroundColor: draftAction == InvoiceNoteDraftAction.clear
+                      ? Theme.of(context).colorScheme.error
+                      : _documentActionColor,
                   foregroundColor: Colors.white,
                 ),
                 onPressed: _busy ? null : _saveInlineNotes,
-                icon: const Icon(Icons.check),
-                label: Text(tr('saveNotes')),
+                icon: Icon(draftAction == InvoiceNoteDraftAction.clear
+                    ? Icons.delete_outline
+                    : Icons.check),
+                label: Text(draftAction == InvoiceNoteDraftAction.clear
+                    ? tr('clearInvoiceNote')
+                    : tr('saveNotes')),
               ),
             ),
           ],
           const SizedBox(height: 12),
-          if (!_readOnly && _notesController.text.trim().isNotEmpty)
+          if (!_readOnly &&
+              _notesController.text.trim().isNotEmpty)
             OutlinedButton.icon(
+              key: const ValueKey('invoice-save-as-standard-note'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _documentActionColor,
+                side: BorderSide(color: _documentActionColor),
+                alignment: Alignment.centerLeft,
+              ),
               onPressed: _busy ? null : () => _createStandardNote(
                 initialBody: _notesController.text,
               ),
               icon: const Icon(Icons.bookmark_add_outlined),
-              label: const Text('Save as Standard Note'),
+              label: Text(tr('standardNoteSaveAs')),
             ),
           if (!_readOnly)
             OutlinedButton.icon(
