@@ -263,6 +263,59 @@ class AppointmentSyncService {
     return localId;
   }
 
+  /// Reassign an appointment that has never been uploaded. Both its cached
+  /// record and original create payload change in the same transaction.
+  Future<void> reassignPendingCreate(
+    String businessId, String appointmentId, {
+    required String customerId,
+    String? vehicleId,
+  }) async {
+    if (!appointmentId.startsWith('local-appointment-') ||
+        customerId.trim().isEmpty) {
+      throw ArgumentError('A pending appointment and customer are required.');
+    }
+    await _database.transaction(() async {
+      final records = await _database.customSelect(
+        """SELECT job_id FROM local_appointments
+           WHERE business_id=? AND id=? LIMIT 1""",
+        variables: [Variable<String>(businessId),
+                    Variable<String>(appointmentId)],
+      ).get();
+      if (records.length != 1 ||
+          records.single.readNullable<String>('job_id') != null) {
+        throw StateError('Appointment is missing or linked to a Job.');
+      }
+      final queue = await _database.customSelect(
+        """SELECT id,payload_json,attempt_count,last_attempt_at
+           FROM sync_outbox WHERE business_id=? AND entity_id=?
+           AND entity_type='appointment_create' AND state='pending' LIMIT 1""",
+        variables: [Variable<String>(businessId),
+                    Variable<String>(appointmentId)],
+      ).get();
+      if (queue.length != 1 ||
+          queue.single.read<int>('attempt_count') != 0 ||
+          queue.single.readNullable<int>('last_attempt_at') != null) {
+        throw StateError('Appointment creation has started synchronizing.');
+      }
+      final data = Map<String,dynamic>.from(
+        jsonDecode(queue.single.read<String>('payload_json')) as Map);
+      data['customer_id'] = customerId;
+      data['vehicle_id'] = vehicleId;
+      await _database.customStatement(
+        'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+        [jsonEncode(data),queue.single.read<int>('id')],
+      );
+      await _database.customStatement(
+        """UPDATE local_appointments SET customer_id=?,vehicle_id=?,
+           customer_name=NULL,vehicle_label=NULL,
+           vehicle_year=NULL,vehicle_make=NULL,vehicle_model=NULL
+           WHERE business_id=? AND id=?""",
+        [customerId,vehicleId,businessId,appointmentId],
+      );
+    });
+    _syncEvents.add(businessId);
+  }
+
   /// First stage of offline appointment editing. This records the complete
   /// requested edit atomically with its base revision. It does not attempt
   /// network writes; a server conflict-aware replay is required before this
