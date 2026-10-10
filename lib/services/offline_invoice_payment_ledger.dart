@@ -138,7 +138,15 @@ class OfflineInvoicePaymentLedger {
 
   /// Retry replay with the *same* saved UUID, never the legacy non-idempotent
   /// payment API. Fail closed and retain the row when server support is absent.
-  Future<void> flush(String businessId) async {
+  Future<void> flush(
+    String businessId, {
+    Future<String> Function(String businessId, String invoiceId, num amount,
+            String methodId, String operationId)? submitPayment,
+    Future<Map<String, dynamic>> Function(String businessId, String invoiceId)?
+        fetchInvoice,
+    Future<void> Function(String businessId, String invoiceId,
+            Map<String, dynamic> detail)? cacheInvoice,
+  }) async {
     final rows = await _database.customSelect(
       """SELECT id,entity_id,payload_json FROM sync_outbox
       WHERE business_id=? AND entity_type='invoice_payment_received'
@@ -153,29 +161,36 @@ class OfflineInvoicePaymentLedger {
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
       try {
-        final paymentId = await _api.addPendingInvoicePaymentOnce(
-          businessId,
-          invoiceId,
-          amount: (payload['amount_cents'] as num) / 100,
-          methodId: payload['method_id'].toString(),
-          operationId: payload['operation_id'].toString(),
-        );
+        final amount = (payload['amount_cents'] as num) / 100;
+        final methodId = payload['method_id'].toString();
+        final operationId = payload['operation_id'].toString();
+        final paymentId = submitPayment != null
+            ? await submitPayment(
+                businessId, invoiceId, amount, methodId, operationId)
+            : await _api.addPendingInvoicePaymentOnce(
+                businessId, invoiceId,
+                amount: amount, methodId: methodId, operationId: operationId,
+              );
         // A server acknowledgement is not sufficient to remove the local
         // receipt from the outbox. Preserve it until the refreshed server
         // invoice proves that the payment is represented in its aggregates.
         // A missing/failed refresh will safely retry with the same UUID.
-        final detail = await _api.documentDetail(businessId, invoiceId);
+        final detail = fetchInvoice != null
+            ? await fetchInvoice(businessId, invoiceId)
+            : await _api.documentDetail(businessId, invoiceId);
         final present = serverAcknowledgesPayment(detail, paymentId);
         if (!present) {
           throw StateError(
             'Server accepted payment but invoice detail has not reconciled yet.',
           );
         }
-        await const LocalDocumentDetailCache().save(
-          businessId,
-          invoiceId,
-          detail,
-        );
+        if (cacheInvoice != null) {
+          await cacheInvoice(businessId, invoiceId, detail);
+        } else {
+          await const LocalDocumentDetailCache().save(
+            businessId, invoiceId, detail,
+          );
+        }
         await _database.customStatement(
           'DELETE FROM sync_outbox WHERE id=?',
           [id],
