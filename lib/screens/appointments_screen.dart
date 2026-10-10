@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/appointment_action_policy.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
 import '../services/appointment_sync_service.dart';
@@ -353,27 +354,34 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   Future<void> _showOptions(Map<String, dynamic> item) async {
     if (!_canManage && !_canCheckIn) return;
 
-    final status = item['status']?.toString() ?? '';
     final syncState = item['sync_state']?.toString() ?? 'synced';
     final queued = syncState == 'pending';
     final conflict = syncState == 'conflict';
-    final canEdit = _onlineReady &&
-        _canManage &&
-        {'confirmed', 'tentative'}.contains(status) &&
-        item['job_id'] == null &&
-        !queued &&
-        !conflict;
+    // Staff may edit ordinary appointments; owners can also correct
+    // checked-in appointments. The guarded server RPC preserves linked
+    // Job/customer/vehicle integrity when historical links already exist.
+    final canEdit = AppointmentActionPolicy.canEdit(
+      onlineReady: _onlineReady,
+      canManage: _canManage,
+      isOwner: widget.roleCode == 'owner',
+      linkedJob: item['job_id'] != null,
+      pending: queued,
+      conflict: conflict,
+    );
     final canCheckIn = _canCheckIn &&
         item['can_check_in'] == true &&
         item['job_id'] == null &&
         !queued &&
         !conflict;
     final canCancel = canEdit;
-    final canDelete = _onlineReady &&
-        widget.roleCode == 'owner' &&
-        item['job_id'] == null &&
-        item['request_id'] == null &&
-        {'confirmed', 'tentative', 'cancelled', 'no_show'}.contains(status);
+    final canDelete = AppointmentActionPolicy.canDelete(
+      onlineReady: _onlineReady,
+      isOwner: widget.roleCode == 'owner',
+      linkedJob: item['job_id'] != null,
+      linkedRequest: item['request_id'] != null,
+      pending: queued,
+      conflict: conflict,
+    );
 
     final action = await showModalBottomSheet<String>(
       context: context,

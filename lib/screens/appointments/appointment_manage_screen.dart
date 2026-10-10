@@ -39,6 +39,7 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   String? _error;
 
   bool get _editing => widget.appointment != null;
+  bool get _linkedJob => widget.appointment?['job_id'] != null;
 
   @override
   void initState() {
@@ -276,7 +277,7 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                   ),
                 )
                 .toList(),
-            onChanged: (value) async {
+            onChanged: _linkedJob ? null : (value) async {
               setState(() {
                 _customerId = value;
                 _vehicleId = null;
@@ -313,7 +314,7 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                 ),
               ),
             ],
-            onChanged: (value) => setState(() => _vehicleId = value),
+            onChanged: _linkedJob ? null : (value) => setState(() => _vehicleId = value),
           ),
           const SizedBox(height: 12),
           TextField(
