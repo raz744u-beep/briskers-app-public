@@ -48,8 +48,7 @@ class OfflineInvoicePaymentLedger {
   }
 
   /// Record a payment already received or approved through its real channel.
-  /// This does NOT process cards; card approval must occur in the terminal.
-  /// Store only a non-sensitive approval reference, never card credentials.
+  /// Briskers records the received payment only; it never processes cards.
   Future<String> recordReceivedPayment(
     String businessId,
     String invoiceId, {
@@ -57,26 +56,12 @@ class OfflineInvoicePaymentLedger {
     required int remainingBeforePaymentCents,
     required String methodId,
     required String methodName,
-    String? cardApprovalReference,
   }) async {
     if (businessId.isEmpty || invoiceId.isEmpty || methodId.isEmpty) {
       throw ArgumentError('Business, invoice and payment method are required.');
     }
     final method = methodName.trim();
     if (method.isEmpty) throw ArgumentError('Payment method is required.');
-    // Every configured payment method is eligible for offline recording.
-    // Card payments still require approval from the actual card processor.
-    final normalized = method.toLowerCase();
-    final isCard = normalized.contains('card') ||
-        normalized.contains('visa') ||
-        normalized.contains('mastercard') ||
-        normalized.contains('amex') ||
-        normalized.contains('discover');
-    if (isCard && (cardApprovalReference?.trim().isEmpty ?? true)) {
-      throw StateError(
-        'Confirm card approval on the terminal before recording its payment.',
-      );
-    }
     final amountCents = cents(amount);
     if (remainingBeforePaymentCents < amountCents) {
       throw StateError('Payment exceeds the remaining invoice balance.');
@@ -88,7 +73,6 @@ class OfflineInvoicePaymentLedger {
       'invoice_id': invoiceId,
       'method_id': methodId,
       'method_name': method,
-      if (isCard) 'card_approval_reference': cardApprovalReference!.trim(),
       'amount_cents': amountCents,
       'received_at': DateTime.now().toUtc().toIso8601String(),
     };
