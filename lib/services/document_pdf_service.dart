@@ -127,6 +127,26 @@ class DocumentPdfService {
     return text;
   }
 
+  /// The PDF display suffix is not part of the stored quantity or price.
+  /// Catalog units win over generic item defaults.
+  static String pdfLineQuantity(Map<String, dynamic> line) {
+    final qty = _quantity(line['quantity']);
+    if (line['line_kind']?.toString() == 'labor') return '$qty hrs';
+
+    final raw = line['pricing_unit']?.toString().trim() ?? '';
+    String unit = raw;
+    if (unit.isEmpty && line['line_kind']?.toString() == 'item') {
+      unit = 'pc.';
+    } else if (const {'pc', 'pcs', 'piece', 'pieces'}.contains(
+      unit.toLowerCase(),
+    )) {
+      unit = 'pc.';
+    } else if (const {'hr', 'hour', 'hours'}.contains(unit.toLowerCase())) {
+      unit = 'hrs';
+    }
+    return unit.isEmpty ? qty : '$qty $unit';
+  }
+
   static String _address(Object? raw) {
     if (raw == null) return '';
     if (raw is String) return raw.trim();
@@ -733,7 +753,7 @@ class DocumentPdfService {
         _bodyCell(index.toString(), align: pw.TextAlign.center),
         _bodyCell(display),
         _bodyCell(
-          _quantity(line['quantity']),
+          pdfLineQuantity(line),
           align: pw.TextAlign.center,
         ),
         _bodyCell(_money(line['unit_price']), align: pw.TextAlign.right),
