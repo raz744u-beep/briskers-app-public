@@ -1600,6 +1600,39 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (action == 'delete') await _deleteLine(line);
   }
 
+  /// Enrich only the PDF snapshot from the already-synced local catalog.
+  /// Never alter stored invoice items, unit prices or totals.
+  Future<Map<String, dynamic>> _withPdfUnits(
+    Map<String, dynamic> detail,
+  ) async {
+    final raw = detail['lines'];
+    if (raw is! List || raw.isEmpty) return detail;
+    try {
+      final catalog = await _localCatalog.items(widget.businessId);
+      final units = <String, String>{
+        for (final item in catalog)
+          if ((item['pricing_unit']?.toString().trim() ?? '').isNotEmpty)
+            item['id'].toString(): item['pricing_unit'].toString().trim(),
+      };
+      return {
+        ...detail,
+        'lines': raw.map((value) {
+          if (value is! Map) return value;
+          final line = Map<String, dynamic>.from(value);
+          final itemId = line['item_id']?.toString() ?? '';
+          final existing = line['pricing_unit']?.toString().trim() ?? '';
+          if (existing.isEmpty && units.containsKey(itemId)) {
+            line['pricing_unit'] = units[itemId];
+          }
+          return line;
+        }).toList(),
+      };
+    } catch (_) {
+      // A missing local catalog must never prevent invoice PDF creation.
+      return detail;
+    }
+  }
+
   Future<Map<String, dynamic>?> _preparePdf() async {
     final lines = List<dynamic>.from(_detail?['lines'] ?? const []);
     if (lines.isEmpty) {
@@ -1610,7 +1643,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (BriskersConnectionModeController.instance.forceOffline) {
       final localDetail = _detail;
       if (localDetail == null) return null;
-      return Map<String, dynamic>.from(localDetail);
+      return _withPdfUnits(Map<String, dynamic>.from(localDetail));
     }
 
     try {
@@ -1661,7 +1694,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       } else if (mounted) {
         setState(() => _detail = detail);
       }
-      return detail;
+      return _withPdfUnits(detail);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
       return null;
