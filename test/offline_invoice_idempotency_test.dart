@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,6 +38,7 @@ class _InterruptedSyncApi extends BriskersApi {
       'id':documentId,
       'kind':'invoice',
       'document_number':'6332',
+      'job_id':'00000000-0000-4000-8000-00000000a633',
       'customer_id':'customer-one',
       'document_date':'2026-10-09',
       'status':'issued',
@@ -71,7 +73,16 @@ void main() {
     await drafts.addLine('sandbox', id,
         name:'Water pump', quantity:1, unitPrice:100,
         taxRate:0.0975, lineKind:'item');
+    final before = await db.customSelect(
+      "select job_id from local_documents where business_id='sandbox' and id=?",
+      variables: [Variable<String>(id)],
+    ).get();
+    expect(before.single.read<String>('job_id'), startsWith('local-job-'));
     await drafts.flush('sandbox');
+    final jobStillQueued = await db.customSelect(
+      "select id from local_jobs where business_id='sandbox' and sync_state='pending'",
+    ).get();
+    expect(jobStillQueued, hasLength(1));
     final stillQueued = await db.customSelect(
       "select id from sync_outbox where business_id='sandbox' and state='pending'"
     ).get();
@@ -93,6 +104,15 @@ void main() {
         .listByKind('sandbox',kind:'invoice');
     expect(stored, hasLength(1));
     expect(stored.single['document_number'], '6332');
+    expect(stored.single['job_id'], '00000000-0000-4000-8000-00000000a633');
+    final provisionalJobs = await db.customSelect(
+      "select id from local_jobs where business_id='sandbox' and id like 'local-job-%'",
+    ).get();
+    expect(provisionalJobs, isEmpty);
+    final provisionalVisits = await db.customSelect(
+      "select id from local_job_visits where business_id='sandbox' and id like 'local-visit-%'",
+    ).get();
+    expect(provisionalVisits, isEmpty);
     await db.close();
   });
 }
