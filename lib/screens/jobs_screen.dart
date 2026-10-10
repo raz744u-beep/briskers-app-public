@@ -237,7 +237,7 @@ class _JobsScreenState extends State<JobsScreen> {
     widget.onJobsChanged?.call();
   }
 
-  Future<void> _openJob(Map<String, dynamic> job) async {
+  Future<void> _openJob(Map<String, dynamic> job, {String? initialAction}) async {
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
@@ -245,6 +245,7 @@ class _JobsScreenState extends State<JobsScreen> {
           businessId: widget.businessId,
           jobId: job['id'].toString(),
           roleCode: widget.roleCode,
+          initialAction: initialAction,
           bottomNavigationBar: widget.jobDetailBottomNavigationBar,
         ),
       ),
@@ -599,10 +600,79 @@ class _JobsScreenState extends State<JobsScreen> {
     );
   }
 
+  Future<void> _showJobActions(Map<String, dynamic> job) async {
+    final owner = widget.roleCode == 'owner';
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.folder_open_outlined),
+              title: const Text('Open Job'),
+              onTap: () => Navigator.pop(sheetContext, 'open'),
+            ),
+            if (_canManage)
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit Job'),
+                onTap: () => Navigator.pop(sheetContext, 'edit'),
+              ),
+            if (owner)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text('Delete Job', style: TextStyle(color: Colors.red)),
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+            const Divider(),
+            if (_canManage) ...[
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined),
+                title: const Text('Add Pre-inspection'),
+                onTap: () => Navigator.pop(sheetContext, 'inspection'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.notes_outlined),
+                title: const Text('Add Customer Complaint'),
+                onTap: () => Navigator.pop(sheetContext, 'complaint'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.add_circle_outline),
+                title: const Text('Add Finding'),
+                onTap: () => Navigator.pop(sheetContext, 'finding'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.request_quote_outlined),
+                title: const Text('Add Estimate'),
+                onTap: () => Navigator.pop(sheetContext, 'estimate'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.receipt_long_outlined),
+                title: const Text('Add Invoice'),
+                onTap: () => Navigator.pop(sheetContext, 'invoice'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.add_card_outlined),
+                title: const Text('Add Expense'),
+                onTap: () => Navigator.pop(sheetContext, 'expense'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    await _openJob(job, initialAction: action == 'open' ? null : action);
+  }
+
   Widget _jobCard(Map<String, dynamic> job) => JobCompactCard(
         job: job,
         statusControl: _statusControl(job),
         onOpen: () => _openJob(job),
+        onLongPress: () => _showJobActions(job),
         onEditMechanic:
             _canManage ? () => _quickEditMechanic(job) : null,
         onEditPlannedTime:

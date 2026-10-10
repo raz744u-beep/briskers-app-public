@@ -10,6 +10,7 @@ class JobCompactCard extends StatelessWidget {
     required this.job,
     required this.statusControl,
     required this.onOpen,
+    this.onLongPress,
     this.onEditMechanic,
     this.onEditPlannedTime,
     this.canOpen = true,
@@ -18,6 +19,7 @@ class JobCompactCard extends StatelessWidget {
   final Map<String, dynamic> job;
   final Widget statusControl;
   final VoidCallback onOpen;
+  final VoidCallback? onLongPress;
   final VoidCallback? onEditMechanic;
   final VoidCallback? onEditPlannedTime;
   final bool canOpen;
@@ -94,6 +96,7 @@ class JobCompactCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: canOpen ? onOpen : null,
+        onLongPress: canOpen ? onLongPress : null,
         child: Stack(
           children: [
             Positioned.fill(
