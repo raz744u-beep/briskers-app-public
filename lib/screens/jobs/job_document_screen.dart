@@ -28,6 +28,7 @@ import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_document_edit_service.dart';
 import '../../services/local_tax_settings_cache.dart';
+import '../../services/local_payment_methods_cache.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'customer_invoice_signature_screen.dart';
@@ -75,6 +76,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   final LocalTaxSettingsCache _taxSettingsCache =
       LocalTaxSettingsCache();
   final _catalogSync = CatalogSyncService();
+  final LocalPaymentMethodsCache _paymentMethodsCache =
+      const LocalPaymentMethodsCache();
   final ImagePicker _picker = ImagePicker();
   final ScrollController _workspaceHeaderController = ScrollController();
   final GlobalKey _workspaceHeaderKey = GlobalKey();
@@ -2374,10 +2377,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _paymentMethods() async {
-    final options = await _api.paymentOptions(widget.businessId);
-    return List<dynamic>.from(options['methods'] ?? const [])
-        .map((raw) => Map<String, dynamic>.from(raw as Map))
-        .toList();
+    final cached = await _paymentMethodsCache.load(widget.businessId);
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      return cached;
+    }
+    try {
+      final options = await _api.paymentOptions(widget.businessId);
+      final methods = List<dynamic>.from(options['methods'] ?? const [])
+          .map((raw) => Map<String, dynamic>.from(raw as Map))
+          .toList();
+      await _paymentMethodsCache.save(widget.businessId, methods);
+      return methods;
+    } catch (_) {
+      // Auto mode can still display previously configured methods if the
+      // network is unavailable. Saving payments remains server-only until
+      // the durable, idempotent offline payment queue is implemented.
+      if (cached.isNotEmpty) return cached;
+      rethrow;
+    }
   }
 
   Future<void> _enterPayment() async {
