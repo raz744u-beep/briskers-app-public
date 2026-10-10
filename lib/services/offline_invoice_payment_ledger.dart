@@ -40,6 +40,19 @@ class OfflineInvoicePaymentLedger {
     return max(0, toCents(total) - received);
   }
 
+  /// Local queue entries are retired only after their payment appears in
+  /// authoritative server detail. Never rely on matching amounts alone.
+  static bool serverAcknowledgesPayment(
+    Map<String, dynamic> detail,
+    String paymentId,
+  ) {
+    final entries = detail['payments'];
+    if (entries is! List || paymentId.isEmpty) return false;
+    return entries.whereType<Map>().any(
+      (payment) => payment['id']?.toString() == paymentId,
+    );
+  }
+
   String _operationId() {
     final bytes = List<int>.generate(16, (_) => _random.nextInt(256));
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
@@ -151,10 +164,7 @@ class OfflineInvoicePaymentLedger {
         // invoice proves that the payment is represented in its aggregates.
         // A missing/failed refresh will safely retry with the same UUID.
         final detail = await _api.documentDetail(businessId, invoiceId);
-        final payments = (detail['payments'] as List?) ?? const [];
-        final present = payments.whereType<Map>().any(
-          (p) => p['id']?.toString() == paymentId,
-        );
+        final present = serverAcknowledgesPayment(detail, paymentId);
         if (!present) {
           throw StateError(
             'Server accepted payment but invoice detail has not reconciled yet.',
