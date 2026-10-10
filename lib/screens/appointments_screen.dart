@@ -357,12 +357,13 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final syncState = item['sync_state']?.toString() ?? 'synced';
     final queued = syncState == 'pending';
     final conflict = syncState == 'conflict';
+    // Staff may edit ordinary appointments; owners can also correct
+    // checked-in appointments. The guarded server RPC preserves linked
+    // Job/customer/vehicle integrity when historical links already exist.
     final canEdit = _onlineReady &&
         _canManage &&
-        {'confirmed', 'tentative'}.contains(status) &&
-        item['job_id'] == null &&
-        !queued &&
-        !conflict;
+        (widget.roleCode == 'owner' ||
+            (item['job_id'] == null && !queued && !conflict));
     final canCheckIn = _canCheckIn &&
         item['can_check_in'] == true &&
         item['job_id'] == null &&
@@ -371,9 +372,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final canCancel = canEdit;
     final canDelete = _onlineReady &&
         widget.roleCode == 'owner' &&
+        !queued &&
+        !conflict &&
         item['job_id'] == null &&
-        item['request_id'] == null &&
-        {'confirmed', 'tentative', 'cancelled', 'no_show'}.contains(status);
+        item['request_id'] == null;
 
     final action = await showModalBottomSheet<String>(
       context: context,
