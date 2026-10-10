@@ -245,10 +245,26 @@ class DocumentPdfService {
     }
   }
 
+  /// Unsynced documents have no server-assigned number yet. Display their
+  /// immutable local operation ID in the existing number field only.
+  /// Do not add customer-facing sync or payment status to the PDF.
+  static String _receiptNumber(Map<String, dynamic> detail) {
+    final permanent = detail['document_number']?.toString().trim() ?? '';
+    if (permanent.isNotEmpty) return permanent;
+    final id = detail['id']?.toString() ?? '';
+    if (id.startsWith('local-invoice-')) {
+      return 'TMP-${id.substring('local-invoice-'.length)}';
+    }
+    if (id.startsWith('local-estimate-')) {
+      return 'TMP-${id.substring('local-estimate-'.length)}';
+    }
+    return '';
+  }
+
   static String fileName(Map<String, dynamic> detail) {
     final kind =
         detail['kind']?.toString() == 'estimate' ? 'Estimate' : 'Invoice';
-    final number = detail['document_number']?.toString().trim() ?? '';
+    final number = _receiptNumber(detail);
     return number.isEmpty ? 'Briskers-$kind.pdf' : 'Briskers-$kind-$number.pdf';
   }
 
@@ -274,8 +290,7 @@ class DocumentPdfService {
     final paymentRows = kind == 'INVOICE'
         ? invoicePaymentLines(detail)
         : <Map<String, dynamic>>[];
-    final rawDocumentNumber =
-        detail['document_number']?.toString().trim() ?? '';
+    final rawDocumentNumber = _receiptNumber(detail);
     final documentNumber = _displayNumber(kind, rawDocumentNumber);
 
     final shopName = detail['shop_name']?.toString().trim() ?? 'Briskers';
