@@ -310,6 +310,7 @@ class _BusinessGateState extends State<BusinessGate> {
     }
 
     try {
+      await _appointmentSync.flushEdits(businessId);
       await _appointmentSync.flush(businessId);
     } catch (_) {
       // Queued check-ins stay local and retry on the next sync.
