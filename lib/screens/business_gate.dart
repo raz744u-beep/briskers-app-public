@@ -310,6 +310,7 @@ class _BusinessGateState extends State<BusinessGate> {
     }
 
     try {
+      await _appointmentSync.flushCreates(businessId);
       await _appointmentSync.flushEdits(businessId);
       await _appointmentSync.flush(businessId);
     } catch (_) {
