@@ -42,7 +42,33 @@ Future<bool?> showInvoiceDeletionChoice(
       ],
     ),
   );
-  if (choice == 'invoice') return false;
-  if (choice == 'job') return true;
-  return null;
+  if (choice != 'invoice' && choice != 'job') return null;
+  // Choosing an action does not execute the deletion. Require a separate
+  // explicit acknowledgement of exactly what is about to be removed.
+  if (!context.mounted) return null;
+  final withJob=choice == 'job';
+  final approved=await showDialog<bool>(
+    context:context,
+    barrierDismissible:false,
+    builder:(dialogContext)=>AlertDialog(
+      title:Text(withJob ? 'Confirm Job deletion' : 'Confirm invoice deletion'),
+      content:Text(withJob
+        ? 'Delete invoice #$invoiceNumber and Job $jobNumber, including all '
+          'other eligible unpaid invoices on this Job? This cannot be undone.'
+        : 'Delete invoice #$invoiceNumber only and keep its Job? '
+          'This cannot be undone.'),
+      actions:[
+        TextButton(
+          onPressed:()=>Navigator.pop(dialogContext,false),
+          child:const Text('Back'),
+        ),
+        FilledButton(
+          onPressed:()=>Navigator.pop(dialogContext,true),
+          child:const Text('Confirm delete'),
+        ),
+      ],
+    ),
+  );
+  if (approved != true) return null;
+  return withJob;
 }

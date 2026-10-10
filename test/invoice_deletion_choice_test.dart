@@ -29,6 +29,10 @@ void main() {
     expect(find.textContaining('2 unpaid invoices'),findsOneWidget);
     await tester.tap(find.text('Delete invoice and Job'));
     await tester.pumpAndSettle();
+    expect(find.text('Confirm delete'), findsOneWidget);
+    expect(result, isNull);
+    await tester.tap(find.text('Confirm delete'));
+    await tester.pumpAndSettle();
     expect(result,isTrue);
   });
 
@@ -56,6 +60,10 @@ void main() {
     expect(find.text('Delete invoice and Job'),findsNothing);
     expect(find.textContaining('payment activity'),findsOneWidget);
     await tester.tap(find.text('Delete invoice only'));
+    await tester.pumpAndSettle();
+    expect(find.text('Confirm delete'), findsOneWidget);
+    expect(result, isNull);
+    await tester.tap(find.text('Confirm delete'));
     await tester.pumpAndSettle();
     expect(result,isFalse);
   });

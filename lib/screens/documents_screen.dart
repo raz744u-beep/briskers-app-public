@@ -507,6 +507,30 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       if (confirmed != true) return;
     }
 
+    if (!mounted) return;
+    final progress = ValueNotifier<String>('Deleting…');
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: const Text('Please wait'),
+          content: ValueListenableBuilder<String>(
+            valueListenable: progress,
+            builder: (context, message, child) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(width: 24, height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 16),
+                Flexible(child: Text(message)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
     try {
       if (!isEstimate && _offlineDrafts.isLocalDraftId(row['id'].toString())) {
         await _offlineDrafts.cancelNeverSyncedQuickInvoice(
@@ -526,8 +550,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         );
       }
 
+      progress.value = 'Refreshing…';
       await _load();
       if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -538,6 +564,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       );
     } catch (error) {
       if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
       await showDialog<void>(
         context: context,
         builder: (dialogContext) => AlertDialog(
