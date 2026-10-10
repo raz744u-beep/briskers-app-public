@@ -4104,6 +4104,26 @@ class BriskersApi {
     return result.toString();
   }
 
+  Future<String> addPendingInvoicePaymentOnce(
+    String businessId,
+    String invoiceId, {
+    required num amount,
+    required String methodId,
+    required String operationId,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_add_pending_invoice_payment_once',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+        'p_amount': amount,
+        'p_method_id': methodId,
+        'p_operation_id': operationId,
+      },
+    );
+    return result.toString();
+  }
+
   Future<void> updatePendingInvoicePayment(
     String businessId,
     String paymentId, {

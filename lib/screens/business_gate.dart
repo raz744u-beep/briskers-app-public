@@ -22,6 +22,7 @@ import '../services/offline_financial_write_service.dart';
 import '../services/offline_estimate_invoice_service.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/offline_document_edit_service.dart';
+import '../services/offline_invoice_payment_ledger.dart';
 import '../services/local_tax_settings_cache.dart';
 import '../services/local_invoice_status_styles_cache.dart';
 import '../services/offline_work_findings_service.dart';
@@ -60,6 +61,8 @@ class _BusinessGateState extends State<BusinessGate> {
       OfflineDocumentDraftService();
   final OfflineDocumentEditService _offlineDocumentEdit =
       OfflineDocumentEditService();
+  final OfflineInvoicePaymentLedger _offlinePayments =
+      OfflineInvoicePaymentLedger();
   final LocalTaxSettingsCache _taxSettingsCache =
       LocalTaxSettingsCache();
   final LocalInvoiceStatusStylesCache _invoiceStatusStyles =
@@ -301,6 +304,12 @@ class _BusinessGateState extends State<BusinessGate> {
       await _offlineDocumentEdit.flush(businessId);
     } catch (_) {
       // Cached document edits stay queued and retry on reconnect.
+    }
+
+    try {
+      await _offlinePayments.flush(businessId);
+    } catch (_) {
+      // Payments remain in the durable outbox until acknowledged by server.
     }
 
     try {
