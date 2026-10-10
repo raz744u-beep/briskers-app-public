@@ -4939,7 +4939,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   child: ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.delete_outline, color: Colors.red),
+                    leading: const Icon(Icons.delete_outline, color: Colors.red),
                     title: Text(_onlineReady
                         ? 'Delete Job'
                         : 'Delete Job (waiting for online verification)'),
