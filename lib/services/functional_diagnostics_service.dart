@@ -181,6 +181,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkPaymentInvoiceRemap,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-015',
+      title: 'Payment acknowledgment identity verification',
+      success: 'A matching server payment ID is required before clearing local queue; matching amount alone cannot acknowledge a payment.',
+      action: _checkPaymentAcknowledgment,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -305,6 +313,32 @@ class BriskersFunctionalDiagnosticsService {
         'Queued payment still references a temporary invoice.');
     _require(updated.single['amount_cents'] == 20000,
         'Remapping changed the payment amount.');
+  }
+
+  Future<void> _checkPaymentAcknowledgment(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    _require(
+      OfflineInvoicePaymentLedger.serverAcknowledgesPayment(
+        {'payments': [{'id': 'server-payment-1', 'amount': 500}]},
+        'server-payment-1',
+      ),
+      'Known payment ID was not recognized.',
+    );
+    _require(
+      !OfflineInvoicePaymentLedger.serverAcknowledgesPayment(
+        {'payments': [{'id': 'another-payment', 'amount': 500}]},
+        'server-payment-1',
+      ),
+      'Matching amount incorrectly acknowledged a different payment.',
+    );
+    _require(
+      !OfflineInvoicePaymentLedger.serverAcknowledgesPayment(
+        {'payments': []}, 'server-payment-1',
+      ),
+      'Missing payment was incorrectly acknowledged.',
+    );
   }
 
   Future<void> _checkOfflineInvoiceCancel(
