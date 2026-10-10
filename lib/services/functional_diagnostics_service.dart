@@ -197,6 +197,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkInterruptedPaymentReplay,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-017',
+      title: 'Simultaneous local payment queue replay',
+      success: 'Concurrent flush triggers share one in-process submission; queue is retired once after server acknowledgment.',
+      action: _checkSimultaneousPaymentFlush,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -404,6 +412,40 @@ class BriskersFunctionalDiagnosticsService {
         'Refreshed server invoice was not cached exactly once.');
     _require((await ledger.pendingForInvoice(businessId, invoiceId)).isEmpty,
         'Acknowledged payment remains in local outbox.');
+  }
+
+  Future<void> _checkSimultaneousPaymentFlush(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final ledger = OfflineInvoicePaymentLedger(database: database);
+    const invoice = 'server-invoice-concurrent-test';
+    await ledger.recordReceivedPayment(
+      businessId, invoice, amount: 500,
+      remainingBeforePaymentCents: 50000,
+      methodId: 'cash-method', methodName: 'Cash',
+    );
+    var submissions = 0;
+    Future<String> submit(
+      String business, String invoiceId, num amount,
+      String methodId, String operationId,
+    ) async {
+      submissions++;
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      return 'ack-payment-1';
+    }
+    Future<Map<String, dynamic>> fetch(
+      String business, String invoiceId,
+    ) async => {'payments': [{'id': 'ack-payment-1', 'amount': 500}]};
+    await Future.wait([
+      ledger.flush(businessId, submitPayment: submit, fetchInvoice: fetch,
+          cacheInvoice: (b, i, d) async {}),
+      ledger.flush(businessId, submitPayment: submit, fetchInvoice: fetch,
+          cacheInvoice: (b, i, d) async {}),
+    ]);
+    _require(submissions == 1, 'Concurrent workers sent a payment twice.');
+    _require((await ledger.pendingForInvoice(businessId, invoice)).isEmpty,
+        'Concurrent replay did not reconcile local payment.');
   }
 
   Future<void> _checkOfflineInvoiceCancel(
