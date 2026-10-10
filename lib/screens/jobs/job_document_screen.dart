@@ -35,6 +35,7 @@ import 'invoice_warranty_panel.dart';
 import 'invoice_note_draft_rules.dart';
 import 'standard_note_editor_sheet.dart';
 import 'job_detail_screen.dart';
+import 'invoice_deletion_choice.dart';
 
 class JobDocumentScreen extends StatefulWidget {
   const JobDocumentScreen({
@@ -3253,46 +3254,40 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       return;
     }
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete invoice?'),
-        content: const Text(
-          'This invoice has no finalized payment. It will be deleted and its invoice number can be reused, even if it was previously previewed, printed, emailed, or shown to the customer.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(tr('cancel')),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Delete invoice'),
-          ),
-        ],
-      ),
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (mounted) {
+        setState(() => _error =
+            'Reconnect to delete an already-synced invoice.');
+      }
+      return;
+    }
+    Map<String,dynamic>? jobPlan;
+    final jobId=_detail?['job_id']?.toString() ?? '';
+    if (jobId.isNotEmpty) {
+      try {
+        jobPlan=await _api.jobDeletionPlan(widget.businessId,jobId);
+      } catch (_) {
+        // The owner can still delete the invoice alone.
+      }
+    }
+    if (!mounted) return;
+    final deleteJob=await showInvoiceDeletionChoice(
+      context,
+      invoiceNumber:_detail?['document_number']?.toString() ?? '',
+      jobPlan:jobPlan,
     );
-    if (confirmed != true) return;
+    if (deleteJob == null) return;
 
     try {
-      setState(() {
-        _busy = true;
-        _error = null;
-      });
-
-      await _api.deleteDraftInvoice(
-        widget.businessId,
-        widget.documentId,
+      setState(() { _busy = true; _error = null; });
+      await _api.deleteInvoiceManaged(
+        widget.businessId,widget.documentId,deleteJob:deleteJob,
       );
       if (mounted) Navigator.pop(context);
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) setState(() => _error=error.toString());
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _busy=false);
     }
   }
 
