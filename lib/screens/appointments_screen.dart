@@ -360,7 +360,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final queued = syncState == 'pending';
     final conflict = syncState == 'conflict';
     final canEdit = _canManage &&
-        !queued && !conflict &&
+        !conflict &&
         (widget.roleCode == 'owner' ||
          (item['job_id'] == null &&
           {'confirmed', 'tentative'}.contains(status)));
