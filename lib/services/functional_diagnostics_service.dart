@@ -173,6 +173,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkOfflineReceivedPayment,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-014',
+      title: 'Offline payment permanent invoice remapping',
+      success: 'Pending payments preserve operation identities and amounts while switching to a permanent invoice ID; a repeated remap does not duplicate rows.',
+      action: _checkPaymentInvoiceRemap,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -269,6 +277,34 @@ class BriskersFunctionalDiagnosticsService {
     _require(rejected, 'Excess payment was not rejected.');
     _require((await ledger.pendingForInvoice(businessId, invoiceId)).length == 1,
         'Rejected payment changed the local queue.');
+  }
+
+  Future<void> _checkPaymentInvoiceRemap(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final ledger = OfflineInvoicePaymentLedger(database: database);
+    const local = 'local-invoice-diagnostic';
+    const permanent = 'server-invoice-diagnostic';
+    final op = await ledger.recordReceivedPayment(
+      businessId, local,
+      amount: 200,
+      remainingBeforePaymentCents: 50000,
+      methodId: 'method-check',
+      methodName: 'Check',
+    );
+    await ledger.remapInvoice(businessId, local, permanent);
+    await ledger.remapInvoice(businessId, local, permanent);
+    final old = await ledger.pendingForInvoice(businessId, local);
+    final updated = await ledger.pendingForInvoice(businessId, permanent);
+    _require(old.isEmpty, 'Local invoice retained a payment after remapping.');
+    _require(updated.length == 1, 'Remapping duplicated or lost a payment.');
+    _require(updated.single['operation_id'] == op,
+        'Remapping changed the idempotency key.');
+    _require(updated.single['invoice_id'] == permanent,
+        'Queued payment still references a temporary invoice.');
+    _require(updated.single['amount_cents'] == 20000,
+        'Remapping changed the payment amount.');
   }
 
   Future<void> _checkOfflineInvoiceCancel(
