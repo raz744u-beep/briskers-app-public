@@ -96,10 +96,12 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
       }
       setState(() {
         _customers = _pendingCreate ? cachedCustomers : [{'id':_customerId, 'display_name':item['customer'] ?? 'Customer'}];
-        if (!_pendingCreate) _vehicles = _vehicleId == null ? const [] : [{
-          'id':_vehicleId, 'year':item['vehicle_year'],
-          'make':item['vehicle_make'], 'model':item['vehicle_model'],
-        }];
+        if (!_pendingCreate) {
+          _vehicles = _vehicleId == null ? const [] : [{
+            'id': _vehicleId, 'year': item['vehicle_year'],
+            'make': item['vehicle_make'], 'model': item['vehicle_model'],
+          }];
+        }
         _employees = _employeeId == null ? const [] : [{
           'id':_employeeId, 'display_name':item['mechanic'] ?? 'Assigned',
         }];
