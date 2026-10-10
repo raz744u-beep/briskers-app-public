@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'diagnostics_service.dart';
+import 'document_pdf_service.dart';
 import 'local_document_detail_cache.dart';
 import 'local_financial_cache.dart';
 import 'offline_customer_vehicle_admin_service.dart';
@@ -147,6 +148,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkInvoiceNoteActions,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-011',
+      title: 'Invoice PDF payment methods and remaining balance',
+      success: 'Individual finalized/pending methods, fallback and invoice balances reconcile; no payment is counted twice.',
+      action: _checkInvoicePdfPayments,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -197,6 +206,74 @@ class BriskersFunctionalDiagnosticsService {
       await _cleanupPreferences(businessId);
       await database.close();
     }
+  }
+
+  Future<void> _checkInvoicePdfPayments(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final detail = <String, dynamic>{
+      'total_amount': 500,
+      'paid_amount': 200,
+      'pending_payment': 100,
+      'payments': [
+        {
+          'amount': 120,
+          'state': 'posted',
+          'payment_method_name': 'Cash',
+        },
+        {
+          'amount': 80,
+          'state': 'posted',
+          'payment_method_name': 'Check',
+        },
+        {
+          'amount': 100,
+          'state': 'pending',
+          'payment_method_name': 'Credit card',
+        },
+      ],
+    };
+    final lines = DocumentPdfService.invoicePaymentLines(detail);
+    final summary = DocumentPdfService.invoicePaymentAmounts(detail);
+    _require(
+      lines.length == 3 &&
+          lines[0]['label'] == 'Payment — Cash' &&
+          lines[1]['label'] == 'Payment — Check' &&
+          lines[2]['label'] == 'Payment — Credit card (Pending)',
+      'The PDF did not retain the individual methods and pending state.',
+    );
+    _require(
+      _near(summary['remaining']!, 200) &&
+          _near(
+            lines.fold<num>(
+              0,
+              (sum, row) => sum + (row['amount'] as num),
+            ),
+            summary['paid']! + summary['pending']!,
+          ),
+      'The invoice PDF payment breakdown double counted or lost money.',
+    );
+
+    // An incomplete local/historical payload must not invent method names
+    // or duplicate just the available payment records.
+    final partialCache = Map<String, dynamic>.from(detail)
+      ..['payments'] = [
+        {
+          'amount': 120,
+          'state': 'posted',
+          'payment_method_name': 'Cash',
+        },
+      ];
+    final safe = DocumentPdfService.invoicePaymentLines(partialCache);
+    _require(
+      safe.length == 2 &&
+          safe.first['amount'] == 200 &&
+          safe.last['amount'] == 100 &&
+          safe.first['label'] == 'Payment — Method not recorded' &&
+          safe.last['pending'] == true,
+      'An incomplete offline payment list produced an incorrect PDF total.',
+    );
   }
 
   Future<void> _checkInvoiceNoteActions(
