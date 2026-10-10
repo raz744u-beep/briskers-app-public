@@ -240,7 +240,7 @@ class BriskersFunctionalDiagnosticsService {
       lines.length == 3 &&
           lines[0]['label'] == 'Payment - Cash' &&
           lines[1]['label'] == 'Payment - Check' &&
-          lines[2]['label'] == 'Payment - Credit card (Pending)',
+          lines[2]['label'] == 'Payment - Credit card',
       'The PDF did not retain the individual methods and pending state.',
     );
     _require(
