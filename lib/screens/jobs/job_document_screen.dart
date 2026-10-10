@@ -361,9 +361,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         );
         if (cached != null && mounted) {
           final recovered = await _withRecoveredDocumentDate(cached);
+          final cachedTax = await _taxSettingsCache.load(widget.businessId);
           if (!mounted) return;
           setState(() {
             _detail = recovered;
+            _defaultTaxRate = num.tryParse(
+              cachedTax?['sales_tax_rate']?.toString() ?? '',
+            ) ?? 0;
+            _taxSettingsCached = cachedTax != null;
             _loading = false;
             _error = null;
           });
