@@ -250,13 +250,19 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     Map<String, dynamic> item,
     String status,
   ) async {
-    if (!_onlineReady || !_canManage) return;
+    if (!_canManage) return;
     try {
-      await _api.setAppointmentStatus(
-        widget.businessId,
-        item['id'].toString(),
-        status,
-      );
+      if (status == 'cancelled') {
+        await _appointmentSync.queueCancel(
+          widget.businessId, item['id'].toString(),
+          canManage: true,
+        );
+      } else {
+        if (!_onlineReady) return;
+        await _api.setAppointmentStatus(
+          widget.businessId,item['id'].toString(),status,
+        );
+      }
       await _load();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -376,7 +382,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         item['job_id'] == null &&
         !queued &&
         !conflict;
-    final canCancel = canEdit && _onlineReady;
+    final canCancel = _canManage && !queued && !conflict &&
+        item['job_id'] == null &&
+        {'confirmed','tentative'}.contains(status) &&
+        item['id']?.toString().startsWith('local-appointment-') != true;
     final canDelete = (_onlineReady || item['id']?.toString().startsWith('local-appointment-') == true) &&
         widget.roleCode == 'owner' &&
         item['job_id'] == null &&
