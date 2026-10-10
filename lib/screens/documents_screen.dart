@@ -518,7 +518,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           title: const Text('Please wait'),
           content: ValueListenableBuilder<String>(
             valueListenable: progress,
-            builder: (_, message, __) => Row(
+            builder: (context, message, child) => Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 const SizedBox(width: 24, height: 24,
