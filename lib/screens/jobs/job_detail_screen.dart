@@ -3313,7 +3313,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   Future<void> _deleteUnusedJob() async {
     if (!_owner || !_onlineReady || _busy ||
-        BriskersConnectionModeController.instance.forceOffline) return;
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     final number = _job?['job_number']?.toString() ?? '';
     final confirmed = await showDialog<bool>(
       context: context,
