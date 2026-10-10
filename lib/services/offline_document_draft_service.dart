@@ -155,6 +155,85 @@ class OfflineDocumentDraftService {
     return id;
   }
 
+  /// Owner cancellation for a never-uploaded local Quick Invoice only.
+  /// A previously attempted upload may already exist on the server, so we
+  /// refuse unsafe offline deletion instead of orphaning a numbered invoice.
+  Future<void> cancelNeverSyncedQuickInvoice(
+    String businessId,
+    String documentId,
+  ) async {
+    if (!documentId.startsWith('local-invoice-')) {
+      throw StateError('Only an unsynced local invoice can be canceled offline.');
+    }
+    final snapshot = await _cache.load(businessId, documentId);
+    if (snapshot == null || snapshot['_server_document_id'] != null) {
+      throw StateError('This invoice has synced; reconnect before deleting.');
+    }
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        '''
+        SELECT id,payload_json,attempt_count,last_attempt_at,state
+        FROM sync_outbox
+        WHERE business_id=? AND entity_id=?
+          AND entity_type='document_draft_create'
+        LIMIT 1
+        ''',
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(documentId),
+        ],
+      ).get();
+      if (rows.length != 1) {
+        throw StateError('The invoice sync state is uncertain. Reconnect first.');
+      }
+      final row = rows.single;
+      if (row.read<String>('state') != 'pending' ||
+          row.read<int>('attempt_count') != 0 ||
+          row.data['last_attempt_at'] != null) {
+        throw StateError(
+          'This invoice may already be syncing. Reconnect before deleting.',
+        );
+      }
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(row.read<String>('payload_json')) as Map,
+      );
+      final jobId = payload['provisional_job_id']?.toString() ?? '';
+      if (jobId != 'local-job-${payload['operation_id']}') {
+        throw StateError('The temporary Job link is inconsistent.');
+      }
+      // A local job shared by another document is not safe to delete.
+      final linked = await _database.customSelect(
+        'SELECT count(*) AS count FROM local_documents '
+        'WHERE business_id=? AND job_id=? AND id<>?',
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(jobId),
+          Variable<String>(documentId),
+        ],
+      ).getSingle();
+      if (linked.read<int>('count') != 0) {
+        throw StateError('Other documents still refer to this Job.');
+      }
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id=?',
+        [row.read<int>('id')],
+      );
+      await _database.customStatement(
+        'DELETE FROM local_documents WHERE business_id=? AND id=?',
+        [businessId,documentId],
+      );
+      await _database.customStatement(
+        'DELETE FROM local_job_visits WHERE business_id=? AND job_id=?',
+        [businessId,jobId],
+      );
+      await _database.customStatement(
+        "DELETE FROM local_jobs WHERE business_id=? AND id=? AND sync_state='pending'",
+        [businessId,jobId],
+      );
+    });
+    await _cache.remove(businessId, documentId);
+  }
+
   String _lineId() {
     final now = DateTime.now().toUtc().microsecondsSinceEpoch;
     final salt = _random.nextInt(1 << 32).toRadixString(16);
@@ -493,6 +572,13 @@ class OfflineDocumentDraftService {
       final outboxId = row.read<int>('id');
       final localId = row.read<String>('entity_id');
       try {
+        // Claim before sending any bytes. A delete can cancel only an
+        // untouched operation; reconnect if an upload might have started.
+        await _database.customStatement(
+          "UPDATE sync_outbox SET state='inflight',last_attempt_at=? "
+          "WHERE id=? AND state='pending'",
+          [_unixNow(),outboxId],
+        );
         final payload = Map<String, dynamic>.from(
           jsonDecode(row.read<String>('payload_json')) as Map,
         );
@@ -618,6 +704,7 @@ class OfflineDocumentDraftService {
           '''
           UPDATE sync_outbox
           SET attempt_count = attempt_count + 1,
+              state = 'pending',
               last_attempt_at = ?,
               last_error = ?
           WHERE id = ?
