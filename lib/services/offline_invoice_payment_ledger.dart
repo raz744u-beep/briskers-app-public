@@ -139,13 +139,27 @@ class OfflineInvoicePaymentLedger {
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
       try {
-        await _api.addPendingInvoicePaymentOnce(
+        final paymentId = await _api.addPendingInvoicePaymentOnce(
           businessId,
           invoiceId,
           amount: (payload['amount_cents'] as num) / 100,
           methodId: payload['method_id'].toString(),
           operationId: payload['operation_id'].toString(),
         );
+        // A server acknowledgement is not sufficient to remove the local
+        // receipt from the outbox. Preserve it until the refreshed server
+        // invoice proves that the payment is represented in its aggregates.
+        // A missing/failed refresh will safely retry with the same UUID.
+        final detail = await _api.documentDetail(businessId, invoiceId);
+        final payments = (detail['payments'] as List?) ?? const [];
+        final present = payments.whereType<Map>().any(
+          (p) => p['id']?.toString() == paymentId,
+        );
+        if (!present) {
+          throw StateError(
+            'Server accepted payment but invoice detail has not reconciled yet.',
+          );
+        }
         await _database.customStatement(
           'DELETE FROM sync_outbox WHERE id=?',
           [id],
