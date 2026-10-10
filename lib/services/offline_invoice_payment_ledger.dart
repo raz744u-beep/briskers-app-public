@@ -47,18 +47,32 @@ class OfflineInvoicePaymentLedger {
         '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
   }
 
-  /// Only actually received cash may be captured here. Credit/debit card
-  /// transactions require external processor approval; checks need their own
-  /// validation policy. Finalization stays owner-only and online.
-  Future<String> recordReceivedCash(
+  /// Record a payment already received or approved through its real channel.
+  /// This does NOT process cards; card approval must occur in the terminal.
+  /// Store only a non-sensitive approval reference, never card credentials.
+  Future<String> recordReceivedPayment(
     String businessId,
     String invoiceId, {
     required num amount,
     required int remainingBeforePaymentCents,
     required String methodId,
+    required String methodName,
+    String? cardApprovalReference,
   }) async {
     if (businessId.isEmpty || invoiceId.isEmpty || methodId.isEmpty) {
-      throw ArgumentError('Business, invoice and cash method are required.');
+      throw ArgumentError('Business, invoice and payment method are required.');
+    }
+    final method = methodName.trim();
+    if (method.isEmpty) throw ArgumentError('Payment method is required.');
+    final isCard = method.toLowerCase().contains('card') ||
+        method.toLowerCase().contains('visa') ||
+        method.toLowerCase().contains('mastercard') ||
+        method.toLowerCase().contains('amex') ||
+        method.toLowerCase().contains('discover');
+    if (isCard && (cardApprovalReference?.trim().isEmpty ?? true)) {
+      throw StateError(
+        'Confirm card approval on the terminal before recording its payment.',
+      );
     }
     final amountCents = cents(amount);
     if (remainingBeforePaymentCents < amountCents) {
@@ -70,7 +84,8 @@ class OfflineInvoicePaymentLedger {
       'operation_id': operationId,
       'invoice_id': invoiceId,
       'method_id': methodId,
-      'method_name': 'Cash',
+      'method_name': method,
+      if (isCard) 'card_approval_reference': cardApprovalReference!.trim(),
       'amount_cents': amountCents,
       'received_at': DateTime.now().toUtc().toIso8601String(),
     };
@@ -83,7 +98,7 @@ class OfflineInvoicePaymentLedger {
           business_id, entity_type, entity_id, operation, payload_json,
           base_row_version, state, attempt_count, created_at,
           last_attempt_at, last_error
-        ) VALUES (?, 'invoice_payment_received', ?, 'record_cash', ?,
+        ) VALUES (?, 'invoice_payment_received', ?, 'record_received_payment', ?,
                   NULL, 'pending', 0, ?, NULL, NULL)
         ''',
         [businessId, invoiceId, jsonEncode(payload), now],
