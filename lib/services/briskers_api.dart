@@ -1282,6 +1282,46 @@ class BriskersApi {
   }
 
   /// Owner-only guarded deletion: fails if the Job has work or references.
+  /// Owner-only preflight: current server invoices and protected Job links.
+  Future<Map<String, dynamic>> jobDeletionPlan(
+    String businessId,
+    String jobId,
+  ) async {
+    final result = await networkSupabase.rpc(
+      'briskers_job_delete_plan',
+      params: {'p_business_id':businessId,'p_job_id':jobId},
+    );
+    return Map<String,dynamic>.from(result as Map);
+  }
+
+  /// Never silently delete paid or history-linked records.
+  Future<Map<String, dynamic>> deleteJobWithUnpaidInvoices(
+    String businessId,
+    String jobId,
+  ) async {
+    final result = await networkSupabase.rpc(
+      'briskers_delete_job_with_unpaid_v1',
+      params: {'p_business_id':businessId,'p_job_id':jobId},
+    );
+    return Map<String,dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> deleteInvoiceManaged(
+    String businessId,
+    String invoiceId, {
+    bool deleteJob = false,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_delete_invoice_managed_v1',
+      params: {
+        'p_business_id':businessId,
+        'p_invoice_id':invoiceId,
+        'p_with_job':deleteJob,
+      },
+    );
+    return Map<String,dynamic>.from(result as Map);
+  }
+
   Future<void> deleteUnusedJob(
     String businessId,
     String jobId,
