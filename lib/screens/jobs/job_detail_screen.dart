@@ -4573,7 +4573,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
     if (key == 'documents' && _canSeeFinancial) {
       try {
-        final localDocuments = await _localDocumentsForJob();
+        final localDocuments = await _localDocumentsForJob(
+          recoverLegacy: true,
+        );
         if (mounted) {
           setState(() => _documents = localDocuments);
         }
