@@ -6,6 +6,7 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_document_detail_cache.dart';
 
 /// Durable *local* payment capture. This class never posts income or invokes
 /// a server payment RPC; replay requires a separate idempotent server endpoint.
@@ -170,6 +171,11 @@ class OfflineInvoicePaymentLedger {
             'Server accepted payment but invoice detail has not reconciled yet.',
           );
         }
+        await const LocalDocumentDetailCache().save(
+          businessId,
+          invoiceId,
+          detail,
+        );
         await _database.customStatement(
           'DELETE FROM sync_outbox WHERE id=?',
           [id],
