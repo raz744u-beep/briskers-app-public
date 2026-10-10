@@ -211,6 +211,76 @@ class AppointmentSyncService {
     }
   }
 
+  /// First stage of offline appointment editing. This records the complete
+  /// requested edit atomically with its base revision. It does not attempt
+  /// network writes; a server conflict-aware replay is required before this
+  /// can be exposed as a completed UI workflow.
+  Future<void> queueEdit(
+    String businessId,
+    String appointmentId, {
+    required String title,
+    String? description,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    String? employeeId,
+    required bool isOwner,
+  }) async {
+    if (!endsAt.isAfter(startsAt)) {
+      throw ArgumentError('Appointment end must follow start.');
+    }
+    if (title.trim().isEmpty) {
+      throw ArgumentError('Appointment title is required.');
+    }
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        'SELECT * FROM local_appointments WHERE business_id=? AND id=? LIMIT 1',
+        variables: [Variable<String>(businessId), Variable<String>(appointmentId)],
+      ).get();
+      if (rows.isEmpty) {
+        throw StateError('Appointment is not cached on this device.');
+      }
+      final row = rows.single;
+      if (row.read<String>('sync_state') != 'synced') {
+        throw StateError('Resolve existing pending/conflicted changes first.');
+      }
+      if (!isOwner &&
+          (row.read<String>('status') != 'confirmed' ||
+           row.readNullable<String>('job_id') != null)) {
+        throw StateError('Owner access required for this appointment.');
+      }
+      final op = _operationId('appointment-edit');
+      await _database.customStatement(
+        """INSERT INTO sync_outbox (
+          business_id,entity_type,entity_id,operation,payload_json,
+          base_row_version,state,attempt_count,created_at,last_attempt_at,last_error
+        ) VALUES (?, 'appointment_edit', ?, 'update', ?, ?, 'pending', 0, ?, NULL, NULL)""",
+        [
+          businessId, appointmentId,
+          jsonEncode({
+            'operation_id': op,
+            'appointment_id': appointmentId,
+            'title': title.trim(),
+            'description': description,
+            'starts_at': startsAt.toUtc().toIso8601String(),
+            'ends_at': endsAt.toUtc().toIso8601String(),
+            'employee_id': employeeId,
+          }),
+          row.readNullable<int>('row_version'),
+          _unix(DateTime.now().toUtc()),
+        ],
+      );
+      await _database.customStatement(
+        """UPDATE local_appointments SET title=?,description=?,starts_at=?,
+          ends_at=?,employee_id=?,sync_state='pending'
+          WHERE business_id=? AND id=?""",
+        [
+          title.trim(), description, _unix(startsAt), _unix(endsAt),
+          employeeId, businessId, appointmentId,
+        ],
+      );
+    });
+  }
+
   Future<void> queueCheckIn(
     String businessId,
     String appointmentId,
