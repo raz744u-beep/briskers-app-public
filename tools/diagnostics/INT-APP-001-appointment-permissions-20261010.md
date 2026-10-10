@@ -8,6 +8,7 @@ Method: authenticated owner/office identities in a SQL transaction using a **syn
 
 - Office role successfully updates a confirmed appointment through `briskers_update_appointment`.
 - Office role is denied `briskers_delete_appointment`.
+- Office role is denied editing a cancelled appointment (separate rolled-back synthetic fixture).
 - Owner role updates a cancelled appointment through `briskers_update_appointment`.
 - Owner role deletes a history-free appointment through `briskers_delete_appointment`.
 - After rollback: 0 synthetic customers, 0 synthetic appointments.
@@ -20,7 +21,6 @@ An initial attempt used a nonexistent `checked_in` status in the appointments ta
 ## Outstanding
 
 - Authenticated checked-in appointment + linked Job tests, including immutable customer/vehicle association
-- Office denial on non-confirmed appointment
 - Offline edit/delete durable outbox, conflict handling and cross-device deletion tombstones
 - Mobile Android/iOS verification
 
