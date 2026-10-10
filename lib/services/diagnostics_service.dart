@@ -12,6 +12,7 @@ import 'briskers_api.dart';
 import 'local_financial_cache.dart';
 import 'local_job_repository.dart';
 import 'local_document_detail_cache.dart';
+import 'invoice_performance_metrics.dart';
 import 'local_invoice_status_styles_cache.dart';
 import 'local_tax_settings_cache.dart';
 
@@ -114,6 +115,34 @@ class BriskersDiagnosticsService {
   final LocalInvoiceStatusStylesCache _invoiceStatusStylesCache;
   final BriskersConnectionModeController _connectionMode;
 
+  Future<void> _checkInvoicePerformance(
+    String businessId,
+    List<DiagnosticCheck> checks,
+  ) async {
+    final samples = await const InvoicePerformanceMetrics().recent(businessId);
+    final slow = samples.where((record) {
+      final ms = int.tryParse(record['ms']?.toString() ?? '') ?? 0;
+      return ms > (record['stage'] == 'cached_first_paint' ? 1500 : 4000);
+    }).toList();
+    checks.add(DiagnosticCheck(
+      id: 'PERF-001',
+      category: 'Invoice performance',
+      title: 'Invoice and PDF loading stages',
+      level: samples.isEmpty || slow.isNotEmpty
+          ? BriskersDiagnosticLevel.warning
+          : BriskersDiagnosticLevel.pass,
+      summary: samples.isEmpty
+          ? 'No measured invoice loads yet. Open invoice #6321 and its PDF first.'
+          : '${samples.length} actual stage measurements; '
+            '${slow.length} slow stages.',
+      details: [
+        for (final record in samples.reversed.take(12))
+          '${record['stage']}: ${record['ms']} ms '
+          '(document ${record['document_id']})',
+      ],
+    ));
+  }
+
   Future<DiagnosticsReport> run(
     String businessId, {
     bool full = false,
@@ -193,6 +222,13 @@ class BriskersDiagnosticsService {
     );
 
     if (full) {
+      await _safeGroup(
+        checks,
+        fallbackId: 'PERF-001',
+        category: 'Invoice performance',
+        title: 'Real recent invoice/PDF timing samples',
+        action: () => _checkInvoicePerformance(businessId, checks),
+      );
       await _safeGroup(
         checks,
         fallbackId: 'DOC-000',
