@@ -562,7 +562,7 @@ class OfflineDocumentDraftService {
       FROM sync_outbox
       WHERE business_id = ?
         AND entity_type = 'document_draft_create'
-        AND state = 'pending'
+        AND state IN ('pending','inflight')
       ORDER BY id
       ''',
       variables: [Variable<String>(businessId)],
@@ -576,7 +576,7 @@ class OfflineDocumentDraftService {
         // untouched operation; reconnect if an upload might have started.
         await _database.customStatement(
           "UPDATE sync_outbox SET state='inflight',last_attempt_at=? "
-          "WHERE id=? AND state='pending'",
+          "WHERE id=? AND state IN ('pending','inflight')",
           [_unixNow(),outboxId],
         );
         final payload = Map<String, dynamic>.from(
