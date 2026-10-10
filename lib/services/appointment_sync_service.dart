@@ -382,6 +382,68 @@ class AppointmentSyncService {
     });
   }
 
+  /// Replays offline appointment edits using the authenticated revision-guarded
+  /// RPC. A conflict is retained for owner review rather than overwritten.
+  Future<void> flushEdits(String businessId) async {
+    final rows = await _database.customSelect(
+      """SELECT * FROM sync_outbox WHERE business_id=?
+         AND entity_type='appointment_edit' AND state='pending' ORDER BY id""",
+      variables: [Variable<String>(businessId)],
+    ).get();
+    for (final row in rows) {
+      final outboxId = row.read<int>('id');
+      final appointmentId = row.read<String>('entity_id');
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(row.read<String>('payload_json')) as Map,
+      );
+      try {
+        final version = await _api.syncOfflineAppointmentEdit(
+          businessId, appointmentId,
+          operationId: payload['operation_id'].toString(),
+          baseVersion: row.read<int>('base_row_version'),
+          title: payload['title'].toString(),
+          description: payload['description']?.toString(),
+          startsAt: DateTime.parse(payload['starts_at'].toString()),
+          endsAt: DateTime.parse(payload['ends_at'].toString()),
+          employeeId: payload['employee_id']?.toString(),
+        );
+        await _database.transaction(() async {
+          await _database.customStatement(
+            """UPDATE local_appointments SET row_version=?,
+               sync_state='synced' WHERE business_id=? AND id=?
+               AND sync_state='pending'""",
+            [version,businessId,appointmentId],
+          );
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE id=?',
+            [outboxId],
+          );
+        });
+        _syncEvents.add(businessId);
+      } catch (error) {
+        final message = error.toString();
+        final conflict = message.contains('40001') ||
+            message.contains('Appointment changed on another device');
+        await _database.transaction(() async {
+          await _database.customStatement(
+            """UPDATE sync_outbox SET state=?,attempt_count=attempt_count+1,
+               last_attempt_at=?,last_error=? WHERE id=?""",
+            [conflict ? 'conflict' : 'pending',
+             _unix(DateTime.now().toUtc()),message,outboxId],
+          );
+          if (conflict) {
+            await _database.customStatement(
+              """UPDATE local_appointments SET sync_state='conflict'
+                 WHERE business_id=? AND id=?""",
+              [businessId,appointmentId],
+            );
+          }
+        });
+        break;
+      }
+    }
+  }
+
   Future<Map<String, String>> flush(String businessId) async {
     final rows = await _database.customSelect(
       '''
