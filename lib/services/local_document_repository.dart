@@ -143,6 +143,10 @@ class LocalDocumentRepository {
     ).get();
 
     String displayStatus(QueryRow row) {
+      if (row.read<String>('id').startsWith('local-invoice-') &&
+          row.read<String>('sync_state') == 'pending') {
+        return 'Pending sync';
+      }
       final raw = row.readNullable<String>('display_status_code') ??
           row.readNullable<String>('status') ??
           '';
@@ -225,6 +229,10 @@ class LocalDocumentRepository {
     ).get();
 
     String displayStatus(QueryRow row) {
+      if (row.read<String>('id').startsWith('local-invoice-') &&
+          row.read<String>('sync_state') == 'pending') {
+        return 'Pending sync';
+      }
       final raw = row.readNullable<String>('display_status_code') ??
           row.readNullable<String>('status') ??
           '';
@@ -297,6 +305,55 @@ class LocalDocumentRepository {
         )
         .watchSingle()
         .map((row) => row.read<int>('count'));
+  }
+
+  /// Read-only offline Home attention from the already-synced invoice index.
+  /// Does not interpret a missing snapshot as evidence that invoices are paid.
+  Future<Map<String, dynamic>> pendingCloseAttention(
+    String businessId, {
+    int limit = 25,
+  }) async {
+    const where = '''
+      d.business_id = ? AND d.kind = 'invoice'
+      AND d.closed_at IS NULL
+      AND lower(replace(coalesce(d.display_status_code, ''), ' ', '_'))
+          IN ('pending_close', 'pendingclose')
+    ''';
+    final countRow = await _database.customSelect(
+      'SELECT COUNT(*) AS count FROM local_documents d WHERE $where',
+      variables: [Variable<String>(businessId)],
+    ).getSingle();
+    final rows = await _database.customSelect(
+      '''
+      SELECT d.id, d.document_number, d.job_id, d.customer_id,
+             coalesce(c.display_name,j.customer_name,'Customer') AS customer_name,
+             coalesce(j.job_number,'') AS job_number,
+             coalesce(j.vehicle_label,'') AS vehicle
+      FROM local_documents d
+      LEFT JOIN local_jobs j ON j.business_id = d.business_id
+        AND j.id = d.job_id
+      LEFT JOIN local_customers c ON c.business_id = d.business_id
+        AND c.id = d.customer_id
+      WHERE $where
+      ORDER BY d.document_date DESC, d.created_at DESC
+      LIMIT ?
+      ''',
+      variables: [Variable<String>(businessId),Variable<int>(limit)],
+    ).get();
+    return {
+      'count': countRow.read<int>('count'),
+      'items': [
+        for (final row in rows)
+          <String, dynamic>{
+            'id': row.read<String>('id'),
+            'document_number': row.readNullable<String>('document_number'),
+            'job_id': row.readNullable<String>('job_id'),
+            'job_number': row.read<String>('job_number'),
+            'customer_name': row.read<String>('customer_name'),
+            'vehicle': row.read<String>('vehicle'),
+          },
+      ],
+    };
   }
 
   Future<int> openInvoiceCount(String businessId) async {

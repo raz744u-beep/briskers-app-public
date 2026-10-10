@@ -3311,6 +3311,43 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
+  Future<void> _deleteUnusedJob() async {
+    if (!_owner || !_onlineReady || _busy ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
+    final number = _job?['job_number']?.toString() ?? '';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Job?'),
+        content: Text(number.isEmpty
+            ? 'Permanently delete this unused Job?'
+            : 'Permanently delete Job $number?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete Job'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await _api.deleteUnusedJob(widget.businessId, widget.jobId);
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _showNewMenu() async {
     final size = MediaQuery.sizeOf(context);
     final choice = await showMenu<String>(
@@ -4832,6 +4869,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               if (value == 'edit') await _editJob();
               if (value == 'assignment') await _changeAssignment();
               if (value == 'refresh') await _load();
+              if (value == 'delete_unused') await _deleteUnusedJob();
             },
             itemBuilder: (_) => [
               if (_canQuickAdmin)
@@ -4854,6 +4892,18 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     title: Text('Assign / unassign mechanic'),
                   ),
                 ),
+              if (_owner && _onlineReady) ...[
+                const PopupMenuDivider(),
+                const PopupMenuItem(
+                  value: 'delete_unused',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.delete_outline, color: Colors.red),
+                    title: Text('Delete Job'),
+                  ),
+                ),
+              ],
               if (_canQuickAdmin) const PopupMenuDivider(),
               const PopupMenuItem(
                 value: 'refresh',

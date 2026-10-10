@@ -115,4 +115,52 @@ void main() {
     expect(provisionalVisits, isEmpty);
     await db.close();
   });
+  test('cancel never-uploaded offline invoice removes draft, Job, visit and outbox', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final api = _InterruptedSyncApi();
+    final drafts = OfflineDocumentDraftService(database: db, api: api);
+    final id = await drafts.createQuickInvoice(
+      'cancel-shop', customerId: 'customer-one', customerName: 'Customer One',
+    );
+    await drafts.addLine('cancel-shop', id, name: 'Labor',
+        quantity: 1, unitPrice: 0, taxRate: 0, lineKind: 'labor');
+    await drafts.cancelNeverSyncedQuickInvoice('cancel-shop', id);
+
+    for (final name in ['local_documents', 'local_jobs', 'local_job_visits',
+                        'sync_outbox']) {
+      final rows = await db.customSelect(
+        "SELECT count(*) AS n FROM $name WHERE business_id='cancel-shop'",
+      ).getSingle();
+      expect(rows.read<int>('n'), 0, reason: name);
+    }
+    expect(await const LocalDocumentDetailCache().load('cancel-shop', id), isNull);
+    await drafts.flush('cancel-shop');
+    expect(api.operationIds, isEmpty);
+    await db.close();
+  });
+
+  test('an attempted offline upload cannot be deleted blindly while disconnected', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final drafts = OfflineDocumentDraftService(database: db);
+    final id = await drafts.createQuickInvoice(
+      'race-shop', customerId: 'customer-one', customerName: 'Customer One',
+    );
+    await db.customStatement(
+      "UPDATE sync_outbox SET state='inflight', last_attempt_at=123456 "
+      "WHERE business_id='race-shop' AND entity_id=?",
+      [id],
+    );
+    await expectLater(
+      drafts.cancelNeverSyncedQuickInvoice('race-shop', id),
+      throwsStateError,
+    );
+    final remains = await db.customSelect(
+      "SELECT count(*) AS n FROM local_documents WHERE business_id='race-shop'",
+    ).getSingle();
+    expect(remains.read<int>('n'), 1);
+    await db.close();
+  });
+
 }

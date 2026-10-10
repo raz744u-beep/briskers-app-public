@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:typed_data';
 
@@ -16,6 +17,7 @@ import '../../core/invoice_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/document_pdf_service.dart';
+import '../../services/invoice_performance_metrics.dart';
 import '../../services/gmail_compose_service.dart';
 import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
@@ -90,6 +92,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   bool _loading = true;
   bool _busy = false;
   bool _initialActionHandled = false;
+  Timer? _pendingInvoiceResolution;
   bool _notesDirty = false;
   String? _error;
 
@@ -119,7 +122,39 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   @override
   void initState() {
     super.initState();
+    BriskersConnectionModeController.instance.addListener(_onModeChanged);
     _load();
+    if (widget.documentId.startsWith('local-invoice-')) {
+      // When sync finishes in the background, switch to the real numbered
+      // invoice. Do not interrupt an item editor or confirmation sheet.
+      _pendingInvoiceResolution = Timer.periodic(
+        const Duration(seconds: 4),
+        (timer) async {
+          if (!mounted || _busy ||
+              BriskersConnectionModeController.instance.forceOffline ||
+              ModalRoute.of(context)?.isCurrent != true) {
+            return;
+          }
+          final detail = await _detailCache.load(
+            widget.businessId, widget.documentId,
+          );
+          if (!mounted) {
+            return;
+          }
+          final realId = detail?['_server_document_id']?.toString() ?? '';
+          if (realId.isNotEmpty && realId != widget.documentId) {
+            timer.cancel();
+            await _load();
+          }
+        },
+      );
+    }
+  }
+
+  void _onModeChanged() {
+    if (mounted && !_busy) {
+      _load();
+    }
   }
 
   void _scheduleInitialActionIfNeeded() {
@@ -135,6 +170,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   @override
   void dispose() {
+    _pendingInvoiceResolution?.cancel();
+    BriskersConnectionModeController.instance.removeListener(_onModeChanged);
     _workspaceHeaderController.dispose();
     _notesController.dispose();
     _notesFocusNode.dispose();
@@ -227,6 +264,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _load() async {
+    final loadWatch = Stopwatch()..start();
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
     var unsyncedDraft = false;
@@ -237,7 +275,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         widget.documentId,
       );
       final serverId = cached?['_server_document_id']?.toString() ?? '';
-      if (serverId.isNotEmpty && serverId != widget.documentId && !forceOffline) {
+      if (serverId.isNotEmpty && serverId != widget.documentId) {
         if (!mounted) return;
         await Navigator.pushReplacement<void, void>(
           context,
@@ -313,87 +351,127 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       return;
     }
 
+    // Auto mode renders the saved invoice immediately while the authoritative
+    // remote detail refresh continues. Printing still revalidates server totals.
+    if (!BriskersConnectionModeController.instance.forceOnline) {
+      try {
+        final cached = await _detailCache.load(
+          widget.businessId,
+          widget.documentId,
+        );
+        if (cached != null && mounted) {
+          final recovered = await _withRecoveredDocumentDate(cached);
+          final cachedTax = await _taxSettingsCache.load(widget.businessId);
+          if (!mounted) return;
+          setState(() {
+            _detail = recovered;
+            _defaultTaxRate = num.tryParse(
+              cachedTax?['sales_tax_rate']?.toString() ?? '',
+            ) ?? 0;
+            _taxSettingsCached = cachedTax != null;
+            _loading = false;
+            _error = null;
+          });
+          unawaited(const InvoicePerformanceMetrics().record(
+            widget.businessId,
+            documentId: widget.documentId,
+            stage: 'cached_first_paint',
+            milliseconds: loadWatch.elapsedMilliseconds,
+          ));
+        }
+      } catch (_) {
+        // A missing or corrupt cache should not prevent the network refresh.
+      }
+    }
+
+    final openWatch = Stopwatch()..start();
     try {
       final detail = await _api.documentDetail(
         widget.businessId,
         widget.documentId,
       );
+      debugPrint('PERF-001 document detail RPC: ${openWatch.elapsedMilliseconds}ms');
+      unawaited(const InvoicePerformanceMetrics().record(
+        widget.businessId,
+        documentId: widget.documentId,
+        stage: 'detail_rpc',
+        milliseconds: openWatch.elapsedMilliseconds,
+      ));
       await _detailCache.save(
         widget.businessId,
         widget.documentId,
         detail,
       );
-      final taxSettings = await _api.taxSettings(widget.businessId);
-      await _taxSettingsCache.save(widget.businessId, taxSettings);
-      List<Map<String, dynamic>> invoiceStyles = const [];
-      List<Map<String, dynamic>> openFindings = const [];
-      Map<String, dynamic> warrantyDetail = const {};
-      Map<String, dynamic> signatureStatus = const {};
-      Map<String, dynamic> submissionReadiness = const {};
-      if (detail['kind']?.toString() == 'invoice') {
-        invoiceStyles = await _api.invoiceStatusStyles(widget.businessId);
-        await _localInvoiceStyles.save(
-          widget.businessId,
-          invoiceStyles,
-        );
+      // Independent option/metadata RPCs must not serialize screen opening.
+      Future<T> safe<T>(Future<T> future, T fallback) async {
         try {
-          warrantyDetail = await _api.documentWarrantyDetail(
-            widget.businessId,
-            widget.documentId,
-          );
+          return await future;
         } catch (_) {
-          warrantyDetail = const {};
-        }
-        try {
-          signatureStatus = await _api.documentSignatureStatus(
-            widget.businessId,
-            widget.documentId,
-          );
-        } catch (_) {
-          signatureStatus = const {};
-        }
-        try {
-          submissionReadiness = await _api.warrantySubmissionReadiness(
-            widget.businessId,
-            widget.documentId,
-          );
-        } catch (_) {
-          submissionReadiness = const {};
-        }
-        final vehicleId = detail['vehicle_id']?.toString() ?? '';
-        if (vehicleId.isNotEmpty) {
-          try {
-            final findings = await _api.vehicleFindings(
-              widget.businessId,
-              vehicleId,
-              includeResolved: false,
-            );
-            openFindings = findings
-                .where(
-                  (finding) => _findingNeedsInvoiceAttention(
-                    finding,
-                    detail: detail,
-                  ),
-                )
-                .toList();
-          } catch (_) {
-            openFindings = const [];
-          }
+          return fallback;
         }
       }
 
-      Map<String, dynamic> identifixMeta = const {};
-      if (detail['kind']?.toString() == 'estimate') {
-        try {
-          identifixMeta = await _api.identifixPricingStatus(
-            widget.businessId,
-            widget.documentId,
-          );
-        } catch (_) {
-          identifixMeta = const {};
-        }
+      final invoice = detail['kind']?.toString() == 'invoice';
+      final estimate = detail['kind']?.toString() == 'estimate';
+      final vehicleId = detail['vehicle_id']?.toString() ?? '';
+      final results = await Future.wait<dynamic>([
+        safe(_api.taxSettings(widget.businessId), <String, dynamic>{}),
+        if (invoice)
+          safe(_api.invoiceStatusStyles(widget.businessId),
+              <Map<String, dynamic>>[])
+        else
+          Future.value(<Map<String, dynamic>>[]),
+        if (invoice)
+          safe(_api.documentWarrantyDetail(widget.businessId,
+              widget.documentId), <String, dynamic>{})
+        else
+          Future.value(<String, dynamic>{}),
+        if (invoice)
+          safe(_api.documentSignatureStatus(widget.businessId,
+              widget.documentId), <String, dynamic>{})
+        else
+          Future.value(<String, dynamic>{}),
+        if (invoice)
+          safe(_api.warrantySubmissionReadiness(widget.businessId,
+              widget.documentId), <String, dynamic>{})
+        else
+          Future.value(<String, dynamic>{}),
+        if (invoice && vehicleId.isNotEmpty)
+          safe(_api.vehicleFindings(widget.businessId, vehicleId,
+              includeResolved: false), <Map<String, dynamic>>[])
+        else
+          Future.value(<Map<String, dynamic>>[]),
+        if (estimate)
+          safe(_api.identifixPricingStatus(widget.businessId,
+              widget.documentId), <String, dynamic>{})
+        else
+          Future.value(<String, dynamic>{}),
+      ]);
+      final taxSettings = Map<String, dynamic>.from(results[0] as Map);
+      final invoiceStyles = (results[1] as List)
+          .map((value) => Map<String, dynamic>.from(value as Map)).toList();
+      final warrantyDetail = Map<String, dynamic>.from(results[2] as Map);
+      final signatureStatus = Map<String, dynamic>.from(results[3] as Map);
+      final submissionReadiness = Map<String, dynamic>.from(results[4] as Map);
+      final findings = (results[5] as List)
+          .map((value) => Map<String, dynamic>.from(value as Map)).toList();
+      final openFindings = findings
+          .where((finding) => _findingNeedsInvoiceAttention(
+              finding, detail: detail)).toList();
+      final identifixMeta = Map<String, dynamic>.from(results[6] as Map);
+      if (taxSettings.isNotEmpty) {
+        await _taxSettingsCache.save(widget.businessId, taxSettings);
       }
-
+      if (invoice && invoiceStyles.isNotEmpty) {
+        await _localInvoiceStyles.save(widget.businessId, invoiceStyles);
+      }
+      debugPrint('PERF-001 detail + parallel metadata: ${openWatch.elapsedMilliseconds}ms');
+      unawaited(const InvoicePerformanceMetrics().record(
+        widget.businessId,
+        documentId: widget.documentId,
+        stage: 'detail_with_metadata',
+        milliseconds: openWatch.elapsedMilliseconds,
+      ));
       if (!mounted) return;
       setState(() {
         _detail = detail;
@@ -406,9 +484,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _submissionReadiness = submissionReadiness;
         _invoiceStyles = invoiceStyles;
         _openFindings = openFindings;
-        _defaultTaxRate =
-            num.tryParse(taxSettings['sales_tax_rate']?.toString() ?? '') ?? 0;
-        _taxSettingsCached = true;
+        if (taxSettings.isNotEmpty) {
+          _defaultTaxRate =
+              num.tryParse(taxSettings['sales_tax_rate']?.toString() ?? '') ??
+                  _defaultTaxRate;
+        }
+        _taxSettingsCached = _taxSettingsCached || taxSettings.isNotEmpty;
         _loading = false;
         _error = null;
       });
@@ -552,10 +633,55 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     ));
   }
 
+  Future<void> _openAddItemChoices() async {
+    if (_readOnly || _busy) {
+      return;
+    }
+    await _collapseWorkspaceHeader();
+    if (!mounted) {
+      return;
+    }
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.inventory_2_outlined),
+              title: Text(tr('addFromItemList')),
+              onTap: () => Navigator.pop(sheetContext, 'catalog'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_box_outlined),
+              title: Text(tr('addCustomLine')),
+              onTap: () => Navigator.pop(sheetContext, 'custom'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.percent_outlined),
+              title: Text(tr('addDiscount')),
+              onTap: () => Navigator.pop(sheetContext, 'discount'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == 'catalog') {
+      await _addCatalogItem();
+    }
+    if (action == 'custom') {
+      await _addCustomLine();
+    }
+    if (action == 'discount') {
+      await _addDiscount();
+    }
+  }
+
   Future<void> _runInitialAction(String action) async {
     switch (action) {
       case 'add_item':
-        await _addCustomLine();
+        await _openAddItemChoices();
         break;
       case 'edit':
         await _editDocumentHeader();
@@ -1600,6 +1726,39 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (action == 'delete') await _deleteLine(line);
   }
 
+  /// Enrich only the PDF snapshot from the already-synced local catalog.
+  /// Never alter stored invoice items, unit prices or totals.
+  Future<Map<String, dynamic>> _withPdfUnits(
+    Map<String, dynamic> detail,
+  ) async {
+    final raw = detail['lines'];
+    if (raw is! List || raw.isEmpty) return detail;
+    try {
+      final catalog = await _localCatalog.items(widget.businessId);
+      final units = <String, String>{
+        for (final item in catalog)
+          if ((item['pricing_unit']?.toString().trim() ?? '').isNotEmpty)
+            item['id'].toString(): item['pricing_unit'].toString().trim(),
+      };
+      return {
+        ...detail,
+        'lines': raw.map((value) {
+          if (value is! Map) return value;
+          final line = Map<String, dynamic>.from(value);
+          final itemId = line['item_id']?.toString() ?? '';
+          final existing = line['pricing_unit']?.toString().trim() ?? '';
+          if (existing.isEmpty && units.containsKey(itemId)) {
+            line['pricing_unit'] = units[itemId];
+          }
+          return line;
+        }).toList(),
+      };
+    } catch (_) {
+      // A missing local catalog must never prevent invoice PDF creation.
+      return detail;
+    }
+  }
+
   Future<Map<String, dynamic>?> _preparePdf() async {
     final lines = List<dynamic>.from(_detail?['lines'] ?? const []);
     if (lines.isEmpty) {
@@ -1610,7 +1769,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (BriskersConnectionModeController.instance.forceOffline) {
       final localDetail = _detail;
       if (localDetail == null) return null;
-      return Map<String, dynamic>.from(localDetail);
+      return _withPdfUnits(Map<String, dynamic>.from(localDetail));
     }
 
     try {
@@ -1624,21 +1783,32 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           expectedVersion: _version,
         );
       }
-      final detail = await _api.documentDetail(
+      final pdfWatch = Stopwatch()..start();
+      // PDF data must be current, but independent network fetches can run
+      // together; never wait for each sequentially.
+      final result = await Future.wait<dynamic>([
+        _api.documentDetail(widget.businessId, widget.documentId),
+        if (!_estimate)
+          _api.documentWarrantyDetail(widget.businessId, widget.documentId)
+        else
+          Future.value(<String, dynamic>{}),
+        if (!_estimate)
+          _api.documentSignatureStatus(widget.businessId, widget.documentId)
+        else
+          Future.value(<String, dynamic>{}),
+      ]);
+      final detail = Map<String, dynamic>.from(result[0] as Map);
+      debugPrint('PERF-001 PDF current data RPCs: ${pdfWatch.elapsedMilliseconds}ms');
+      unawaited(const InvoicePerformanceMetrics().record(
         widget.businessId,
-        widget.documentId,
-      );
+        documentId: widget.documentId,
+        stage: 'pdf_data',
+        milliseconds: pdfWatch.elapsedMilliseconds,
+      ));
       if (!_estimate) {
-        final warranty = await _api.documentWarrantyDetail(
-          widget.businessId,
-          widget.documentId,
-        );
+        final warranty = Map<String, dynamic>.from(result[1] as Map);
         detail.addAll(warranty);
-
-        final signature = await _api.documentSignatureStatus(
-          widget.businessId,
-          widget.documentId,
-        );
+        final signature = Map<String, dynamic>.from(result[2] as Map);
         final bucket = signature['bucket']?.toString() ?? '';
         final key = signature['key']?.toString() ?? '';
         if (signature['is_current'] == true &&
@@ -1661,7 +1831,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       } else if (mounted) {
         setState(() => _detail = detail);
       }
-      return detail;
+      return await _withPdfUnits(detail);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
       return null;
@@ -1673,7 +1843,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (detail == null || !mounted) return;
 
     try {
+      final pdfRenderWatch = Stopwatch()..start();
       final bytes = await DocumentPdfService.build(detail);
+      unawaited(const InvoicePerformanceMetrics().record(
+        widget.businessId,
+        documentId: widget.documentId,
+        stage: 'pdf_render',
+        milliseconds: pdfRenderWatch.elapsedMilliseconds,
+      ));
       if (!mounted) return;
 
       await Navigator.push<void>(
@@ -2999,6 +3176,37 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   Future<void> _deleteOrVoidInvoice() async {
     if (!widget.isOwner || _estimate || _detail == null || _busy) return;
+
+    if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Delete invoice?'),
+          content: const Text('This invoice will be permanently deleted.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(tr('cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete invoice'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+      try {
+        await _offlineDocumentDraft.cancelNeverSyncedQuickInvoice(
+          widget.businessId,
+          widget.documentId,
+        );
+        if (mounted) Navigator.pop(context);
+      } catch (error) {
+        if (mounted) setState(() => _error = error.toString());
+      }
+      return;
+    }
 
     final finalizedPaid = _number(_detail!['paid_amount']);
     final pendingPaid = _number(_detail!['pending_payment']);
@@ -6110,11 +6318,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             finalizedPaid: finalizedPaid,
             pendingPaid: pendingPaid,
           );
-    final statusLabel = _statusLabel(
-      total: total,
-      finalizedPaid: finalizedPaid,
-      pendingPaid: pendingPaid,
-    );
+    final unsyncedInvoice = widget.documentId.startsWith('local-invoice-') &&
+        (_detail?['_server_document_id']?.toString().isEmpty ?? true);
+    final statusLabel = unsyncedInvoice
+        ? 'Pending sync'
+        : _statusLabel(
+            total: total,
+            finalizedPaid: finalizedPaid,
+            pendingPaid: pendingPaid,
+          );
     final tabCount = _estimate ? 2 : 3;
 
     return DefaultTabController(
@@ -6154,7 +6366,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              _statusPill(statusLabel, code: statusCode),
+              _statusPill(statusLabel,
+                  code: unsyncedInvoice ? 'pending' : statusCode),
               ],
             ),
           ),

@@ -1281,6 +1281,17 @@ class BriskersApi {
     return result.toString();
   }
 
+  /// Owner-only guarded deletion: fails if the Job has work or references.
+  Future<void> deleteUnusedJob(
+    String businessId,
+    String jobId,
+  ) async {
+    await networkSupabase.rpc(
+      'briskers_delete_unused_job',
+      params: {'p_business_id': businessId, 'p_job_id': jobId},
+    );
+  }
+
   Future<Map<String, dynamic>> jobDetail(
     String businessId,
     String jobId,
