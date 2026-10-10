@@ -222,7 +222,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   }
 
   Future<void> _deleteAppointment(Map<String, dynamic> item) async {
-    if (!_onlineReady || widget.roleCode != 'owner') return;
+    if (widget.roleCode != 'owner') return;
+    final isPendingCreate = item['id']?.toString().startsWith('local-appointment-') == true;
+    if (!isPendingCreate && !_onlineReady) return;
     final ok = await _confirm(
       title: 'Delete appointment?',
       message:
@@ -232,7 +234,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     );
     if (!ok) return;
     try {
-      await _api.deleteAppointment(widget.businessId, item['id'].toString());
+      if (isPendingCreate) {
+        await _appointmentSync.deletePendingCreate(widget.businessId,
+          item['id'].toString(), isOwner: true);
+      } else {
+        await _api.deleteAppointment(widget.businessId, item['id'].toString());
+      }
       await _load();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -370,7 +377,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         !queued &&
         !conflict;
     final canCancel = canEdit && _onlineReady;
-    final canDelete = _onlineReady &&
+    final canDelete = (_onlineReady || item['id']?.toString().startsWith('local-appointment-') == true) &&
         widget.roleCode == 'owner' &&
         item['job_id'] == null &&
         item['request_id'] == null &&
