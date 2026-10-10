@@ -2552,6 +2552,34 @@ class BriskersApi {
     );
   }
 
+  Future<String> syncOfflineAppointmentCreate(
+    String businessId, {
+    required String operationId,
+    required String customerId,
+    String? vehicleId,
+    required String title,
+    String? description,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    String? employeeId,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_sync_offline_appointment_create',
+      params: {
+        'p_business_id': businessId,
+        'p_operation_id': operationId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_title': title,
+        'p_description': description,
+        'p_starts_at': startsAt.toUtc().toIso8601String(),
+        'p_ends_at': endsAt.toUtc().toIso8601String(),
+        'p_employee_id': employeeId,
+      },
+    );
+    return result.toString();
+  }
+
   Future<String> createAppointment(
     String businessId, {
     required String customerId,
