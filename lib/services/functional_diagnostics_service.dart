@@ -189,6 +189,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkPaymentAcknowledgment,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-016',
+      title: 'Interrupted payment replay and idempotent retry',
+      success: 'Lost response retains one queued payment; retry reuses the same UUID, verifies matching server ID, caches invoice and retires queue.',
+      action: _checkInterruptedPaymentReplay,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -339,6 +347,63 @@ class BriskersFunctionalDiagnosticsService {
       ),
       'Missing payment was incorrectly acknowledged.',
     );
+  }
+
+  Future<void> _checkInterruptedPaymentReplay(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final ledger = OfflineInvoicePaymentLedger(database: database);
+    const invoiceId = 'server-invoice-diagnostic';
+    final operationId = await ledger.recordReceivedPayment(
+      businessId, invoiceId,
+      amount: 500, remainingBeforePaymentCents: 50000,
+      methodId: 'test-method', methodName: 'Cash',
+    );
+    final accepted = <String, String>{};
+    var networkCalls = 0;
+    var cacheWrites = 0;
+    Future<String> submit(
+      String business, String invoice, num amount, String method, String op,
+    ) async {
+      networkCalls++;
+      _require(op == operationId, 'Retry changed payment operation ID.');
+      final serverId = accepted.putIfAbsent(op, () => 'payment-server-1');
+      if (networkCalls == 1) {
+        throw StateError('Simulated lost network response after acceptance');
+      }
+      return serverId;
+    }
+    Future<Map<String, dynamic>> fetch(String business, String invoice) async =>
+        {'payments': [{'id': accepted[operationId], 'amount': 500}],
+         'pending_payment': 500, 'paid_amount': 0, 'total_amount': 500};
+    await ledger.flush(businessId,
+      submitPayment: submit,
+      fetchInvoice: fetch,
+      cacheInvoice: (b, i, detail) async { cacheWrites++; },
+    );
+    _require((await ledger.pendingForInvoice(businessId, invoiceId)).length == 1,
+        'Lost response prematurely removed local payment.');
+    await ledger.flush(businessId,
+      submitPayment: submit,
+      fetchInvoice: fetch,
+      cacheInvoice: (b, i, detail) async {
+        cacheWrites++;
+        _require(
+          OfflineInvoicePaymentLedger.serverAcknowledgesPayment(
+            detail, 'payment-server-1'),
+          'Invoice was cached without an authoritative payment ID.',
+        );
+      },
+    );
+    _require(networkCalls == 2,
+        'Interrupted submission did not retry exactly once.');
+    _require(accepted.length == 1,
+        'Retry created a second synthetic server payment.');
+    _require(cacheWrites == 1,
+        'Refreshed server invoice was not cached exactly once.');
+    _require((await ledger.pendingForInvoice(businessId, invoiceId)).isEmpty,
+        'Acknowledged payment remains in local outbox.');
   }
 
   Future<void> _checkOfflineInvoiceCancel(
