@@ -116,7 +116,7 @@ void main() {
       expect(lines.map((row) => row['label']), [
         'Payment - Cash',
         'Payment - Check',
-        'Payment - Credit card (Pending)',
+        'Payment - Credit card',
       ]);
       expect(lines.map((row) => row['amount']), [250, 250, 150]);
       expect(lines.last['pending'], isTrue);
@@ -139,7 +139,7 @@ void main() {
       final lines = DocumentPdfService.invoicePaymentLines(detail);
       expect(lines.map((row) => row['label']), [
         'Payment - Method not recorded',
-        'Payment - Method not recorded (Pending)',
+        'Payment - Method not recorded',
       ]);
       expect(lines.map((row) => row['amount']), [600, 100]);
       expect(DocumentPdfService.invoicePaymentAmounts(detail)['remaining'],
