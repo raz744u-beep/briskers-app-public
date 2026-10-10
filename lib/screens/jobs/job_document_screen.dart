@@ -119,7 +119,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   @override
   void initState() {
     super.initState();
+    BriskersConnectionModeController.instance.addListener(_onModeChanged);
     _load();
+  }
+
+  void _onModeChanged() {
+    if (mounted && !_busy) _load();
   }
 
   void _scheduleInitialActionIfNeeded() {
@@ -135,6 +140,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   @override
   void dispose() {
+    BriskersConnectionModeController.instance.removeListener(_onModeChanged);
     _workspaceHeaderController.dispose();
     _notesController.dispose();
     _notesFocusNode.dispose();
@@ -237,7 +243,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         widget.documentId,
       );
       final serverId = cached?['_server_document_id']?.toString() ?? '';
-      if (serverId.isNotEmpty && serverId != widget.documentId && !forceOffline) {
+      if (serverId.isNotEmpty && serverId != widget.documentId) {
         if (!mounted) return;
         await Navigator.pushReplacement<void, void>(
           context,
@@ -6196,11 +6202,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             finalizedPaid: finalizedPaid,
             pendingPaid: pendingPaid,
           );
-    final statusLabel = _statusLabel(
-      total: total,
-      finalizedPaid: finalizedPaid,
-      pendingPaid: pendingPaid,
-    );
+    final unsyncedInvoice = widget.documentId.startsWith('local-invoice-') &&
+        (_detail?['_server_document_id']?.toString().isEmpty ?? true);
+    final statusLabel = unsyncedInvoice
+        ? 'Pending sync'
+        : _statusLabel(
+            total: total,
+            finalizedPaid: finalizedPaid,
+            pendingPaid: pendingPaid,
+          );
     final tabCount = _estimate ? 2 : 3;
 
     return DefaultTabController(
@@ -6240,7 +6250,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              _statusPill(statusLabel, code: statusCode),
+              _statusPill(statusLabel,
+                  code: unsyncedInvoice ? 'pending' : statusCode),
               ],
             ),
           ),
