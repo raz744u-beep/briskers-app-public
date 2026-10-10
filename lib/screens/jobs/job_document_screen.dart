@@ -484,9 +484,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _submissionReadiness = submissionReadiness;
         _invoiceStyles = invoiceStyles;
         _openFindings = openFindings;
-        _defaultTaxRate =
-            num.tryParse(taxSettings['sales_tax_rate']?.toString() ?? '') ?? 0;
-        _taxSettingsCached = true;
+        if (taxSettings.isNotEmpty) {
+          _defaultTaxRate =
+              num.tryParse(taxSettings['sales_tax_rate']?.toString() ?? '') ??
+                  _defaultTaxRate;
+        }
+        _taxSettingsCached = _taxSettingsCached || taxSettings.isNotEmpty;
         _loading = false;
         _error = null;
       });
