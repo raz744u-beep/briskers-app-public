@@ -146,7 +146,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       _appointments ?? const <Map<String, dynamic>>[];
 
   Future<void> _addAppointment() async {
-    if (!_onlineReady || !_canManage) return;
+    if (!_canManage) return;
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
