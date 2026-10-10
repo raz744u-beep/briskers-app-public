@@ -3055,6 +3055,37 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _deleteOrVoidInvoice() async {
     if (!widget.isOwner || _estimate || _detail == null || _busy) return;
 
+    if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Delete invoice?'),
+          content: const Text('This invoice will be permanently deleted.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(tr('cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete invoice'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+      try {
+        await _offlineDocumentDraft.cancelNeverSyncedQuickInvoice(
+          widget.businessId,
+          widget.documentId,
+        );
+        if (mounted) Navigator.pop(context);
+      } catch (error) {
+        if (mounted) setState(() => _error = error.toString());
+      }
+      return;
+    }
+
     final finalizedPaid = _number(_detail!['paid_amount']);
     final pendingPaid = _number(_detail!['pending_payment']);
 
