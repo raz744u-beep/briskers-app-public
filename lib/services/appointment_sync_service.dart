@@ -240,35 +240,65 @@ class AppointmentSyncService {
         throw StateError('Appointment is not cached on this device.');
       }
       final row = rows.single;
-      if (row.read<String>('sync_state') != 'synced') {
-        throw StateError('Resolve existing pending/conflicted changes first.');
+      final syncState = row.read<String>('sync_state');
+      if (syncState == 'conflict') {
+        throw StateError('Resolve the synchronization conflict first.');
+      }
+      final queued = await _database.customSelect(
+        """SELECT id, payload_json, attempt_count, last_attempt_at
+           FROM sync_outbox WHERE business_id=? AND entity_id=?
+           AND entity_type='appointment_edit' AND state='pending'
+           ORDER BY id LIMIT 1""",
+        variables: [Variable<String>(businessId),
+                    Variable<String>(appointmentId)],
+      ).get();
+      if (syncState != 'synced' && queued.isEmpty) {
+        throw StateError('An unfinished appointment operation needs review.');
+      }
+      if (queued.isNotEmpty &&
+          (queued.single.read<int>('attempt_count') > 0 ||
+           queued.single.readNullable<int>('last_attempt_at') != null)) {
+        throw StateError(
+          'This edit may already have reached the server. Sync before editing again.',
+        );
       }
       if (!isOwner &&
           (row.read<String>('status') != 'confirmed' ||
            row.readNullable<String>('job_id') != null)) {
         throw StateError('Owner access required for this appointment.');
       }
-      final op = _operationId('appointment-edit');
-      await _database.customStatement(
-        """INSERT INTO sync_outbox (
-          business_id,entity_type,entity_id,operation,payload_json,
-          base_row_version,state,attempt_count,created_at,last_attempt_at,last_error
-        ) VALUES (?, 'appointment_edit', ?, 'update', ?, ?, 'pending', 0, ?, NULL, NULL)""",
-        [
-          businessId, appointmentId,
-          jsonEncode({
-            'operation_id': op,
-            'appointment_id': appointmentId,
-            'title': title.trim(),
-            'description': description,
-            'starts_at': startsAt.toUtc().toIso8601String(),
-            'ends_at': endsAt.toUtc().toIso8601String(),
-            'employee_id': employeeId,
-          }),
-          row.readNullable<int>('row_version'),
-          _unix(DateTime.now().toUtc()),
-        ],
-      );
+      final existingPayload = queued.isEmpty
+          ? null
+          : Map<String, dynamic>.from(
+              jsonDecode(queued.single.read<String>('payload_json')) as Map);
+      final op = existingPayload?['operation_id']?.toString() ??
+          _operationId('appointment-edit');
+      final payload = jsonEncode({
+        'operation_id': op,
+        'appointment_id': appointmentId,
+        'title': title.trim(),
+        'description': description,
+        'starts_at': startsAt.toUtc().toIso8601String(),
+        'ends_at': endsAt.toUtc().toIso8601String(),
+        'employee_id': employeeId,
+      });
+      if (queued.isEmpty) {
+        await _database.customStatement(
+          """INSERT INTO sync_outbox (
+            business_id,entity_type,entity_id,operation,payload_json,
+            base_row_version,state,attempt_count,created_at,last_attempt_at,last_error
+          ) VALUES (?, 'appointment_edit', ?, 'update', ?, ?, 'pending', 0, ?, NULL, NULL)""",
+          [businessId, appointmentId, payload,
+           row.readNullable<int>('row_version'), _unix(DateTime.now().toUtc())],
+        );
+      } else {
+        // This UUID has not been attempted, so replacing its payload cannot
+        // cause a mismatched retry of an already accepted server operation.
+        await _database.customStatement(
+          'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+          [payload, queued.single.read<int>('id')],
+        );
+      }
       await _database.customStatement(
         """UPDATE local_appointments SET title=?,description=?,starts_at=?,
           ends_at=?,employee_id=?,sync_state='pending'
