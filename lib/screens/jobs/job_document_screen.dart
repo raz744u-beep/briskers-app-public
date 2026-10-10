@@ -1674,21 +1674,26 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           expectedVersion: _version,
         );
       }
-      final detail = await _api.documentDetail(
-        widget.businessId,
-        widget.documentId,
-      );
+      final pdfWatch = Stopwatch()..start();
+      // PDF data must be current, but independent network fetches can run
+      // together; never wait for each sequentially.
+      final result = await Future.wait<dynamic>([
+        _api.documentDetail(widget.businessId, widget.documentId),
+        if (!_estimate)
+          _api.documentWarrantyDetail(widget.businessId, widget.documentId)
+        else
+          Future.value(<String, dynamic>{}),
+        if (!_estimate)
+          _api.documentSignatureStatus(widget.businessId, widget.documentId)
+        else
+          Future.value(<String, dynamic>{}),
+      ]);
+      final detail = Map<String, dynamic>.from(result[0] as Map);
+      debugPrint('PERF-001 PDF current data RPCs: ${pdfWatch.elapsedMilliseconds}ms');
       if (!_estimate) {
-        final warranty = await _api.documentWarrantyDetail(
-          widget.businessId,
-          widget.documentId,
-        );
+        final warranty = Map<String, dynamic>.from(result[1] as Map);
         detail.addAll(warranty);
-
-        final signature = await _api.documentSignatureStatus(
-          widget.businessId,
-          widget.documentId,
-        );
+        final signature = Map<String, dynamic>.from(result[2] as Map);
         final bucket = signature['bucket']?.toString() ?? '';
         final key = signature['key']?.toString() ?? '';
         if (signature['is_current'] == true &&
