@@ -148,7 +148,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   void _onModeChanged() {
-    if (mounted && !_busy) _load();
+    if (mounted && !_busy) {
+      _load();
+    }
   }
 
   void _scheduleInitialActionIfNeeded() {
