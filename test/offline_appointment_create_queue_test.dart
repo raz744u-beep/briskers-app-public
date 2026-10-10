@@ -31,6 +31,22 @@ void main() {
       final payload = jsonDecode(outbox.single.read<String>('payload_json')) as Map;
       expect(payload['title'], 'Updated');
       expect(payload['customer_id'], 'customer-test');
+      final queueIdRow = await db.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type='appointment_create'",
+      ).getSingle();
+      await service.acknowledgeCreatedAppointment(
+        'shop-test', id, 'server-appointment-123',
+        queueIdRow.read<int>('id'),
+      );
+      final accepted = await db.customSelect(
+        "SELECT id,sync_state FROM local_appointments WHERE business_id='shop-test'",
+      ).getSingle();
+      expect(accepted.read<String>('id'), 'server-appointment-123');
+      expect(accepted.read<String>('sync_state'), 'synced');
+      final remaining = await db.customSelect(
+        "SELECT count(*) AS n FROM sync_outbox WHERE business_id='shop-test'",
+      ).getSingle();
+      expect(remaining.read<int>('n'), 0);
       final local = await db.customSelect(
         "SELECT title FROM local_appointments WHERE business_id='shop-test'",
       ).getSingle();
