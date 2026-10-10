@@ -14,6 +14,7 @@ import '../../services/briskers_api.dart';
 import '../../services/job_sync_service.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
+import '../../services/job_performance_metrics.dart';
 import '../../services/local_document_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_financial_cache.dart';
@@ -191,6 +192,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _load() async {
+    final loadWatch = Stopwatch()..start();
     var localShown = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
     final forceOffline =
@@ -202,6 +204,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         widget.businessId,
         widget.jobId,
       );
+      unawaited(const JobPerformanceMetrics().record(
+        widget.businessId,
+        jobId:widget.jobId,
+        stage:'local_job_detail',
+        milliseconds:loadWatch.elapsedMilliseconds,
+      ));
       if (snapshot != null && mounted) {
         final localDocuments = _canSeeFinancial
             ? await _localDocumentsForJob()
@@ -212,6 +220,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               )
             : null;
         localShown = true;
+        unawaited(const JobPerformanceMetrics().record(
+          widget.businessId,
+          jobId:widget.jobId,
+          stage:'offline_first_render',
+          milliseconds:loadWatch.elapsedMilliseconds,
+        ));
         setState(() {
           _job = snapshot.job;
           _preInspection = snapshot.preInspection;
