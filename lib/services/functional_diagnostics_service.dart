@@ -384,7 +384,9 @@ class BriskersFunctionalDiagnosticsService {
     );
     await drafts.saveMemo(businessId, id, 'Sandbox invoice note');
     final snapshot = await cache.load(businessId, id);
-    _require(snapshot != null, 'Offline invoice detail not cached.');
+    if (snapshot == null) {
+      throw StateError('Offline invoice detail not cached.');
+    }
     final localJobId = snapshot['job_id']?.toString() ?? '';
     _require(
       localJobId.startsWith('local-job-') &&
@@ -410,7 +412,7 @@ class BriskersFunctionalDiagnosticsService {
           linked.single.read<int>('visits') == 1,
       'Offline invoice, pending Job and initial visit were not created atomically.',
     );
-    _require(snapshot!['kind'] == 'invoice', 'Invoice kind was lost.');
+    _require(snapshot['kind'] == 'invoice', 'Invoice kind was lost.');
     _require(
       (snapshot['total_amount'] as num).toDouble() > 109,
       'Offline invoice math was not saved.',
