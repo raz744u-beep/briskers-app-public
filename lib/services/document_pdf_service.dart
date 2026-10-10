@@ -131,18 +131,23 @@ class DocumentPdfService {
   /// Catalog units win over generic item defaults.
   static String pdfLineQuantity(Map<String, dynamic> line) {
     final qty = _quantity(line['quantity']);
-    if (line['line_kind']?.toString() == 'labor') return '$qty hrs';
+    final numericQuantity = num.tryParse(line['quantity']?.toString() ?? '');
+    final singular = numericQuantity == 1;
+
+    if (line['line_kind']?.toString() == 'labor') {
+      return '$qty ${singular ? 'hr' : 'hrs'}';
+    }
 
     final raw = line['pricing_unit']?.toString().trim() ?? '';
+    final normalized = raw.toLowerCase();
     String unit = raw;
-    if (unit.isEmpty && line['line_kind']?.toString() == 'item') {
-      unit = 'pc.';
-    } else if (const {'pc', 'pcs', 'piece', 'pieces'}.contains(
-      unit.toLowerCase(),
-    )) {
-      unit = 'pc.';
-    } else if (const {'hr', 'hour', 'hours'}.contains(unit.toLowerCase())) {
-      unit = 'hrs';
+    if (const {'pc', 'pc.', 'pcs', 'pcs.', 'piece', 'pieces'}
+        .contains(normalized) ||
+        (raw.isEmpty && line['line_kind']?.toString() == 'item')) {
+      unit = singular ? 'pc' : 'pcs';
+    } else if (const {'hr', 'hr.', 'hrs', 'hrs.', 'hour', 'hours'}
+        .contains(normalized)) {
+      unit = singular ? 'hr' : 'hrs';
     }
     return unit.isEmpty ? qty : '$qty $unit';
   }

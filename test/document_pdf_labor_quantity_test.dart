@@ -6,7 +6,21 @@ import 'package:briskers_app/services/document_pdf_service.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('only PDF labor quantities include hrs, preserving decimals', () {
+  test('PDF quantities use pc/hr for one and pcs/hrs otherwise', () {
+    expect(
+      DocumentPdfService.pdfLineQuantity({
+        'line_kind': 'labor',
+        'quantity': 1,
+      }),
+      '1 hr',
+    );
+    expect(
+      DocumentPdfService.pdfLineQuantity({
+        'line_kind': 'labor',
+        'quantity': 1.0,
+      }),
+      '1 hr',
+    );
     expect(
       DocumentPdfService.pdfLineQuantity({
         'line_kind': 'labor',
@@ -27,14 +41,53 @@ void main() {
         'quantity': 4.4,
         'pricing_unit': 'pc',
       }),
-      '4.4 pc.',
+      '4.4 pcs',
     );
     expect(
       DocumentPdfService.pdfLineQuantity({
         'line_kind': 'item',
         'quantity': 2,
       }),
-      '2 pc.',
+      '2 pcs',
+    );
+    expect(
+      DocumentPdfService.pdfLineQuantity({
+        'line_kind': 'item',
+        'quantity': 1,
+        'pricing_unit': 'pcs',
+      }),
+      '1 pc',
+    );
+    expect(
+      DocumentPdfService.pdfLineQuantity({
+        'line_kind': 'item',
+        'quantity': 1,
+      }),
+      '1 pc',
+    );
+    expect(
+      DocumentPdfService.pdfLineQuantity({
+        'line_kind': 'item',
+        'quantity': 2,
+        'pricing_unit': 'piece',
+      }),
+      '2 pcs',
+    );
+    expect(
+      DocumentPdfService.pdfLineQuantity({
+        'line_kind': 'item',
+        'quantity': 1,
+        'pricing_unit': 'hr',
+      }),
+      '1 hr',
+    );
+    expect(
+      DocumentPdfService.pdfLineQuantity({
+        'line_kind': 'item',
+        'quantity': 1.5,
+        'pricing_unit': 'hour',
+      }),
+      '1.5 hrs',
     );
     expect(
       DocumentPdfService.pdfLineQuantity({
