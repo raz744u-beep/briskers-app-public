@@ -20,6 +20,7 @@ import '../jobs/job_document_screen.dart';
 import '../jobs/blank_invoice_setup_screen.dart';
 import '../jobs/estimate_job_setup_screen.dart';
 import 'customer_quick_actions.dart';
+import 'customer_problem_flag_card.dart';
 import 'customer_account_section.dart';
 import 'customer_appointments_section.dart';
 import 'customer_notes_section.dart';
@@ -1003,43 +1004,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  Card(
-                    child: Column(
-                      children: [
-                        CheckboxListTile(
-                          title: const Text(
-                            'Problem customer',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          subtitle: const Text(
-                            'Show a red flag beside this customer throughout Briskers.',
-                          ),
-                          value: customer['problem_flag'] == true,
-                          onChanged:
-                              _canEditLocal ? (_) => _editProblemFlag() : null,
-                        ),
-                        if (customer['problem_flag'] == true)
-                          ListTile(
-                            leading: const Icon(
-                              Icons.flag,
-                              color: Colors.red,
-                            ),
-                            title: const Text('Flag reason / note'),
-                            subtitle: Text(
-                              (customer['problem_flag_note']?.toString() ?? '')
-                                      .trim()
-                                      .isEmpty
-                                  ? 'Tap to add a reason'
-                                  : customer['problem_flag_note'].toString(),
-                            ),
-                            trailing: _canEditLocal
-                                ? const Icon(Icons.edit_outlined)
-                                : null,
-                            onTap:
-                                _canEditLocal ? _editProblemFlag : null,
-                          ),
-                      ],
-                    ),
+                  CustomerProblemFlagCard(
+                    customerId: widget.customerId,
+                    flagged: customer['problem_flag'] == true,
+                    note: customer['problem_flag_note']?.toString() ?? '',
+                    canEdit: _canEditLocal,
+                    onEdit: _editProblemFlag,
                   ),
                   const SizedBox(height: 18),
                   CustomerVehiclesSection(
