@@ -46,7 +46,7 @@ BEGIN
       AND d.kind='invoice'
       AND (d.origin<>'native' OR d.closed_at IS NOT NULL
            OR d.status IN ('void','closed','paid')
-           OR d.extended_warranty=true
+           OR d.extended_warranty=true OR d.signature_required=true
            OR d.warranty_company_id IS NOT NULL)
   ) THEN
     v_block:='A linked invoice is closed, imported or otherwise protected';
@@ -77,15 +77,20 @@ BEGIN
     SELECT 1 FROM briskers.job_visits v
     WHERE v.business_id=p_business_id AND v.job_id=p_job_id
       AND (v.visit_number<>1 OR v.work_summary IS NOT NULL
-           OR v.closed_at IS NOT NULL OR coalesce(v.planned_hours,0)<>0)
+           OR v.closed_at IS NOT NULL OR coalesce(v.planned_hours,0)<>0
+           OR coalesce(v.reason,'Initial visit')<>'Initial visit')
   ) OR (SELECT count(*) FROM briskers.job_visits v
         WHERE v.business_id=p_business_id AND v.job_id=p_job_id)>1 THEN
     v_block:='Job contains service visit or work history';
   ELSIF EXISTS(
     SELECT 1 FROM briskers.job_status_events e
     WHERE e.business_id=p_business_id AND e.job_id=p_job_id
-      AND (e.from_status IS NOT NULL
-           AND NOT(e.from_status='open' AND e.to_status='pending_approval'))
+      AND NOT (
+        (e.from_status IS NULL AND e.to_status='open'
+           AND e.note IS NOT DISTINCT FROM 'Job created')
+        OR (e.from_status='open' AND e.to_status='pending_approval'
+           AND e.note IS NOT DISTINCT FROM 'Job created for estimate preparation.')
+      )
   ) THEN
     v_block:='Job has status change history';
   ELSIF EXISTS(
@@ -120,6 +125,9 @@ BEGIN
   ) OR EXISTS(
     SELECT 1 FROM briskers.kiosk_registrations x
     WHERE x.job_id=p_job_id
+  ) OR EXISTS(
+    SELECT 1 FROM briskers.document_reassignment_restore x
+    WHERE x.business_id=p_business_id AND x.prior_job_id=p_job_id
   ) THEN
     v_block:='Job has linked service, financial or communication history';
   END IF;
@@ -210,7 +218,7 @@ BEGIN
    RETURN public.briskers_delete_job_with_unpaid_v1(p_business_id,d.job_id);
  END IF;
  IF d.origin<>'native' OR d.closed_at IS NOT NULL OR d.status='void'
-    OR d.extended_warranty=true THEN
+    OR d.extended_warranty=true OR d.signature_required=true THEN
    RAISE EXCEPTION 'Only eligible unpaid native invoices can be deleted'
      USING ERRCODE='55000';
  END IF;
