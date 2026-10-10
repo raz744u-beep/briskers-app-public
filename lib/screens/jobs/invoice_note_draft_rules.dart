@@ -28,10 +28,10 @@ String mergeStandardNoteIntoDraft(
   if (addition.isEmpty) return current;
   if (current.isEmpty) return addition;
   final sections = current
-      .split(RegExp(r'\\n\\s*\\n'))
+      .split(RegExp(r'\n\s*\n'))
       .map((section) => section.trim());
   if (sections.contains(addition)) return current;
-  return '$current\\n\\n$addition';
+  return '$current\n\n$addition';
 }
 
 bool canSaveStandardNoteText(String name, String body) =>
