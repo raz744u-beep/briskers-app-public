@@ -390,8 +390,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         !conflict;
     final canCancel = _canManage && !queued && !conflict &&
         item['job_id'] == null &&
-        {'confirmed','tentative'}.contains(status) &&
-        true;
+        {'confirmed','tentative'}.contains(status);
     final canDelete = (_onlineReady || item['id']?.toString().startsWith('local-appointment-') == true) &&
         widget.roleCode == 'owner' &&
         item['job_id'] == null &&
