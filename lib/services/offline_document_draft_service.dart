@@ -106,7 +106,7 @@ class OfflineDocumentDraftService {
           status,status_name,customer_id,customer_name,vehicle_id,
           vehicle_label,created_at,sync_state
         ) VALUES (?,?,'full',NULL,'Invoice',NULL,'open','In progress',
-                  ?,?,?,?,?,?,'pending')
+                  ?,?,?,?,?,'pending')
         ''',
         [
           provisionalJobId,businessId,customerId,customerName,
