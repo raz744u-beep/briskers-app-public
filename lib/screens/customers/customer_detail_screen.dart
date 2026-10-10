@@ -618,7 +618,25 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     String? jobId;
     try {
       if (BriskersConnectionModeController.instance.forceOffline) {
-        await _createOfflineEstimateForCustomer();
+        final documentId=await Navigator.push<String>(
+          context,MaterialPageRoute(builder:(_)=>BlankInvoiceSetupScreen(
+            businessId:widget.businessId,
+            kind:'estimate',
+            initialCustomerId:widget.customerId,
+            initialCustomerName:customer['name']?.toString() ?? 'Customer',
+            initialVehicles:vehicles,
+          )),
+        );
+        if (!mounted || documentId==null) return;
+        await Navigator.push<void>(context,MaterialPageRoute(
+          builder:(_)=>JobDocumentScreen(
+            businessId:widget.businessId,
+            documentId:documentId,
+            isOwner:widget.roleCode=='owner',
+            canManageExpenses:_canManageQuickActions,
+            initialAction:'add_item',
+          ),
+        ));
         return;
       }
       final history = await _api.customerServiceHistory(
@@ -640,7 +658,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               children: [
                 const ListTile(
                   title: Text('Create estimate'),
-                  subtitle: Text('Use an existing job or create a new job.'),
+                  subtitle: Text('Existing Job or standalone estimate.'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.build_outlined),
@@ -649,7 +667,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.add_circle_outline),
-                  title: const Text('New job for estimate'),
+                  title: const Text('New Estimate (no Job)'),
                   onTap: () => Navigator.pop(sheetContext, 'new'),
                 ),
               ],
@@ -688,19 +706,28 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       }
 
       if (jobId == null) {
-        final job = await Navigator.push<Map<String, dynamic>>(
+        final documentId=await Navigator.push<String>(
           context,
-          MaterialPageRoute(
-            builder: (_) => EstimateJobSetupScreen(
-              businessId: widget.businessId,
-              initialCustomerId: widget.customerId,
-              initialCustomerName: customer['name']?.toString() ?? 'Customer',
-              initialVehicles: vehicles,
-            ),
-          ),
+          MaterialPageRoute(builder:(_)=>BlankInvoiceSetupScreen(
+            businessId:widget.businessId,
+            kind:'estimate',
+            initialCustomerId:widget.customerId,
+            initialCustomerName:customer['name']?.toString() ?? 'Customer',
+            initialVehicles:vehicles,
+          )),
         );
-        if (!mounted || job == null) return;
-        jobId = job['id']?.toString();
+        if (!mounted || documentId==null || documentId.isEmpty) return;
+        await Navigator.push<void>(
+          context,MaterialPageRoute(builder:(_)=>JobDocumentScreen(
+            businessId:widget.businessId,
+            documentId:documentId,
+            isOwner:widget.roleCode=='owner',
+            canManageExpenses:_canManageQuickActions,
+            initialAction:'add_item',
+          )),
+        );
+        if (mounted) await _load();
+        return;
       }
       if (jobId == null || jobId.isEmpty) {
         throw StateError('No job was selected for the estimate.');
