@@ -706,9 +706,22 @@ class OfflineDocumentDraftService {
         } else {
           final jobId = payload['job_id']?.toString() ?? '';
           if (jobId.isEmpty) {
-            throw StateError('The offline estimate has no linked job.');
-          }
-
+            final operationId=payload['operation_id']?.toString() ?? '';
+            final customerId=payload['customer_id']?.toString() ?? '';
+            if (operationId.isEmpty || customerId.isEmpty) {
+              throw StateError('The offline estimate has no sync identity.');
+            }
+            serverId = await _api.syncOfflineStandaloneEstimate(
+              businessId,
+              customerId:customerId,
+              vehicleId:payload['vehicle_id']?.toString(),
+              operationId:operationId,
+              documentDate:payload['document_date']?.toString() ?? '',
+              lines:_lines(localDetail),
+              memo:localDetail['memo']?.toString(),
+            );
+            serverDetail=await _api.documentDetail(businessId,serverId);
+          } else {
           serverId = await _api.createEstimate(businessId, jobId);
           serverDetail = await _api.documentDetail(businessId, serverId);
 
@@ -742,6 +755,7 @@ class OfflineDocumentDraftService {
               memo: memo,
             );
             serverDetail = await _api.documentDetail(businessId,serverId);
+          }
           }
         }
 
