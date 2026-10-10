@@ -523,6 +523,9 @@ class AppointmentSyncService {
           endsAt: DateTime.parse(data['ends_at'].toString()),
           employeeId: data['employee_id']?.toString(),
         );
+        if (serverId.isEmpty) {
+          throw StateError('Server did not return appointment identity.');
+        }
         // The authoritative pull fills server fields. Remove only the
         // never-synced local placeholder, with the outbox row atomically.
         await _database.transaction(() async {
@@ -537,9 +540,6 @@ class AppointmentSyncService {
         });
         // Ensure the new record is fetched on the normal sync pull.
         _syncEvents.add(businessId);
-        if (serverId.isEmpty) {
-          throw StateError('Server did not return appointment identity.');
-        }
       } catch (error) {
         await _database.customStatement(
           """UPDATE sync_outbox SET attempt_count=attempt_count+1,
