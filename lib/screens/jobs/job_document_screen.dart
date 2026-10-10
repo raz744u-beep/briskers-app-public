@@ -6382,11 +6382,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             if (!_readOnly)
               IconButton(
                 tooltip: _estimate ? 'Estimate actions' : tr('editInvoice'),
-                onPressed: _busy
-                    ? null
-                    : (_estimate
-                        ? _showDocumentHeaderActions
-                        : _editDocumentHeader),
+                onPressed: _busy ? null : _showDocumentHeaderActions,
                 icon: const Icon(Icons.edit_outlined),
               ),
           ],
