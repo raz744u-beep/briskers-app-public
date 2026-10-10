@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:typed_data';
 
@@ -90,6 +91,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   bool _loading = true;
   bool _busy = false;
   bool _initialActionHandled = false;
+  Timer? _pendingInvoiceResolution;
   bool _notesDirty = false;
   String? _error;
 
@@ -121,6 +123,27 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     super.initState();
     BriskersConnectionModeController.instance.addListener(_onModeChanged);
     _load();
+    if (widget.documentId.startsWith('local-invoice-')) {
+      // When sync finishes in the background, switch to the real numbered
+      // invoice. Do not interrupt an item editor or confirmation sheet.
+      _pendingInvoiceResolution = Timer.periodic(
+        const Duration(seconds: 4),
+        (timer) async {
+          if (!mounted || _busy ||
+              BriskersConnectionModeController.instance.forceOffline ||
+              ModalRoute.of(context)?.isCurrent != true) return;
+          final detail = await _detailCache.load(
+            widget.businessId, widget.documentId,
+          );
+          if (!mounted) return;
+          final realId = detail?['_server_document_id']?.toString() ?? '';
+          if (realId.isNotEmpty && realId != widget.documentId) {
+            timer.cancel();
+            await _load();
+          }
+        },
+      );
+    }
   }
 
   void _onModeChanged() {
@@ -140,6 +163,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   @override
   void dispose() {
+    _pendingInvoiceResolution?.cancel();
     BriskersConnectionModeController.instance.removeListener(_onModeChanged);
     _workspaceHeaderController.dispose();
     _notesController.dispose();
