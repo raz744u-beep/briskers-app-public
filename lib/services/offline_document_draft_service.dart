@@ -496,6 +496,27 @@ class OfflineDocumentDraftService {
     if (detail == null) {
       throw StateError('The local estimate draft could not be found.');
     }
+    if (documentId.startsWith('local-invoice-')) {
+      final rows = await _database.customSelect(
+        "SELECT state,attempt_count,last_attempt_at FROM sync_outbox "
+        "WHERE business_id=? AND entity_id=? "
+        "AND entity_type='document_draft_create' LIMIT 1",
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(documentId),
+        ],
+      ).get();
+      if (rows.isNotEmpty) {
+        final row = rows.single;
+        if (row.read<String>('state') != 'pending' ||
+            row.read<int>('attempt_count') != 0 ||
+            row.data['last_attempt_at'] != null) {
+          throw StateError(
+            'This invoice is synchronizing. Reopen it once sync finishes.',
+          );
+        }
+      }
+    }
     return detail;
   }
 
