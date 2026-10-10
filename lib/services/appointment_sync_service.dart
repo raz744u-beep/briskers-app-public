@@ -747,6 +747,15 @@ class AppointmentSyncService {
         if (serverId.isEmpty) {
           throw StateError('Server did not return appointment identity.');
         }
+        if (data['cancel_after_create'] == true) {
+          // The server creates then cancels under the same durable IDs.
+          // Both RPCs are idempotent; a lost response retries safely.
+          await _api.syncOfflineAppointmentCancel(
+            businessId, serverId,
+            operationId: data['operation_id'].toString(),
+            baseVersion: 1,
+          );
+        }
         await acknowledgeCreatedAppointment(
           businessId, localId, serverId, queueId,
         );
