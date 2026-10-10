@@ -371,7 +371,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         item['job_id'] == null &&
         !queued &&
         !conflict;
-    final canCancel = canEdit;
+    final canCancel = canEdit && _onlineReady;
     final canDelete = _onlineReady &&
         widget.roleCode == 'owner' &&
         item['job_id'] == null &&
