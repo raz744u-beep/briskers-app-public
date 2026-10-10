@@ -114,9 +114,9 @@ void main() {
       };
       final lines = DocumentPdfService.invoicePaymentLines(detail);
       expect(lines.map((row) => row['label']), [
-        'Payment — Cash',
-        'Payment — Check',
-        'Payment — Credit card (Pending)',
+        'Payment - Cash',
+        'Payment - Check',
+        'Payment - Credit card (Pending)',
       ]);
       expect(lines.map((row) => row['amount']), [250, 250, 150]);
       expect(lines.last['pending'], isTrue);
@@ -138,8 +138,8 @@ void main() {
       };
       final lines = DocumentPdfService.invoicePaymentLines(detail);
       expect(lines.map((row) => row['label']), [
-        'Payment — Method not recorded',
-        'Payment — Method not recorded (Pending)',
+        'Payment - Method not recorded',
+        'Payment - Method not recorded (Pending)',
       ]);
       expect(lines.map((row) => row['amount']), [600, 100]);
       expect(DocumentPdfService.invoicePaymentAmounts(detail)['remaining'],
@@ -159,7 +159,7 @@ void main() {
         ],
       });
       expect(lines.length, 1);
-      expect(lines.single['label'], 'Payment — Debit card');
+      expect(lines.single['label'], 'Payment - Debit card');
       expect(lines.single['amount'], 35.25);
     });
 
@@ -179,7 +179,7 @@ void main() {
         ],
       };
       expect(DocumentPdfService.invoicePaymentLines(fullyPaid).single['label'],
-          'Payment — Warranty check');
+          'Payment - Warranty check');
       expect(DocumentPdfService.invoicePaymentAmounts(fullyPaid)['remaining'],
           0);
     });
