@@ -17,6 +17,7 @@ import '../../core/invoice_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/document_pdf_service.dart';
+import '../../services/invoice_performance_metrics.dart';
 import '../../services/gmail_compose_service.dart';
 import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
@@ -257,6 +258,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _load() async {
+    final loadWatch = Stopwatch()..start();
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
     var unsyncedDraft = false;
@@ -359,6 +361,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             _loading = false;
             _error = null;
           });
+          unawaited(const InvoicePerformanceMetrics().record(
+            widget.businessId,
+            documentId: widget.documentId,
+            stage: 'cached_first_paint',
+            milliseconds: loadWatch.elapsedMilliseconds,
+          ));
         }
       } catch (_) {
         // A missing or corrupt cache should not prevent the network refresh.
@@ -372,6 +380,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         widget.documentId,
       );
       debugPrint('PERF-001 document detail RPC: ${openWatch.elapsedMilliseconds}ms');
+      unawaited(const InvoicePerformanceMetrics().record(
+        widget.businessId,
+        documentId: widget.documentId,
+        stage: 'detail_rpc',
+        milliseconds: openWatch.elapsedMilliseconds,
+      ));
       await _detailCache.save(
         widget.businessId,
         widget.documentId,
@@ -441,6 +455,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         await _localInvoiceStyles.save(widget.businessId, invoiceStyles);
       }
       debugPrint('PERF-001 detail + parallel metadata: ${openWatch.elapsedMilliseconds}ms');
+      unawaited(const InvoicePerformanceMetrics().record(
+        widget.businessId,
+        documentId: widget.documentId,
+        stage: 'detail_with_metadata',
+        milliseconds: openWatch.elapsedMilliseconds,
+      ));
       if (!mounted) return;
       setState(() {
         _detail = detail;
@@ -1720,6 +1740,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       ]);
       final detail = Map<String, dynamic>.from(result[0] as Map);
       debugPrint('PERF-001 PDF current data RPCs: ${pdfWatch.elapsedMilliseconds}ms');
+      unawaited(const InvoicePerformanceMetrics().record(
+        widget.businessId,
+        documentId: widget.documentId,
+        stage: 'pdf_data',
+        milliseconds: pdfWatch.elapsedMilliseconds,
+      ));
       if (!_estimate) {
         final warranty = Map<String, dynamic>.from(result[1] as Map);
         detail.addAll(warranty);
@@ -1758,7 +1784,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (detail == null || !mounted) return;
 
     try {
+      final pdfRenderWatch = Stopwatch()..start();
       final bytes = await DocumentPdfService.build(detail);
+      unawaited(const InvoicePerformanceMetrics().record(
+        widget.businessId,
+        documentId: widget.documentId,
+        stage: 'pdf_render',
+        milliseconds: pdfRenderWatch.elapsedMilliseconds,
+      ));
       if (!mounted) return;
 
       await Navigator.push<void>(
