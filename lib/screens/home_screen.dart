@@ -759,7 +759,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               subtitle: Text(
-                'Use an existing Job or create a blank invoice for a customer.',
+                'Use an existing Job or create a new invoice for a customer.',
               ),
             ),
             ListTile(
@@ -777,8 +777,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 Icons.receipt_long_outlined,
                 color: BriskersColors.invoices,
               ),
-              title: const Text('New Blank Invoice'),
-              subtitle: const Text('Start a blank invoice and choose a customer.'),
+              title: const Text('New Invoice'),
+              subtitle: const Text('Start a new invoice and choose a customer.'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.pop(sheetContext, 'blank'),
             ),
