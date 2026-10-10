@@ -132,11 +132,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         (timer) async {
           if (!mounted || _busy ||
               BriskersConnectionModeController.instance.forceOffline ||
-              ModalRoute.of(context)?.isCurrent != true) return;
+              ModalRoute.of(context)?.isCurrent != true) {
+            return;
+          }
           final detail = await _detailCache.load(
             widget.businessId, widget.documentId,
           );
-          if (!mounted) return;
+          if (!mounted) {
+            return;
+          }
           final realId = detail?['_server_document_id']?.toString() ?? '';
           if (realId.isNotEmpty && realId != widget.documentId) {
             timer.cancel();
