@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/appointment_sync_service.dart';
@@ -104,6 +105,28 @@ void main() {
     } finally {
       await db.close();
     }
+  });
+
+  test('secretary cancels never-synced appointment without deleting it', () async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    final service=AppointmentSyncService(database:db);
+    try {
+      final start=DateTime.utc(2026,10,12,11);
+      final id=await service.queueCreate('shop-test',customerId:'customer',
+        title:'Cancelled appointment',startsAt:start,
+        endsAt:start.add(const Duration(hours:1)));
+      await service.cancelPendingCreate('shop-test',id,canManage:true);
+      final record=await db.customSelect(
+        "SELECT status FROM local_appointments WHERE id=?",
+        variables:[Variable<String>(id)],
+      ).getSingle();
+      expect(record.read<String>('status'),'cancelled');
+      final queue=await db.customSelect(
+        "SELECT payload_json FROM sync_outbox WHERE entity_type='appointment_create'",
+      ).getSingle();
+      final payload=jsonDecode(queue.read<String>('payload_json')) as Map;
+      expect(payload['cancel_after_create'],true);
+    } finally { await db.close(); }
   });
 
 }
