@@ -23,6 +23,10 @@ void main() {
         endsAt: start.add(const Duration(hours: 3)),
         isOwner: false,
       );
+      await service.reassignPendingCreate(
+        'shop-test',id,customerId:'customer-replacement',
+        vehicleId:'vehicle-replacement',
+      );
       final outbox = await db.customSelect(
         "SELECT entity_type,payload_json FROM sync_outbox WHERE business_id='shop-test'",
       ).get();
@@ -30,7 +34,13 @@ void main() {
       expect(outbox.single.read<String>('entity_type'), 'appointment_create');
       final payload = jsonDecode(outbox.single.read<String>('payload_json')) as Map;
       expect(payload['title'], 'Updated');
-      expect(payload['customer_id'], 'customer-test');
+      expect(payload['customer_id'], 'customer-replacement');
+      expect(payload['vehicle_id'], 'vehicle-replacement');
+      final reassigned = await db.customSelect(
+        "SELECT customer_id,vehicle_id FROM local_appointments WHERE business_id='shop-test'",
+      ).getSingle();
+      expect(reassigned.read<String>('customer_id'),'customer-replacement');
+      expect(reassigned.read<String>('vehicle_id'),'vehicle-replacement');
       final queueIdRow = await db.customSelect(
         "SELECT id FROM sync_outbox WHERE entity_type='appointment_create'",
       ).getSingle();
