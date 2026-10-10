@@ -81,4 +81,29 @@ void main() {
       await db.close();
     }
   });
+  test('owner deletes unsent appointment but secretary cannot', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final service = AppointmentSyncService(database: db);
+    try {
+      final starts = DateTime.utc(2026,10,12,14);
+      final id = await service.queueCreate('shop-test',
+        customerId:'customer-1',title:'Not yet uploaded',
+        startsAt:starts,endsAt:starts.add(const Duration(hours:1)));
+      await expectLater(
+        service.deletePendingCreate('shop-test',id,isOwner:false),
+        throwsStateError);
+      await service.deletePendingCreate('shop-test',id,isOwner:true);
+      final records = await db.customSelect(
+        "SELECT count(*) AS n FROM local_appointments WHERE business_id='shop-test'",
+      ).getSingle();
+      final queue = await db.customSelect(
+        "SELECT count(*) AS n FROM sync_outbox WHERE business_id='shop-test'",
+      ).getSingle();
+      expect(records.read<int>('n'),0);
+      expect(queue.read<int>('n'),0);
+    } finally {
+      await db.close();
+    }
+  });
+
 }
