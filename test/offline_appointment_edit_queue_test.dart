@@ -4,7 +4,7 @@ import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/appointment_sync_service.dart';
 
 void main() {
-  test('offline appointment edit is durable and blocks duplicate edits', () async {
+  test('offline appointment edits coalesce before any sync attempt', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     final service = AppointmentSyncService(database: db);
     try {
@@ -29,8 +29,20 @@ void main() {
       ).getSingle();
       expect(outbox.read<int>('base_row_version'), 3);
       expect(outbox.read<String>('payload_json'), contains('New title'));
+      await service.queueEdit('shop-1','appt-1',title:'Second edit',
+          startsAt:start,endsAt:end,isOwner:true);
+      final updatedQueue = await db.customSelect(
+        "SELECT payload_json,base_row_version FROM sync_outbox WHERE entity_id='appt-1'",
+      ).getSingle();
+      expect(updatedQueue.read<String>('payload_json'), contains('Second edit'));
+      expect(updatedQueue.read<int>('base_row_version'), 3);
+      expect(updatedQueue.read<String>('payload_json'),
+          contains('"operation_id":'));
+      await db.customStatement(
+        "UPDATE sync_outbox SET attempt_count=1 WHERE entity_id='appt-1'",
+      );
       await expectLater(
-        service.queueEdit('shop-1','appt-1',title:'Second edit',
+        service.queueEdit('shop-1','appt-1',title:'Unsafe third edit',
             startsAt:start,endsAt:end,isOwner:true),
         throwsStateError,
       );
