@@ -61,6 +61,7 @@ class OfflineDocumentDraftService {
     }
     final operationId = _offlineOperationUuid();
     final id = 'local-invoice-$operationId';
+    final provisionalJobId = 'local-job-$operationId';
     final now = DateTime.now();
     final date = now.toIso8601String().split('T').first;
     final detail = <String, dynamic>{
@@ -70,7 +71,7 @@ class OfflineDocumentDraftService {
       'status': 'issued',
       'display_status': 'Pending sync',
       'display_status_code': 'open',
-      'job_id': null,
+      'job_id': provisionalJobId,
       'customer_id': customerId,
       'customer_name': customerName,
       'vehicle_id': vehicleId,
@@ -96,16 +97,40 @@ class OfflineDocumentDraftService {
     };
 
     await _database.transaction(() async {
+      // Keep a visible local Job linked to the offline invoice. Both
+      // placeholders are replaced only after one idempotent server operation.
+      await _database.customStatement(
+        '''
+        INSERT INTO local_jobs (
+          id,business_id,access_scope,job_number,title,requested_work,
+          status,status_name,customer_id,customer_name,vehicle_id,
+          vehicle_label,created_at,sync_state
+        ) VALUES (?,?,'full',NULL,'Invoice',NULL,'open','In progress',
+                  ?,?,?,?,?,?,'pending')
+        ''',
+        [
+          provisionalJobId,businessId,customerId,customerName,
+          vehicleId,vehicleLabel,_unixNow(),
+        ],
+      );
+      await _database.customStatement(
+        '''
+        INSERT INTO local_job_visits (
+          id,business_id,job_id,visit_number,reason,opened_at,sync_state
+        ) VALUES (?,?,?,1,'Initial visit',?,'pending')
+        ''',
+        ['local-visit-$operationId',businessId,provisionalJobId,_unixNow()],
+      );
       await _database.customStatement(
         '''
         INSERT INTO local_documents (
           id,business_id,job_id,customer_id,kind,document_number,
           status,display_status_code,closed_at,converted,total,
           document_date,created_at,server_updated_at,row_version,sync_state
-        ) VALUES (?, ?, NULL, ?, 'invoice', NULL, 'issued', 'open',
+        ) VALUES (?, ?, ?, ?, 'invoice', NULL, 'issued', 'open',
                   NULL, 0, 0, ?, ?, NULL, 1, 'pending')
         ''',
-        [id,businessId,customerId,date,_unixNow()],
+        [id,businessId,provisionalJobId,customerId,date,_unixNow()],
       );
       await _database.customStatement(
         '''
@@ -121,6 +146,7 @@ class OfflineDocumentDraftService {
             'local_id':id,'kind':'invoice',
             'customer_id':customerId,'vehicle_id':vehicleId,
             'operation_id':operationId,'document_date':date,
+            'provisional_job_id':provisionalJobId,
           }),_unixNow(),
         ],
       );
@@ -493,6 +519,9 @@ class OfflineDocumentDraftService {
             memo: localDetail['memo']?.toString(),
           );
           serverDetail = await _api.documentDetail(businessId,serverId);
+          if ((serverDetail['job_id']?.toString() ?? '').isEmpty) {
+            throw StateError('The synced invoice did not return its linked Job.');
+          }
         } else {
           final jobId = payload['job_id']?.toString() ?? '';
           if (jobId.isEmpty) {
@@ -558,6 +587,23 @@ class OfflineDocumentDraftService {
         }
 
         await _database.transaction(() async {
+          if (payload['kind'] == 'invoice') {
+            // Do not remove pending local Job until authoritative invoice
+            // and its linked real Job are safely cached.
+            final provisionalJobId =
+                payload['provisional_job_id']?.toString() ?? '';
+            if (provisionalJobId.isNotEmpty) {
+              await _database.customStatement(
+                'DELETE FROM local_job_visits WHERE business_id = ? AND job_id = ?',
+                [businessId, provisionalJobId],
+              );
+              await _database.customStatement(
+                'DELETE FROM local_jobs WHERE business_id = ? AND id = ? '
+                "AND sync_state = 'pending'",
+                [businessId, provisionalJobId],
+              );
+            }
+          }
           await _database.customStatement(
             'DELETE FROM local_documents WHERE business_id = ? AND id = ?',
             [businessId, localId],
