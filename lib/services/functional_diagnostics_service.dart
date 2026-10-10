@@ -205,6 +205,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkSimultaneousPaymentFlush,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-018',
+      title: 'Payment cache failure preserves replay queue',
+      success: 'A failed local invoice cache write retains the payment and original UUID until a successful retry.',
+      action: _checkPaymentCacheFailure,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -446,6 +454,52 @@ class BriskersFunctionalDiagnosticsService {
     _require(submissions == 1, 'Concurrent workers sent a payment twice.');
     _require((await ledger.pendingForInvoice(businessId, invoice)).isEmpty,
         'Concurrent replay did not reconcile local payment.');
+  }
+
+  Future<void> _checkPaymentCacheFailure(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final ledger = OfflineInvoicePaymentLedger(database: database);
+    const invoice = 'server-invoice-cache-failure';
+    final operationId = await ledger.recordReceivedPayment(
+      businessId, invoice, amount: 125,
+      remainingBeforePaymentCents: 12500,
+      methodId: 'check-method', methodName: 'Check',
+    );
+    final seenOperations = <String>[];
+    Future<String> submit(
+      String b, String i, num amount, String methodId, String op,
+    ) async {
+      seenOperations.add(op);
+      return 'server-payment-cache-retry';
+    }
+    Future<Map<String,dynamic>> fetch(String b, String i) async => {
+      'payments': [{'id': 'server-payment-cache-retry', 'amount': 125}],
+      'pending_payment': 125, 'paid_amount': 0, 'total_amount': 125,
+    };
+    await ledger.flush(businessId,
+      submitPayment: submit,
+      fetchInvoice: fetch,
+      cacheInvoice: (b, i, data) async {
+        throw StateError('Simulated disk write failure');
+      },
+    );
+    final retained = await ledger.pendingForInvoice(businessId, invoice);
+    _require(retained.length == 1 && retained.single['operation_id'] == operationId,
+        'Cache write failure lost the recorded payment.');
+    var saved = false;
+    await ledger.flush(businessId,
+      submitPayment: submit,
+      fetchInvoice: fetch,
+      cacheInvoice: (b, i, data) async { saved = true; },
+    );
+    _require(saved, 'Retry did not save authoritative invoice cache.');
+    _require(seenOperations.length == 2 &&
+        seenOperations.every((op) => op == operationId),
+        'Cache write retry changed operation identity.');
+    _require((await ledger.pendingForInvoice(businessId, invoice)).isEmpty,
+        'Queue was not retired after successful cache refresh.');
   }
 
   Future<void> _checkOfflineInvoiceCancel(
