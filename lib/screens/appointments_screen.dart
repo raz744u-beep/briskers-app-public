@@ -353,7 +353,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   Future<void> _showOptions(Map<String, dynamic> item) async {
     if (!_canManage && !_canCheckIn) return;
 
-    final status = item['status']?.toString() ?? '';
     final syncState = item['sync_state']?.toString() ?? 'synced';
     final queued = syncState == 'pending';
     final conflict = syncState == 'conflict';
