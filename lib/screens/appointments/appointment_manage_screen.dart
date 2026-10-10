@@ -30,9 +30,8 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   final LocalCustomerRepository _localCustomers = LocalCustomerRepository();
   bool get _pendingCreate => widget.appointment?['id']
           ?.toString().startsWith('local-appointment-') == true;
-  bool get _offlineEditing => _editing &&
-      (BriskersConnectionModeController.instance.forceOffline ||
-       _pendingCreate);
+  // Existing appointments are always edited locally first in Auto mode too.
+  bool get _offlineEditing => _editing;
 
   final _title = TextEditingController(text: 'Service appointment');
   final _description = TextEditingController();
