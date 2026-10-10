@@ -160,8 +160,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   Future<void> _editAppointment(Map<String, dynamic> item) async {
     if (!_canManage) return;
-    final offline = BriskersConnectionModeController.instance.forceOffline;
-    if (!_onlineReady && !offline) return;
+    // A cached appointment remains editable when Auto loses connectivity.
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -362,7 +361,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final conflict = syncState == 'conflict';
     final canEdit = _canManage &&
         !queued && !conflict &&
-        (_onlineReady || BriskersConnectionModeController.instance.forceOffline) &&
         (widget.roleCode == 'owner' ||
          (item['job_id'] == null &&
           {'confirmed', 'tentative'}.contains(status)));
