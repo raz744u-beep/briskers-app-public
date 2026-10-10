@@ -41,6 +41,22 @@ void main() {
       ).getSingle();
       expect(reassigned.read<String>('customer_id'),'customer-replacement');
       expect(reassigned.read<String>('vehicle_id'),'vehicle-replacement');
+      // After a network attempt, the original create operation identity
+      // must remain immutable until the server response is reconciled.
+      await db.customStatement(
+        "UPDATE sync_outbox SET attempt_count=1 WHERE entity_type='appointment_create'",
+      );
+      await expectLater(
+        service.reassignPendingCreate('shop-test',id,
+          customerId:'unsafe-reassignment'),
+        throwsStateError,
+      );
+      await expectLater(
+        service.queueEdit('shop-test',id,
+          title:'Unsafe new payload',startsAt:start,
+          endsAt:start.add(const Duration(hours:1)),isOwner:true),
+        throwsStateError,
+      );
       final queueIdRow = await db.customSelect(
         "SELECT id FROM sync_outbox WHERE entity_type='appointment_create'",
       ).getSingle();
