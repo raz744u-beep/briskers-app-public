@@ -263,6 +263,51 @@ class AppointmentSyncService {
     return localId;
   }
 
+  /// Stage a secretary/owner cancellation locally, without deleting history.
+  /// Server replay is a separate release gate; never mark queued cancel synced
+  /// until the version-guarded cancellation endpoint confirms it.
+  Future<void> queueCancel(
+    String businessId, String appointmentId, {
+    required bool canManage,
+  }) async {
+    if (!canManage) throw StateError('Appointment management access required.');
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        'SELECT * FROM local_appointments WHERE business_id=? AND id=?',
+        variables:[Variable<String>(businessId),Variable<String>(appointmentId)],
+      ).get();
+      if (rows.length != 1) throw StateError('Appointment is not cached.');
+      final row=rows.single;
+      if (row.readNullable<String>('job_id') != null) {
+        throw StateError('Linked Job appointments cannot be cancelled offline.');
+      }
+      if (!{'confirmed','tentative'}.contains(row.read<String>('status'))) {
+        throw StateError('Appointment is not eligible for cancellation.');
+      }
+      if (row.read<String>('sync_state') != 'synced') {
+        throw StateError('Resolve pending appointment operations before cancellation.');
+      }
+      await _database.customStatement(
+        """INSERT INTO sync_outbox
+          (business_id,entity_type,entity_id,operation,payload_json,
+           base_row_version,state,attempt_count,created_at)
+          VALUES (?,'appointment_cancel',?,'cancel',?,?,'pending',0,?)""",
+        [businessId,appointmentId,jsonEncode({
+          'operation_id':_operationId('appointment-cancel'),
+          'appointment_id':appointmentId,
+          'status':'cancelled',
+        }),row.readNullable<int>('row_version'),
+         _unix(DateTime.now().toUtc())],
+      );
+      await _database.customStatement(
+        """UPDATE local_appointments SET status='cancelled',sync_state='pending',
+           can_check_in=0 WHERE business_id=? AND id=?""",
+        [businessId,appointmentId],
+      );
+    });
+    _syncEvents.add(businessId);
+  }
+
   /// Owner-only deletion before first upload: remove the cached appointment
   /// and its unsent create operation in one transaction. Never delete an
   /// already-attempted create because the server may have accepted it.
