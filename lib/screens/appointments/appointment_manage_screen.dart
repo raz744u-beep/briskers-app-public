@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
+import '../../services/appointment_sync_service.dart';
 import '../../services/briskers_api.dart';
 
 class AppointmentManageScreen extends StatefulWidget {
@@ -9,10 +11,12 @@ class AppointmentManageScreen extends StatefulWidget {
     super.key,
     required this.businessId,
     this.appointment,
+    this.isOwner = false,
   });
 
   final String businessId;
   final Map<String, dynamic>? appointment;
+  final bool isOwner;
 
   @override
   State<AppointmentManageScreen> createState() =>
@@ -21,6 +25,9 @@ class AppointmentManageScreen extends StatefulWidget {
 
 class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   static const _api = BriskersApi();
+  final AppointmentSyncService _sync = AppointmentSyncService();
+  bool get _offlineEditing => _editing &&
+      BriskersConnectionModeController.instance.forceOffline;
 
   final _title = TextEditingController(text: 'Service appointment');
   final _description = TextEditingController();
@@ -75,6 +82,21 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   }
 
   Future<void> _load() async {
+    if (_offlineEditing) {
+      final item = widget.appointment!;
+      setState(() {
+        _customers = [{'id':_customerId, 'display_name':item['customer'] ?? 'Customer'}];
+        _vehicles = _vehicleId == null ? const [] : [{
+          'id':_vehicleId, 'year':item['vehicle_year'],
+          'make':item['vehicle_make'], 'model':item['vehicle_model'],
+        }];
+        _employees = _employeeId == null ? const [] : [{
+          'id':_employeeId, 'display_name':item['mechanic'] ?? 'Assigned',
+        }];
+        _loading = false;
+      });
+      return;
+    }
     try {
       final results = await Future.wait<dynamic>([
         _api.customers(widget.businessId, limit: 100),
@@ -205,7 +227,15 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
 
     try {
       final endsAt = _startsAt.add(Duration(minutes: _durationMinutes));
-      if (_editing) {
+      if (_offlineEditing) {
+        await _sync.queueEdit(
+          widget.businessId, widget.appointment!['id'].toString(),
+          title: title,
+          description: _description.text.trim().isEmpty ? null : _description.text.trim(),
+          startsAt: _startsAt, endsAt: endsAt,
+          employeeId: _employeeId, isOwner: widget.isOwner,
+        );
+      } else if (_editing) {
         await _api.updateAppointment(
           widget.businessId,
           widget.appointment!['id'].toString(),
@@ -276,7 +306,7 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                   ),
                 )
                 .toList(),
-            onChanged: (value) async {
+            onChanged: _offlineEditing ? null : (value) async {
               setState(() {
                 _customerId = value;
                 _vehicleId = null;
@@ -313,7 +343,7 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                 ),
               ),
             ],
-            onChanged: (value) => setState(() => _vehicleId = value),
+            onChanged: _offlineEditing ? null : (value) => setState(() => _vehicleId = value),
           ),
           const SizedBox(height: 12),
           TextField(
