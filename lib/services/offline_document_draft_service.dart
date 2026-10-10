@@ -497,6 +497,9 @@ class OfflineDocumentDraftService {
       throw StateError('The local estimate draft could not be found.');
     }
     if (documentId.startsWith('local-invoice-')) {
+      if ((detail['_server_document_id']?.toString() ?? '').isNotEmpty) {
+        throw StateError('This invoice has synced. Open the numbered invoice.');
+      }
       final rows = await _database.customSelect(
         "SELECT state,attempt_count,last_attempt_at FROM sync_outbox "
         "WHERE business_id=? AND entity_id=? "
@@ -506,6 +509,9 @@ class OfflineDocumentDraftService {
           Variable<String>(documentId),
         ],
       ).get();
+      if (rows.isEmpty) {
+        throw StateError('This invoice is no longer queued. Reopen the invoice.');
+      }
       if (rows.isNotEmpty) {
         final row = rows.single;
         if (row.read<String>('state') != 'pending' ||
