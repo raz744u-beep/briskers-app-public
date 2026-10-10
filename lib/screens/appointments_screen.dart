@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/appointment_action_policy.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
 import '../services/appointment_sync_service.dart';
@@ -359,22 +360,28 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     // Staff may edit ordinary appointments; owners can also correct
     // checked-in appointments. The guarded server RPC preserves linked
     // Job/customer/vehicle integrity when historical links already exist.
-    final canEdit = _onlineReady &&
-        _canManage &&
-        (widget.roleCode == 'owner' ||
-            (item['job_id'] == null && !queued && !conflict));
+    final canEdit = AppointmentActionPolicy.canEdit(
+      onlineReady: _onlineReady,
+      canManage: _canManage,
+      isOwner: widget.roleCode == 'owner',
+      linkedJob: item['job_id'] != null,
+      pending: queued,
+      conflict: conflict,
+    );
     final canCheckIn = _canCheckIn &&
         item['can_check_in'] == true &&
         item['job_id'] == null &&
         !queued &&
         !conflict;
     final canCancel = canEdit;
-    final canDelete = _onlineReady &&
-        widget.roleCode == 'owner' &&
-        !queued &&
-        !conflict &&
-        item['job_id'] == null &&
-        item['request_id'] == null;
+    final canDelete = AppointmentActionPolicy.canDelete(
+      onlineReady: _onlineReady,
+      isOwner: widget.roleCode == 'owner',
+      linkedJob: item['job_id'] != null,
+      linkedRequest: item['request_id'] != null,
+      pending: queued,
+      conflict: conflict,
+    );
 
     final action = await showModalBottomSheet<String>(
       context: context,
