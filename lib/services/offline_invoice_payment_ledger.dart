@@ -64,11 +64,14 @@ class OfflineInvoicePaymentLedger {
     }
     final method = methodName.trim();
     if (method.isEmpty) throw ArgumentError('Payment method is required.');
-    final isCard = method.toLowerCase().contains('card') ||
-        method.toLowerCase().contains('visa') ||
-        method.toLowerCase().contains('mastercard') ||
-        method.toLowerCase().contains('amex') ||
-        method.toLowerCase().contains('discover');
+    // Every configured payment method is eligible for offline recording.
+    // Card payments still require approval from the actual card processor.
+    final normalized = method.toLowerCase();
+    final isCard = normalized.contains('card') ||
+        normalized.contains('visa') ||
+        normalized.contains('mastercard') ||
+        normalized.contains('amex') ||
+        normalized.contains('discover');
     if (isCard && (cardApprovalReference?.trim().isEmpty ?? true)) {
       throw StateError(
         'Confirm card approval on the terminal before recording its payment.',
