@@ -497,6 +497,60 @@ class AppointmentSyncService {
     });
   }
 
+  /// Send never-synchronized creations before queued edits/check-ins.
+  /// A retry retains the original operation ID until the server confirms it.
+  Future<void> flushCreates(String businessId) async {
+    final rows = await _database.customSelect(
+      """SELECT * FROM sync_outbox WHERE business_id=?
+         AND entity_type='appointment_create'
+         AND state IN ('pending','inflight') ORDER BY id""",
+      variables: [Variable<String>(businessId)],
+    ).get();
+    for (final row in rows) {
+      final queueId = row.read<int>('id');
+      final localId = row.read<String>('entity_id');
+      final data = Map<String,dynamic>.from(
+        jsonDecode(row.read<String>('payload_json')) as Map);
+      try {
+        final serverId = await _api.syncOfflineAppointmentCreate(
+          businessId,
+          operationId: data['operation_id'].toString(),
+          customerId: data['customer_id'].toString(),
+          vehicleId: data['vehicle_id']?.toString(),
+          title: data['title'].toString(),
+          description: data['description']?.toString(),
+          startsAt: DateTime.parse(data['starts_at'].toString()),
+          endsAt: DateTime.parse(data['ends_at'].toString()),
+          employeeId: data['employee_id']?.toString(),
+        );
+        // The authoritative pull fills server fields. Remove only the
+        // never-synced local placeholder, with the outbox row atomically.
+        await _database.transaction(() async {
+          await _database.customStatement(
+            'DELETE FROM local_appointments WHERE business_id=? AND id=?',
+            [businessId,localId],
+          );
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE id=?',
+            [queueId],
+          );
+        });
+        // Ensure the new record is fetched on the normal sync pull.
+        _syncEvents.add(businessId);
+        if (serverId.isEmpty) {
+          throw StateError('Server did not return appointment identity.');
+        }
+      } catch (error) {
+        await _database.customStatement(
+          """UPDATE sync_outbox SET attempt_count=attempt_count+1,
+            last_attempt_at=?,last_error=? WHERE id=?""",
+          [_unix(DateTime.now().toUtc()),error.toString(),queueId],
+        );
+        break;
+      }
+    }
+  }
+
   /// Replays offline appointment edits using the authenticated revision-guarded
   /// RPC. A conflict is retained for owner review rather than overwritten.
   Future<void> flushEdits(String businessId) async {
