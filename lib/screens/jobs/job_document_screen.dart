@@ -313,87 +313,104 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       return;
     }
 
+    // Auto mode renders the saved invoice immediately while the authoritative
+    // remote detail refresh continues. Printing still revalidates server totals.
+    if (!BriskersConnectionModeController.instance.forceOnline) {
+      try {
+        final cached = await _detailCache.load(
+          widget.businessId,
+          widget.documentId,
+        );
+        if (cached != null && mounted) {
+          final recovered = await _withRecoveredDocumentDate(cached);
+          if (!mounted) return;
+          setState(() {
+            _detail = recovered;
+            _loading = false;
+            _error = null;
+          });
+        }
+      } catch (_) {
+        // A missing or corrupt cache should not prevent the network refresh.
+      }
+    }
+
+    final openWatch = Stopwatch()..start();
     try {
       final detail = await _api.documentDetail(
         widget.businessId,
         widget.documentId,
       );
+      debugPrint('PERF-001 document detail RPC: ${openWatch.elapsedMilliseconds}ms');
       await _detailCache.save(
         widget.businessId,
         widget.documentId,
         detail,
       );
-      final taxSettings = await _api.taxSettings(widget.businessId);
-      await _taxSettingsCache.save(widget.businessId, taxSettings);
-      List<Map<String, dynamic>> invoiceStyles = const [];
-      List<Map<String, dynamic>> openFindings = const [];
-      Map<String, dynamic> warrantyDetail = const {};
-      Map<String, dynamic> signatureStatus = const {};
-      Map<String, dynamic> submissionReadiness = const {};
-      if (detail['kind']?.toString() == 'invoice') {
-        invoiceStyles = await _api.invoiceStatusStyles(widget.businessId);
-        await _localInvoiceStyles.save(
-          widget.businessId,
-          invoiceStyles,
-        );
+      // Independent option/metadata RPCs must not serialize screen opening.
+      Future<T> safe<T>(Future<T> future, T fallback) async {
         try {
-          warrantyDetail = await _api.documentWarrantyDetail(
-            widget.businessId,
-            widget.documentId,
-          );
+          return await future;
         } catch (_) {
-          warrantyDetail = const {};
-        }
-        try {
-          signatureStatus = await _api.documentSignatureStatus(
-            widget.businessId,
-            widget.documentId,
-          );
-        } catch (_) {
-          signatureStatus = const {};
-        }
-        try {
-          submissionReadiness = await _api.warrantySubmissionReadiness(
-            widget.businessId,
-            widget.documentId,
-          );
-        } catch (_) {
-          submissionReadiness = const {};
-        }
-        final vehicleId = detail['vehicle_id']?.toString() ?? '';
-        if (vehicleId.isNotEmpty) {
-          try {
-            final findings = await _api.vehicleFindings(
-              widget.businessId,
-              vehicleId,
-              includeResolved: false,
-            );
-            openFindings = findings
-                .where(
-                  (finding) => _findingNeedsInvoiceAttention(
-                    finding,
-                    detail: detail,
-                  ),
-                )
-                .toList();
-          } catch (_) {
-            openFindings = const [];
-          }
+          return fallback;
         }
       }
 
-      Map<String, dynamic> identifixMeta = const {};
-      if (detail['kind']?.toString() == 'estimate') {
-        try {
-          identifixMeta = await _api.identifixPricingStatus(
-            widget.businessId,
-            widget.documentId,
-          );
-        } catch (_) {
-          identifixMeta = const {};
-        }
+      final invoice = detail['kind']?.toString() == 'invoice';
+      final estimate = detail['kind']?.toString() == 'estimate';
+      final vehicleId = detail['vehicle_id']?.toString() ?? '';
+      final results = await Future.wait<dynamic>([
+        safe(_api.taxSettings(widget.businessId), <String, dynamic>{}),
+        if (invoice)
+          safe(_api.invoiceStatusStyles(widget.businessId),
+              <Map<String, dynamic>>[])
+        else
+          Future.value(<Map<String, dynamic>>[]),
+        if (invoice)
+          safe(_api.documentWarrantyDetail(widget.businessId,
+              widget.documentId), <String, dynamic>{})
+        else
+          Future.value(<String, dynamic>{}),
+        if (invoice)
+          safe(_api.documentSignatureStatus(widget.businessId,
+              widget.documentId), <String, dynamic>{})
+        else
+          Future.value(<String, dynamic>{}),
+        if (invoice)
+          safe(_api.warrantySubmissionReadiness(widget.businessId,
+              widget.documentId), <String, dynamic>{})
+        else
+          Future.value(<String, dynamic>{}),
+        if (invoice && vehicleId.isNotEmpty)
+          safe(_api.vehicleFindings(widget.businessId, vehicleId,
+              includeResolved: false), <Map<String, dynamic>>[])
+        else
+          Future.value(<Map<String, dynamic>>[]),
+        if (estimate)
+          safe(_api.identifixPricingStatus(widget.businessId,
+              widget.documentId), <String, dynamic>{})
+        else
+          Future.value(<String, dynamic>{}),
+      ]);
+      final taxSettings = Map<String, dynamic>.from(results[0] as Map);
+      final invoiceStyles = (results[1] as List)
+          .map((value) => Map<String, dynamic>.from(value as Map)).toList();
+      final warrantyDetail = Map<String, dynamic>.from(results[2] as Map);
+      final signatureStatus = Map<String, dynamic>.from(results[3] as Map);
+      final submissionReadiness = Map<String, dynamic>.from(results[4] as Map);
+      final findings = (results[5] as List)
+          .map((value) => Map<String, dynamic>.from(value as Map)).toList();
+      final openFindings = findings
+          .where((finding) => _findingNeedsInvoiceAttention(
+              finding, detail: detail)).toList();
+      final identifixMeta = Map<String, dynamic>.from(results[6] as Map);
+      if (taxSettings.isNotEmpty) {
+        await _taxSettingsCache.save(widget.businessId, taxSettings);
       }
-
+      if (invoice && invoiceStyles.isNotEmpty) {
+        await _localInvoiceStyles.save(widget.businessId, invoiceStyles);
+      }
+      debugPrint('PERF-001 detail + parallel metadata: ${openWatch.elapsedMilliseconds}ms');
       if (!mounted) return;
       setState(() {
         _detail = detail;
