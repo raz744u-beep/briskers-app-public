@@ -1444,6 +1444,53 @@ class BriskersDiagnosticsService {
         'Investigate missing source history before attempting an import.',
       ],
     ));
+
+    // JOB-005 is intentionally a warning rather than an invented visit.
+    // The current editor requires a visit and hides Add/Edit otherwise.
+    // Highlight completed jobs that have a saved Finding but no editable
+    // Work Performed visit; leave the historical records unchanged.
+    final blockedRows = await _database.customSelect(
+      '''
+      SELECT j.id, j.job_number, j.title
+      FROM local_jobs j
+      WHERE j.business_id = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM local_job_visits v
+          WHERE v.business_id=j.business_id AND v.job_id=j.id
+        )
+        AND EXISTS (
+          SELECT 1 FROM local_findings f
+          WHERE f.business_id=j.business_id
+            AND f.found_job_id=j.id
+            AND trim(f.body)<>''
+        )
+      ORDER BY j.created_at DESC
+      LIMIT 10
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    checks.add(DiagnosticCheck(
+      id: 'JOB-005',
+      category: 'Jobs',
+      title: 'Findings without editable work visit',
+      level: blockedRows.isEmpty
+          ? BriskersDiagnosticLevel.pass
+          : BriskersDiagnosticLevel.warning,
+      summary: blockedRows.isEmpty
+          ? 'No locally identifiable finding/job pairs lack a visit.'
+          : '${blockedRows.length} sampled job(s) have Findings but no '
+              'visit for Work Performed editing.',
+      details: [
+        for (final row in blockedRows)
+          '${row.readNullable<String>('job_number') ?? row.read<String>('id')}: '
+              '${row.read<String>('title')}',
+        'A finding records the diagnosis, not proof that repairs occurred.',
+        'Work Performed must support owner/secretary entry without an existing visit.',
+        'Saving genuine work should create a linked visit with the entry time, '
+            'without fabricating a historical service date.',
+        'Check MB-6321 / Debbie Kohl; its finding was saved without a visit.',
+      ],
+    ));
   }
 
   Future<void> _checkExpenseLinkIntegrity(
