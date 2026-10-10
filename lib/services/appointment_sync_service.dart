@@ -263,6 +263,50 @@ class AppointmentSyncService {
     return localId;
   }
 
+  /// Owner-only deletion before first upload: remove the cached appointment
+  /// and its unsent create operation in one transaction. Never delete an
+  /// already-attempted create because the server may have accepted it.
+  Future<void> deletePendingCreate(
+    String businessId, String appointmentId, {
+    required bool isOwner,
+  }) async {
+    if (!isOwner) throw StateError('Only the owner can delete appointments.');
+    if (!appointmentId.startsWith('local-appointment-')) {
+      throw StateError('Synced appointments require server-side deletion.');
+    }
+    await _database.transaction(() async {
+      final records = await _database.customSelect(
+        'SELECT job_id FROM local_appointments WHERE business_id=? AND id=?',
+        variables: [Variable<String>(businessId),
+                    Variable<String>(appointmentId)],
+      ).get();
+      if (records.length != 1 ||
+          records.single.readNullable<String>('job_id') != null) {
+        throw StateError('Linked or missing appointments cannot be deleted.');
+      }
+      final queue = await _database.customSelect(
+        """SELECT id,attempt_count,last_attempt_at FROM sync_outbox
+           WHERE business_id=? AND entity_id=?
+           AND entity_type='appointment_create' AND state='pending'""",
+        variables: [Variable<String>(businessId),
+                    Variable<String>(appointmentId)],
+      ).get();
+      if (queue.length != 1 || queue.single.read<int>('attempt_count') != 0 ||
+          queue.single.readNullable<int>('last_attempt_at') != null) {
+        throw StateError('Appointment creation may already have reached server.');
+      }
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id=?',
+        [queue.single.read<int>('id')],
+      );
+      await _database.customStatement(
+        'DELETE FROM local_appointments WHERE business_id=? AND id=?',
+        [businessId,appointmentId],
+      );
+    });
+    _syncEvents.add(businessId);
+  }
+
   /// Reassign an appointment that has never been uploaded. Both its cached
   /// record and original create payload change in the same transaction.
   Future<void> reassignPendingCreate(
