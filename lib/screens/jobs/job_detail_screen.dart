@@ -3321,35 +3321,49 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         BriskersConnectionModeController.instance.forceOffline) {
       return;
     }
-    final number = _job?['job_number']?.toString() ?? '';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Job?'),
-        content: Text(number.isEmpty
-            ? 'Permanently delete this unused Job?'
-            : 'Permanently delete Job $number?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Delete Job'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    setState(() => _busy = true);
     try {
-      await _api.deleteUnusedJob(widget.businessId, widget.jobId);
-      if (mounted) Navigator.pop(context, true);
+      final plan = await _api.jobDeletionPlan(widget.businessId,widget.jobId);
+      if (!mounted) return;
+      final number=plan['job_number']?.toString() ?? '';
+      final permitted=plan['can_delete'] == true;
+      final invoices=(plan['invoices'] as List?) ?? const [];
+      final estimates=(plan['estimates_preserved'] as List?) ?? const [];
+      final confirmed=await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Delete Job?'),
+          content: Text(permitted
+              ? 'Delete Job $number and ${invoices.length} unpaid invoice'
+                '${invoices.length == 1 ? '' : 's'}? '
+                '${estimates.length} estimate'
+                '${estimates.length == 1 ? ' will' : 's will'} be kept.'
+              : 'Job $number cannot be deleted: '
+                '${plan['reason'] ?? 'Protected related records'}.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext,false),
+              child: const Text('Cancel'),
+            ),
+            if (permitted)
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext,true),
+                child: const Text('Delete Job'),
+              ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      setState(() => _busy=true);
+      try {
+        await _api.deleteJobWithUnpaidInvoices(
+          widget.businessId,widget.jobId,
+        );
+        if (mounted) Navigator.pop(context,true);
+      } finally {
+        if (mounted) setState(() => _busy=false);
+      }
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _error=error.toString());
     }
   }
 
