@@ -5,6 +5,7 @@ import '../core/briskers_colors.dart';
 import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
 import '../services/local_job_repository.dart';
+import '../services/local_document_repository.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/weather_service.dart';
 import 'appointments/appointment_manage_screen.dart';
@@ -57,6 +58,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   static const _api = BriskersApi();
   final LocalJobRepository _localJobs = LocalJobRepository();
+  final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
   final BriskersWeatherService _weatherService = BriskersWeatherService();
@@ -80,6 +82,17 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadAttention();
     _loadWeather();
+    BriskersConnectionModeController.instance.addListener(_onConnectionMode);
+  }
+
+  void _onConnectionMode() {
+    if (mounted) _loadAttention();
+  }
+
+  @override
+  void dispose() {
+    BriskersConnectionModeController.instance.removeListener(_onConnectionMode);
+    super.dispose();
   }
 
   @override
@@ -174,6 +187,9 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       final localCount =
           await _localJobs.unassignedOpenJobCount(widget.businessId);
+      final localPending = await _localDocuments.pendingCloseAttention(
+        widget.businessId,
+      );
 
       if (mounted) {
         final currentCounts = _attention['counts'] is Map
@@ -181,9 +197,11 @@ class _HomeScreenState extends State<HomeScreen> {
             : <String, dynamic>{};
         final next = Map<String, dynamic>.from(_attention)
           ..['unassigned_jobs'] = localJobs
+          ..['pending_close_invoices'] = localPending['items']
           ..['counts'] = {
             ...currentCounts,
             'unassigned_jobs': localCount,
+            'pending_close_invoices': localPending['count'],
           };
         setState(() => _attention = next);
       }
