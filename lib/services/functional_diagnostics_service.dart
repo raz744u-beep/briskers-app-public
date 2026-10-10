@@ -156,6 +156,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkInvoicePdfPayments,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-012',
+      title: 'Never-synced offline invoice safe cancellation',
+      success: 'Local invoice, Job, visit and pending upload removed together without server calls.',
+      action: _checkOfflineInvoiceCancel,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -206,6 +214,42 @@ class BriskersFunctionalDiagnosticsService {
       await _cleanupPreferences(businessId);
       await database.close();
     }
+  }
+
+  Future<void> _checkOfflineInvoiceCancel(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final service = OfflineDocumentDraftService(database: database);
+    final id = await service.createQuickInvoice(
+      businessId,
+      customerId: 'test-customer',
+      customerName: 'Test Customer',
+    );
+    await service.addLine(
+      businessId,
+      id,
+      name: 'Labor',
+      quantity: 4.4,
+      unitPrice: 0,
+      taxRate: 0,
+      lineKind: 'labor',
+    );
+    await service.cancelNeverSyncedQuickInvoice(businessId,id);
+    for (final table in [
+      'local_documents','local_jobs','local_job_visits','sync_outbox',
+    ]) {
+      final row = await database.customSelect(
+        'SELECT COUNT(*) AS n FROM $table WHERE business_id=?',
+        variables: [Variable<String>(businessId)],
+      ).getSingle();
+      _require(
+        row.read<int>('n') == 0,
+        '$table still contains records for the canceled invoice.',
+      );
+    }
+    final cache = await const LocalDocumentDetailCache().load(businessId,id);
+    _require(cache == null, 'Deleted invoice still has a cached detail.');
   }
 
   Future<void> _checkInvoicePdfPayments(
