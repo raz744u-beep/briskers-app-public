@@ -4631,7 +4631,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Future<void> _openSectionModal(String key) async {
     if (_job == null) return;
 
-    if (key == 'documents' && _canSeeFinancial) {
+    // The online response already contains the authoritative Job document list.
+    // Never overwrite it with a potentially lagging local index when the
+    // documents tile is reopened. Local recovery is for offline display only.
+    if (key == 'documents' && _canSeeFinancial && !_onlineReady) {
       try {
         final localDocuments = await _localDocumentsForJob(
           recoverLegacy: true,
@@ -4959,15 +4962,19 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     title: Text('Assign / unassign mechanic'),
                   ),
                 ),
-              if (_owner && _onlineReady) ...[
+              if (_owner) ...[
                 const PopupMenuDivider(),
-                const PopupMenuItem(
+                PopupMenuItem(
+                  enabled: _onlineReady && !_busy &&
+                      !BriskersConnectionModeController.instance.forceOffline,
                   value: 'delete_unused',
                   child: ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.delete_outline, color: Colors.red),
-                    title: Text('Delete Job'),
+                    leading: const Icon(Icons.delete_outline, color: Colors.red),
+                    title: Text(_onlineReady
+                        ? 'Delete Job'
+                        : 'Delete Job (waiting for online verification)'),
                   ),
                 ),
               ],
