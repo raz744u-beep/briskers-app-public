@@ -262,7 +262,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Runs 7 real workflow tests in a disposable in-memory database. It does not touch your customers, jobs, invoices, expenses or the network.',
+                    'Runs isolated workflow and payment-layout checks in a disposable in-memory database. It does not touch your customers, jobs, invoices, expenses or the network.',
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
