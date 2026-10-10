@@ -355,6 +355,45 @@ class AppointmentSyncService {
     _syncEvents.add(businessId);
   }
 
+  /// Stage owner-only deletion of a synchronized, unlinked appointment.
+  /// A local tombstone prevents sync pulls from resurrecting it.
+  Future<void> queueDeleteSynced(
+    String businessId, String appointmentId, {
+    required bool isOwner,
+  }) async {
+    if (!isOwner) throw StateError('Only the owner can delete appointments.');
+    await _database.transaction(() async {
+      final rows=await _database.customSelect(
+        'SELECT * FROM local_appointments WHERE business_id=? AND id=?',
+        variables:[Variable<String>(businessId),Variable<String>(appointmentId)],
+      ).get();
+      if (rows.length!=1) throw StateError('Appointment not cached.');
+      final row=rows.single;
+      if (row.read<String>('sync_state')!='synced' ||
+          row.readNullable<String>('job_id')!=null ||
+          row.readNullable<String>('request_id')!=null) {
+        throw StateError('Resolve sync or linked records before deleting.');
+      }
+      await _database.customStatement(
+        """INSERT INTO sync_outbox
+          (business_id,entity_type,entity_id,operation,payload_json,
+           base_row_version,state,attempt_count,created_at)
+          VALUES (?,'appointment_delete',?,'delete',?,?,'pending',0,?)""",
+        [businessId,appointmentId,jsonEncode({
+          'operation_id':_operationId('appointment-delete'),
+          'appointment_id':appointmentId,
+        }),row.readNullable<int>('row_version'),
+         _unix(DateTime.now().toUtc())],
+      );
+      await _database.customStatement(
+        """UPDATE local_appointments SET sync_state='pending_delete',
+           can_check_in=0 WHERE business_id=? AND id=?""",
+        [businessId,appointmentId],
+      );
+    });
+    _syncEvents.add(businessId);
+  }
+
   /// Owner-only deletion before first upload: remove the cached appointment
   /// and its unsent create operation in one transaction. Never delete an
   /// already-attempted create because the server may have accepted it.
@@ -1029,7 +1068,8 @@ class AppointmentSyncService {
 
     if (!force && existing.isNotEmpty) {
       final state = existing.first.read<String>('sync_state');
-      if (state == 'pending' || state == 'conflict') {
+      if (state == 'pending' || state == 'conflict' ||
+          state == 'pending_delete') {
         return;
       }
     }
