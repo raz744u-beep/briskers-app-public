@@ -20,6 +20,8 @@ class OfflineInvoicePaymentLedger {
   final BriskersLocalDatabase _database;
   final BriskersApi _api;
   final Random _random = Random.secure();
+  static final Map<String, Future<void>> _activeFlushes = {};
+
 
   static int cents(num value) {
     if (!value.isFinite || value <= 0) {
@@ -139,6 +141,33 @@ class OfflineInvoicePaymentLedger {
   /// Retry replay with the *same* saved UUID, never the legacy non-idempotent
   /// payment API. Fail closed and retain the row when server support is absent.
   Future<void> flush(
+    String businessId, {
+    Future<String> Function(String businessId, String invoiceId, num amount,
+            String methodId, String operationId)? submitPayment,
+    Future<Map<String, dynamic>> Function(String businessId, String invoiceId)?
+        fetchInvoice,
+    Future<void> Function(String businessId, String invoiceId,
+            Map<String, dynamic> detail)? cacheInvoice,
+  }) {
+    // Multiple sync triggers in the same app process share one replay.
+    // The database and server operation UUID remain the durable safety nets.
+    final existing = _activeFlushes[businessId];
+    if (existing != null) return existing;
+    final work = _flushInternal(
+      businessId,
+      submitPayment: submitPayment,
+      fetchInvoice: fetchInvoice,
+      cacheInvoice: cacheInvoice,
+    );
+    _activeFlushes[businessId] = work;
+    return work.whenComplete(() {
+      if (identical(_activeFlushes[businessId], work)) {
+        _activeFlushes.remove(businessId);
+      }
+    });
+  }
+
+  Future<void> _flushInternal(
     String businessId, {
     Future<String> Function(String businessId, String invoiceId, num amount,
             String methodId, String operationId)? submitPayment,
