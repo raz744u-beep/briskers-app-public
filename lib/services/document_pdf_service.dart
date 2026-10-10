@@ -31,7 +31,8 @@ class DocumentPdfService {
     };
   }
 
-  /// Presentation-only payment rows for invoice PDFs. The aggregate amounts
+  /// Presentation-only payment rows for invoice PDFs.
+  /// Use an ASCII separator because PDF Helvetica lacks em dash support. The aggregate amounts
   /// remain authoritative; never double-count or label pending as finalized.
   /// If a stale/offline detail lacks a complete payment breakdown, preserve
   /// the correct totals rather than guessing payment methods.
@@ -76,7 +77,7 @@ class DocumentPdfService {
             method.isEmpty ? 'Method not recorded' : method;
         rows.add({
           'label':
-              'Payment — $displayMethod${pending ? ' (Pending)' : ''}',
+              'Payment - $displayMethod${pending ? ' (Pending)' : ''}',
           'amount': amountCents / 100,
           'pending': pending,
         });
@@ -97,13 +98,13 @@ class DocumentPdfService {
     return [
       if (paidCents > 0)
         {
-          'label': 'Payment — Method not recorded',
+          'label': 'Payment - Method not recorded',
           'amount': paidCents / 100,
           'pending': false,
         },
       if (pendingCents > 0)
         {
-          'label': 'Payment — Method not recorded (Pending)',
+          'label': 'Payment - Method not recorded (Pending)',
           'amount': pendingCents / 100,
           'pending': true,
         },
