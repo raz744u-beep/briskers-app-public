@@ -2552,6 +2552,23 @@ class BriskersApi {
     );
   }
 
+  Future<bool> syncOfflineAppointmentDelete(
+    String businessId, String appointmentId, {
+    required String operationId,
+    required int baseVersion,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_sync_offline_appointment_delete',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+        'p_operation_id': operationId,
+        'p_base_version': baseVersion,
+      },
+    );
+    return result == true;
+  }
+
   Future<int> syncOfflineAppointmentCancel(
     String businessId, String appointmentId, {
     required String operationId,
