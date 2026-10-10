@@ -49,9 +49,12 @@ class CustomerVehicleSyncService {
 
   Future<void> refreshCustomer(
     String businessId,
-    String customerId,
-  ) async {
-    final detail = await _api.customerDetail(
+    String customerId, {
+    Map<String, dynamic>? fetchedDetail,
+  }) async {
+    // Reuse the customer detail already fetched by the screen; do not make
+    // a second identical network request on each customer-page visit.
+    final detail = fetchedDetail ?? await _api.customerDetail(
       businessId,
       customerId,
     );

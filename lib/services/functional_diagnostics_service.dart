@@ -130,6 +130,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkCustomerQuickActions,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-009',
+      title: 'Offline blank invoice draft and unique sync identity',
+      success: 'Invoice, items and notes saved locally with one sync identity.',
+      action: _checkOfflineInvoiceDraft,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -217,6 +225,69 @@ class BriskersFunctionalDiagnosticsService {
     // No production actions are executed: widget regression tests verify
     // every sheet tap returns its matching action, and the typed exhaustive
     // screen dispatcher must handle each value.
+  }
+
+  Future<void> _checkOfflineInvoiceDraft(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final cache = const LocalDocumentDetailCache();
+    final drafts = OfflineDocumentDraftService(
+      database: database,
+      cache: cache,
+    );
+    final id = await drafts.createQuickInvoice(
+      businessId,
+      customerId: 'diagnostic-customer',
+      customerName: 'Sandbox Customer',
+    );
+    _require(
+      id.startsWith('local-invoice-') && drafts.isLocalDraftId(id),
+      'Offline invoice temporary ID missing.',
+    );
+    await drafts.addLine(
+      businessId,
+      id,
+      name: 'Diagnostic water pump',
+      quantity: 1,
+      unitPrice: 100,
+      taxRate: 0.0975,
+      lineKind: 'item',
+    );
+    await drafts.saveMemo(businessId, id, 'Sandbox invoice note');
+    final snapshot = await cache.load(businessId, id);
+    _require(snapshot != null, 'Offline invoice detail not cached.');
+    _require(snapshot!['kind'] == 'invoice', 'Invoice kind was lost.');
+    _require(
+      (snapshot['total_amount'] as num).toDouble() > 109,
+      'Offline invoice math was not saved.',
+    );
+    _require(
+      snapshot['memo'] == 'Sandbox invoice note',
+      'Offline invoice memo was lost.',
+    );
+    _require(
+      snapshot['document_number'] == null,
+      'Temporary invoice was assigned a false final number.',
+    );
+    final outbox = await database.customSelect(
+      'SELECT operation, payload_json FROM sync_outbox '
+      'WHERE business_id = ? AND entity_id = ?',
+      variables: [Variable<String>(businessId), Variable<String>(id)],
+    ).get();
+    _require(
+      outbox.length == 1 &&
+          outbox.single.read<String>('operation') == 'create_quick_invoice',
+      'Offline invoice did not queue one durable create operation.',
+    );
+    final payload = jsonDecode(
+      outbox.single.read<String>('payload_json'),
+    ) as Map<String, dynamic>;
+    final operationId = payload['operation_id']?.toString() ?? '';
+    _require(
+      operationId.length == 36 && operationId.split('-').length == 5,
+      'Offline operation ID is not suitable for safe retry.',
+    );
   }
 
   Future<void> _cleanupPreferences(String businessId) async {

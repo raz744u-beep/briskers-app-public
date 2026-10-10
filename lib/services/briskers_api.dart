@@ -3013,6 +3013,24 @@ class BriskersApi {
     );
   }
 
+  /// Owner-only, audited override for a closed or imported invoice.
+  Future<void> ownerForceReopenInvoice(
+    String businessId,
+    String documentId, {
+    required int expectedVersion,
+    required String reason,
+  }) async {
+    await networkSupabase.rpc(
+      'briskers_owner_force_reopen_invoice',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_expected_version': expectedVersion,
+        'p_reason': reason,
+      },
+    );
+  }
+
   Future<Map<String, dynamic>> documentDetail(
     String businessId,
     String documentId,
@@ -3182,6 +3200,31 @@ class BriskersApi {
         'p_memo': memo,
       },
     );
+  }
+
+  /// Upload an offline invoice atomically. Repeating the same UUID is safe.
+  Future<String> syncOfflineQuickInvoice(
+    String businessId, {
+    required String customerId,
+    String? vehicleId,
+    required String operationId,
+    required String documentDate,
+    required List<Map<String, dynamic>> lines,
+    String? memo,
+  }) async {
+    final id = await networkSupabase.rpc(
+      'briskers_sync_offline_quick_invoice_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_operation_id': operationId,
+        'p_document_date': documentDate,
+        'p_lines': lines,
+        'p_memo': memo,
+      },
+    );
+    return id.toString();
   }
 
   Future<String> createQuickInvoice(
