@@ -29,8 +29,8 @@ class BlankInvoiceSetupScreen extends StatefulWidget {
 
 class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
   static const _api = BriskersApi();
-  final _offlineDrafts = OfflineDocumentDraftService();
-  final _localCustomers = LocalCustomerRepository();
+  OfflineDocumentDraftService get _offlineDrafts => OfflineDocumentDraftService();
+  LocalCustomerRepository get _localCustomers => LocalCustomerRepository();
   final TextEditingController _customerSearch = TextEditingController();
   Timer? _searchDebounce;
   int _searchGeneration = 0;
