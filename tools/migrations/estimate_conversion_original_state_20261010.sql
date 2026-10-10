@@ -223,7 +223,7 @@ begin
 
   return v_result;
 end
-$function$
+$function$;
 
 
 CREATE OR REPLACE FUNCTION public.briskers_convert_estimate(p_business_id uuid, p_estimate_id uuid)
@@ -316,6 +316,6 @@ begin
   where business_id=p_business_id and document_id=p_estimate_id;
 
   return inv;
-end $function$
+end $function$;
 
 
