@@ -238,9 +238,9 @@ class BriskersFunctionalDiagnosticsService {
     final summary = DocumentPdfService.invoicePaymentAmounts(detail);
     _require(
       lines.length == 3 &&
-          lines[0]['label'] == 'Payment — Cash' &&
-          lines[1]['label'] == 'Payment — Check' &&
-          lines[2]['label'] == 'Payment — Credit card (Pending)',
+          lines[0]['label'] == 'Payment - Cash' &&
+          lines[1]['label'] == 'Payment - Check' &&
+          lines[2]['label'] == 'Payment - Credit card (Pending)',
       'The PDF did not retain the individual methods and pending state.',
     );
     _require(
@@ -270,7 +270,7 @@ class BriskersFunctionalDiagnosticsService {
       safe.length == 2 &&
           safe.first['amount'] == 200 &&
           safe.last['amount'] == 100 &&
-          safe.first['label'] == 'Payment — Method not recorded' &&
+          safe.first['label'] == 'Payment - Method not recorded' &&
           safe.last['pending'] == true,
       'An incomplete offline payment list produced an incorrect PDF total.',
     );
