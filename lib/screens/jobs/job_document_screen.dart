@@ -5139,7 +5139,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (!canSaveStandardNoteText(
       result['name'] ?? '',
       result['body'] ?? '',
-    )) return null;
+    )) {
+      return null;
+    }
     try {
       final existing = await _api.documentNoteTemplates(widget.businessId);
       final normalizedName = result['name']!.trim().toLowerCase();
@@ -5253,8 +5255,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
               const Divider(height: 1),
               if (templates.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(16),
+                Padding(
+                  padding: const EdgeInsets.all(16),
                   child: Text(tr('standardNoteEmptyList')),
                 ),
               ...templates.map(
