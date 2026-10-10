@@ -130,12 +130,17 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     super.dispose();
   }
 
-  Future<List<Map<String, dynamic>>> _localDocumentsForJob() async {
+  Future<List<Map<String, dynamic>>> _localDocumentsForJob({
+    bool recoverLegacy = false,
+  }) async {
     final direct = await _localDocuments.listByJob(
       widget.businessId,
       widget.jobId,
     );
-    if (direct.isNotEmpty) return direct;
+    // A new Job commonly has zero documents. Never scan the entire
+    // 5,000+ historical invoice/estimate cache on its initial open.
+    // Historical orphan-link recovery is available on the Documents tile.
+    if (direct.isNotEmpty || !recoverLegacy) return direct;
 
     final candidates = <Map<String, dynamic>>[
       ...await _localDocuments.listByKind(
