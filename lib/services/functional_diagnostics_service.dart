@@ -222,7 +222,7 @@ class BriskersFunctionalDiagnosticsService {
     const template = 'Warranty: 12 months / 12000 miles';
     final merged = mergeStandardNoteIntoDraft(manual, template);
     _require(
-      merged == '$manual\\n\\n$template',
+      merged == '$manual\n\n$template',
       'Adding a standard note discarded the unsaved manual text.',
     );
     _require(
