@@ -497,6 +497,38 @@ class AppointmentSyncService {
     });
   }
 
+  /// Atomically retain the acknowledged appointment in the local list.
+  /// Kept separate so diagnostics can exercise the real SQLite transition.
+  Future<void> acknowledgeCreatedAppointment(
+    String businessId, String localId, String serverId, int queueId,
+  ) async {
+    if (serverId.isEmpty || serverId.startsWith('local-')) {
+      throw StateError('A permanent appointment ID is required.');
+    }
+    await _database.transaction(() async {
+      final existing = await _database.customSelect(
+        'SELECT id FROM local_appointments WHERE business_id=? AND id=?',
+        variables: [Variable<String>(businessId), Variable<String>(serverId)],
+      ).get();
+      if (existing.isNotEmpty) {
+        await _database.customStatement(
+          'DELETE FROM local_appointments WHERE business_id=? AND id=?',
+          [businessId,localId],
+        );
+      } else {
+        await _database.customStatement(
+          """UPDATE local_appointments SET id=?,sync_state='synced',
+             row_version=1 WHERE business_id=? AND id=?""",
+          [serverId,businessId,localId],
+        );
+      }
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id=? AND business_id=?',
+        [queueId,businessId],
+      );
+    });
+  }
+
   /// Send never-synchronized creations before queued edits/check-ins.
   /// A retry retains the original operation ID until the server confirms it.
   Future<void> flushCreates(String businessId) async {
@@ -526,33 +558,9 @@ class AppointmentSyncService {
         if (serverId.isEmpty) {
           throw StateError('Server did not return appointment identity.');
         }
-        // Keep the appointment visible immediately after acknowledgment.
-        // A later pull will hydrate the rest of the authoritative fields.
-        await _database.transaction(() async {
-          final alreadySynced = await _database.customSelect(
-            'SELECT id FROM local_appointments WHERE business_id=? AND id=?',
-            variables: [
-              Variable<String>(businessId),
-              Variable<String>(serverId),
-            ],
-          ).get();
-          if (alreadySynced.isNotEmpty) {
-            await _database.customStatement(
-              'DELETE FROM local_appointments WHERE business_id=? AND id=?',
-              [businessId, localId],
-            );
-          } else {
-            await _database.customStatement(
-              """UPDATE local_appointments SET id=?, sync_state='synced',
-                 row_version=1 WHERE business_id=? AND id=?""",
-              [serverId, businessId, localId],
-            );
-          }
-          await _database.customStatement(
-            'DELETE FROM sync_outbox WHERE id=?',
-            [queueId],
-          );
-        });
+        await acknowledgeCreatedAppointment(
+          businessId, localId, serverId, queueId,
+        );
         // Ensure the new record is fetched on the normal sync pull.
         _syncEvents.add(businessId);
       } catch (error) {
