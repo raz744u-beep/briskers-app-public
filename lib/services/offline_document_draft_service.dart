@@ -564,9 +564,10 @@ class OfflineDocumentDraftService {
     if (detail == null) {
       throw StateError('The local estimate draft could not be found.');
     }
-    if (documentId.startsWith('local-invoice-')) {
+    if (documentId.startsWith('local-invoice-') ||
+        documentId.startsWith('local-estimate-')) {
       if ((detail['_server_document_id']?.toString() ?? '').isNotEmpty) {
-        throw StateError('This invoice has synced. Open the numbered invoice.');
+        throw StateError('This document has synced. Open its numbered record.');
       }
       final rows = await _database.customSelect(
         "SELECT state,attempt_count,last_attempt_at FROM sync_outbox "
@@ -578,7 +579,7 @@ class OfflineDocumentDraftService {
         ],
       ).get();
       if (rows.isEmpty) {
-        throw StateError('This invoice is no longer queued. Reopen the invoice.');
+        throw StateError('This document is no longer queued. Reopen it.');
       }
       if (rows.isNotEmpty) {
         final row = rows.single;
@@ -586,7 +587,7 @@ class OfflineDocumentDraftService {
             row.read<int>('attempt_count') != 0 ||
             row.data['last_attempt_at'] != null) {
           throw StateError(
-            'This invoice is synchronizing. Reopen it once sync finishes.',
+            'This document is synchronizing. Reopen it once sync finishes.',
           );
         }
       }
