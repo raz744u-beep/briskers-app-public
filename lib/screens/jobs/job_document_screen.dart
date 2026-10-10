@@ -1746,7 +1746,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       } else if (mounted) {
         setState(() => _detail = detail);
       }
-      return _withPdfUnits(detail);
+      return await _withPdfUnits(detail);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
       return null;
