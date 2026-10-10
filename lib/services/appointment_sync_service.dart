@@ -263,6 +263,53 @@ class AppointmentSyncService {
     return localId;
   }
 
+  /// Cancel an appointment created offline before any upload attempt.
+  /// Its original create operation is retained and modified to send status
+  /// after creation, so the cancellation remains in appointment history.
+  Future<void> cancelPendingCreate(
+    String businessId, String appointmentId, {
+    required bool canManage,
+  }) async {
+    if (!canManage) throw StateError('Appointment management access required.');
+    if (!appointmentId.startsWith('local-appointment-')) {
+      throw StateError('Expected a never-synced appointment.');
+    }
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        """SELECT job_id,status FROM local_appointments
+           WHERE business_id=? AND id=?""",
+        variables:[Variable<String>(businessId),Variable<String>(appointmentId)],
+      ).get();
+      if (rows.length!=1 || rows.single.readNullable<String>('job_id')!=null ||
+          !{'confirmed','tentative'}.contains(rows.single.read<String>('status'))) {
+        throw StateError('Appointment cannot be cancelled.');
+      }
+      final queued=await _database.customSelect(
+        """SELECT id,payload_json,attempt_count,last_attempt_at
+           FROM sync_outbox WHERE business_id=? AND entity_id=?
+           AND entity_type='appointment_create' AND state='pending' LIMIT 1""",
+        variables:[Variable<String>(businessId),Variable<String>(appointmentId)],
+      ).get();
+      if (queued.length!=1 || queued.single.read<int>('attempt_count')!=0 ||
+          queued.single.readNullable<int>('last_attempt_at')!=null) {
+        throw StateError('Creation has started syncing; reconcile first.');
+      }
+      final payload=Map<String,dynamic>.from(
+        jsonDecode(queued.single.read<String>('payload_json')) as Map);
+      payload['cancel_after_create']=true;
+      await _database.customStatement(
+        'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+        [jsonEncode(payload),queued.single.read<int>('id')],
+      );
+      await _database.customStatement(
+        """UPDATE local_appointments SET status='cancelled',can_check_in=0
+           WHERE business_id=? AND id=?""",
+        [businessId,appointmentId],
+      );
+    });
+    _syncEvents.add(businessId);
+  }
+
   /// Stage a secretary/owner cancellation locally, without deleting history.
   /// Server replay is a separate release gate; never mark queued cancel synced
   /// until the version-guarded cancellation endpoint confirms it.
