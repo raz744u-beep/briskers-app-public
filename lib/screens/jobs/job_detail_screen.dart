@@ -34,12 +34,14 @@ class JobDetailScreen extends StatefulWidget {
     required this.businessId,
     required this.jobId,
     required this.roleCode,
+    this.initialAction,
     this.bottomNavigationBar,
   });
 
   final String businessId;
   final String jobId;
   final String roleCode;
+  final String? initialAction;
   final Widget? bottomNavigationBar;
 
   @override
@@ -79,6 +81,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   bool _loading = true;
   bool _busy = false;
   bool _onlineReady = false;
+  bool _initialActionScheduled = false;
   bool _showingLocal = false;
   String? _error;
   VoidCallback? _modalRefresh;
@@ -191,6 +194,33 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     return repaired;
   }
 
+  void _scheduleInitialAction() {
+    final action = widget.initialAction;
+    if (action == null || _initialActionScheduled) return;
+    _initialActionScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      switch (action) {
+        case 'edit':
+          await _editJob();
+        case 'delete':
+          await _deleteUnusedJob();
+        case 'inspection':
+          await _editPreInspectionDetails();
+        case 'complaint':
+          await _editComplaint();
+        case 'finding':
+          await _addFinding();
+        case 'estimate':
+          await _createEstimate();
+        case 'invoice':
+          await _createInvoice();
+        case 'expense':
+          await _addJobExpense();
+      }
+    });
+  }
+
   Future<void> _load() async {
     final loadWatch = Stopwatch()..start();
     var localShown = false;
@@ -248,6 +278,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
 
     if (forceOffline) {
+      if (localShown) _scheduleInitialAction();
       if (!localShown && mounted) {
         setState(() {
           _loading = false;
@@ -498,6 +529,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         _error = null;
       });
       _modalRefresh?.call();
+      _scheduleInitialAction();
       unawaited(_prefetchFindingPhotos(findings));
 
       unawaited(
