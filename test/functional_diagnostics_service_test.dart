@@ -12,10 +12,10 @@ void main() {
 
     final report = await service.run();
 
-    expect(report.checks, hasLength(15));
-    expect(report.passed, 15);
+    expect(report.checks, hasLength(16));
+    expect(report.passed, 16);
     expect(report.warnings, 0);
     expect(report.failed, 0);
-    expect(report.checks.map((c) => c.id), containsAll(['FUNC-013', 'FUNC-014', 'FUNC-015']));
+    expect(report.checks.map((c) => c.id), containsAll(['FUNC-013', 'FUNC-014', 'FUNC-015', 'FUNC-016']));
   });
 }
