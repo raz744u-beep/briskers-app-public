@@ -29,6 +29,7 @@ import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_document_edit_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
+import '../../services/local_payment_methods_cache.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'customer_invoice_signature_screen.dart';
@@ -77,6 +78,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       LocalTaxSettingsCache();
   final _catalogSync = CatalogSyncService();
   final OfflineInvoicePaymentLedger _offlinePayments = OfflineInvoicePaymentLedger();
+  final LocalPaymentMethodsCache _paymentMethodsCache = const LocalPaymentMethodsCache();
   final ImagePicker _picker = ImagePicker();
   final ScrollController _workspaceHeaderController = ScrollController();
   final GlobalKey _workspaceHeaderKey = GlobalKey();
@@ -2405,10 +2407,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _paymentMethods() async {
-    final options = await _api.paymentOptions(widget.businessId);
-    return List<dynamic>.from(options['methods'] ?? const [])
-        .map((raw) => Map<String, dynamic>.from(raw as Map))
-        .toList();
+    final cached = await _paymentMethodsCache.load(widget.businessId);
+    if (BriskersConnectionModeController.instance.forceOffline ||
+        _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      return cached;
+    }
+    try {
+      final options = await _api.paymentOptions(widget.businessId);
+      final methods = List<dynamic>.from(options['methods'] ?? const [])
+          .map((raw) => Map<String, dynamic>.from(raw as Map))
+          .toList();
+      await _paymentMethodsCache.save(widget.businessId, methods);
+      return methods;
+    } catch (_) {
+      if (cached.isNotEmpty) return cached;
+      rethrow;
+    }
   }
 
   Future<void> _enterPayment() async {
