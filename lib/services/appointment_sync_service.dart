@@ -292,6 +292,39 @@ class AppointmentSyncService {
         throw StateError('Appointment is not cached on this device.');
       }
       final row = rows.single;
+      if (appointmentId.startsWith('local-appointment-')) {
+        final creates = await _database.customSelect(
+          """SELECT id,payload_json,attempt_count,last_attempt_at
+             FROM sync_outbox WHERE business_id=? AND entity_id=?
+             AND entity_type='appointment_create' AND state='pending'
+             LIMIT 1""",
+          variables: [Variable<String>(businessId),
+                      Variable<String>(appointmentId)],
+        ).get();
+        if (creates.length != 1 ||
+            creates.single.read<int>('attempt_count') > 0 ||
+            creates.single.readNullable<int>('last_attempt_at') != null) {
+          throw StateError('Appointment creation is already synchronizing.');
+        }
+        final pendingCreate = Map<String,dynamic>.from(
+          jsonDecode(creates.single.read<String>('payload_json')) as Map);
+        pendingCreate['title'] = title.trim();
+        pendingCreate['description'] = description;
+        pendingCreate['starts_at'] = startsAt.toUtc().toIso8601String();
+        pendingCreate['ends_at'] = endsAt.toUtc().toIso8601String();
+        pendingCreate['employee_id'] = employeeId;
+        await _database.customStatement(
+          'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+          [jsonEncode(pendingCreate),creates.single.read<int>('id')],
+        );
+        await _database.customStatement(
+          """UPDATE local_appointments SET title=?,description=?,starts_at=?,
+             ends_at=?,employee_id=? WHERE business_id=? AND id=?""",
+          [title.trim(),description,_unix(startsAt),_unix(endsAt),
+           employeeId,businessId,appointmentId],
+        );
+        return;
+      }
       final syncState = row.read<String>('sync_state');
       if (syncState == 'conflict') {
         throw StateError('Resolve the synchronization conflict first.');
