@@ -127,6 +127,14 @@ class DocumentPdfService {
     return text;
   }
 
+  /// PDF-only labor quantity notation; no change to stored quantities.
+  static String pdfLineQuantity(Map<String, dynamic> line) {
+    final quantity = _quantity(line['quantity']);
+    return line['line_kind']?.toString() == 'labor'
+        ? '$quantity hrs'
+        : quantity;
+  }
+
   static String _address(Object? raw) {
     if (raw == null) return '';
     if (raw is String) return raw.trim();
@@ -733,7 +741,7 @@ class DocumentPdfService {
         _bodyCell(index.toString(), align: pw.TextAlign.center),
         _bodyCell(display),
         _bodyCell(
-          _quantity(line['quantity']),
+          pdfLineQuantity(line),
           align: pw.TextAlign.center,
         ),
         _bodyCell(_money(line['unit_price']), align: pw.TextAlign.right),
