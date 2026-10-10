@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:drift/drift.dart' show Variable;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/briskers_colors.dart';
@@ -12,13 +11,10 @@ import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/customer_detail_cache.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
-import '../../services/offline_document_draft_service.dart';
-import '../../local/local_database_provider.dart';
 import '../appointments/appointment_create_screen.dart';
 import '../jobs/job_create_screen.dart';
 import '../jobs/job_document_screen.dart';
 import '../jobs/blank_invoice_setup_screen.dart';
-import '../jobs/estimate_job_setup_screen.dart';
 import 'customer_quick_actions.dart';
 import 'customer_problem_flag_card.dart';
 import 'customer_account_section.dart';
@@ -55,7 +51,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       LocalCustomerRepository();
   final OfflineCustomerVehicleAdminService _offlineAdmin =
       OfflineCustomerVehicleAdminService();
-  final OfflineDocumentDraftService _offlineDrafts = OfflineDocumentDraftService();
 
   Map<String, dynamic>? _data;
   String? _error;
@@ -618,7 +613,25 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     String? jobId;
     try {
       if (BriskersConnectionModeController.instance.forceOffline) {
-        await _createOfflineEstimateForCustomer();
+        final documentId=await Navigator.push<String>(
+          context,MaterialPageRoute(builder:(_)=>BlankInvoiceSetupScreen(
+            businessId:widget.businessId,
+            kind:'estimate',
+            initialCustomerId:widget.customerId,
+            initialCustomerName:customer['name']?.toString() ?? 'Customer',
+            initialVehicles:vehicles,
+          )),
+        );
+        if (!mounted || documentId==null) return;
+        await Navigator.push<void>(context,MaterialPageRoute(
+          builder:(_)=>JobDocumentScreen(
+            businessId:widget.businessId,
+            documentId:documentId,
+            isOwner:widget.roleCode=='owner',
+            canManageExpenses:_canManageQuickActions,
+            initialAction:'add_item',
+          ),
+        ));
         return;
       }
       final history = await _api.customerServiceHistory(
@@ -640,7 +653,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               children: [
                 const ListTile(
                   title: Text('Create estimate'),
-                  subtitle: Text('Use an existing job or create a new job.'),
+                  subtitle: Text('Existing Job or standalone estimate.'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.build_outlined),
@@ -649,7 +662,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.add_circle_outline),
-                  title: const Text('New job for estimate'),
+                  title: const Text('New Estimate (no Job)'),
                   onTap: () => Navigator.pop(sheetContext, 'new'),
                 ),
               ],
@@ -688,21 +701,30 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       }
 
       if (jobId == null) {
-        final job = await Navigator.push<Map<String, dynamic>>(
+        final documentId=await Navigator.push<String>(
           context,
-          MaterialPageRoute(
-            builder: (_) => EstimateJobSetupScreen(
-              businessId: widget.businessId,
-              initialCustomerId: widget.customerId,
-              initialCustomerName: customer['name']?.toString() ?? 'Customer',
-              initialVehicles: vehicles,
-            ),
-          ),
+          MaterialPageRoute(builder:(_)=>BlankInvoiceSetupScreen(
+            businessId:widget.businessId,
+            kind:'estimate',
+            initialCustomerId:widget.customerId,
+            initialCustomerName:customer['name']?.toString() ?? 'Customer',
+            initialVehicles:vehicles,
+          )),
         );
-        if (!mounted || job == null) return;
-        jobId = job['id']?.toString();
+        if (!mounted || documentId==null || documentId.isEmpty) return;
+        await Navigator.push<void>(
+          context,MaterialPageRoute(builder:(_)=>JobDocumentScreen(
+            businessId:widget.businessId,
+            documentId:documentId,
+            isOwner:widget.roleCode=='owner',
+            canManageExpenses:_canManageQuickActions,
+            initialAction:'add_item',
+          )),
+        );
+        if (mounted) await _load();
+        return;
       }
-      if (jobId == null || jobId.isEmpty) {
+      if (jobId.isEmpty) {
         throw StateError('No job was selected for the estimate.');
       }
       final documentId = await _api.createEstimate(widget.businessId, jobId);
@@ -726,82 +748,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         SnackBar(content: Text('Could not create estimate: $error')),
       );
     }
-  }
-
-  Future<void> _createOfflineEstimateForCustomer() async {
-    final saved = await localDatabase.customSelect(
-      '''
-      SELECT id, job_number, title, vehicle_label
-      FROM local_jobs
-      WHERE business_id=? AND customer_id=?
-        AND status NOT IN ('completed','cancelled')
-      ORDER BY created_at DESC
-      LIMIT 50
-      ''',
-      variables: [
-        Variable<String>(widget.businessId),
-        Variable<String>(widget.customerId),
-      ],
-    ).get();
-    if (!mounted) return;
-    if (saved.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(
-          'To create an estimate offline, this customer needs an existing saved active job. Creating a new job requires an internet connection.',
-        )),
-      );
-      return;
-    }
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (sheetContext) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(sheetContext).height * 0.60,
-          child: ListView(
-            children: [
-              const ListTile(
-                title: Text('Offline estimate'),
-                subtitle: Text('Choose a saved active job.'),
-              ),
-              for (final job in saved)
-                ListTile(
-                  leading: const Icon(Icons.build_outlined),
-                  title: Text(
-                    '${job.readNullable<String>('job_number') ?? ''} • '
-                    '${job.read<String>('title')}',
-                  ),
-                  subtitle: Text(
-                    job.readNullable<String>('vehicle_label') ?? '',
-                  ),
-                  onTap: () => Navigator.pop(
-                    sheetContext,job.read<String>('id'),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (!mounted || selected == null) return;
-    final documentId = await _offlineDrafts.createEstimate(
-      widget.businessId,selected,
-    );
-    if (!mounted) return;
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => JobDocumentScreen(
-          businessId: widget.businessId,
-          documentId: documentId,
-          isOwner: widget.roleCode == 'owner',
-          canManageExpenses: _canManageQuickActions,
-          initialAction: 'add_item',
-        ),
-      ),
-    );
-    if (mounted) await _load();
   }
 
   void _openCustomerNoteComposer() {

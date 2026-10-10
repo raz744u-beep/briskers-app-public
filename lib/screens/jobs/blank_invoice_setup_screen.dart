@@ -12,12 +12,14 @@ class BlankInvoiceSetupScreen extends StatefulWidget {
   const BlankInvoiceSetupScreen({
     super.key,
     required this.businessId,
+    this.kind = 'invoice',
     this.initialCustomerId,
     this.initialCustomerName,
     this.initialVehicles = const [],
   });
 
   final String businessId;
+  final String kind;
   final String? initialCustomerId;
   final String? initialCustomerName;
   final List<dynamic> initialVehicles;
@@ -180,7 +182,24 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
     });
 
     try {
-      final invoiceId = BriskersConnectionModeController.instance.forceOffline
+      final isEstimate=widget.kind=='estimate';
+      final invoiceId = isEstimate
+          ? (BriskersConnectionModeController.instance.forceOffline
+              ? await _offlineDrafts.createStandaloneEstimate(
+                  widget.businessId,
+                  customerId: customerId,
+                  customerName: widget.initialCustomerName ??
+                      _customers.where((row) => row['id']?.toString() == customerId)
+                          .map((row) => row['display_name']?.toString() ??
+                              row['name']?.toString() ?? 'Customer')
+                          .firstOrNull ?? 'Customer',
+                  vehicleId: _vehicleId,
+                  vehicleLabel: _vehicles.where((v) =>
+                      v['id']?.toString() == _vehicleId).map(_vehicleName).firstOrNull,
+                )
+              : await _api.createStandaloneEstimate(
+                  widget.businessId,customerId:customerId,vehicleId:_vehicleId))
+          : BriskersConnectionModeController.instance.forceOffline
           ? await _offlineDrafts.createQuickInvoice(
               widget.businessId,
               customerId: customerId,
@@ -219,15 +238,19 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: BriskersColors.invoices.withValues(alpha: 0.10),
-        title: const Text('New Invoice'),
+        backgroundColor: (widget.kind=='estimate'
+            ? BriskersColors.estimates : BriskersColors.invoices)
+            .withValues(alpha:0.10),
+        title: Text(widget.kind=='estimate' ? 'New Estimate' : 'New Invoice'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text(
-            'Choose a customer and optional vehicle. After creating the invoice, you can add parts, labor, and other items.',
-            style: TextStyle(color: Color(0xFF667085)),
+          Text(
+            widget.kind=='estimate'
+                ? 'Choose a customer and optional vehicle. The estimate does not create a Job until converted to an invoice.'
+                : 'Choose a customer and optional vehicle. After creating the invoice, you can add parts, labor, and other items.',
+            style: const TextStyle(color: Color(0xFF667085)),
           ),
           const SizedBox(height: 16),
           if (widget.initialCustomerId == null)
@@ -332,7 +355,8 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
           const SizedBox(height: 22),
           FilledButton.icon(
             style: FilledButton.styleFrom(
-              backgroundColor: BriskersColors.invoices,
+              backgroundColor: widget.kind=='estimate'
+                  ? BriskersColors.estimates : BriskersColors.invoices,
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
             onPressed: _saving ? null : _create,
@@ -342,7 +366,8 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.receipt_long_outlined),
-            label: const Text('Create Invoice & Add Items'),
+            label: Text(widget.kind=='estimate'
+                ? 'Create Estimate & Add Items' : 'Create Invoice & Add Items'),
           ),
         ],
       ),

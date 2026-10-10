@@ -14,6 +14,7 @@ import 'local_job_repository.dart';
 import 'local_document_detail_cache.dart';
 import 'local_document_repository.dart';
 import 'invoice_performance_metrics.dart';
+import 'job_performance_metrics.dart';
 import 'local_invoice_status_styles_cache.dart';
 import 'local_tax_settings_cache.dart';
 
@@ -159,6 +160,32 @@ class BriskersDiagnosticsService {
     ));
   }
 
+  Future<void> _checkJobPerformance(
+    String businessId,
+    List<DiagnosticCheck> checks,
+  ) async {
+    final samples = await const JobPerformanceMetrics().recent(businessId);
+    final slow = samples.where((v) {
+      final ms = int.tryParse(v['ms']?.toString() ?? '') ?? 0;
+      return ms > 1200;
+    }).toList();
+    checks.add(DiagnosticCheck(
+      id:'JOB-PERF-001',
+      category:'Job performance',
+      title:'Measured offline Job detail opening',
+      level:samples.isEmpty || slow.isNotEmpty
+          ? BriskersDiagnosticLevel.warning
+          : BriskersDiagnosticLevel.pass,
+      summary:samples.isEmpty
+          ? 'No Job opening samples yet.'
+          : '${samples.length} measurements; ${slow.length} over 1200 ms.',
+      details:[
+        for (final row in samples.reversed.take(10))
+          '${row['stage']}: ${row['ms']} ms (Job ${row['job_id']})',
+      ],
+    ));
+  }
+
   Future<void> _checkInvoicePerformance(
     String businessId,
     List<DiagnosticCheck> checks,
@@ -266,6 +293,13 @@ class BriskersDiagnosticsService {
     );
 
     if (full) {
+      await _safeGroup(
+        checks,
+        fallbackId: 'JOB-PERF-001',
+        category: 'Job performance',
+        title: 'Job opening time in local mode',
+        action: () => _checkJobPerformance(businessId,checks),
+      );
       await _safeGroup(
         checks,
         fallbackId: 'ATT-001',

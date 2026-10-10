@@ -695,7 +695,40 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _createEstimate() async {
     if (!_canManage) return;
-    final job = await _chooseEstimateJob('New Estimate');
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle:true,
+      builder:(sheetContext)=> SafeArea(child:Column(
+        mainAxisSize:MainAxisSize.min,
+        children:[
+          const ListTile(title:Text('New Estimate')),
+          ListTile(
+            leading:const Icon(Icons.note_add_outlined),
+            title:const Text('New Estimate'),
+            subtitle:const Text('No Job until converted to invoice'),
+            onTap:()=>Navigator.pop(sheetContext,'standalone'),
+          ),
+          ListTile(
+            leading:const Icon(Icons.build_outlined),
+            title:const Text('Existing Job'),
+            onTap:()=>Navigator.pop(sheetContext,'existing'),
+          ),
+        ],
+      )),
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'standalone') {
+      final documentId=await Navigator.push<String>(
+        context,
+        MaterialPageRoute(builder:(_)=>BlankInvoiceSetupScreen(
+          businessId:widget.businessId,kind:'estimate',
+        )),
+      );
+      if (!mounted || documentId==null || documentId.isEmpty) return;
+      await _openDocument(documentId);
+      return;
+    }
+    final job = await _pickActiveJob('New Estimate');
     if (job == null || !mounted) return;
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;

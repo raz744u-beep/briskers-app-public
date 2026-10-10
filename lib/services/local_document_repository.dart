@@ -129,10 +129,14 @@ class LocalDocumentRepository {
   }) async {
     final rows = await _database.customSelect(
       '''
-      SELECT d.*, j.job_number, j.customer_name, j.vehicle_label
+      SELECT d.*, j.job_number,
+             coalesce(j.customer_name,c.display_name,'Customer') AS customer_name,
+             coalesce(j.vehicle_label,'') AS vehicle_label
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
+      LEFT JOIN local_customers c ON c.business_id=d.business_id
+        AND c.id=d.customer_id
       WHERE d.business_id = ? AND d.kind = ?
       ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
       ''',
