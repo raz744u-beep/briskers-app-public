@@ -33,6 +33,6 @@ void main() {
     expect(source,contains('briskers_job_delete_plan'));
     expect(source,contains('briskers_delete_job_with_unpaid_v1'));
     expect(source,contains('briskers_delete_invoice_managed_v1'));
-    expect(source,contains('deleteJob: false'));
+    expect(source,contains('bool deleteJob = false'));
   });
 }
