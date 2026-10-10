@@ -87,16 +87,16 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   }
 
   Future<void> _load() async {
-    if (_offlineEditing) {
-      final item = widget.appointment!;
-      final cachedCustomers = _pendingCreate
+    if (_offlineEditing || BriskersConnectionModeController.instance.forceOffline) {
+      final item = widget.appointment ?? const <String,dynamic>{};
+      final cachedCustomers = _pendingCreate || !_editing
           ? await _localCustomers.customers(widget.businessId)
           : <Map<String,dynamic>>[];
-      if (_pendingCreate && _customerId != null) {
+      if ((_pendingCreate || !_editing) && _customerId != null) {
         await _loadLocalVehicles(_customerId!);
       }
       setState(() {
-        _customers = _pendingCreate ? cachedCustomers : [{'id':_customerId, 'display_name':item['customer'] ?? 'Customer'}];
+        _customers = _pendingCreate || !_editing ? cachedCustomers : [{'id':_customerId, 'display_name':item['customer'] ?? 'Customer'}];
         if (!_pendingCreate) {
           _vehicles = _vehicleId == null ? const [] : [{
             'id': _vehicleId, 'year': item['vehicle_year'],
@@ -342,7 +342,7 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                 _vehicles = const [];
               });
               if (value != null) {
-                if (_offlineEditing) { await _loadLocalVehicles(value); }
+                if (_offlineEditing || BriskersConnectionModeController.instance.forceOffline) { await _loadLocalVehicles(value); }
                 else { await _loadVehicles(value); }
               }
             },
