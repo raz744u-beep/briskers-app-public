@@ -20,8 +20,21 @@ An initial attempt used a nonexistent `checked_in` status in the appointments ta
 
 ## Outstanding
 
-- Authenticated checked-in appointment + linked Job tests, including immutable customer/vehicle association
 - Offline edit/delete durable outbox, conflict handling and cross-device deletion tombstones
 - Mobile Android/iOS verification
 
 Do not treat APP-001 as fully implemented or verified yet.
+
+
+## Linked-Job integration extension — PASS (October 10)
+
+In a separate transaction, created synthetic customers, a synthetic Job,
+and an appointment linked by job_id. Exercised actual authenticated RPCs:
+- Office edit to the Job-linked appointment was denied
+- Owner scheduling/title edit to the Job-linked appointment was accepted
+- Owner reassigning its customer was denied
+- Owner attempting to delete the Job-linked appointment was denied
+
+Transaction ROLLBACK completed; confirmed zero synthetic customers,
+appointments and Jobs persisted. This is a live server permission test,
+not an in-app diagnostic or a real device test.
