@@ -13,6 +13,7 @@ import 'local_document_detail_cache.dart';
 import 'local_financial_cache.dart';
 import 'offline_customer_vehicle_admin_service.dart';
 import 'offline_document_draft_service.dart';
+import 'offline_invoice_payment_ledger.dart';
 import 'offline_estimate_invoice_service.dart';
 import 'offline_financial_write_service.dart';
 import 'offline_job_admin_service.dart';
@@ -164,6 +165,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkOfflineInvoiceCancel,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-013',
+      title: 'Offline received-payment outbox and balances',
+      success: 'Configured payment recorded durably with UUID, exact cents, and correct local balance; rejected excess and preserved queue.',
+      action: _checkOfflineReceivedPayment,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -214,6 +223,52 @@ class BriskersFunctionalDiagnosticsService {
       await _cleanupPreferences(businessId);
       await database.close();
     }
+  }
+
+  Future<void> _checkOfflineReceivedPayment(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final ledger = OfflineInvoicePaymentLedger(database: database);
+    const invoiceId = 'local-invoice-sandbox';
+    final operationId = await ledger.recordReceivedPayment(
+      businessId,
+      invoiceId,
+      amount: 500,
+      remainingBeforePaymentCents: 50000,
+      methodId: 'configured-test-method',
+      methodName: 'Zelle',
+    );
+    final pending = await ledger.pendingForInvoice(businessId, invoiceId);
+    _require(pending.length == 1, 'Expected one durable local payment.');
+    _require(pending.single['operation_id'] == operationId,
+        'Queued payment operation ID changed.');
+    _require(pending.single['amount_cents'] == 50000,
+        'Amount was not stored as exact cents.');
+    _require(pending.single['method_name'] == 'Zelle',
+        'Selected payment method was lost.');
+    _require(
+      OfflineInvoicePaymentLedger.remainingCents(
+        total: 500, finalized: 0, pendingOnServer: 0,
+        queuedLocally: const [500],
+      ) == 0,
+      'Received payment did not reduce balance to zero.',
+    );
+    var rejected = false;
+    try {
+      await ledger.recordReceivedPayment(
+        businessId, invoiceId,
+        amount: 501,
+        remainingBeforePaymentCents: 50000,
+        methodId: 'configured-test-method',
+        methodName: 'Zelle',
+      );
+    } catch (_) {
+      rejected = true;
+    }
+    _require(rejected, 'Excess payment was not rejected.');
+    _require((await ledger.pendingForInvoice(businessId, invoiceId)).length == 1,
+        'Rejected payment changed the local queue.');
   }
 
   Future<void> _checkOfflineInvoiceCancel(
