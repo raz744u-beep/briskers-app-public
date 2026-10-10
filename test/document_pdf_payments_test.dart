@@ -96,4 +96,121 @@ void main() {
       expect(utf8.decode(bytes.sublist(0, 5)), '%PDF-');
     });
   });
+
+  group('PDF-001 individual payment methods and presentation math', () {
+    test('two finalized methods plus one pending card stay itemized', () {
+      final detail = <String, dynamic>{
+        'total_amount': 972,
+        'paid_amount': 500,
+        'pending_payment': 150,
+        'payments': [
+          {'amount': 250, 'state': 'finalized',
+            'payment_method_name': 'Cash'},
+          {'amount': 250, 'state': 'posted',
+            'payment_method_name': 'Check'},
+          {'amount': 150, 'state': 'pending',
+            'payment_method_name': 'Credit card'},
+        ],
+      };
+      final lines = DocumentPdfService.invoicePaymentLines(detail);
+      expect(lines.map((row) => row['label']), [
+        'Payment — Cash',
+        'Payment — Check',
+        'Payment — Credit card (Pending)',
+      ]);
+      expect(lines.map((row) => row['amount']), [250, 250, 150]);
+      expect(lines.last['pending'], isTrue);
+      final summary = DocumentPdfService.invoicePaymentAmounts(detail);
+      expect(summary['remaining'], 322);
+      expect(lines.fold<num>(0, (sum, row) => sum + (row['amount'] as num)),
+          summary['paid']! + summary['pending']!);
+    });
+
+    test('missing or stale breakdown uses aggregates without guessing method', () {
+      final detail = <String, dynamic>{
+        'total_amount': 1000,
+        'paid_amount': 600,
+        'pending_payment': 100,
+        'payments': [
+          {'amount': 200, 'state': 'posted',
+            'payment_method_name': 'Credit card'},
+        ],
+      };
+      final lines = DocumentPdfService.invoicePaymentLines(detail);
+      expect(lines.map((row) => row['label']), [
+        'Payment — Method not recorded',
+        'Payment — Method not recorded (Pending)',
+      ]);
+      expect(lines.map((row) => row['amount']), [600, 100]);
+      expect(DocumentPdfService.invoicePaymentAmounts(detail)['remaining'],
+          300);
+    });
+
+    test('voided/reversed items never inflate the received total', () {
+      final lines = DocumentPdfService.invoicePaymentLines({
+        'total_amount': 100,
+        'paid_amount': 35.25,
+        'pending_payment': 0,
+        'payments': [
+          {'amount': 35.25, 'state': 'posted',
+            'payment_method_name': 'Debit card'},
+          {'amount': 40, 'state': 'reversed',
+            'payment_method_name': 'Check'},
+        ],
+      });
+      expect(lines.length, 1);
+      expect(lines.single['label'], 'Payment — Debit card');
+      expect(lines.single['amount'], 35.25);
+    });
+
+    test('zero and fully paid invoices have correct payment lines', () {
+      expect(DocumentPdfService.invoicePaymentLines({
+        'total_amount': 200,
+        'paid_amount': 0,
+        'pending_payment': 0,
+      }), isEmpty);
+      final fullyPaid = {
+        'total_amount': 200,
+        'paid_amount': 200,
+        'pending_payment': 0,
+        'payments': [
+          {'amount': 200, 'state': 'finalized',
+            'payment_method_name': 'Warranty check'},
+        ],
+      };
+      expect(DocumentPdfService.invoicePaymentLines(fullyPaid).single['label'],
+          'Payment — Warranty check');
+      expect(DocumentPdfService.invoicePaymentAmounts(fullyPaid)['remaining'],
+          0);
+    });
+
+    test('a multi-payment invoice and a plain estimate both render', () async {
+      final detail = <String, dynamic>{
+        'kind': 'invoice',
+        'document_number': '6330',
+        'customer_name': 'PDF Test',
+        'total_amount': 500,
+        'net_amount': 500,
+        'tax_amount': 0,
+        'paid_amount': 400,
+        'pending_payment': 100,
+        'payments': [
+          {'amount': 200, 'state': 'posted',
+            'payment_method_name': 'Cash'},
+          {'amount': 200, 'state': 'posted',
+            'payment_method_name': 'Check'},
+          {'amount': 100, 'state': 'pending',
+            'payment_method_name': 'Credit card'},
+        ],
+        'lines': <Map<String, dynamic>>[],
+      };
+      final invoiceBytes = await DocumentPdfService.build(detail);
+      expect(utf8.decode(invoiceBytes.sublist(0, 5)), '%PDF-');
+      final estimateBytes = await DocumentPdfService.build({
+        ...detail,
+        'kind': 'estimate',
+      });
+      expect(utf8.decode(estimateBytes.sublist(0, 5)), '%PDF-');
+    });
+  });
 }
