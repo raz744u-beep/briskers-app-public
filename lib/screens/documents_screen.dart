@@ -17,6 +17,7 @@ import '../services/local_invoice_status_styles_cache.dart';
 import '../widgets/briskers_page_header.dart';
 import 'jobs/blank_invoice_setup_screen.dart';
 import 'jobs/job_document_screen.dart';
+import 'jobs/invoice_deletion_choice.dart';
 import 'expenses/expense_detail_screen.dart';
 
 class DocumentsScreen extends StatefulWidget {
@@ -451,31 +452,60 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     final label = isEstimate ? 'estimate' : 'invoice';
     final number = row['document_number']?.toString().trim() ?? '';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Delete $label?'),
-        content: Text(
-          number.isEmpty
-              ? 'This $label will be permanently deleted.'
-              : 'Delete $label #$number? This cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+    final documentId = row['id']?.toString() ?? '';
+    final localDraft = _offlineDrafts.isLocalDraftId(documentId);
+    bool deleteJob = false;
+    if (!isEstimate && !localDraft) {
+      if (BriskersConnectionModeController.instance.forceOffline) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Reconnect to delete an already-synced invoice.'),
+          ));
+        }
+        return;
+      }
+      Map<String, dynamic>? plan;
+      final jobId = row['job_id']?.toString() ?? '';
+      if (jobId.isNotEmpty) {
+        try {
+          plan = await _api.jobDeletionPlan(widget.businessId,jobId);
+        } catch (_) {
+          // Invoice-only remains available; the RPC will verify permission.
+        }
+      }
+      if (!mounted) return;
+      final choice = await showInvoiceDeletionChoice(
+        context, invoiceNumber: number,jobPlan: plan,
+      );
+      if (choice == null) return;
+      deleteJob = choice;
+    } else {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Delete $label?'),
+          content: Text(
+            number.isEmpty
+                ? 'This $label will be permanently deleted.'
+                : 'Delete $label #$number? This cannot be undone.',
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
             ),
-            child: Text('Delete $label'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+              child: Text('Delete $label'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
 
     try {
       if (!isEstimate && _offlineDrafts.isLocalDraftId(row['id'].toString())) {
@@ -489,9 +519,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           row['id'].toString(),
         );
       } else {
-        await _api.deleteDraftInvoice(
+        await _api.deleteInvoiceManaged(
           widget.businessId,
           row['id'].toString(),
+          deleteJob: deleteJob,
         );
       }
 
@@ -500,7 +531,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${isEstimate ? 'Estimate' : 'Invoice'} deleted.',
+            deleteJob ? 'Invoice and Job deleted.' :
+                '${isEstimate ? 'Estimate' : 'Invoice'} deleted.',
           ),
         ),
       );
