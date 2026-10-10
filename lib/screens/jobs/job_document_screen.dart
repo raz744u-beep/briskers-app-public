@@ -30,6 +30,8 @@ import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'customer_invoice_signature_screen.dart';
 import 'invoice_warranty_panel.dart';
+import 'invoice_note_draft_rules.dart';
+import 'standard_note_editor_sheet.dart';
 import 'job_detail_screen.dart';
 
 class JobDocumentScreen extends StatefulWidget {
@@ -5113,60 +5115,33 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     }
   }
 
+  /// Creates a reusable template. A caller from Add Standard Note may
+  /// also insert it into the invoice, while Save as Standard Note only saves
+  /// the template (keeping the in-progress invoice note untouched).
   Future<Map<String, dynamic>?> _createStandardNote({
     String? initialBody,
+    bool addToInvoice = false,
   }) async {
-    final name = TextEditingController();
-    final body = TextEditingController(text: initialBody ?? '');
-    final result = await showDialog<Map<String, String>>(
+    if (!mounted || _busy || _readOnly) return null;
+    _notesFocusNode.unfocus();
+    final result = await showModalBottomSheet<Map<String, String>>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Save standard note'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: name,
-                autofocus: initialBody == null,
-                decoration: const InputDecoration(
-                  labelText: 'Template name',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: body,
-                minLines: 3,
-                maxLines: 7,
-                decoration: const InputDecoration(
-                  labelText: 'Standard note text',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (name.text.trim().isEmpty || body.text.trim().isEmpty) return;
-              Navigator.pop(dialogContext, {
-                'name': name.text.trim(),
-                'body': body.text.trim(),
-              });
-            },
-            child: const Text('Save template'),
-          ),
-        ],
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (_) => StandardNoteEditorSheet(
+        accent: _documentActionColor,
+        initialBody: initialBody ?? '',
+        addToInvoice: addToInvoice,
       ),
     );
-    name.dispose();
-    body.dispose();
-    if (result == null || !mounted) return null;
+    if (!mounted || result == null) return null;
+    if (!canSaveStandardNoteText(
+      result['name'] ?? '',
+      result['body'] ?? '',
+    )) {
+      return null;
+    }
     try {
       final existing = await _api.documentNoteTemplates(widget.businessId);
       final normalizedName = result['name']!.trim().toLowerCase();
@@ -5175,9 +5150,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           normalizedName)) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text(
-              'A standard note with this name already exists.',
-            )),
+            SnackBar(content: Text(tr('standardNoteDuplicateName'))),
           );
         }
         return null;
@@ -5187,15 +5160,52 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         name: result['name']!,
         body: result['body']!,
       );
-      if (mounted) {
+      if (!mounted) return null;
+      if (!addToInvoice) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Standard note saved for reuse.')),
+          SnackBar(content: Text(tr('standardNoteSaved'))),
         );
       }
       return result;
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) {
+        setState(() => _error = error.toString());
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save standard note: $error')),
+        );
+      }
       return null;
+    }
+  }
+
+  Future<void> _applyStandardNoteBody(String body) async {
+    if (!mounted || _busy || _readOnly) return;
+    final original = _notesController.text;
+    final merged = mergeStandardNoteIntoDraft(original, body);
+    if (merged.isEmpty) return;
+
+    if (merged == original.trim() && !_notesDirty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr('standardNoteAlreadyThere'))),
+      );
+      return;
+    }
+    _notesFocusNode.unfocus();
+    setState(() {
+      _notesController.text = merged;
+      _notesDirty = invoiceNoteDraftAction(
+        merged,
+        _detail?['memo']?.toString(),
+      ) != InvoiceNoteDraftAction.none;
+    });
+
+    if (_notesDirty) {
+      await _saveInlineNotes();
+    }
+    if (mounted && _error == null && !_notesDirty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr('standardNoteAdded'))),
+      );
     }
   }
 
@@ -5234,20 +5244,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                subtitle: const Text('Choose a saved note or create one.'),
+                subtitle: Text(tr('standardNoteChooseOrCreate')),
               ),
               ListTile(
                 key: const ValueKey('add-standard-note-template'),
                 leading: const Icon(Icons.add_circle_outline),
-                title: const Text('Create standard note'),
+                title: Text(tr('standardNoteCreate')),
                 onTap: () => Navigator.pop(sheetContext,
                     <String, dynamic>{'_create_template': true}),
               ),
               const Divider(height: 1),
               if (templates.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('No standard notes saved yet. Tap + to create one.'),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(tr('standardNoteEmptyList')),
                 ),
               ...templates.map(
                 (template) => ListTile(
@@ -5269,25 +5279,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     if (!mounted || selected == null) return;
     if (selected['_create_template'] == true) {
-      final created = await _createStandardNote();
+      final created = await _createStandardNote(addToInvoice: true);
       if (created == null) return;
-      // Creating a reusable template must not silently alter this invoice.
+      await _applyStandardNoteBody(created['body']?.toString() ?? '');
       return;
     }
-
-    final body = selected['body']?.toString().trim() ?? '';
-    if (body.isEmpty) return;
-
-    final current = _detail?['memo']?.toString().trim() ?? '';
-    final combined = current.isEmpty
-        ? body
-        : current.contains(body)
-            ? current
-            : '$current\n\n$body';
-
-    await _run(
-      () => _saveMemoLocalAware(combined),
-    );
+    await _applyStandardNoteBody(selected['body']?.toString() ?? '');
   }
 
   Future<Map<String, dynamic>?> _editDisclaimerSheet({
@@ -5647,7 +5644,43 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _saveInlineNotes() async {
     if (_readOnly || _busy || !_notesDirty) return;
     final value = _notesController.text.trim();
-    final translatedValue = await _translateManualNote(value);
+    final action = invoiceNoteDraftAction(
+      value,
+      _detail?['memo']?.toString(),
+    );
+    if (action == InvoiceNoteDraftAction.none) {
+      if (mounted) setState(() => _notesDirty = false);
+      return;
+    }
+
+    if (action == InvoiceNoteDraftAction.clear) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(tr('clearInvoiceNoteTitle')),
+          content: Text(tr('clearInvoiceNoteWarning')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(tr('cancel')),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(tr('clearInvoiceNote')),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || confirmed != true) return;
+    }
+
+    final translatedValue = action == InvoiceNoteDraftAction.clear
+        ? ''
+        : await _translateManualNote(value);
     if (translatedValue == null || !mounted) return;
 
     await _run(
@@ -5676,6 +5709,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final signedAt = DateTime.tryParse(
       _signatureStatus['signed_at']?.toString() ?? '',
     );
+    final draftAction = invoiceNoteDraftAction(
+      _notesController.text,
+      _detail?['memo']?.toString(),
+    );
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -5697,11 +5734,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             maxLines: 7,
             keyboardType: TextInputType.multiline,
             textCapitalization: TextCapitalization.sentences,
-            onChanged: (_) {
-              if (!_notesDirty) {
-                setState(() => _notesDirty = true);
-              }
-            },
+            onChanged: (_) => setState(() {
+              _notesDirty = invoiceNoteDraftAction(
+                _notesController.text,
+                _detail?['memo']?.toString(),
+              ) != InvoiceNoteDraftAction.none;
+            }),
             decoration: InputDecoration(
               hintText: _estimate
                   ? tr('noEstimateNotes')
@@ -5729,31 +5767,44 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
             ),
           ),
-          if (!_readOnly && _notesDirty) ...[
+          if (!_readOnly &&
+              draftAction != InvoiceNoteDraftAction.none) ...[
             const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton.icon(
+                key: const ValueKey('invoice-note-save-or-clear'),
                 style: FilledButton.styleFrom(
-                  backgroundColor: _estimate
-                      ? BriskersColors.estimates
-                      : BriskersColors.invoices,
+                  backgroundColor: draftAction == InvoiceNoteDraftAction.clear
+                      ? Theme.of(context).colorScheme.error
+                      : _documentActionColor,
                   foregroundColor: Colors.white,
                 ),
                 onPressed: _busy ? null : _saveInlineNotes,
-                icon: const Icon(Icons.check),
-                label: Text(tr('saveNotes')),
+                icon: Icon(draftAction == InvoiceNoteDraftAction.clear
+                    ? Icons.delete_outline
+                    : Icons.check),
+                label: Text(draftAction == InvoiceNoteDraftAction.clear
+                    ? tr('clearInvoiceNote')
+                    : tr('saveNotes')),
               ),
             ),
           ],
           const SizedBox(height: 12),
-          if (!_readOnly && _notesController.text.trim().isNotEmpty)
+          if (!_readOnly &&
+              _notesController.text.trim().isNotEmpty)
             OutlinedButton.icon(
+              key: const ValueKey('invoice-save-as-standard-note'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _documentActionColor,
+                side: BorderSide(color: _documentActionColor),
+                alignment: Alignment.centerLeft,
+              ),
               onPressed: _busy ? null : () => _createStandardNote(
                 initialBody: _notesController.text,
               ),
               icon: const Icon(Icons.bookmark_add_outlined),
-              label: const Text('Save as Standard Note'),
+              label: Text(tr('standardNoteSaveAs')),
             ),
           if (!_readOnly)
             OutlinedButton.icon(
