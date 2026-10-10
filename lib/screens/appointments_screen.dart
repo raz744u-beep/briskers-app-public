@@ -159,13 +159,16 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   }
 
   Future<void> _editAppointment(Map<String, dynamic> item) async {
-    if (!_onlineReady || !_canManage) return;
+    if (!_canManage) return;
+    final offline = BriskersConnectionModeController.instance.forceOffline;
+    if (!_onlineReady && !offline) return;
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => AppointmentManageScreen(
           businessId: widget.businessId,
           appointment: item,
+          isOwner: widget.roleCode == 'owner',
         ),
       ),
     );
@@ -357,12 +360,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final syncState = item['sync_state']?.toString() ?? 'synced';
     final queued = syncState == 'pending';
     final conflict = syncState == 'conflict';
-    final canEdit = _onlineReady &&
-        _canManage &&
-        {'confirmed', 'tentative'}.contains(status) &&
-        item['job_id'] == null &&
-        !queued &&
-        !conflict;
+    final canEdit = _canManage &&
+        !queued && !conflict &&
+        (_onlineReady || BriskersConnectionModeController.instance.forceOffline) &&
+        (widget.roleCode == 'owner' ||
+         (item['job_id'] == null &&
+          {'confirmed', 'tentative'}.contains(status)));
     final canCheckIn = _canCheckIn &&
         item['can_check_in'] == true &&
         item['job_id'] == null &&
