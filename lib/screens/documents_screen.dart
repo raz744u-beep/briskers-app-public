@@ -12,6 +12,7 @@ import '../core/document_future_date.dart';
 import '../services/briskers_api.dart';
 import '../services/local_financial_cache.dart';
 import '../services/local_document_repository.dart';
+import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
 import '../widgets/briskers_page_header.dart';
 import 'jobs/blank_invoice_setup_screen.dart';
@@ -41,6 +42,7 @@ class DocumentsScreen extends StatefulWidget {
 class _DocumentsScreenState extends State<DocumentsScreen> {
   static const _api = BriskersApi();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
+  final OfflineDocumentDraftService _offlineDrafts = OfflineDocumentDraftService();
   final LocalInvoiceStatusStylesCache _localInvoiceStyles =
       LocalInvoiceStatusStylesCache();
   static final Map<String, List<Map<String, dynamic>>> _styleCache = {};
@@ -476,7 +478,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     if (confirmed != true) return;
 
     try {
-      if (isEstimate) {
+      if (!isEstimate && _offlineDrafts.isLocalDraftId(row['id'].toString())) {
+        await _offlineDrafts.cancelNeverSyncedQuickInvoice(
+          widget.businessId,
+          row['id'].toString(),
+        );
+      } else if (isEstimate) {
         await _api.deleteEstimate(
           widget.businessId,
           row['id'].toString(),
