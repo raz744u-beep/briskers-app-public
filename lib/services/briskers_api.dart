@@ -2958,6 +2958,46 @@ class BriskersApi {
     );
   }
 
+  Future<String> createStandaloneEstimate(
+    String businessId, {
+    required String customerId,
+    String? vehicleId,
+  }) async {
+    final result=await networkSupabase.rpc(
+      'briskers_create_standalone_estimate_v1',
+      params:{
+        'p_business_id':businessId,
+        'p_customer_id':customerId,
+        'p_vehicle_id':vehicleId,
+      },
+    );
+    return result.toString();
+  }
+
+  Future<String> syncOfflineStandaloneEstimate(
+    String businessId, {
+    required String customerId,
+    String? vehicleId,
+    required String operationId,
+    required String documentDate,
+    required List<Map<String,dynamic>> lines,
+    String? memo,
+  }) async {
+    final result=await networkSupabase.rpc(
+      'briskers_sync_offline_standalone_estimate_v1',
+      params:{
+        'p_business_id':businessId,
+        'p_customer_id':customerId,
+        'p_vehicle_id':vehicleId,
+        'p_operation_id':operationId,
+        'p_document_date':documentDate,
+        'p_lines':lines,
+        'p_memo':memo,
+      },
+    );
+    return result.toString();
+  }
+
   Future<String> createEstimate(
     String businessId,
     String jobId,
