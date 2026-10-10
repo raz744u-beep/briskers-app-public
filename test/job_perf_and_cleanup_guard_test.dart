@@ -28,18 +28,11 @@ void main() {
     expect(source,contains('recoverLegacy: true'));
   });
 
-  test('cascade guards require paid-invoice protection and preserve estimates',
-      () async {
-    final sql=await File(
-      'tools/migrations/delete_job_unpaid_invoice_cascade_20261010.sql'
-    ).readAsString();
-    expect(sql,contains('briskers.invoice_pending_payments'));
-    expect(sql,contains('briskers.payment_allocations'));
-    expect(sql,contains('briskers.expense_allocations'));
-    expect(sql,contains('source_estimate_id'));
-    expect(sql,contains('briskers.restore_estimate_after_invoice_delete'));
-    expect(sql,contains('WHERE e.business_id=p_business_id AND e.job_id=p_job_id'));
-    expect(sql,contains('IF (v_plan->>\'can_delete\')::boolean IS DISTINCT FROM true'));
-    expect(sql,contains('briskers.document_number_reuse'));
+  test('owner cascade remains an explicit server-side opt-in', () async {
+    final source=await File('lib/services/briskers_api.dart').readAsString();
+    expect(source,contains('briskers_job_delete_plan'));
+    expect(source,contains('briskers_delete_job_with_unpaid_v1'));
+    expect(source,contains('briskers_delete_invoice_managed_v1'));
+    expect(source,contains('deleteJob: false'));
   });
 }
