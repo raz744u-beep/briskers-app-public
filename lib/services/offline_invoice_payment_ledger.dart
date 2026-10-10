@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
+import 'briskers_api.dart';
 
 /// Durable *local* payment capture. This class never posts income or invokes
 /// a server payment RPC; replay requires a separate idempotent server endpoint.
@@ -12,10 +13,11 @@ import '../local/local_database_provider.dart';
 /// Outbox payloads are the source of truth until the server acknowledges them.
 /// Use [pendingForInvoice] after restart to rebuild the invoice's local display.
 class OfflineInvoicePaymentLedger {
-  OfflineInvoicePaymentLedger({BriskersLocalDatabase? database})
-      : _database = database ?? localDatabase;
+  OfflineInvoicePaymentLedger({BriskersLocalDatabase? database, BriskersApi api = const BriskersApi()})
+      : _database = database ?? localDatabase, _api = api;
 
   final BriskersLocalDatabase _database;
+  final BriskersApi _api;
   final Random _random = Random.secure();
 
   static int cents(num value) {
@@ -92,6 +94,71 @@ class OfflineInvoicePaymentLedger {
       );
     });
     return operationId;
+  }
+
+  /// Replace a local invoice reference only after the authoritative server
+  /// document has been saved; preserve each payment operation UUID.
+  Future<void> remapInvoice(
+    String businessId,
+    String localId,
+    String serverId,
+  ) async {
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        """SELECT id,payload_json FROM sync_outbox WHERE business_id=?
+        AND entity_type='invoice_payment_received' AND entity_id=?""",
+        variables: [Variable<String>(businessId), Variable<String>(localId)],
+      ).get();
+      for (final row in rows) {
+        final payload = Map<String,dynamic>.from(
+          jsonDecode(row.read<String>('payload_json')) as Map,
+        );
+        payload['invoice_id'] = serverId;
+        await _database.customStatement(
+          'UPDATE sync_outbox SET entity_id=?, payload_json=? WHERE id=?',
+          [serverId,jsonEncode(payload),row.read<int>('id')],
+        );
+      }
+    });
+  }
+
+  /// Retry replay with the *same* saved UUID, never the legacy non-idempotent
+  /// payment API. Fail closed and retain the row when server support is absent.
+  Future<void> flush(String businessId) async {
+    final rows = await _database.customSelect(
+      """SELECT id,entity_id,payload_json FROM sync_outbox
+      WHERE business_id=? AND entity_type='invoice_payment_received'
+      AND state IN ('pending','inflight') ORDER BY id""",
+      variables: [Variable<String>(businessId)],
+    ).get();
+    for (final row in rows) {
+      final id = row.read<int>('id');
+      final invoiceId = row.read<String>('entity_id');
+      if (invoiceId.startsWith('local-')) continue;
+      final payload = Map<String,dynamic>.from(
+        jsonDecode(row.read<String>('payload_json')) as Map,
+      );
+      try {
+        await _api.addPendingInvoicePaymentOnce(
+          businessId,
+          invoiceId,
+          amount: (payload['amount_cents'] as num) / 100,
+          methodId: payload['method_id'].toString(),
+          operationId: payload['operation_id'].toString(),
+        );
+        await _database.customStatement(
+          'DELETE FROM sync_outbox WHERE id=?',
+          [id],
+        );
+      } catch (error) {
+        await _database.customStatement(
+          """UPDATE sync_outbox SET state='pending',
+          attempt_count=attempt_count+1,last_error=? WHERE id=?""",
+          [error.toString(),id],
+        );
+        break;
+      }
+    }
   }
 
   Future<List<Map<String, dynamic>>> pendingForInvoice(
