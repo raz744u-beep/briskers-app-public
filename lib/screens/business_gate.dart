@@ -313,6 +313,7 @@ class _BusinessGateState extends State<BusinessGate> {
       await _appointmentSync.flushCreates(businessId);
       await _appointmentSync.flushEdits(businessId);
       await _appointmentSync.flushCancels(businessId);
+      await _appointmentSync.flushDeletes(businessId);
       await _appointmentSync.flush(businessId);
     } catch (_) {
       // Queued check-ins stay local and retry on the next sync.
