@@ -243,6 +243,74 @@ class OfflineDocumentDraftService {
   num _number(Object? raw) =>
       num.tryParse(raw?.toString() ?? '') ?? 0;
 
+  /// Create a quote locally without creating any Job. Operation UUID is
+  /// replayed atomically on the server with its lines and notes.
+  Future<String> createStandaloneEstimate(
+    String businessId, {
+    required String customerId,
+    required String customerName,
+    String? vehicleId,
+    String? vehicleLabel,
+  }) async {
+    if (customerId.isEmpty) {
+      throw StateError('Select a saved customer before creating an estimate.');
+    }
+    final operationId=_offlineOperationUuid();
+    final id='local-estimate-$operationId';
+    final now=DateTime.now();
+    final date=now.toIso8601String().split('T').first;
+    final detail=<String,dynamic>{
+      'id':id,'kind':'estimate','document_number':null,
+      'status':'draft','display_status':'Draft',
+      'display_status_code':'draft',
+      'job_id':null,'job_number':null,
+      'customer_id':customerId,'customer_name':customerName,
+      'vehicle_id':vehicleId,'vehicle':vehicleLabel,
+      'document_date':date,
+      'created_at':now.toIso8601String(),
+      'updated_at':now.toIso8601String(),
+      'memo':null,'lines':<Map<String,dynamic>>[],
+      'net_amount':0,'tax_amount':0,'total_amount':0,
+      'paid_amount':0,'pending_payment':0,
+      'row_version':1,'converted':false,
+      'sync_state':'pending','_local_snapshot':true,'_local_draft':true,
+    };
+    await _database.transaction(() async {
+      await _database.customStatement(
+        '''
+        INSERT INTO local_documents(
+          id,business_id,job_id,customer_id,kind,document_number,
+          status,display_status_code,closed_at,converted,total,
+          document_date,created_at,server_updated_at,row_version,sync_state
+        ) VALUES (?, ?, NULL, ?, 'estimate', NULL, 'draft','draft',
+                  NULL,0,0,?,?,NULL,1,'pending')
+        ''',
+        [id,businessId,customerId,date,_unixNow()],
+      );
+      await _database.customStatement(
+        '''
+        INSERT INTO sync_outbox(
+          business_id,entity_type,entity_id,operation,payload_json,
+          base_row_version,state,attempt_count,created_at,
+          last_attempt_at,last_error
+        ) VALUES (?, 'document_draft_create', ?, 'create_estimate', ?,
+                  NULL,'pending',0,?,NULL,NULL)
+        ''',
+        [
+          businessId,id,
+          jsonEncode({
+            'local_id':id,'kind':'estimate',
+            'customer_id':customerId,'vehicle_id':vehicleId,
+            'operation_id':operationId,'document_date':date,
+          }),
+          _unixNow(),
+        ],
+      );
+    });
+    await _cache.save(businessId,id,detail);
+    return id;
+  }
+
   Future<String> createEstimate(
     String businessId,
     String jobId,
