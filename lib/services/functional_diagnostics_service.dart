@@ -7,6 +7,7 @@ import 'package:drift/native.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../local/briskers_local_database.dart' show BriskersLocalDatabase;
+import '../core/appointment_action_policy.dart;
 import 'diagnostics_service.dart';
 import 'document_pdf_service.dart';
 import 'local_document_detail_cache.dart';
@@ -164,6 +165,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkOfflineInvoiceCancel,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-019',
+      title: 'Appointment role and linked-history action guards',
+      success: 'Owner edits protected linked appointments, only unlinked owner deletion is allowed, office deletion and unsafe pending/conflict actions are blocked.',
+      action: _checkAppointmentActionPolicy,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -214,6 +223,42 @@ class BriskersFunctionalDiagnosticsService {
       await _cleanupPreferences(businessId);
       await database.close();
     }
+  }
+
+  Future<void> _checkAppointmentActionPolicy(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    bool edit(bool owner, bool linked, {bool pending = false,
+        bool conflict = false, bool online = true}) =>
+        AppointmentActionPolicy.canEdit(
+          onlineReady: online, canManage: true, isOwner: owner,
+          linkedJob: linked, pending: pending, conflict: conflict);
+    bool remove(bool owner, bool linked, {bool request = false,
+        bool pending = false, bool conflict = false, bool online = true}) =>
+        AppointmentActionPolicy.canDelete(
+          onlineReady: online, isOwner: owner, linkedJob: linked,
+          linkedRequest: request, pending: pending, conflict: conflict);
+    _require(edit(true, true), 'Owner cannot edit checked-in appointment.');
+    _require(edit(false, false), 'Office cannot edit unlinked appointment.');
+    _require(!edit(false, true), 'Office can edit Job-linked appointment.');
+    _require(!edit(true, true, pending: true),
+        'Owner can edit pending sync data with no safe queue.');
+    _require(!edit(true, false, conflict: true),
+        'Conflicted appointment can be edited.');
+    _require(!edit(true, false, online: false),
+        'Offline edit was offered without implementation.');
+    _require(remove(true, false), 'Owner cannot delete unlinked appointment.');
+    _require(!remove(false, false), 'Office can delete appointment.');
+    _require(!remove(true, true), 'Owner can delete linked Job history.');
+    _require(!remove(true, false, request: true),
+        'Owner can delete linked request history.');
+    _require(!remove(true, false, pending: true),
+        'Owner can delete an unsynced appointment.');
+    _require(!remove(true, false, conflict: true),
+        'Owner can delete conflicted appointment.');
+    _require(!remove(true, false, online: false),
+        'Offline delete was offered without a safe queue.');
   }
 
   Future<void> _checkOfflineInvoiceCancel(
