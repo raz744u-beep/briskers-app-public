@@ -31,6 +31,86 @@ class DocumentPdfService {
     };
   }
 
+  /// Presentation-only payment rows for invoice PDFs.
+  /// Use an ASCII separator because PDF Helvetica lacks em dash support. The aggregate amounts
+  /// remain authoritative; never double-count or label pending as finalized.
+  /// If a stale/offline detail lacks a complete payment breakdown, preserve
+  /// the correct totals rather than guessing payment methods.
+  static List<Map<String, dynamic>> invoicePaymentLines(
+    Map<String, dynamic> detail,
+  ) {
+    final amounts = invoicePaymentAmounts(detail);
+    int cents(num value) => (value * 100).round();
+    final paidCents = cents(amounts['paid'] ?? 0);
+    final pendingCents = cents(amounts['pending'] ?? 0);
+
+    final rows = <Map<String, dynamic>>[];
+    var matchedPaid = 0;
+    var matchedPending = 0;
+    final rawPayments = detail['payments'];
+    if (rawPayments is List) {
+      for (final raw in rawPayments) {
+        if (raw is! Map) continue;
+        final payment = Map<String, dynamic>.from(raw);
+        final state =
+            payment['state']?.toString().trim().toLowerCase() ?? '';
+        if (const {
+          'void',
+          'voided',
+          'cancelled',
+          'canceled',
+          'reversed',
+          'deleted',
+          'failed',
+        }.contains(state)) {
+          continue;
+        }
+        final amount = num.tryParse(payment['amount']?.toString() ?? '');
+        if (amount == null || !amount.isFinite || amount <= 0) continue;
+        final amountCents = cents(amount);
+        if (amountCents <= 0) continue;
+
+        final pending = state == 'pending';
+        final method =
+            payment['payment_method_name']?.toString().trim() ?? '';
+        final displayMethod =
+            method.isEmpty ? 'Method not recorded' : method;
+        rows.add({
+          'label':
+              'Payment - $displayMethod${pending ? ' (Pending)' : ''}',
+          'amount': amountCents / 100,
+          'pending': pending,
+        });
+        if (pending) {
+          matchedPending += amountCents;
+        } else {
+          matchedPaid += amountCents;
+        }
+      }
+    }
+
+    if (matchedPaid == paidCents && matchedPending == pendingCents) {
+      return rows;
+    }
+
+    // Incomplete/old payment detail: do not invent card/check information,
+    // apply some entries twice, or misstate the invoice balance.
+    return [
+      if (paidCents > 0)
+        {
+          'label': 'Payment - Method not recorded',
+          'amount': paidCents / 100,
+          'pending': false,
+        },
+      if (pendingCents > 0)
+        {
+          'label': 'Payment - Method not recorded (Pending)',
+          'amount': pendingCents / 100,
+          'pending': true,
+        },
+    ];
+  }
+
   static String _money(Object? raw) {
     final value = num.tryParse(raw?.toString() ?? '') ?? 0;
     return '\u0024${value.toStringAsFixed(2)}';
@@ -166,6 +246,9 @@ class DocumentPdfService {
     final kindTitle = kind == 'INVOICE' ? 'Invoice' : 'Estimate';
     final invoicePayments =
         kind == 'INVOICE' ? invoicePaymentAmounts(detail) : null;
+    final paymentRows = kind == 'INVOICE'
+        ? invoicePaymentLines(detail)
+        : <Map<String, dynamic>>[];
     final rawDocumentNumber =
         detail['document_number']?.toString().trim() ?? '';
     final documentNumber = _displayNumber(kind, rawDocumentNumber);
@@ -425,6 +508,7 @@ class DocumentPdfService {
                   tax: detail['tax_amount'],
                   total: detail['total_amount'],
                   payments: invoicePayments,
+                  paymentRows: paymentRows,
                 ),
               ),
             ],
@@ -720,15 +804,14 @@ class DocumentPdfService {
     required Object? tax,
     required Object? total,
     required Map<String, num>? payments,
+    required List<Map<String, dynamic>> paymentRows,
   }) {
     final paid = payments?['paid'] ?? 0;
     final pending = payments?['pending'] ?? 0;
     final remaining = payments?['remaining'] ?? 0;
-    final isPartial = paid + pending > 0.005 && remaining > 0.005;
 
     return pw.Container(
-      // Payment breakdown can be taller than the standard estimate totals.
-      // Never clip it to the 76pt estimate-only totals box.
+      // Invoices need room for any number of individual payment rows.
       height: payments == null ? 76 : null,
       padding: const pw.EdgeInsets.fromLTRB(10, 8, 10, 7),
       decoration: pw.BoxDecoration(
@@ -741,37 +824,25 @@ class DocumentPdfService {
           pw.Divider(height: 10, color: PdfColors.grey600),
           _totalRow('Total', _money(total), bold: true),
           if (payments != null) ...[
-            pw.Divider(height: 8, color: PdfColors.grey600),
-            _totalRow('Total Paid (Finalized)', _money(paid)),
-            if (pending > 0.005) ...[
-              _totalRow('Payment Entered (Pending)', _money(pending)),
+            if (paymentRows.isNotEmpty)
+              pw.Divider(height: 8, color: PdfColors.grey600),
+            for (final payment in paymentRows)
               _totalRow(
-                'Total Payments Recorded',
-                _money(paid + pending),
-                bold: true,
+                payment['label']?.toString() ?? 'Payment',
+                _money(payment['amount']),
               ),
-            ],
             pw.Divider(height: 8, color: PdfColors.grey600),
             _totalRow(
-              pending > 0.005
-                  ? 'Balance After Entered Payments'
-                  : 'Remaining Balance',
-              _money(remaining),
+              'Total Payments Received',
+              _money(paid + pending),
               bold: true,
             ),
+            _totalRow('Balance Due', _money(remaining), bold: true),
             if (pending > 0.005)
               pw.Align(
                 alignment: pw.Alignment.centerRight,
                 child: pw.Text(
-                  'Payment entered but not finalized',
-                  style: const pw.TextStyle(fontSize: 8),
-                ),
-              ),
-            if (isPartial)
-              pw.Align(
-                alignment: pw.Alignment.centerRight,
-                child: pw.Text(
-                  'Partial Payment',
+                  'Pending entries are not yet finalized',
                   style: const pw.TextStyle(fontSize: 8),
                 ),
               ),
