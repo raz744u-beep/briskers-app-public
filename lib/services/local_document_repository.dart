@@ -131,18 +131,12 @@ class LocalDocumentRepository {
       '''
       SELECT d.*, j.job_number,
              coalesce(j.customer_name,c.display_name,'Customer') AS customer_name,
-             coalesce(j.vehicle_label,
-                trim(coalesce(cast(v.year AS TEXT)||' ','')||
-                     coalesce(v.make||' ','')||coalesce(v.model,'')),
-                '') AS vehicle_label
+             coalesce(j.vehicle_label,'') AS vehicle_label
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
       LEFT JOIN local_customers c ON c.business_id=d.business_id
         AND c.id=d.customer_id
-      LEFT JOIN local_vehicles v ON v.business_id=d.business_id
-        AND v.id=(SELECT vehicle_id FROM local_jobs
-                  WHERE business_id=d.business_id AND id=d.job_id LIMIT 1)
       WHERE d.business_id = ? AND d.kind = ?
       ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
       ''',
