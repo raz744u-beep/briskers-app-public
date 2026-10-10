@@ -143,6 +143,10 @@ class LocalDocumentRepository {
     ).get();
 
     String displayStatus(QueryRow row) {
+      if (row.read<String>('id').startsWith('local-invoice-') &&
+          row.read<String>('sync_state') == 'pending') {
+        return 'Pending sync';
+      }
       final raw = row.readNullable<String>('display_status_code') ??
           row.readNullable<String>('status') ??
           '';
@@ -225,6 +229,10 @@ class LocalDocumentRepository {
     ).get();
 
     String displayStatus(QueryRow row) {
+      if (row.read<String>('id').startsWith('local-invoice-') &&
+          row.read<String>('sync_state') == 'pending') {
+        return 'Pending sync';
+      }
       final raw = row.readNullable<String>('display_status_code') ??
           row.readNullable<String>('status') ??
           '';
