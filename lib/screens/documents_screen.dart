@@ -1169,6 +1169,34 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     if (mounted) unawaited(_load());
   }
 
+  Future<void> _createStandaloneEstimate() async {
+    if (!widget.isOwner && !widget.canManageExpenses) return;
+    final documentId = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BlankInvoiceSetupScreen(
+          businessId: widget.businessId,
+          kind: 'estimate',
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (documentId != null && documentId.isNotEmpty) {
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => JobDocumentScreen(
+            businessId: widget.businessId,
+            documentId: documentId,
+            isOwner: widget.isOwner,
+            canManageExpenses: widget.canManageExpenses,
+          ),
+        ),
+      );
+    }
+    if (mounted) await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final visible = _visibleRows;
@@ -1328,6 +1356,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   ),
               ],
             ),
+            if (_estimate && (widget.isOwner || widget.canManageExpenses)) ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: BriskersColors.estimates,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: _createStandaloneEstimate,
+                  icon: const Icon(Icons.note_add_outlined),
+                  label: const Text('New Estimate'),
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
             SearchBar(
               key: const ValueKey('persistent-document-search'),
