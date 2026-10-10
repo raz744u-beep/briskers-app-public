@@ -31,7 +31,8 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   bool get _pendingCreate => widget.appointment?['id']
           ?.toString().startsWith('local-appointment-') == true;
   bool get _offlineEditing => _editing &&
-      BriskersConnectionModeController.instance.forceOffline;
+      (BriskersConnectionModeController.instance.forceOffline ||
+       _pendingCreate);
 
   final _title = TextEditingController(text: 'Service appointment');
   final _description = TextEditingController();
@@ -253,7 +254,15 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
 
     try {
       final endsAt = _startsAt.add(Duration(minutes: _durationMinutes));
-      if (_offlineEditing) {
+      if (!_editing) {
+        await _sync.queueCreate(widget.businessId,
+          customerId: customerId,vehicleId: _vehicleId,
+          title: title,
+          description: _description.text.trim().isEmpty
+              ? null : _description.text.trim(),
+          startsAt: _startsAt,endsAt: endsAt,employeeId: _employeeId,
+        );
+      } else if (_offlineEditing) {
         if (_pendingCreate && (customerId != widget.appointment!['customer_id']?.toString() ||
             _vehicleId != widget.appointment!['vehicle_id']?.toString())) {
           await _sync.reassignPendingCreate(widget.businessId,
@@ -271,18 +280,6 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
         await _api.updateAppointment(
           widget.businessId,
           widget.appointment!['id'].toString(),
-          customerId: customerId,
-          vehicleId: _vehicleId,
-          title: title,
-          description:
-              _description.text.trim().isEmpty ? null : _description.text.trim(),
-          startsAt: _startsAt,
-          endsAt: endsAt,
-          employeeId: _employeeId,
-        );
-      } else {
-        await _api.createAppointment(
-          widget.businessId,
           customerId: customerId,
           vehicleId: _vehicleId,
           title: title,
