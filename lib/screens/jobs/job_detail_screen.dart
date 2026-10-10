@@ -221,6 +221,25 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     });
   }
 
+  Future<void> _hydrateLocalLinkedExpenses() async {
+    try {
+      final linked = await _linkedExpensesCache.loadLinkedExpenses(
+        widget.businessId,
+        jobId: widget.jobId,
+      );
+      // An online refresh can complete while the disk read is in flight.
+      // Never overwrite newer server data with an older local snapshot.
+      if (!mounted || !_showingLocal || _onlineReady) return;
+      setState(() {
+        _jobExpenses = linked ?? const [];
+        _linkedExpensesCached = linked != null;
+      });
+      _modalRefresh?.call();
+    } catch (_) {
+      // The Job remains usable even if cached expense hydration fails.
+    }
+  }
+
   Future<void> _load() async {
     final loadWatch = Stopwatch()..start();
     var localShown = false;
@@ -244,11 +263,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         final localDocuments = _canSeeFinancial
             ? await _localDocumentsForJob()
             : const <Map<String, dynamic>>[];
-        final cachedLinked = _canSeeFinancial
-            ? await _linkedExpensesCache.loadLinkedExpenses(
-                widget.businessId, jobId: widget.jobId,
-              )
-            : null;
         localShown = true;
         unawaited(const JobPerformanceMetrics().record(
           widget.businessId,
@@ -261,8 +275,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           _preInspection = snapshot.preInspection;
           _statuses = snapshot.statuses;
           _documents = localDocuments;
-          _jobExpenses = cachedLinked ?? const [];
-          _linkedExpensesCached = cachedLinked != null;
+          _jobExpenses = const [];
+          _linkedExpensesCached = false;
           _findings = snapshot.findings;
           _loading = false;
           _onlineReady = false;
@@ -270,6 +284,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           _error = null;
         });
         _modalRefresh?.call();
+        // Linked expenses are a secondary tile. Their cache lookup should
+        // never delay the first usable Job detail frame.
+        if (_canSeeFinancial) {
+          unawaited(_hydrateLocalLinkedExpenses());
+        }
         unawaited(_prefetchFindingPhotos(snapshot.findings));
       }
     } catch (_) {
