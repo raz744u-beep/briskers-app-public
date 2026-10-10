@@ -625,10 +625,45 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     ));
   }
 
+  Future<void> _openAddItemChoices() async {
+    if (_readOnly || _busy) return;
+    await _collapseWorkspaceHeader();
+    if (!mounted) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.inventory_2_outlined),
+              title: Text(tr('addFromItemList')),
+              onTap: () => Navigator.pop(sheetContext, 'catalog'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_box_outlined),
+              title: Text(tr('addCustomLine')),
+              onTap: () => Navigator.pop(sheetContext, 'custom'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.percent_outlined),
+              title: Text(tr('addDiscount')),
+              onTap: () => Navigator.pop(sheetContext, 'discount'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == 'catalog') await _addCatalogItem();
+    if (action == 'custom') await _addCustomLine();
+    if (action == 'discount') await _addDiscount();
+  }
+
   Future<void> _runInitialAction(String action) async {
     switch (action) {
       case 'add_item':
-        await _addCustomLine();
+        await _openAddItemChoices();
         break;
       case 'edit':
         await _editDocumentHeader();
