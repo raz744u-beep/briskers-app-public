@@ -626,9 +626,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _openAddItemChoices() async {
-    if (_readOnly || _busy) return;
+    if (_readOnly || _busy) {
+      return;
+    }
     await _collapseWorkspaceHeader();
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -655,9 +659,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         ),
       ),
     );
-    if (action == 'catalog') await _addCatalogItem();
-    if (action == 'custom') await _addCustomLine();
-    if (action == 'discount') await _addDiscount();
+    if (action == 'catalog') {
+      await _addCatalogItem();
+    }
+    if (action == 'custom') {
+      await _addCustomLine();
+    }
+    if (action == 'discount') {
+      await _addDiscount();
+    }
   }
 
   Future<void> _runInitialAction(String action) async {
