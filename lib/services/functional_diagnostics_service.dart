@@ -385,7 +385,7 @@ class BriskersFunctionalDiagnosticsService {
     await drafts.saveMemo(businessId, id, 'Sandbox invoice note');
     final snapshot = await cache.load(businessId, id);
     _require(snapshot != null, 'Offline invoice detail not cached.');
-    final localJobId = snapshot!['job_id']?.toString() ?? '';
+    final localJobId = snapshot['job_id']?.toString() ?? '';
     _require(
       localJobId.startsWith('local-job-') &&
           localJobId == id.replaceFirst('local-invoice-', 'local-job-'),
