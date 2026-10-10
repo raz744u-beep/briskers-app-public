@@ -7,7 +7,7 @@ import 'package:drift/native.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../local/briskers_local_database.dart' show BriskersLocalDatabase;
-import '../core/appointment_action_policy.dart;
+import '../core/appointment_action_policy.dart';
 import 'diagnostics_service.dart';
 import 'document_pdf_service.dart';
 import 'local_document_detail_cache.dart';
