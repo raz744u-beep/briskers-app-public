@@ -724,7 +724,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         if (mounted) await _load();
         return;
       }
-      if (jobId == null || jobId.isEmpty) {
+      if (jobId.isEmpty) {
         throw StateError('No job was selected for the estimate.');
       }
       final documentId = await _api.createEstimate(widget.businessId, jobId);
