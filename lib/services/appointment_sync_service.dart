@@ -526,13 +526,28 @@ class AppointmentSyncService {
         if (serverId.isEmpty) {
           throw StateError('Server did not return appointment identity.');
         }
-        // The authoritative pull fills server fields. Remove only the
-        // never-synced local placeholder, with the outbox row atomically.
+        // Keep the appointment visible immediately after acknowledgment.
+        // A later pull will hydrate the rest of the authoritative fields.
         await _database.transaction(() async {
-          await _database.customStatement(
-            'DELETE FROM local_appointments WHERE business_id=? AND id=?',
-            [businessId,localId],
-          );
+          final alreadySynced = await _database.customSelect(
+            'SELECT id FROM local_appointments WHERE business_id=? AND id=?',
+            variables: [
+              Variable<String>(businessId),
+              Variable<String>(serverId),
+            ],
+          ).get();
+          if (alreadySynced.isNotEmpty) {
+            await _database.customStatement(
+              'DELETE FROM local_appointments WHERE business_id=? AND id=?',
+              [businessId, localId],
+            );
+          } else {
+            await _database.customStatement(
+              """UPDATE local_appointments SET id=?, sync_state='synced',
+                 row_version=1 WHERE business_id=? AND id=?""",
+              [serverId, businessId, localId],
+            );
+          }
           await _database.customStatement(
             'DELETE FROM sync_outbox WHERE id=?',
             [queueId],
