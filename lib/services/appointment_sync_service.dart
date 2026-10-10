@@ -211,6 +211,58 @@ class AppointmentSyncService {
     }
   }
 
+  /// A never-synchronized appointment starts as one local create operation.
+  /// The server must allocate its permanent identity through an idempotent
+  /// create endpoint before this queue is enabled for release.
+  Future<String> queueCreate(
+    String businessId, {
+    required String customerId,
+    String? vehicleId,
+    required String title,
+    String? description,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    String? employeeId,
+  }) async {
+    if (customerId.isEmpty || title.trim().isEmpty ||
+        !endsAt.isAfter(startsAt)) {
+      throw ArgumentError('Valid customer, title, and appointment times required.');
+    }
+    final operationId = _operationId('appointment-create');
+    final localId = 'local-appointment-$operationId';
+    final payload = <String, dynamic>{
+      'operation_id': operationId,
+      'local_id': localId,
+      'customer_id': customerId,
+      'vehicle_id': vehicleId,
+      'title': title.trim(),
+      'description': description,
+      'starts_at': startsAt.toUtc().toIso8601String(),
+      'ends_at': endsAt.toUtc().toIso8601String(),
+      'employee_id': employeeId,
+    };
+    await _database.transaction(() async {
+      await _database.customStatement(
+        """INSERT INTO local_appointments (
+          id,business_id,customer_id,vehicle_id,employee_id,
+          starts_at,ends_at,status,title,description,
+          can_check_in,sync_state
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,0,'pending')""",
+        [localId,businessId,customerId,vehicleId,employeeId,
+         _unix(startsAt),_unix(endsAt),'confirmed',title.trim(),description],
+      );
+      await _database.customStatement(
+        """INSERT INTO sync_outbox (
+          business_id,entity_type,entity_id,operation,payload_json,
+          base_row_version,state,attempt_count,created_at,last_attempt_at,last_error
+        ) VALUES (?,'appointment_create',?,'create',?,NULL,'pending',0,?,NULL,NULL)""",
+        [businessId,localId,jsonEncode(payload),_unix(DateTime.now().toUtc())],
+      );
+    });
+    _syncEvents.add(businessId);
+    return localId;
+  }
+
   /// First stage of offline appointment editing. This records the complete
   /// requested edit atomically with its base revision. It does not attempt
   /// network writes; a server conflict-aware replay is required before this
