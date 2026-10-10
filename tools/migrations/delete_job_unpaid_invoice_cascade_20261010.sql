@@ -74,6 +74,24 @@ BEGIN
   ) THEN
     v_block:='A linked invoice has payments, expenses or protected history';
   ELSIF EXISTS(
+    SELECT 1 FROM briskers.sales_documents d
+    JOIN briskers.sales_documents e ON e.business_id=d.business_id
+      AND e.id=d.source_estimate_id
+    WHERE d.business_id=p_business_id AND d.job_id=p_job_id
+      AND d.kind='invoice' AND e.kind='estimate'
+      AND NOT(e.source_metadata ? 'pre_conversion_status')
+  ) OR EXISTS(
+    SELECT 1 FROM briskers.sales_documents d
+    JOIN briskers.sales_document_estimate_links l ON l.business_id=d.business_id
+      AND l.invoice_id=d.id
+    JOIN briskers.sales_documents e ON e.business_id=l.business_id
+      AND e.id=l.estimate_id
+    WHERE d.business_id=p_business_id AND d.job_id=p_job_id
+      AND d.kind='invoice'
+      AND NOT(e.source_metadata ? 'pre_conversion_status')
+  ) THEN
+    v_block:='Estimate conversion predates reversible-state tracking; review required';
+  ELSIF EXISTS(
     SELECT 1 FROM briskers.job_visits v
     WHERE v.business_id=p_business_id AND v.job_id=p_job_id
       AND (v.visit_number<>1 OR v.work_summary IS NOT NULL
@@ -218,7 +236,8 @@ BEGIN
    RETURN public.briskers_delete_job_with_unpaid_v1(p_business_id,d.job_id);
  END IF;
  IF d.origin<>'native' OR d.closed_at IS NOT NULL OR d.status='void'
-    OR d.extended_warranty=true OR d.signature_required=true THEN
+    OR d.extended_warranty=true OR d.signature_required=true
+    OR d.warranty_company_id IS NOT NULL THEN
    RAISE EXCEPTION 'Only eligible unpaid native invoices can be deleted'
      USING ERRCODE='55000';
  END IF;
@@ -227,6 +246,21 @@ BEGIN
    OR EXISTS(SELECT 1 FROM briskers.payment_allocations a
    WHERE a.business_id=p_business_id AND a.document_id=d.id) THEN
    RAISE EXCEPTION 'Invoice has payment activity' USING ERRCODE='55000';
+ END IF;
+ IF EXISTS(
+   SELECT 1 FROM briskers.sales_documents e
+   WHERE e.business_id=p_business_id AND e.id=d.source_estimate_id
+     AND e.kind='estimate'
+     AND NOT(e.source_metadata ? 'pre_conversion_status')
+ ) OR EXISTS(
+   SELECT 1 FROM briskers.sales_document_estimate_links l
+   JOIN briskers.sales_documents e ON e.business_id=l.business_id
+     AND e.id=l.estimate_id
+   WHERE l.business_id=p_business_id AND l.invoice_id=d.id
+     AND NOT(e.source_metadata ? 'pre_conversion_status')
+ ) THEN
+   RAISE EXCEPTION 'Estimate conversion predates reversible-state tracking'
+     USING ERRCODE='55000';
  END IF;
  IF EXISTS(SELECT 1 FROM briskers.document_attachments a
      WHERE a.business_id=p_business_id AND a.document_id=d.id)
