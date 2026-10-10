@@ -18,6 +18,7 @@ import 'offline_job_admin_service.dart';
 import 'weather_service.dart';
 import 'historical_photo_matcher.dart';
 import '../screens/customers/customer_quick_actions.dart';
+import '../screens/jobs/invoice_note_draft_rules.dart';
 
 class FunctionalDiagnosticsReport {
   const FunctionalDiagnosticsReport({
@@ -138,6 +139,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkOfflineInvoiceDraft,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-010',
+      title: 'Invoice note actions and standard note insertion',
+      success: 'Empty text cannot be saved as a template; clearing saved notes is explicit; adding a template keeps unsaved text and avoids duplicate paragraphs.',
+      action: _checkInvoiceNoteActions,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -188,6 +197,48 @@ class BriskersFunctionalDiagnosticsService {
       await _cleanupPreferences(businessId);
       await database.close();
     }
+  }
+
+  Future<void> _checkInvoiceNoteActions(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    _require(
+      invoiceNoteDraftAction('', null) == InvoiceNoteDraftAction.none &&
+          invoiceNoteDraftAction('  ', '') == InvoiceNoteDraftAction.none,
+      'A blank invoice must not offer Save or Clear.',
+    );
+    _require(
+      invoiceNoteDraftAction('Updated note', 'Prior note') ==
+          InvoiceNoteDraftAction.save,
+      'An edited invoice note must offer Save.',
+    );
+    _require(
+      invoiceNoteDraftAction('', 'Saved note') ==
+          InvoiceNoteDraftAction.clear,
+      'Clearing a saved note must request confirmation.',
+    );
+    const manual = 'Typed but not yet saved';
+    const template = 'Warranty: 12 months / 12000 miles';
+    final merged = mergeStandardNoteIntoDraft(manual, template);
+    _require(
+      merged == '$manual\\n\\n$template',
+      'Adding a standard note discarded the unsaved manual text.',
+    );
+    _require(
+      mergeStandardNoteIntoDraft(merged, template) == merged,
+      'Adding a standard note duplicated an existing paragraph.',
+    );
+    _require(
+      mergeStandardNoteIntoDraft('', template) == template,
+      'Creating and adding a first standard note was ignored.',
+    );
+    _require(
+      !canSaveStandardNoteText('', 'body') &&
+          !canSaveStandardNoteText('name', '   ') &&
+          canSaveStandardNoteText('Standard Warranty', template),
+      'Empty template names/text must be blocked.',
+    );
   }
 
   Future<void> _checkCustomerQuickActions(
