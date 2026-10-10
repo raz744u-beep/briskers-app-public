@@ -1362,11 +1362,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _addCustomLine() async {
     if (_readOnly) return;
 
-    final result = await showDialog<Map<String, dynamic>>(
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
-      builder: (_) => _CustomLineDialog(
-        defaultTaxRate: _defaultTaxRate,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (_) => _EditLineDialog(
+        line: <String, dynamic>{
+          'name': '',
+          'description': '',
+          'line_kind': 'item',
+          'quantity': 1,
+          'unit_price': 0,
+          'tax_rate': _defaultTaxRate,
+        },
         accent: _documentActionColor,
+        title: 'Add custom line',
+        saveLabel: 'Add',
+        clearNumericOnFirstTap: true,
       ),
     );
     if (result == null) return;
@@ -5100,6 +5113,92 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     }
   }
 
+  Future<Map<String, dynamic>?> _createStandardNote({
+    String? initialBody,
+  }) async {
+    final name = TextEditingController();
+    final body = TextEditingController(text: initialBody ?? '');
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Save standard note'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: name,
+                autofocus: initialBody == null,
+                decoration: const InputDecoration(
+                  labelText: 'Template name',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: body,
+                minLines: 3,
+                maxLines: 7,
+                decoration: const InputDecoration(
+                  labelText: 'Standard note text',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (name.text.trim().isEmpty || body.text.trim().isEmpty) return;
+              Navigator.pop(dialogContext, {
+                'name': name.text.trim(),
+                'body': body.text.trim(),
+              });
+            },
+            child: const Text('Save template'),
+          ),
+        ],
+      ),
+    );
+    name.dispose();
+    body.dispose();
+    if (result == null || !mounted) return null;
+    try {
+      final existing = await _api.documentNoteTemplates(widget.businessId);
+      final normalizedName = result['name']!.trim().toLowerCase();
+      if (existing.any((note) =>
+          (note['name']?.toString().trim().toLowerCase() ?? '') ==
+          normalizedName)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(
+              'A standard note with this name already exists.',
+            )),
+          );
+        }
+        return null;
+      }
+      await _api.saveDocumentNoteTemplate(
+        widget.businessId,
+        name: result['name']!,
+        body: result['body']!,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Standard note saved for reuse.')),
+        );
+      }
+      return result;
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return null;
+    }
+  }
+
   Future<void> _addStandardNote() async {
     await _collapseWorkspaceHeader();
     if (_readOnly || _busy) return;
@@ -5114,74 +5213,67 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     if (!mounted) return;
 
-    if (templates.isEmpty) {
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text(tr('standardNotes')),
-          content: Text(tr('noStandardNoteTemplates')),
-          actions: [
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: _documentActionColor,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
     final selected = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.only(bottom: 12),
-          children: [
-            ListTile(
-              title: Text(
-                tr('addStandardNote'),
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              subtitle: Text(tr('selectSavedNote')),
-            ),
-            const Divider(height: 1),
-            ...templates.map(
-              (template) => ListTile(
-                leading: Icon(
-                  template['template_type']?.toString() == 'warranty'
-                      ? Icons.verified_outlined
-                      : Icons.notes_outlined,
-                  color: _estimate
-                      ? BriskersColors.estimates
-                      : BriskersColors.invoices,
-                ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.76,
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.only(bottom: 12),
+            children: [
+              ListTile(
                 title: Text(
-                  template['name']?.toString() ?? '',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                  tr('standardNotes'),
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
-                subtitle: Text(
-                  template['body']?.toString() ?? '',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () => Navigator.pop(sheetContext, template),
+                subtitle: const Text('Choose a saved note or create one.'),
               ),
-            ),
-          ],
+              ListTile(
+                key: const ValueKey('add-standard-note-template'),
+                leading: const Icon(Icons.add_circle_outline),
+                title: const Text('Create standard note'),
+                onTap: () => Navigator.pop(sheetContext,
+                    <String, dynamic>{'_create_template': true}),
+              ),
+              const Divider(height: 1),
+              if (templates.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No standard notes saved yet. Tap + to create one.'),
+                ),
+              ...templates.map(
+                (template) => ListTile(
+                  leading: const Icon(Icons.notes_outlined),
+                  title: Text(template['name']?.toString() ?? ''),
+                  subtitle: Text(
+                    template['body']?.toString() ?? '',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, template),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
 
-    if (selected == null) return;
+    if (!mounted || selected == null) return;
+    if (selected['_create_template'] == true) {
+      final created = await _createStandardNote();
+      if (created == null) return;
+      // Creating a reusable template must not silently alter this invoice.
+      return;
+    }
 
     final body = selected['body']?.toString().trim() ?? '';
     if (body.isEmpty) return;
@@ -5655,6 +5747,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ),
           ],
           const SizedBox(height: 12),
+          if (!_readOnly && _notesController.text.trim().isNotEmpty)
+            OutlinedButton.icon(
+              onPressed: _busy ? null : () => _createStandardNote(
+                initialBody: _notesController.text,
+              ),
+              icon: const Icon(Icons.bookmark_add_outlined),
+              label: const Text('Save as Standard Note'),
+            ),
           if (!_readOnly)
             OutlinedButton.icon(
               onPressed: _busy ? null : _addStandardNote,
