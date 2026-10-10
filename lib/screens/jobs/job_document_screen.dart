@@ -7612,12 +7612,14 @@ class _PaymentEntryDialog extends StatefulWidget {
 
 class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
   late final TextEditingController _amount;
+  late final TextEditingController _cardApproval;
   late String _methodId;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    _cardApproval = TextEditingController();
     _amount = TextEditingController(
       text: widget.initialAmount.toStringAsFixed(2),
     );
@@ -7631,6 +7633,7 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
   @override
   void dispose() {
     _amount.dispose();
+    _cardApproval.dispose();
     super.dispose();
   }
 
@@ -7645,6 +7648,7 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
       <String, dynamic>{
         'amount': amount,
         'method_id': _methodId,
+        'card_approval_reference': _cardApproval.text.trim(),
       },
     );
   }
@@ -7695,6 +7699,19 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
               if (value != null) setState(() => _methodId = value);
             },
           ),
+          if (widget.methods.any((item) =>
+              item['id']?.toString() == _methodId &&
+              RegExp(r'card|visa|mastercard|amex|discover', caseSensitive: false)
+                  .hasMatch(item['name']?.toString() ?? ''))) ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _cardApproval,
+              decoration: const InputDecoration(
+                labelText: 'Card terminal approval reference',
+                helperText: 'Do not enter a card number or security code.',
+              ),
+            ),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(
