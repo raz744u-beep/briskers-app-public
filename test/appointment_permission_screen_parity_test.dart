@@ -185,5 +185,20 @@ void main() {
     expect(repo, contains('j.title AS job_title'));
   });
 
+  test('Standalone Estimates restores main navigation and owner pill', () async {
+    final docs = await File('lib/screens/documents_screen.dart').readAsString();
+    expect(docs, contains('bottomNavigationBar: widget.showAppBar && _estimate'));
+    expect(docs, contains('ShellScreen('));
+    expect(docs, contains("child: Text('OWNER'"));
+  });
+
+  test('Custom item editor protects bottom buttons and selects numeric values', () async {
+    final screen = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    expect(screen, contains('child: AnimatedPadding('));
+    expect(screen, contains('_taxPercent.selection = TextSelection('));
+    expect(screen, contains('_quantity.selection = TextSelection('));
+    expect(screen, contains('_price.selection = TextSelection('));
+  });
+
 }
 
