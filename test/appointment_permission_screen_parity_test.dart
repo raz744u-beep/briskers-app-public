@@ -169,5 +169,21 @@ void main() {
     expect(screen, isNot(contains('Creating a new invoice from an estimate still requires a connection.')));
   });
 
+  test('Customer Overview reads active offline records and excludes history', () async {
+    final source = await File('lib/screens/customers/customer_detail_screen.dart').readAsString();
+    expect(source, contains("Widget _overviewSection()"));
+    expect(source, contains('local_appointments'));
+    expect(source, contains('local_jobs'));
+    expect(source, contains('local_documents'));
+    expect(source, contains("doc['id'].toString()"));
+  });
+
+  test('Document cards show a title under the customer name', () async {
+    final source = await File('lib/screens/documents_screen.dart').readAsString();
+    final repo = await File('lib/services/local_document_repository.dart').readAsString();
+    expect(source, contains("if (documentTitle.isNotEmpty)"));
+    expect(repo, contains('j.title AS job_title'));
+  });
+
 }
 
