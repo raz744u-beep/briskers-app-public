@@ -898,41 +898,45 @@ class _JobsScreenState extends State<JobsScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                Row(children: [
-                  Expanded(child: SearchBar(
-                  controller: _search,
-                  hintText: 'Search job, customer, vehicle, VIN, plate or invoice #',
-                  leading: const Icon(Icons.search),
-                  trailing: [
-                    if (_search.text.isNotEmpty)
-                      IconButton(
-                        tooltip: 'Clear',
-                        onPressed: () {
+                Row(
+                  children: [
+                    Expanded(
+                      child: SearchBar(
+                        controller: _search,
+                        hintText: 'Search job, customer, vehicle, VIN, plate or invoice #',
+                        leading: const Icon(Icons.search),
+                        trailing: [
+                          if (_search.text.isNotEmpty)
+                            IconButton(
+                              tooltip: 'Clear',
+                              onPressed: () {
                                 _searchDebounce?.cancel();
                                 _search.clear();
                                 setState(() {});
                                 _load();
+                              },
+                              icon: const Icon(Icons.close),
+                            ),
+                        ],
+                        onChanged: (_) {
+                          setState(() {});
+                          _searchChanged();
                         },
-                        icon: const Icon(Icons.close),
                       ),
-
-                  const SizedBox(width: 8),
-                  if (_canManage) IconButton.filled(
-                    tooltip: 'New Job',
-                    style: IconButton.styleFrom(backgroundColor: BriskersColors.jobs,
-                      foregroundColor: Colors.white),
-                    onPressed: _createNewJob,
-                    icon: const Icon(Icons.add),
-                  ),
-                ]),
+                    ),
+                    const SizedBox(width: 8),
+                    if (_canManage)
+                      IconButton.filled(
+                        tooltip: 'New Job',
+                        style: IconButton.styleFrom(
+                          backgroundColor: BriskersColors.jobs,
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: _createNewJob,
+                        icon: const Icon(Icons.add),
+                      ),
                   ],
-                  onChanged: (_) {
-                    setState(() {});
-                    _searchChanged();
-                  },
                 ),
-
-
               ],
             ),
           ),
