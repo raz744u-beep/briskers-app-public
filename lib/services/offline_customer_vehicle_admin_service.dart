@@ -250,18 +250,7 @@ class OfflineCustomerVehicleAdminService {
       final payload = Map<String, dynamic>.from(
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
-      // The legacy createVehicle call has no idempotency key. Never blindly
-      // replay after an ambiguous response: doing so can create duplicates.
-      if (type == 'vehicle_create' && row.read<int>('attempt_count') > 0) {
-        await _database.customStatement(
-          """UPDATE sync_outbox SET state='conflict',
-             last_error='Vehicle creation needs server reconciliation before retry'
-             WHERE id=?""",
-          [outboxId],
-        );
-        continue;
-      }
-      try {
+       try {
         if (type == 'customer_profile') {
           await _api.updateCustomerProfile(
             businessId,
@@ -303,9 +292,11 @@ class OfflineCustomerVehicleAdminService {
             [businessId, entityId],
           );
         } else if (type == 'vehicle_create') {
-          final serverId = await _api.createVehicle(
+          final serverId = await _api.createVehicleOfflineIdempotent(
             businessId,
             payload['customer_id']?.toString() ?? '',
+            operationId: 'vehicle-create-$entityId',
+            localVehicleId: entityId,
             make: payload['make']?.toString() ?? '',
             model: payload['model']?.toString() ?? '',
             year: int.tryParse(payload['year']?.toString() ?? ''),
@@ -333,14 +324,6 @@ class OfflineCustomerVehicleAdminService {
           ''',
           [DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000, error.toString(), outboxId],
         );
-        if (type == 'vehicle_create') {
-          // Any network failure could have occurred after server creation.
-          await _database.customStatement(
-            """UPDATE sync_outbox SET state='conflict' WHERE id=?""",
-            [outboxId],
-          );
-          continue;
-        }
         rethrow;
       }
     }
