@@ -1091,6 +1091,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                           ? () => _editCustomer(customer)
                           : null,
                     )],
+                    ),
                   ),
                   const SizedBox(height: 10),
                   _customerOverviewCard(),
