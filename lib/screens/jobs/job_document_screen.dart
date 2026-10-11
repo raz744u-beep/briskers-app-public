@@ -2494,6 +2494,54 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     });
   }
 
+  Future<void> _offerCompletePaidJob() async {
+    final jobId = _detail?['job_id']?.toString() ?? '';
+    if (jobId.isEmpty || !mounted) return;
+    try {
+      final documents = await _api.jobDocuments(widget.businessId, jobId);
+      final invoices = documents.where((d) => d['kind']?.toString() == 'invoice').toList();
+      if (invoices.isEmpty) return;
+      // If any invoice is missing financial data, leave the job open.
+      final fullyPaid = invoices.every((invoice) {
+        final total = num.tryParse(invoice['total_amount']?.toString() ?? '');
+        final paid = num.tryParse(invoice['paid_amount']?.toString() ?? '');
+        return total != null && paid != null && paid >= total - 0.005;
+      });
+      if (!fullyPaid) return;
+      final job = await _api.jobDetail(widget.businessId, jobId);
+      final status = (job['status']?.toString() ?? '').toLowerCase();
+      if (const {'completed', 'cancelled', 'closed'}.contains(status)) return;
+      if (!mounted) return;
+      final complete = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Invoices paid — job still open'),
+          content: const Text(
+            'All linked invoices are paid, but this job is still open. '
+            'Is the repair work finished? You can complete the job now '
+            'or keep it open if work remains.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep Job Open'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Complete Job'),
+            ),
+          ],
+        ),
+      );
+      if (complete == true) {
+        await _api.changeJobStatus(widget.businessId, jobId, 'completed');
+      }
+    } catch (_) {
+      // Payment is finalized independently; never undo or repeat it because
+      // job status inspection could not be completed.
+    }
+  }
+
   Future<void> _finalizeEnteredPayments() async {
     await _collapseWorkspaceHeader();
     if (_estimate || _busy || _number(_detail?['pending_payment']) <= 0.005) {
@@ -2539,6 +2587,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         widget.documentId,
       );
     });
+    if (mounted && _error == null) await _offerCompletePaidJob();
   }
 
   Future<void> _enterWarrantyPayment() async {
