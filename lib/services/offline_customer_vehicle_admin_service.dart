@@ -58,6 +58,37 @@ class OfflineCustomerVehicleAdminService {
     required Map<String, dynamic> billingAddress,
   }) async {
     await _database.transaction(() async {
+      if (customerId.startsWith('local-customer-')) {
+        final pending=await _database.customSelect(
+          """SELECT id,payload_json,attempt_count,last_attempt_at
+             FROM sync_outbox WHERE business_id=? AND entity_type='customer_create'
+             AND entity_id=? AND state='pending' LIMIT 1""",
+          variables:[Variable<String>(businessId),Variable<String>(customerId)],
+        ).get();
+        if (pending.length!=1 ||
+            pending.single.read<int>('attempt_count')>0 ||
+            pending.single.readNullable<int>('last_attempt_at')!=null) {
+          throw StateError('Customer creation is synchronizing; reconcile first.');
+        }
+        final data=Map<String,dynamic>.from(
+          jsonDecode(pending.single.read<String>('payload_json')) as Map);
+        data['name']=name.trim();
+        data['phone']=phone;
+        data['email']=email;
+        data['billing_address']=billingAddress;
+        await _database.customStatement(
+          'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+          [jsonEncode(data),pending.single.read<int>('id')],
+        );
+        await _database.customStatement(
+          """UPDATE local_customers SET display_name=?,phone=?,list_phone=?,
+             email=?,list_email=?,billing_address_json=?
+             WHERE business_id=? AND id=?""",
+          [name.trim(),phone,phone,email,email,jsonEncode(billingAddress),
+           businessId,customerId],
+        );
+        return;
+      }
       await _database.customStatement(
         '''
         UPDATE local_customers
