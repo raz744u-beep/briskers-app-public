@@ -1227,7 +1227,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 if (widget.isOwner)
                   const Padding(
                     padding: EdgeInsets.only(right: 12),
-                    child: Center(child: Text('OWNER')),
+                    child: Center(child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Color(0xFFF6EAD5),
+                        borderRadius: BorderRadius.all(Radius.circular(999)),
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                        child: Text('OWNER', style: TextStyle(
+                          color: Color(0xFFC47A12), fontWeight: FontWeight.w700,
+                          fontSize: 11)),
+                      ),
+                    )),
                   ),
               ],
             )
