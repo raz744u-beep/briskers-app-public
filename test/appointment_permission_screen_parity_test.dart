@@ -158,5 +158,16 @@ void main() {
     expect(source, contains('const BriskersLogo(height: 44, maxWidth: 148)'));
   });
 
+  test('offline estimate conversion retains existing job and queues one invoice', () async {
+    final draft = await File('lib/services/offline_document_draft_service.dart').readAsString();
+    final screen = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    expect(draft, contains('Future<String> convertEstimateOffline('));
+    expect(draft, contains("'kind': 'convert_invoice'"));
+    expect(draft, contains("serverId = await _api.convertEstimate(businessId, estimateServerId)"));
+    expect(draft, contains("estimate['job_id']"));
+    expect(screen, contains('_offlineDocumentDraft.convertEstimateOffline('));
+    expect(screen, isNot(contains('Creating a new invoice from an estimate still requires a connection.')));
+  });
+
 }
 
