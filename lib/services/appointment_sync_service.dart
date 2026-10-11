@@ -796,8 +796,9 @@ class AppointmentSyncService {
   /// Atomically retain the acknowledged appointment in the local list.
   /// Kept separate so diagnostics can exercise the real SQLite transition.
   Future<void> acknowledgeCreatedAppointment(
-    String businessId, String localId, String serverId, int queueId,
-  ) async {
+    String businessId, String localId, String serverId, int queueId, {
+    int serverVersion = 1,
+  }) async {
     if (serverId.isEmpty || serverId.startsWith('local-')) {
       throw StateError('A permanent appointment ID is required.');
     }
@@ -814,8 +815,8 @@ class AppointmentSyncService {
       } else {
         await _database.customStatement(
           """UPDATE local_appointments SET id=?,sync_state='synced',
-             row_version=1 WHERE business_id=? AND id=?""",
-          [serverId,businessId,localId],
+             row_version=? WHERE business_id=? AND id=?""",
+          [serverId,serverVersion,businessId,localId],
         );
       }
       await _database.customStatement(
@@ -890,10 +891,11 @@ class AppointmentSyncService {
         if (serverId.isEmpty) {
           throw StateError('Server did not return appointment identity.');
         }
+        var acceptedVersion = 1;
         if (data['cancel_after_create'] == true) {
-          // The server creates then cancels under the same durable IDs.
-          // Both RPCs are idempotent; a lost response retries safely.
-          await _api.syncOfflineAppointmentCancel(
+          // A cancelled newly-created appointment has a newer row_version
+          // than the initial create; keep that authoritative revision.
+          acceptedVersion = await _api.syncOfflineAppointmentCancel(
             businessId, serverId,
             operationId: data['operation_id'].toString(),
             baseVersion: 1,
@@ -901,6 +903,7 @@ class AppointmentSyncService {
         }
         await acknowledgeCreatedAppointment(
           businessId, localId, serverId, queueId,
+          serverVersion: acceptedVersion,
         );
         // Ensure the new record is fetched on the normal sync pull.
         _syncEvents.add(businessId);
