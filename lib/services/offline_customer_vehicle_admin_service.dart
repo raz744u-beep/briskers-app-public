@@ -326,9 +326,16 @@ class OfflineCustomerVehicleAdminService {
         'UPDATE local_appointments SET customer_id=? WHERE business_id=? AND customer_id=?',
         [serverId,businessId,localId],
       );
+      await _database.customStatement(
+        'UPDATE local_jobs SET customer_id=? WHERE business_id=? AND customer_id=?',
+        [serverId,businessId,localId],
+      );
+      await _database.customStatement(
+        'UPDATE local_documents SET customer_id=? WHERE business_id=? AND customer_id=?',
+        [serverId,businessId,localId],
+      );
       final rows=await _database.customSelect(
         """SELECT id,payload_json FROM sync_outbox WHERE business_id=?
-           AND entity_type IN ('vehicle_create','appointment_create')
            AND state='pending'""",
         variables:[Variable<String>(businessId)],
       ).get();
