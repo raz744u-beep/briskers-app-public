@@ -355,6 +355,33 @@ class AppointmentSyncService {
     _syncEvents.add(businessId);
   }
 
+  /// Owner-only read of unresolved appointment deletion conflicts.
+  /// Tombstoned records remain hidden from regular appointment lists.
+  Future<List<Map<String, dynamic>>> deletionConflicts(
+    String businessId, {required bool isOwner}) async {
+    if (!isOwner) throw StateError('Owner access required.');
+    final rows = await _database.customSelect(
+      """SELECT o.id,o.entity_id,o.last_error,o.attempt_count,
+                a.customer_name,a.title,a.status
+         FROM sync_outbox o
+         LEFT JOIN local_appointments a
+           ON a.business_id=o.business_id AND a.id=o.entity_id
+         WHERE o.business_id=? AND o.entity_type='appointment_delete'
+           AND o.state='conflict'
+         ORDER BY o.id""",
+      variables:[Variable<String>(businessId)],
+    ).get();
+    return rows.map((row)=> <String,dynamic>{
+      'queue_id':row.read<int>('id'),
+      'appointment_id':row.read<String>('entity_id'),
+      'customer':row.readNullable<String>('customer_name'),
+      'title':row.readNullable<String>('title'),
+      'status':row.readNullable<String>('status'),
+      'attempts':row.read<int>('attempt_count'),
+      'error':row.readNullable<String>('last_error'),
+    }).toList();
+  }
+
   /// Stage owner-only deletion of a synchronized, unlinked appointment.
   /// A local tombstone prevents sync pulls from resurrecting it.
   Future<void> queueDeleteSynced(
