@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:drift/drift.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,6 +38,108 @@ class OfflineJobAdminService {
           .toList();
     } catch (_) {
       return const [];
+    }
+  }
+
+  static String _newJobId() {
+    final bytes = List<int>.generate(16, (_) => Random.secure().nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final h = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${h.substring(0,8)}-${h.substring(8,12)}-${h.substring(12,16)}-'
+        '${h.substring(16,20)}-${h.substring(20)}';
+  }
+
+  /// Save a new Job before contacting the network. The stable UUID is also
+  /// sent to the server so uncertain retries cannot create a second job.
+  Future<String> queueJobCreate(
+    String businessId, {
+    required String customerId,
+    required String customerName,
+    String? vehicleId,
+    String? vehicleLabel,
+    required String title,
+    String? requestedWork,
+    num plannedHours = 0,
+  }) async {
+    if (title.trim().isEmpty) throw StateError('Job title is required.');
+    if (customerId.startsWith('local-')) {
+      throw StateError('Sync the new customer first before creating a Job.');
+    }
+    final id = _newJobId();
+    final now = DateTime.now().toUtc();
+    await _database.transaction(() async {
+      await _database.customStatement(
+        """INSERT INTO local_jobs
+          (id,business_id,access_scope,job_number,title,requested_work,
+           status,status_name,customer_id,customer_name,vehicle_id,vehicle_label,
+           planned_hours,created_at,sync_state)
+          VALUES (?,?,'full','Pending sync',?,?,'open','Open',?,?,?,?,?,?,'pending')""",
+        [id,businessId,title.trim(),requestedWork,customerId,customerName,
+         vehicleId,vehicleLabel,plannedHours.toDouble(),now],
+      );
+      await _database.customStatement(
+        """INSERT INTO sync_outbox
+          (business_id,entity_type,entity_id,operation,payload_json,
+           state,attempt_count,created_at)
+          VALUES (?,'job_create',?,'create',?,'pending',0,?)""",
+        [businessId,id,jsonEncode({
+          'operation_id':'job-create-$id','job_id':id,
+          'customer_id':customerId,'vehicle_id':vehicleId,'title':title.trim(),
+          'requested_work':requestedWork,'planned_hours':plannedHours.toDouble(),
+        }),now.millisecondsSinceEpoch ~/ 1000],
+      );
+    });
+    return id;
+  }
+
+  Future<void> flushCreates(String businessId) async {
+    final rows = await _database.customSelect(
+      """SELECT id,entity_id,payload_json FROM sync_outbox
+         WHERE business_id=? AND entity_type='job_create' AND state='pending'
+         ORDER BY id""",
+      variables: [Variable<String>(businessId)],
+    ).get();
+    for (final row in rows) {
+      final outboxId = row.read<int>('id');
+      final id = row.read<String>('entity_id');
+      final data = Map<String,dynamic>.from(
+          jsonDecode(row.read<String>('payload_json')) as Map);
+      try {
+        final customerId = data['customer_id']?.toString() ?? '';
+        if (customerId.startsWith('local-')) continue;
+        try {
+          await _api.createJob(businessId,
+            id:id,customerId:customerId,
+            vehicleId:data['vehicle_id']?.toString(),
+            title:data['title']?.toString() ?? 'New Job',
+            description:data['requested_work']?.toString());
+        } catch (error) {
+          // A prior request may have committed even if its response was lost.
+          // Verify the same UUID and customer before treating it as replayed.
+          final existing = await _api.jobDetail(businessId,id);
+          if (existing['id']?.toString() != id ||
+              existing['customer_id']?.toString() != customerId) {
+            rethrow;
+          }
+        }
+        await _api.updateJob(businessId,id,
+          customerId:customerId,
+          vehicleId:data['vehicle_id']?.toString(),
+          title:data['title']?.toString() ?? 'New Job',
+          requestedWork:data['requested_work']?.toString(),
+          plannedHours:num.tryParse(data['planned_hours']?.toString() ?? '') ?? 0);
+        await _database.transaction(() async {
+          await _database.customStatement(
+            "DELETE FROM sync_outbox WHERE id=? AND entity_type='job_create'",
+            [outboxId]);
+          await _database.customStatement(
+            "UPDATE local_jobs SET sync_state='synced' WHERE business_id=? AND id=?",
+            [businessId,id]);
+        });
+      } catch (_) {
+        // Keep the identical operation ID and payload for a safe later retry.
+      }
     }
   }
 
@@ -298,6 +401,7 @@ class OfflineJobAdminService {
   }
 
   Future<void> flush(String businessId) async {
+    await flushCreates(businessId);
     final rows = await _database.customSelect(
       '''
       SELECT id, entity_id, payload_json
