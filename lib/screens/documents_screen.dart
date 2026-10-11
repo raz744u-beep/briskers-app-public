@@ -1356,23 +1356,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   ),
               ],
             ),
-            if (_estimate && (widget.isOwner || widget.canManageExpenses)) ...[
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: BriskersColors.estimates,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: _createStandaloneEstimate,
-                  icon: const Icon(Icons.note_add_outlined),
-                  label: const Text('New Estimate'),
-                ),
-              ),
-            ],
             const SizedBox(height: 10),
-            SearchBar(
+            Row(
+              children: [
+                Expanded(
+                  child: SearchBar(
               key: const ValueKey('persistent-document-search'),
               controller: _search,
               focusNode: _searchFocus,
@@ -1392,61 +1380,38 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   ),
               ],
               onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (widget.isOwner || widget.canManageExpenses)
+                  IconButton.filled(
+                    tooltip: _estimate ? 'New Estimate' : 'New Invoice',
+                    style: IconButton.styleFrom(
+                      backgroundColor: _estimate
+                          ? BriskersColors.estimates
+                          : BriskersColors.invoices,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _estimate
+                        ? _createStandaloneEstimate
+                        : _createBlankInvoice,
+                    icon: const Icon(Icons.add),
+                  ),
+              ],
             ),
-            if (!_estimate &&
-                (widget.isOwner || widget.canManageExpenses)) ...[
+            if (!_estimate && widget.isOwner) ...[
               const SizedBox(height: 10),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final createInvoice = FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: BriskersColors.invoices,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                    ),
-                    onPressed: _createBlankInvoice,
-                    icon: const Icon(Icons.note_add_outlined, size: 18),
-                    label: const Text('New Invoice'),
-                  );
-                  final closeInvoices = FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: BriskersColors.invoices,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                    ),
-                    onPressed: _showCloseInvoices,
-                    icon: const Icon(Icons.lock_outline, size: 18),
-                    label: const Text('Close invoices'),
-                  );
-                  if (widget.isOwner && constraints.maxWidth >= 315) {
-                    return Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [createInvoice, closeInvoices],
-                    );
-                  }
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: createInvoice,
-                      ),
-                      if (widget.isOwner) ...[
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: closeInvoices,
-                        ),
-                      ],
-                    ],
-                  );
-                },
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: BriskersColors.invoices,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: _showCloseInvoices,
+                  icon: const Icon(Icons.lock_outline),
+                  label: const Text('Close invoices'),
+                ),
               ),
             ],
             if (_error != null)
