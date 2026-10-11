@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
-import '../../services/briskers_api.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../core/connection_mode.dart';
 
@@ -24,7 +23,6 @@ class JobCreateScreen extends StatefulWidget {
 }
 
 class _JobCreateScreenState extends State<JobCreateScreen> {
-  static const _api = BriskersApi();
   final _offlineJobs = OfflineJobAdminService();
 
   final _title = TextEditingController();
