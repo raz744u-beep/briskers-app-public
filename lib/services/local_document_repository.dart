@@ -129,7 +129,7 @@ class LocalDocumentRepository {
   }) async {
     final rows = await _database.customSelect(
       '''
-      SELECT d.*, j.job_number,
+      SELECT d.*, j.job_number, j.title AS job_title,
              coalesce(j.customer_name,c.display_name,'Customer') AS customer_name,
              coalesce(j.vehicle_label,'') AS vehicle_label
       FROM local_documents d
