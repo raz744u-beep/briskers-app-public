@@ -145,6 +145,51 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   List<Map<String, dynamic>> get _visibleAppointments =>
       _appointments ?? const <Map<String, dynamic>>[];
 
+  Future<void> _showDeletionConflicts() async {
+    if (widget.roleCode != 'owner') return;
+    try {
+      final conflicts = await _appointmentSync.deletionConflicts(
+        widget.businessId, isOwner: true,
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Appointment deletion conflicts'),
+          content: SizedBox(
+            width: 440,
+            child: conflicts.isEmpty
+                ? const Text('No unresolved deletion conflicts.')
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: conflicts.length,
+                    separatorBuilder: (_, __) => const Divider(),
+                    itemBuilder: (_, index) {
+                      final conflict = conflicts[index];
+                      return ListTile(
+                        title: Text(conflict['customer']?.toString() ??
+                            conflict['title']?.toString() ?? 'Appointment'),
+                        subtitle: Text(
+                          'ID: ${conflict['appointment_id']}\n'
+                          'Reason: ${conflict['error'] ?? 'Server version changed'}',
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
   Future<void> _addAppointment() async {
     if (!_canManage) return;
     final changed = await Navigator.push<bool>(
@@ -610,7 +655,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                         ),
                       ),
                     ),
-                    if (_canManage && _onlineReady) ...[
+                    if (_canManage) ...[
                       const SizedBox(width: 8),
                       FilledButton.icon(
                         style: FilledButton.styleFrom(
@@ -621,6 +666,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                         label: Text(tr('add')),
                       ),
                     ],
+                    if (widget.roleCode == 'owner')
+                      IconButton(
+                        tooltip: 'Deletion conflicts',
+                        onPressed: _showDeletionConflicts,
+                        icon: const Icon(Icons.rule_folder_outlined),
+                      ),
                     const Spacer(),
                     Text(
                       '${tr('total')} $total',
