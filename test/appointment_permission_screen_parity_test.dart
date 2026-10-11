@@ -25,6 +25,10 @@ void main() {
     expect(list, contains('_entryRefreshInterval'));
     expect(list, contains('initialEntry && !forceOnline && localAvailable'));
     expect(list, contains('onRefresh: _load'));
+    expect(list, contains('View dependencies / deletion options'));
+    expect(list, contains('_showAppointmentDependencies(item)'));
+    expect(list, contains('Linked job ID:'));
+    expect(list, contains('Customer request ID:'));
   });
 }
 
