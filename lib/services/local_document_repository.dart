@@ -186,6 +186,7 @@ class LocalDocumentRepository {
             'created_at': _isoFromDb(row.data['created_at']),
             'updated_at': _isoFromDb(row.data['server_updated_at']),
             'job_number': row.readNullable<String>('job_number'),
+            'job_title': row.readNullable<String>('job_title'),
             'customer_name': row.readNullable<String>('customer_name'),
             'vehicle': row.readNullable<String>('vehicle_label'),
             '_local_snapshot': true,
