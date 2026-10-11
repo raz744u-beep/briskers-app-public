@@ -39,6 +39,18 @@ void main() {
     expect(source?['converted'], isTrue);
     expect(source?['converted_invoice_id'], invoiceId);
 
+    await service.addLine('shop', invoiceId,
+      name: 'Additional labor', quantity: 1, unitPrice: 50,
+      taxRate: 0, lineKind: 'labor');
+    final edited = await cache.load('shop', invoiceId);
+    expect(edited?['lines'], hasLength(3));
+    expect(edited?['total_amount'], 175);
+    await service.updateLine('shop', invoiceId,
+      (edited?['lines'] as List).last['id'].toString(),
+      name: 'Additional labor', quantity: 2, unitPrice: 50,
+      taxRate: 0, lineKind: 'labor');
+    final afterEdit = await cache.load('shop', invoiceId);
+    expect(afterEdit?['total_amount'], 225);
     final outbox = await db.customSelect(
       "SELECT operation,payload_json FROM sync_outbox "
       "WHERE business_id='shop' AND operation='convert_estimate'").get();
