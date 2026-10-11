@@ -11,9 +11,11 @@ import '../services/job_sync_service.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_job_repository.dart';
+import '../services/local_customer_repository.dart';
 import '../services/offline_job_admin_service.dart';
 import '../widgets/job_compact_card.dart';
 import 'jobs/job_detail_screen.dart';
+import 'jobs/job_create_screen.dart';
 import 'jobs/job_document_screen.dart';
 
 class JobsScreen extends StatefulWidget {
@@ -81,6 +83,94 @@ class _JobsScreenState extends State<JobsScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.refreshToken != widget.refreshToken) {
       _load();
+    }
+  }
+
+  Future<void> _createNewJob() async {
+    if (!_canManage) return;
+    // The legacy JobCreateScreen still uses online create/update APIs.
+    // Never imply offline creation succeeds until durable queuing is wired.
+    if (!_onlineReady) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(
+          'New job creation needs a connection in this version. '
+          'Saved jobs remain accessible offline.',
+        )),
+      );
+      return;
+    }
+    final customers = await LocalCustomerRepository().customers(widget.businessId);
+    if (!mounted) return;
+    final search = TextEditingController();
+    final selected = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) {
+          final needle = search.text.trim().toLowerCase();
+          final matches = customers.where((customer) =>
+              (customer['display_name']?.toString() ?? '')
+                  .toLowerCase().contains(needle)).take(40).toList();
+          return AlertDialog(
+            title: const Text('New job — choose customer'),
+            content: SizedBox(
+              width: 450,
+              height: 420,
+              child: Column(children: [
+                TextField(
+                  controller: search,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: 'Search customer',
+                    prefixIcon: Icon(Icons.search),
+                  ),
+                  onChanged: (_) => update(() {}),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: matches.length,
+                    itemBuilder: (context, index) {
+                      final customer = matches[index];
+                      return ListTile(
+                        title: Text(customer['display_name']?.toString() ?? 'Customer'),
+                        onTap: () => Navigator.pop(dialogContext, customer),
+                      );
+                    },
+                  ),
+                ),
+              ]),
+            ),
+            actions: [TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            )],
+          );
+        },
+      ),
+    );
+    search.dispose();
+    if (selected == null || !mounted) return;
+    try {
+      final id = selected['id']?.toString() ?? '';
+      if (id.isEmpty) return;
+      final detail = await _api.customerDetail(widget.businessId, id);
+      if (!mounted) return;
+      final created = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(builder: (_) => JobCreateScreen(
+          businessId: widget.businessId,
+          customerId: id,
+          customerName: selected['display_name']?.toString() ?? 'Customer',
+          vehicles: List<dynamic>.from(detail['vehicles'] ?? const []),
+        )),
+      );
+      if (created == true && mounted) {
+        await _load();
+        widget.onJobsChanged?.call();
+      }
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to prepare new job: $error')),
+      );
     }
   }
 
@@ -796,6 +886,17 @@ class _JobsScreenState extends State<JobsScreen> {
                       },
                     ),
                   ),
+                    if (_canManage) ...[
+                      const SizedBox(width: 8),
+                      FilledButton.icon(
+                        onPressed: _createNewJob,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: BriskersColors.actionBlue,
+                        ),
+                        icon: const Icon(Icons.add),
+                        label: const Text('New'),
+                      ),
+                    ],
                     const Spacer(),
                     if (_rows != null)
                       Text(
