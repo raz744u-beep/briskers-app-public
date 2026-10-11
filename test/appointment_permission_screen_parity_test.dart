@@ -133,5 +133,23 @@ void main() {
     expect(card, contains('final description = title.isNotEmpty ? title : requested;'));
   });
 
+  test('Paid Still Open filter excludes completed and unpaid jobs', () async {
+    final jobs = await File('lib/screens/jobs_screen.dart').readAsString();
+    final repo = await File('lib/services/local_job_repository.dart').readAsString();
+    expect(jobs, contains("value: 'paid_still_open'"));
+    expect(jobs, contains("Text('Paid, Still Open')"));
+    expect(repo, contains("lower(COALESCE(payment_state, '')) = 'paid'"));
+    expect(repo, contains("NOT IN ('completed','cancelled','closed')"));
+  });
+
+  test('full payment offers job completion without auto closing work', () async {
+    final invoice = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    expect(invoice, contains('_offerCompletePaidJob()'));
+    expect(invoice, contains("paid >= total - 0.005"));
+    expect(invoice, contains("await _api.jobDocuments(widget.businessId, jobId)"));
+    expect(invoice, contains("child: const Text('Keep Job Open')"));
+    expect(invoice, contains("child: const Text('Complete Job')"));
+  });
+
 }
 
