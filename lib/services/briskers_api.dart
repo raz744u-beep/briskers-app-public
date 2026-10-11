@@ -1341,6 +1341,7 @@ class BriskersApi {
     String? vehicleId,
     required String title,
     String? description,
+    String? id,
   }) async {
     final result = await networkSupabase.rpc(
       'briskers_create_job',
@@ -1350,6 +1351,7 @@ class BriskersApi {
         'p_vehicle_id': vehicleId,
         'p_title': title,
         'p_description': description,
+        if (id != null) 'p_id': id,
       },
     );
     return result.toString();
