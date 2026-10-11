@@ -61,11 +61,10 @@ class OfflineJobAdminService {
     required String title,
     String? requestedWork,
     num plannedHours = 0,
+    String? employeeId,
+    String? employeeName,
   }) async {
     if (title.trim().isEmpty) throw StateError('Job title is required.');
-    if (customerId.startsWith('local-')) {
-      throw StateError('Sync the new customer first before creating a Job.');
-    }
     final id = _newJobId();
     final now = DateTime.now().toUtc();
     await _database.transaction(() async {
@@ -88,6 +87,7 @@ class OfflineJobAdminService {
           'operation_id':'job-create-$id','job_id':id,
           'customer_id':customerId,'vehicle_id':vehicleId,'title':title.trim(),
           'requested_work':requestedWork,'planned_hours':plannedHours.toDouble(),
+          'employee_id':employeeId,'employee_name':employeeName,
         }),now.millisecondsSinceEpoch ~/ 1000],
       );
     });
@@ -108,7 +108,9 @@ class OfflineJobAdminService {
           jsonDecode(row.read<String>('payload_json')) as Map);
       try {
         final customerId = data['customer_id']?.toString() ?? '';
-        if (customerId.startsWith('local-')) continue;
+        final vehicleId = data['vehicle_id']?.toString();
+        if (customerId.startsWith('local-') ||
+            (vehicleId != null && vehicleId.startsWith('local-'))) continue;
         try {
           await _api.createJob(businessId,
             id:id,customerId:customerId,
@@ -130,6 +132,10 @@ class OfflineJobAdminService {
           title:data['title']?.toString() ?? 'New Job',
           requestedWork:data['requested_work']?.toString(),
           plannedHours:num.tryParse(data['planned_hours']?.toString() ?? '') ?? 0);
+        final employeeId = data['employee_id']?.toString();
+        if (employeeId != null && employeeId.isNotEmpty) {
+          await _api.setPrimaryJobEmployee(businessId,id,employeeId);
+        }
         await _database.transaction(() async {
           await _database.customStatement(
             "DELETE FROM sync_outbox WHERE id=? AND entity_type='job_create'",
