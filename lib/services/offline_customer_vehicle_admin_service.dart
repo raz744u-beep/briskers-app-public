@@ -100,12 +100,13 @@ class OfflineCustomerVehicleAdminService {
     String? color,
     String? keyPassword,
   }) async {
-    final creating = vehicleId == null || vehicleId.isEmpty;
-    final id = creating
+    final creating = vehicleId == null ||
+        vehicleId.isEmpty || vehicleId.startsWith('local-vehicle-');
+    final id = vehicleId == null || vehicleId.isEmpty
         ? 'local-vehicle-${DateTime.now().microsecondsSinceEpoch}'
         : vehicleId;
 
-    if (!creating && id.startsWith('local-vehicle-')) {
+    if (id.startsWith('local-vehicle-')) {
       final rows=await _database.customSelect(
         """SELECT attempt_count,last_attempt_at FROM sync_outbox
            WHERE business_id=? AND entity_type='vehicle_create'
