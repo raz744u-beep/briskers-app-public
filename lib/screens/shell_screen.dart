@@ -15,6 +15,7 @@ import '../services/local_customer_repository.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
+import '../widgets/connection_header_toggle.dart';
 import 'appointments_screen.dart';
 import 'customers/customers_screen.dart';
 import 'home_screen.dart';
@@ -381,10 +382,12 @@ class _ShellScreenState extends State<ShellScreen> {
         backgroundColor: activeColor.withValues(alpha: 0.08),
         titleSpacing: 10,
         toolbarHeight: 78,
-        title: BriskersPageTitle(
-          title: pageTitles[_index],
-          logoHeight: 44,
-          logoWidth: 148,
+        title: Row(
+          children: [
+            const BriskersLogo(height: 44, maxWidth: 148),
+            const Spacer(),
+            ConnectionHeaderToggle(businessId: widget.businessId),
+          ],
         ),
         actions: [
           if (widget.roleCode.isNotEmpty)
