@@ -145,4 +145,28 @@ void main() {
     } finally { await db.close(); }
   });
 
+  test('cancelled offline appointment keeps the server cancellation revision', () async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    final sync=AppointmentSyncService(database:db);
+    try {
+      final time=DateTime.utc(2026,10,12,13);
+      final id=await sync.queueCreate('shop-test',
+        customerId:'customer-1',title:'Cancelled visit',
+        startsAt:time,endsAt:time.add(const Duration(hours:1)));
+      await sync.cancelPendingCreate('shop-test',id,canManage:true);
+      final queue=await db.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type='appointment_create'",
+      ).getSingle();
+      await sync.acknowledgeCreatedAppointment(
+        'shop-test',id,'server-cancelled-visit',queue.read<int>('id'),
+        serverVersion:2,
+      );
+      final record=await db.customSelect(
+        "SELECT status,row_version FROM local_appointments WHERE id='server-cancelled-visit'",
+      ).getSingle();
+      expect(record.read<String>('status'),'cancelled');
+      expect(record.read<int>('row_version'),2);
+    } finally {await db.close();}
+  });
+
 }
