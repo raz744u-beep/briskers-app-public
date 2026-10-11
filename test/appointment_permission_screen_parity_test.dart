@@ -14,4 +14,17 @@ void main() {
     expect(policy,contains('isOwner ||'));
     expect(policy,contains("status == 'confirmed'"));
   });
+
+  test('appointment cards expose long press actions and guard tab-entry refresh', () async {
+    final list = await File('lib/screens/appointments_screen.dart').readAsString();
+    expect(list, contains('onLongPress: (_canManage || _canCheckIn)'));
+    expect(list, contains('? () => _showOptions(item)'));
+    expect(list, contains("case 'delete':"));
+    expect(list, contains('AppointmentActionPolicy.canDelete('));
+    expect(list, contains('_load(initialEntry: true)'));
+    expect(list, contains('_entryRefreshInterval'));
+    expect(list, contains('initialEntry && !forceOnline && localAvailable'));
+    expect(list, contains('onRefresh: _load'));
+  });
 }
+
