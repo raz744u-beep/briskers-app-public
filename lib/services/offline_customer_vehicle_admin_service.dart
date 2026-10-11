@@ -161,7 +161,7 @@ class OfflineCustomerVehicleAdminService {
   ) async {
     final existing = await _database.customSelect(
       '''
-      SELECT id FROM sync_outbox
+      SELECT id, attempt_count, last_attempt_at FROM sync_outbox
       WHERE business_id = ? AND entity_type = ? AND entity_id = ?
         AND state = 'pending'
       ORDER BY id DESC LIMIT 1
@@ -174,6 +174,11 @@ class OfflineCustomerVehicleAdminService {
     ).get();
 
     if (existing.isNotEmpty) {
+      if (entityType == 'vehicle_create' &&
+          (existing.first.read<int>('attempt_count') > 0 ||
+           existing.first.readNullable<int>('last_attempt_at') != null)) {
+        throw StateError('Vehicle upload already attempted; reconcile before editing.');
+      }
       await _database.customStatement(
         'UPDATE sync_outbox SET payload_json = ?, last_error = NULL WHERE id = ?',
         [jsonEncode(payload), existing.first.read<int>('id')],
