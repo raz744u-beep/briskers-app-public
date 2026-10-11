@@ -437,6 +437,9 @@ class OfflineDocumentDraftService {
 
     final operationId = _offlineOperationUuid();
     final invoiceId = 'local-invoice-$operationId';
+    final originalJobId = estimate['job_id']?.toString() ?? '';
+    final provisionalJobId = originalJobId.isEmpty ? 'local-conversion-job-$operationId' : null;
+    final effectiveJobId = provisionalJobId ?? originalJobId;
     final now = DateTime.now();
     final detail = <String, dynamic>{
       ...estimate,
@@ -448,6 +451,8 @@ class OfflineDocumentDraftService {
       'display_status_code': 'open',
       'converted': false,
       'converted_from_estimate_id': estimateId,
+      'job_id': effectiveJobId,
+      'job_title': estimate['job_title'] ?? estimate['title'] ?? 'Estimate repair',
       'paid_amount': 0,
       'pending_payment': 0,
       'created_at': now.toIso8601String(),
@@ -469,6 +474,18 @@ class OfflineDocumentDraftService {
       'sync_state': 'pending',
     };
     await _database.transaction(() async {
+      if (provisionalJobId != null) {
+        await _database.customStatement(
+          '''INSERT INTO local_jobs (id,business_id,access_scope,job_number,title,
+               status,status_name,customer_id,customer_name,vehicle_id,vehicle_label,
+               created_at,sync_state)
+             VALUES (?,?,'full','Pending sync',?,'open','In progress',?,?,?,?,?,'pending')''',
+          [provisionalJobId,businessId,
+           (estimate['job_title'] ?? estimate['title'] ?? 'Estimate repair').toString(),
+           estimate['customer_id'],estimate['customer_name'],estimate['vehicle_id'],
+           estimate['vehicle'],_unixNow()],
+        );
+      }
       await _database.customStatement(
         '''INSERT INTO local_documents (
           id,business_id,job_id,customer_id,kind,document_number,
@@ -476,7 +493,7 @@ class OfflineDocumentDraftService {
           document_date,created_at,server_updated_at,row_version,sync_state
         ) VALUES (?, ?, ?, ?, 'invoice', NULL, 'issued', 'open',
                   NULL, 0, ?, ?, ?, NULL, 1, 'pending')''',
-        [invoiceId, businessId, estimate['job_id'], estimate['customer_id'],
+        [invoiceId, businessId, effectiveJobId, estimate['customer_id'],
          _number(estimate['total_amount']).toDouble(),
          estimate['document_date'], _unixNow()],
       );
@@ -495,6 +512,7 @@ class OfflineDocumentDraftService {
         [businessId, invoiceId, jsonEncode({
           'local_id': invoiceId, 'kind': 'convert_invoice',
           'estimate_id': estimateId, 'operation_id': operationId,
+          'provisional_job_id': provisionalJobId,
         }), _unixNow()],
       );
     });
@@ -786,6 +804,23 @@ class OfflineDocumentDraftService {
             serverId = await _api.convertEstimate(businessId, estimateServerId);
           }
           serverDetail = await _api.documentDetail(businessId, serverId);
+          final provisionalJobId = payload['provisional_job_id']?.toString() ?? '';
+          if (provisionalJobId.isNotEmpty) {
+            final realJobId = serverDetail['job_id']?.toString() ?? '';
+            if (realJobId.isEmpty) {
+              throw StateError('Converted invoice has no server-linked Job.');
+            }
+            // The server conversion creates exactly one Job for an unlinked
+            // estimate. Replace the temporary local Job with its real identity.
+            await _database.transaction(() async {
+              await _database.customStatement(
+                'UPDATE local_documents SET job_id=? WHERE business_id=? AND job_id=?',
+                [realJobId,businessId,provisionalJobId]);
+              await _database.customStatement(
+                'DELETE FROM local_jobs WHERE business_id=? AND id=? AND sync_state=?',
+                [businessId,provisionalJobId,'pending']);
+            });
+          }
         } else if (payload['kind'] == 'invoice') {
           final operationId = payload['operation_id']?.toString() ?? '';
           final customerId = payload['customer_id']?.toString() ?? '';
