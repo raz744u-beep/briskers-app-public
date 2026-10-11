@@ -13,7 +13,6 @@ import '../services/local_document_repository.dart';
 import '../services/local_job_repository.dart';
 import '../services/local_customer_repository.dart';
 import '../services/offline_job_admin_service.dart';
-import '../services/offline_customer_vehicle_admin_service.dart';
 import '../widgets/job_compact_card.dart';
 import 'jobs/job_detail_screen.dart';
 import 'jobs/job_create_screen.dart';
@@ -47,8 +46,6 @@ class _JobsScreenState extends State<JobsScreen> {
   final DocumentIndexSyncService _documentSync = DocumentIndexSyncService();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
-  final OfflineCustomerVehicleAdminService _offlineCustomerAdmin =
-      OfflineCustomerVehicleAdminService();
 
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _statuses = const [];
