@@ -1311,13 +1311,22 @@ class BriskersFunctionalDiagnosticsService {
     final service = OfflineJobAdminService(database:database);
     final id = await service.queueJobCreate(businessId,
       customerId:'customer-test',customerName:'Diagnostic Customer',
-      title:'Diagnostic work',plannedHours:1);
+      title:'Diagnostic work',requestedWork:'Customer requested a different description',
+      plannedHours:1,employeeId:'employee-test',employeeName:'Test Mechanic');
     final rows = await database.customSelect(
-      'SELECT title,sync_state FROM local_jobs WHERE business_id=? AND id=?',
+      'SELECT title,requested_work,sync_state,assigned_employee_id,assigned_employee_name,is_unassigned FROM local_jobs WHERE business_id=? AND id=?',
       variables:[Variable<String>(businessId),Variable<String>(id)],
     ).get();
     _require(rows.length==1 && rows.single.read<String>('sync_state')=='pending',
       'Offline job is missing from local job cache.');
+    final job=rows.single;
+    _require(job.read<String>('title')=='Diagnostic work' &&
+      job.readNullable<String>('requested_work')=='Customer requested a different description',
+      'Job title or requested work was not retained independently.');
+    _require(job.readNullable<String>('assigned_employee_id')=='employee-test' &&
+      job.readNullable<String>('assigned_employee_name')=='Test Mechanic' &&
+      job.read<int>('is_unassigned')==0,
+      'Mechanic chosen during creation was not persisted locally.');
     final pending = await database.customSelect(
       "SELECT payload_json FROM sync_outbox WHERE business_id=? "
       "AND entity_type='job_create' AND entity_id=?",
@@ -1327,7 +1336,8 @@ class BriskersFunctionalDiagnosticsService {
     final payload=Map<String,dynamic>.from(
       jsonDecode(pending.single.read<String>('payload_json')) as Map);
     _require(payload['job_id']==id &&
-      payload['operation_id']=='job-create-$id',
+      payload['operation_id']=='job-create-$id' &&
+      payload['employee_id']=='employee-test',
       'Job creation sync identity changed or was missing.');
   }
 
