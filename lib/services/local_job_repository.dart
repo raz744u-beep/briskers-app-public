@@ -107,6 +107,11 @@ class LocalJobRepository {
         ON s.business_id = j.business_id AND s.code = j.status
       WHERE ${where.join(' AND ')}
       ORDER BY
+        -- New local-only jobs must be visible immediately before historical jobs.
+        CASE WHEN j.sync_state = 'pending' AND j.job_number = 'Pending sync'
+             THEN 0 ELSE 1 END,
+        CASE WHEN j.sync_state = 'pending' AND j.job_number = 'Pending sync'
+             THEN j.created_at END DESC,
         CASE WHEN j.status IN ('completed','cancelled') THEN 1 ELSE 0 END,
         COALESCE(s.sort_order, 9999),
         -- Imported MobileBiz created_at records when the import ran, not
