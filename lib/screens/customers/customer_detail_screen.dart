@@ -148,6 +148,17 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     future: _activeCustomerItems(),
     builder: (context, snapshot) {
       final rows = snapshot.data ?? const <Map<String,dynamic>>[];
+      final estimates = rows.where((x) => x['type'] == 'estimate').toList();
+      final invoices = rows.where((x) => x['type'] == 'invoice').toList();
+      final estimateTotal = estimates.fold<double>(0,
+        (sum, x) => sum + ((x['total'] as num?)?.toDouble() ?? 0));
+      final knownInvoiceBalances = invoices.where((x) => x['paid'] is num).toList();
+      final balance = knownInvoiceBalances.fold<double>(0, (sum, x) {
+        final outstanding = ((x['total'] as num?)?.toDouble() ?? 0) -
+          ((x['paid'] as num?)?.toDouble() ?? 0);
+        return sum + (outstanding > 0 ? outstanding : 0);
+      });
+      String money(double value) => '${String.fromCharCode(36)}${value.toStringAsFixed(2)}';
       return Card(child: ExpansionTile(
         initiallyExpanded: false,
         leading: const Icon(Icons.dashboard_outlined, color: BriskersColors.customers),
@@ -155,6 +166,22 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         subtitle: Text(snapshot.hasError ? 'Could not read saved activity'
           : snapshot.hasData ? '${rows.length} active records' : 'Loading activity...'),
         children: [
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.account_balance_wallet_outlined),
+            title: const Text('Invoice balance due (locally verified)'),
+            trailing: Text(money(balance),
+              style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: knownInvoiceBalances.length < invoices.length
+              ? Text('Payment details unavailable for ${invoices.length - knownInvoiceBalances.length} invoice(s)')
+              : const Text('Excludes draft estimates'),
+          ),
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.request_quote_outlined),
+            title: const Text('Active estimate value (not due)'),
+            trailing: Text(money(estimateTotal)),
+          ),
           for (final item in rows)
             ListTile(
               dense: true,
