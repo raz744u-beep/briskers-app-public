@@ -168,9 +168,11 @@ class _JobsScreenState extends State<JobsScreen> {
         widget.onJobsChanged?.call();
       }
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Unable to prepare new job: $error')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to prepare new job: $error')),
+        );
+      }
     }
   }
 
