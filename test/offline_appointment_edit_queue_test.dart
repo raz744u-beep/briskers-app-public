@@ -65,6 +65,9 @@ void main() {
         VALUES('appt-2','shop-1','customer-old','vehicle-old',100,200,
           'confirmed','Old appointment',0,9,'synced')
       """);
+      await db.customStatement(
+        "INSERT INTO local_customer_vehicles(business_id,customer_id,vehicle_id) VALUES('shop-1','customer-new','vehicle-new')",
+      );
       final start=DateTime.utc(2026,10,13,10);
       final end=start.add(const Duration(hours:1));
       await service.queueEdit('shop-1','appt-2',
