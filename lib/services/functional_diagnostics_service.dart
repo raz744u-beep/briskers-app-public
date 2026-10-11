@@ -12,6 +12,7 @@ import 'document_pdf_service.dart';
 import 'local_document_detail_cache.dart';
 import 'local_financial_cache.dart';
 import 'offline_customer_vehicle_admin_service.dart';
+import 'appointment_sync_service.dart';
 import 'offline_document_draft_service.dart';
 import 'offline_estimate_invoice_service.dart';
 import 'offline_financial_write_service.dart';
@@ -164,6 +165,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkOfflineInvoiceCancel,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-019',
+      title: 'Offline customer → appointment identity reconciliation',
+      success: 'Customer creates locally, retains stable sync identity, and appointment link is remapped to the permanent customer ID.',
+      action: _checkOfflineCustomerAppointment,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -214,6 +223,56 @@ class BriskersFunctionalDiagnosticsService {
       await _cleanupPreferences(businessId);
       await database.close();
     }
+  }
+
+  Future<void> _checkOfflineCustomerAppointment(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final customers=OfflineCustomerVehicleAdminService(database:database);
+    final appointments=AppointmentSyncService(database:database);
+    final customerId=await customers.queueCustomerCreate(
+      businessId,name:'Diagnostic customer',
+    );
+    final starts=DateTime.utc(2026,10,11,10);
+    final appointmentId=await appointments.queueCreate(
+      businessId,customerId:customerId,title:'Diagnostic visit',
+      startsAt:starts,endsAt:starts.add(const Duration(hours:1)),
+    );
+    _require(
+      !await appointments.dependenciesReadyForCreate(
+        businessId,customerId,null),
+      'Temporary customer was incorrectly considered uploadable.',
+    );
+    final rows=await database.customSelect(
+      """SELECT id FROM sync_outbox
+         WHERE business_id=? AND entity_type='customer_create'""",
+      variables:[Variable<String>(businessId)],
+    ).get();
+    _require(rows.length==1,'Missing or duplicate customer create operation.');
+    await customers.reconcileCreatedCustomerId(
+      businessId,customerId,'server-diagnostic-customer',
+      rows.single.read<int>('id'),
+    );
+    final linked=await database.customSelect(
+      'SELECT customer_id FROM local_appointments WHERE business_id=? AND id=?',
+      variables:[Variable<String>(businessId),Variable<String>(appointmentId)],
+    ).getSingle();
+    _require(linked.read<String>('customer_id')=='server-diagnostic-customer',
+      'Appointment retained temporary customer reference.');
+    final queued=await database.customSelect(
+      """SELECT payload_json FROM sync_outbox WHERE business_id=?
+         AND entity_type='appointment_create'""",
+      variables:[Variable<String>(businessId)],
+    ).getSingle();
+    final payload=jsonDecode(queued.read<String>('payload_json')) as Map;
+    _require(payload['customer_id']=='server-diagnostic-customer',
+      'Queued appointment retained temporary customer ID.');
+    _require(
+      await appointments.dependenciesReadyForCreate(
+        businessId,'server-diagnostic-customer',null),
+      'Synchronized customer could not be used by appointment.',
+    );
   }
 
   Future<void> _checkOfflineInvoiceCancel(
