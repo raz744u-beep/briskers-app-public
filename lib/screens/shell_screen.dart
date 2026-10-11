@@ -316,7 +316,6 @@ class _ShellScreenState extends State<ShellScreen> {
     final activeColor = _sectionColors[_index];
     final isHome = _index == 0;
     final roleStyle = employeeRoleStyle(_roleLabel);
-    final pageTitles = ['Home', tr('customers'), tr('appointments'), tr('jobs'), tr('invoices'), tr('more')];
     Widget buildPage(int index) {
       if (index == 0) {
         return HomeScreen(
