@@ -70,6 +70,23 @@ void main() {
         VALUES('shop-1','vehicle_create','local-vehicle-1','create',?,
           'pending',0,100)
       """,[jsonEncode({'customer_id':local,'make':'BMW','model':'X5'})]);
+      await db.customStatement(
+        """INSERT INTO local_jobs(id,business_id,access_scope,title,status,customer_id)
+           VALUES('local-job-1','shop-1','all','Job','in_progress',?)""",
+        [local],
+      );
+      await db.customStatement(
+        """INSERT INTO local_documents(id,business_id,kind,customer_id)
+           VALUES('local-invoice-1','shop-1','invoice',?)""",
+        [local],
+      );
+      await db.customStatement(
+        """INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,
+           payload_json,state,attempt_count,created_at)
+           VALUES('shop-1','document_draft_create','local-invoice-1','create',?,
+           'pending',0,100)""",
+        [jsonEncode({'customer_id':local})],
+      );
       final queue=await db.customSelect(
         "SELECT id FROM sync_outbox WHERE entity_type='customer_create'",
       ).getSingle();
@@ -87,6 +104,17 @@ void main() {
         "SELECT payload_json FROM sync_outbox WHERE entity_type='appointment_create'",
       ).getSingle();
       expect(jsonDecode(dep.read<String>('payload_json'))['customer_id'],
+        'server-customer-1');
+      for (final table in <String>['local_jobs','local_documents']) {
+        final rows=await db.customSelect(
+          "SELECT customer_id FROM $table WHERE business_id='shop-1'",
+        ).getSingle();
+        expect(rows.read<String>('customer_id'),'server-customer-1');
+      }
+      final documentQueue=await db.customSelect(
+        "SELECT payload_json FROM sync_outbox WHERE entity_type='document_draft_create'",
+      ).getSingle();
+      expect(jsonDecode(documentQueue.read<String>('payload_json'))['customer_id'],
         'server-customer-1');
       final vehicleQueue=await db.customSelect(
         "SELECT payload_json FROM sync_outbox WHERE entity_type='vehicle_create'",
