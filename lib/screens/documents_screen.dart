@@ -1464,6 +1464,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 final color = _statusColor(status);
                 final number = row['document_number']?.toString() ?? '';
                 final customer = row['customer_name']?.toString() ?? '';
+                final documentTitle = (row['title'] ?? row['job_title'])?.toString().trim() ?? '';
                 final vehicle = row['vehicle']?.toString() ?? '';
                 final jobNumber = row['job_number']?.toString() ?? '';
                 final documentDate = _shortDate(row['document_date']);
@@ -1529,6 +1530,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                     ],
                                   ],
                                 ),
+                                if (documentTitle.isNotEmpty) ...[
+                                  const SizedBox(height: 3),
+                                  Text(documentTitle, maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                                ],
                                 const SizedBox(height: 3),
                                 if (vehicle.isNotEmpty)
                                   Text(
