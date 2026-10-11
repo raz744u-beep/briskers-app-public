@@ -132,4 +132,17 @@ void main() {
     } finally { await db.close(); }
   });
 
+  test('appointment upload waits for local-only vehicle dependency', () async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    final service=AppointmentSyncService(database:db);
+    try {
+      expect(await service.dependenciesReadyForCreate(
+        'shop-test','customer-1','local-vehicle-123'),isFalse);
+      expect(await service.dependenciesReadyForCreate(
+        'shop-test','local-customer-123',null),isFalse);
+      expect(await service.dependenciesReadyForCreate(
+        'shop-test','customer-1',null),isTrue);
+    } finally { await db.close(); }
+  });
+
 }
