@@ -1126,13 +1126,6 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           logoHeight: 40,
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _importing || _showingLocal ? null : _showAddMenu,
-        backgroundColor: BriskersColors.expenses,
-        foregroundColor: Colors.white,
-        tooltip: 'Add transaction',
-        child: const Icon(Icons.add),
-      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -1418,7 +1411,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  TextField(
+                  Row(children: [
+                    Expanded(child: TextField(
                     controller: _searchController,
                     onChanged: (value) {
                       setState(() {});
@@ -1447,7 +1441,18 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(32), borderSide: BorderSide.none),
                       isDense: true,
                     ),
-                  ),
+                    )),
+                    const SizedBox(width: 8),
+                    IconButton.filled(
+                      tooltip: 'Add transaction',
+                      style: IconButton.styleFrom(
+                        backgroundColor: BriskersColors.expenses,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: _importing ? null : _showAddMenu,
+                      icon: const Icon(Icons.add),
+                    ),
+                  ]),
                   if (_searchController.text.trim().isNotEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 5, left: 4),
