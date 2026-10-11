@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' show Variable;
 
 import '../local/local_database_provider.dart';
 
