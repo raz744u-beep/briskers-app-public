@@ -36,7 +36,6 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
   final TextEditingController _customerSearch = TextEditingController();
   Timer? _searchDebounce;
   int _searchGeneration = 0;
-  int _customerDropdownVersion = 0;
   bool _searchingCustomers = false;
 
   List<Map<String, dynamic>> _customers = const [];
@@ -85,7 +84,6 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
     // Discard responses from any prior query before the debounce fires.
     _searchGeneration++;
     setState(() {
-      _customerDropdownVersion++;
       _customerId = null;
       _vehicleId = null;
       _vehicles = const [];
