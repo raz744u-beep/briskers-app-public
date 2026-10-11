@@ -852,13 +852,9 @@ class AppointmentSyncService {
             [conflict ? 'conflict':'pending',
              _unix(DateTime.now().toUtc()),message,queueId],
           );
-          if (conflict) {
-            await _database.customStatement(
-              """UPDATE local_appointments SET sync_state='conflict'
-                 WHERE business_id=? AND id=?""",
-              [businessId,appointmentId],
-            );
-          }
+          // Preserve pending_delete tombstone even on a server conflict.
+          // The outbox 'conflict' state signals owner review; changing the
+          // appointment to 'conflict' would resurrect it in the local list.
         });
         break;
       }
@@ -1120,12 +1116,11 @@ class AppointmentSyncService {
       ],
     ).get();
 
-    if (!force && existing.isNotEmpty) {
+    if (existing.isNotEmpty) {
       final state = existing.first.read<String>('sync_state');
-      if (state == 'pending' || state == 'conflict' ||
-          state == 'pending_delete') {
-        return;
-      }
+      // Never resurrect a local deletion, even during forced bootstrap.
+      if (state == 'pending_delete') return;
+      if (!force && (state == 'pending' || state == 'conflict')) return;
     }
 
     await _database.customStatement(
