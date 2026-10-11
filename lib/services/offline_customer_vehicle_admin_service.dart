@@ -16,6 +16,39 @@ class OfflineCustomerVehicleAdminService {
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
 
+  Future<String> queueCustomerCreate(
+    String businessId, {
+    required String name,
+    String? phone,
+    String? email,
+    Map<String,dynamic> billingAddress = const {},
+  }) async {
+    if (name.trim().isEmpty) throw ArgumentError('Customer name required.');
+    final id='local-customer-${DateTime.now().microsecondsSinceEpoch}';
+    await _database.transaction(() async {
+      await _database.customStatement(
+        """INSERT INTO local_customers
+          (id,business_id,display_name,email,list_email,phone,list_phone,
+           billing_address_json,sync_state)
+           VALUES(?,?,?,?,?,?,?,?, 'pending')""",
+        [id,businessId,name.trim(),email,email,phone,phone,
+         jsonEncode(billingAddress)],
+      );
+      await _database.customStatement(
+        """INSERT INTO sync_outbox
+          (business_id,entity_type,entity_id,operation,payload_json,
+           state,attempt_count,created_at)
+           VALUES (?,'customer_create',?,'create',?,'pending',0,?)""",
+        [businessId,id,jsonEncode({
+          'operation_id':'customer-create-$id',
+          'name':name.trim(),
+          'phone':phone,'email':email,'billing_address':billingAddress,
+        }),DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000],
+      );
+    });
+    return id;
+  }
+
   Future<Map<String, dynamic>> queueCustomerProfile(
     String businessId,
     String customerId, {
