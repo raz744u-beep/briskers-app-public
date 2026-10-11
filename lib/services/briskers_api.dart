@@ -941,6 +941,41 @@ class BriskersApi {
     return networkSupabase.storage.from(bucket).createSignedUrl(key, 3600);
   }
 
+  Future<String> createVehicleOfflineIdempotent(
+    String businessId, String customerId, {
+    required String operationId,
+    required String localVehicleId,
+    required String make,
+    required String model,
+    int? year,
+    String? vin,
+    String? licensePlate,
+    String? licenseState,
+    num? mileage,
+    String? color,
+    String? keyPassword,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_offline_create_vehicle_idempotent',
+      params: {
+        'p_business_id': businessId,
+        'p_operation_id': operationId,
+        'p_local_vehicle_id': localVehicleId,
+        'p_customer_id': customerId,
+        'p_make': make,
+        'p_model': model,
+        'p_year': year,
+        'p_vin': vin,
+        'p_license_plate': licensePlate,
+        'p_license_state': licenseState,
+        'p_mileage': mileage,
+        'p_color': color,
+        'p_key_password': keyPassword,
+      },
+    );
+    return result.toString();
+  }
+
   Future<String> createVehicle(
     String businessId,
     String customerId, {
