@@ -283,13 +283,51 @@ class OfflineCustomerVehicleAdminService {
           });
   }
 
+  Future<void> reconcileCreatedCustomerId(
+    String businessId,String localId,String serverId,int queueId,
+  ) async {
+    await _database.transaction(() async {
+      await _database.customStatement(
+        'UPDATE local_customer_vehicles SET customer_id=? WHERE business_id=? AND customer_id=?',
+        [serverId,businessId,localId],
+      );
+      await _database.customStatement(
+        'UPDATE local_appointments SET customer_id=? WHERE business_id=? AND customer_id=?',
+        [serverId,businessId,localId],
+      );
+      final rows=await _database.customSelect(
+        """SELECT id,payload_json FROM sync_outbox WHERE business_id=?
+           AND entity_type IN ('vehicle_create','appointment_create')
+           AND state='pending'""",
+        variables:[Variable<String>(businessId)],
+      ).get();
+      for (final row in rows) {
+        final payload=Map<String,dynamic>.from(
+          jsonDecode(row.read<String>('payload_json')) as Map);
+        if (payload['customer_id']?.toString()!=localId) continue;
+        payload['customer_id']=serverId;
+        await _database.customStatement(
+          'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+          [jsonEncode(payload),row.read<int>('id')],
+        );
+      }
+      await _database.customStatement(
+        "UPDATE local_customers SET id=?,sync_state='synced' WHERE business_id=? AND id=?",
+        [serverId,businessId,localId],
+      );
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id=?',[queueId],
+      );
+    });
+  }
+
   Future<void> flush(String businessId) async {
     final rows = await _database.customSelect(
       '''
       SELECT id, entity_type, entity_id, payload_json, attempt_count
       FROM sync_outbox
       WHERE business_id = ?
-        AND entity_type IN ('customer_profile','customer_flag','vehicle_create','vehicle_update')
+        AND entity_type IN ('customer_create','customer_profile','customer_flag','vehicle_create','vehicle_update')
         AND state = 'pending'
       ORDER BY id
       ''',
@@ -315,7 +353,21 @@ class OfflineCustomerVehicleAdminService {
         continue;
       }
       try {
-        if (type == 'customer_profile') {
+        if (type == 'customer_create') {
+          final serverId=await _api.createCustomerOfflineIdempotent(
+            businessId,
+            operationId:payload['operation_id'].toString(),
+            name:payload['name'].toString(),
+            phone:payload['phone']?.toString(),
+            email:payload['email']?.toString(),
+            billingAddress:Map<String,dynamic>.from(
+              payload['billing_address'] as Map? ?? const {}),
+          );
+          await reconcileCreatedCustomerId(
+            businessId,entityId,serverId,outboxId,
+          );
+          continue;
+        } else if (type == 'customer_profile') {
           await _api.updateCustomerProfile(
             businessId,
             entityId,
