@@ -2456,6 +2456,37 @@ class BriskersApi {
 
   /// Safe replay for locally queued appointment edits. Requires the server
   /// operation-key migration; retries always reuse the stored UUID.
+  Future<int> syncOfflineAppointmentReassign(
+    String businessId, String appointmentId, {
+    required String operationId,
+    required int baseVersion,
+    required String customerId,
+    String? vehicleId,
+    required String title,
+    String? description,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    String? employeeId,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_sync_offline_appointment_reassign',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+        'p_operation_id': operationId,
+        'p_base_version': baseVersion,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_title': title,
+        'p_description': description,
+        'p_starts_at': startsAt.toUtc().toIso8601String(),
+        'p_ends_at': endsAt.toUtc().toIso8601String(),
+        'p_employee_id': employeeId,
+      },
+    );
+    return (result as num).toInt();
+  }
+
   Future<int> syncOfflineAppointmentEdit(
     String businessId,
     String appointmentId, {
