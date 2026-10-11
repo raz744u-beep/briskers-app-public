@@ -422,6 +422,87 @@ class OfflineDocumentDraftService {
     return id;
   }
 
+  /// Converts a cached estimate without creating another Job. The server
+  /// conversion is deferred until the source estimate has a permanent ID.
+  Future<String> convertEstimateOffline(String businessId, String estimateId) async {
+    final estimate = await _cache.load(businessId, estimateId);
+    if (estimate == null) {
+      throw StateError('Open the estimate once while online to cache it.');
+    }
+    if (estimate['converted'] == true) {
+      throw StateError('This estimate is already converted.');
+    }
+    final lines = _lines(estimate);
+    if (lines.isEmpty) throw StateError('Add at least one item first.');
+
+    final operationId = _offlineOperationUuid();
+    final invoiceId = 'local-invoice-$operationId';
+    final now = DateTime.now();
+    final detail = <String, dynamic>{
+      ...estimate,
+      'id': invoiceId,
+      'kind': 'invoice',
+      'document_number': null,
+      'status': 'issued',
+      'display_status': 'Pending sync',
+      'display_status_code': 'open',
+      'converted': false,
+      'converted_from_estimate_id': estimateId,
+      'paid_amount': 0,
+      'pending_payment': 0,
+      'created_at': now.toIso8601String(),
+      'updated_at': now.toIso8601String(),
+      'sync_state': 'pending',
+      '_local_snapshot': true,
+      '_local_draft': true,
+      'lines': lines.map((line) => <String, dynamic>{
+        ...line,
+        'id': 'local-conversion-$operationId-${lines.indexOf(line)}',
+        '_local_draft_line': true,
+      }).toList(),
+    };
+    final modifiedEstimate = <String, dynamic>{
+      ...estimate,
+      'converted': true,
+      'status': 'accepted',
+      'converted_invoice_id': invoiceId,
+      'sync_state': 'pending',
+    };
+    await _database.transaction(() async {
+      await _database.customStatement(
+        '''INSERT INTO local_documents (
+          id,business_id,job_id,customer_id,kind,document_number,
+          status,display_status_code,closed_at,converted,total,
+          document_date,created_at,server_updated_at,row_version,sync_state
+        ) VALUES (?, ?, ?, ?, 'invoice', NULL, 'issued', 'open',
+                  NULL, 0, ?, ?, ?, NULL, 1, 'pending')''',
+        [invoiceId, businessId, estimate['job_id'], estimate['customer_id'],
+         _number(estimate['total_amount']).toDouble(),
+         estimate['document_date'], _unixNow()],
+      );
+      await _database.customStatement(
+        "UPDATE local_documents SET converted=1,status='accepted',sync_state='pending' "
+        "WHERE business_id=? AND id=?",
+        [businessId, estimateId],
+      );
+      await _database.customStatement(
+        '''INSERT INTO sync_outbox (
+          business_id,entity_type,entity_id,operation,payload_json,
+          base_row_version,state,attempt_count,created_at,
+          last_attempt_at,last_error
+        ) VALUES (?, 'document_draft_create', ?, 'convert_estimate', ?,
+                  NULL, 'pending', 0, ?, NULL, NULL)''',
+        [businessId, invoiceId, jsonEncode({
+          'local_id': invoiceId, 'kind': 'convert_invoice',
+          'estimate_id': estimateId, 'operation_id': operationId,
+        }), _unixNow()],
+      );
+    });
+    await _cache.save(businessId, invoiceId, detail);
+    await _cache.save(businessId, estimateId, modifiedEstimate);
+    return invoiceId;
+  }
+
   Future<void> addLine(
     String businessId,
     String documentId, {
@@ -686,7 +767,26 @@ class OfflineDocumentDraftService {
 
         late final String serverId;
         late Map<String, dynamic> serverDetail;
-        if (payload['kind'] == 'invoice') {
+        if (payload['kind'] == 'convert_invoice') {
+          final localEstimateId = payload['estimate_id']?.toString() ?? '';
+          final cachedEstimate = await _cache.load(businessId, localEstimateId);
+          final estimateServerId = cachedEstimate?['_server_document_id']?.toString() ??
+              (localEstimateId.startsWith('local-') ? '' : localEstimateId);
+          if (estimateServerId.isEmpty) {
+            throw StateError('Source estimate needs to synchronize first.');
+          }
+          final currentEstimate = await _api.documentDetail(businessId, estimateServerId);
+          final alreadyConverted = currentEstimate['converted'] == true;
+          if (alreadyConverted) {
+            serverId = currentEstimate['converted_invoice_id']?.toString() ?? '';
+            if (serverId.isEmpty) {
+              throw StateError('Converted estimate has no invoice reference.');
+            }
+          } else {
+            serverId = await _api.convertEstimate(businessId, estimateServerId);
+          }
+          serverDetail = await _api.documentDetail(businessId, serverId);
+        } else if (payload['kind'] == 'invoice') {
           final operationId = payload['operation_id']?.toString() ?? '';
           final customerId = payload['customer_id']?.toString() ?? '';
           if (operationId.isEmpty || customerId.isEmpty) {
@@ -775,6 +875,18 @@ class OfflineDocumentDraftService {
           },
         );
 
+        if (payload['kind'] == 'convert_invoice') {
+          final originalId = payload['estimate_id']?.toString() ?? '';
+          final original = await _cache.load(businessId, originalId);
+          if (original != null) {
+            await _cache.save(businessId, originalId, {
+              ...original,
+              'converted': true,
+              'converted_invoice_id': serverId,
+              'sync_state': 'synced',
+            });
+          }
+        }
         if (payload['kind'] == 'invoice') {
           await OfflineInvoicePaymentLedger(database: _database).remapInvoice(
             businessId,
