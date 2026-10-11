@@ -137,6 +137,7 @@ class OfflineCustomerVehicleAdminService {
         id,
         {
           'customer_id': customerId,
+          if (creating) 'idempotent_v1': true,
           'make': make,
           'model': model,
           'year': year,
@@ -250,7 +251,18 @@ class OfflineCustomerVehicleAdminService {
       final payload = Map<String, dynamic>.from(
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
-       try {
+       if (type == 'vehicle_create' &&
+          row.read<int>('attempt_count') > 0 &&
+          payload['idempotent_v1'] != true) {
+        await _database.customStatement(
+          """UPDATE sync_outbox SET state='conflict',
+             last_error='Legacy vehicle create may have succeeded. Reconcile manually.'
+             WHERE id=?""",
+          [outboxId],
+        );
+        continue;
+      }
+      try {
         if (type == 'customer_profile') {
           await _api.updateCustomerProfile(
             businessId,
