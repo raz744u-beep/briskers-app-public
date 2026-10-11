@@ -614,6 +614,28 @@ class BriskersApi {
     );
   }
 
+  Future<String> createCustomerOfflineIdempotent(
+    String businessId, {
+    required String operationId,
+    required String name,
+    String? phone,
+    String? email,
+    Map<String, dynamic>? billingAddress,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_offline_create_customer_idempotent',
+      params: {
+        'p_business_id': businessId,
+        'p_operation_id': operationId,
+        'p_name': name,
+        'p_email': email,
+        'p_phone': phone,
+        'p_billing_address': billingAddress ?? const <String, dynamic>{},
+      },
+    );
+    return result.toString();
+  }
+
   Future<String> createCustomer(
     String businessId, {
     required String name,
