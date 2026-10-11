@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/connection_mode.dart';
 import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
 import '../services/customer_vehicle_sync_service.dart';
@@ -84,6 +85,7 @@ class _ShellScreenState extends State<ShellScreen> {
   void initState() {
     super.initState();
     _businessName = widget.businessName;
+    BriskersConnectionModeController.instance.addListener(_connectionChanged);
     _refreshHomeJobsCount();
     _homeJobsCountSubscription = _localJobs
         .watchActiveJobCount(widget.businessId)
@@ -133,6 +135,15 @@ class _ShellScreenState extends State<ShellScreen> {
         _refreshHomeEstimatesCount();
         _refreshHomeInvoicesCount();
       }
+    });
+  }
+
+  void _connectionChanged() {
+    if (!mounted) return;
+    setState(() {
+      _lazyPages.clear();
+      _customersRefreshToken++;
+      _jobsRefreshToken++;
     });
   }
 
@@ -226,6 +237,7 @@ class _ShellScreenState extends State<ShellScreen> {
 
   @override
   void dispose() {
+    BriskersConnectionModeController.instance.removeListener(_connectionChanged);
     _homeJobsCountSubscription?.cancel();
     _homeJobsSyncSubscription?.cancel();
     _homeAppointmentsCountSubscription?.cancel();
