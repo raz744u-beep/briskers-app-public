@@ -173,6 +173,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkOfflineCustomerAppointment,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-020',
+      title: 'Offline customer → vehicle → appointment reference chain',
+      success: 'Temporary vehicle and customer references are safely deferred and rekeyed before an appointment upload.',
+      action: _checkOfflineCustomerVehicleAppointment,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -273,6 +281,65 @@ class BriskersFunctionalDiagnosticsService {
         businessId,'server-diagnostic-customer',null),
       'Synchronized customer could not be used by appointment.',
     );
+  }
+
+  Future<void> _checkOfflineCustomerVehicleAppointment(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final service=OfflineCustomerVehicleAdminService(database:database);
+    final appointment=AppointmentSyncService(database:database);
+    final customer=await service.queueCustomerCreate(
+      businessId,name:'Sandbox new customer');
+    final vehicle=await service.queueVehicle(
+      businessId,customer,make:'BMW',model:'X5');
+    final start=DateTime.utc(2026,10,11,11);
+    final appt=await appointment.queueCreate(
+      businessId,customerId:customer,vehicleId:vehicle,
+      title:'Sandbox visit',startsAt:start,
+      endsAt:start.add(const Duration(hours:1)),
+    );
+    _require(!await appointment.dependenciesReadyForCreate(
+      businessId,customer,vehicle),'Temporary customer/vehicle uploaded early.');
+    final customerRows=await database.customSelect(
+      """SELECT id FROM sync_outbox WHERE business_id=?
+         AND entity_type='customer_create'""",
+      variables:[Variable<String>(businessId)],
+    ).get();
+    _require(customerRows.length==1,'Missing customer queue operation.');
+    await service.reconcileCreatedCustomerId(
+      businessId,customer,'server-customer-test',
+      customerRows.single.read<int>('id'),
+    );
+    final vehicleRows=await database.customSelect(
+      """SELECT id FROM sync_outbox WHERE business_id=?
+         AND entity_type='vehicle_create'""",
+      variables:[Variable<String>(businessId)],
+    ).get();
+    _require(vehicleRows.length==1,'Missing vehicle queue operation.');
+    await service.reconcileCreatedVehicleId(
+      businessId,vehicle,'server-vehicle-test',
+      vehicleRows.single.read<int>('id'),
+    );
+    final link=await database.customSelect(
+      'SELECT customer_id,vehicle_id FROM local_appointments WHERE business_id=? AND id=?',
+      variables:[Variable<String>(businessId),Variable<String>(appt)],
+    ).getSingle();
+    _require(link.read<String>('customer_id')=='server-customer-test' &&
+        link.read<String>('vehicle_id')=='server-vehicle-test',
+        'Appointment local references not rekeyed.');
+    final queue=await database.customSelect(
+      """SELECT payload_json FROM sync_outbox WHERE business_id=?
+         AND entity_type='appointment_create'""",
+      variables:[Variable<String>(businessId)],
+    ).getSingle();
+    final payload=jsonDecode(queue.read<String>('payload_json')) as Map;
+    _require(payload['customer_id']=='server-customer-test' &&
+        payload['vehicle_id']=='server-vehicle-test',
+        'Appointment outbox references not rekeyed.');
+    _require(await appointment.dependenciesReadyForCreate(
+      businessId,'server-customer-test','server-vehicle-test'),
+      'Resolved dependencies incorrectly blocked.');
   }
 
   Future<void> _checkOfflineInvoiceCancel(
