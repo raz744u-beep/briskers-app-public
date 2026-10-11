@@ -190,6 +190,46 @@ class OfflineCustomerVehicleAdminService {
     }
   }
 
+  /// Atomic remapping after a vehicle receives its server identity.
+  Future<void> reconcileCreatedVehicleId(
+    String businessId,String entityId,String serverId,int outboxId,
+  ) async {
+    // Remap the new server vehicle ID everywhere atomically.
+          // Appointment create payloads must never retain a local vehicle ID.
+    await _database.transaction(() async {
+            await _database.customStatement(
+              'UPDATE local_customer_vehicles SET vehicle_id=? WHERE business_id=? AND vehicle_id=?',
+              [serverId,businessId,entityId],
+            );
+            await _database.customStatement(
+              'UPDATE local_appointments SET vehicle_id=? WHERE business_id=? AND vehicle_id=?',
+              [serverId,businessId,entityId],
+            );
+            final dependent = await _database.customSelect(
+              """SELECT id,payload_json FROM sync_outbox WHERE business_id=?
+                 AND entity_type='appointment_create' AND state='pending'""",
+              variables:[Variable<String>(businessId)],
+            ).get();
+            for (final pending in dependent) {
+              final data=Map<String,dynamic>.from(
+                jsonDecode(pending.read<String>('payload_json')) as Map);
+              if (data['vehicle_id']?.toString()!=entityId) continue;
+              data['vehicle_id']=serverId;
+              await _database.customStatement(
+                'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+                [jsonEncode(data),pending.read<int>('id')],
+              );
+            }
+            await _database.customStatement(
+              "UPDATE local_vehicles SET id=?,sync_state='synced' WHERE business_id=? AND id=?",
+              [serverId,businessId,entityId],
+            );
+            await _database.customStatement(
+              'DELETE FROM sync_outbox WHERE id=?',[outboxId],
+            );
+          });
+  }
+
   Future<void> flush(String businessId) async {
     final rows = await _database.customSelect(
       '''
@@ -265,40 +305,7 @@ class OfflineCustomerVehicleAdminService {
             color: payload['color']?.toString(),
             keyPassword: payload['key_password']?.toString(),
           );
-          // Remap the new server vehicle ID everywhere atomically.
-          // Appointment create payloads must never retain a local vehicle ID.
-          await _database.transaction(() async {
-            await _database.customStatement(
-              'UPDATE local_customer_vehicles SET vehicle_id=? WHERE business_id=? AND vehicle_id=?',
-              [serverId,businessId,entityId],
-            );
-            await _database.customStatement(
-              'UPDATE local_appointments SET vehicle_id=? WHERE business_id=? AND vehicle_id=?',
-              [serverId,businessId,entityId],
-            );
-            final dependent = await _database.customSelect(
-              """SELECT id,payload_json FROM sync_outbox WHERE business_id=?
-                 AND entity_type='appointment_create' AND state='pending'""",
-              variables:[Variable<String>(businessId)],
-            ).get();
-            for (final pending in dependent) {
-              final data=Map<String,dynamic>.from(
-                jsonDecode(pending.read<String>('payload_json')) as Map);
-              if (data['vehicle_id']?.toString()!=entityId) continue;
-              data['vehicle_id']=serverId;
-              await _database.customStatement(
-                'UPDATE sync_outbox SET payload_json=? WHERE id=?',
-                [jsonEncode(data),pending.read<int>('id')],
-              );
-            }
-            await _database.customStatement(
-              "UPDATE local_vehicles SET id=?,sync_state='synced' WHERE business_id=? AND id=?",
-              [serverId,businessId,entityId],
-            );
-            await _database.customStatement(
-              'DELETE FROM sync_outbox WHERE id=?',[outboxId],
-            );
-          });
+          await reconcileCreatedVehicleId(businessId,entityId,serverId,outboxId);
           continue;
         }
         await _database.customStatement(
