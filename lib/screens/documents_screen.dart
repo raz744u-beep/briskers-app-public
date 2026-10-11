@@ -1212,6 +1212,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       backgroundColor: Colors.white,
       appBar: widget.showAppBar
           ? AppBar(
+              automaticallyImplyLeading: false,
               toolbarHeight: 78,
               titleSpacing: 10,
               backgroundColor: accent.withValues(alpha: 0.08),
