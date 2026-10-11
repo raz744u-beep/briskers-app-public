@@ -12,7 +12,7 @@ As checked, 126 commits ahead of `main`, 0 behind, 39 changed paths.
 - [ ] Verify appointment role policy (owner edit incl Job-linked w/o reassignment, secretary cancel/no delete), conflict tombstones and reconciliation.
 - [ ] Verify owner test invoice / Quick Invoice creates exactly one Job/visit on online/offline sync.
 - [ ] Validate payment entry, partial totals and balance on actual PDF before and after owner finalization without customer-facing pending labels.
-- [ ] Test US-Letter print and printer-app handoff on S26 Ultra; do not assume native MethodChannel exists in generated Android shell.
+- [ ] Test US-Letter print and printer-app handoff on S26 Ultra. The separate Android APK build workflow embeds the com.briskers/pdf Kotlin MethodChannel and ACTION_VIEW PDF handoff; the diagnostics workflow test shell does not. Validate that the actual compiled APK includes it and printer selection works.
 - [ ] Check JOB-005 genuine first Work Performed save for missing-visit imported Job using safe test fixture; no backdated service dates or historical Finding mutation.
 - [ ] Review ExpenseIQ outstanding/missing photos and preserve original Note 9 archive.
 - [ ] Build signed consolidated APK only after source CI passes; then on-device acceptance, repeat with older Note 9.
