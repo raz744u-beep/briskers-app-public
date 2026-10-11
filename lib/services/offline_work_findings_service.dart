@@ -104,10 +104,29 @@ class OfflineWorkFindingsService {
     await _database.transaction(() async {
       final visit = await _currentVisitRow(businessId, jobId);
       if (visit == null) {
-        throw StateError(
-          'This job has no local visit yet. Open it while online once, then '
-          'Work Performed can be edited offline.',
+        if (workSummary.trim().isEmpty) {
+          throw StateError('Enter Work Performed before creating the first visit.');
+        }
+        final jobs = await _database.customSelect(
+          'SELECT id FROM local_jobs WHERE business_id=? AND id=?',
+          variables: [Variable<String>(businessId), Variable<String>(jobId)],
+        ).get();
+        if (jobs.isEmpty) {
+          throw StateError('Open this Job before adding Work Performed.');
+        }
+        final localVisitId = 'local-work-visit-${_operationId('visit')}';
+        final now = DateTime.now().toUtc();
+        await _database.customStatement(
+          """INSERT INTO local_job_visits(
+            id,business_id,job_id,visit_number,work_summary,opened_at,
+            sync_state) VALUES (?,?,?,1,?,?,'pending')""",
+          [localVisitId,businessId,jobId,workSummary.trim(),_unix(now)],
         );
+        await _upsertWorkOutbox(
+          businessId,jobId,visitId:localVisitId,
+          baseRowVersion:null,workSummary:workSummary,
+        );
+        return;
       }
       if (visit.read<String>('sync_state') == 'conflict') {
         throw StateError(
@@ -572,14 +591,20 @@ class OfflineWorkFindingsService {
     final payload = _payload(row);
     final businessId = row.read<String>('business_id');
     final jobId = payload['job_id']?.toString() ?? '';
-    final response = await _api.syncSaveWorkSummary(
-      businessId,
-      jobId,
-      operationId: payload['operation_id']?.toString() ?? '',
-      expectedRowVersion:
-          row.readNullable<int>('base_row_version'),
-      workSummary: payload['work_summary']?.toString() ?? '',
-    );
+    final isNewVisit = (payload['visit_id']?.toString() ?? '')
+        .startsWith('local-work-visit-');
+    final response = isNewVisit
+        ? await _api.createMissingWorkVisit(
+            businessId,jobId,
+            operationId:payload['operation_id']?.toString() ?? '',
+            workSummary:payload['work_summary']?.toString() ?? '',
+          )
+        : await _api.syncSaveWorkSummary(
+            businessId,jobId,
+            operationId:payload['operation_id']?.toString() ?? '',
+            expectedRowVersion:row.readNullable<int>('base_row_version'),
+            workSummary:payload['work_summary']?.toString() ?? '',
+          );
 
     if (response['status']?.toString() == 'conflict') {
       await _database.transaction(() async {
@@ -608,6 +633,12 @@ class OfflineWorkFindingsService {
         businessId,
         Map<String, dynamic>.from(raw),
       );
+      if (isNewVisit) {
+        await _database.customStatement(
+          'DELETE FROM local_job_visits WHERE business_id=? AND id=?',
+          [businessId,payload['visit_id']?.toString()],
+        );
+      }
       await _database.customStatement(
         'DELETE FROM sync_outbox WHERE id = ?',
         [row.read<int>('id')],

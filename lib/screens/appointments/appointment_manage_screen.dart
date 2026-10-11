@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/appointment_action_policy.dart';
+import '../../core/connection_mode.dart';
+import '../../services/appointment_sync_service.dart';
+import '../../services/local_customer_repository.dart';
 import '../../services/briskers_api.dart';
 
 class AppointmentManageScreen extends StatefulWidget {
@@ -9,10 +13,12 @@ class AppointmentManageScreen extends StatefulWidget {
     super.key,
     required this.businessId,
     this.appointment,
+    this.isOwner = false,
   });
 
   final String businessId;
   final Map<String, dynamic>? appointment;
+  final bool isOwner;
 
   @override
   State<AppointmentManageScreen> createState() =>
@@ -21,6 +27,12 @@ class AppointmentManageScreen extends StatefulWidget {
 
 class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   static const _api = BriskersApi();
+  final AppointmentSyncService _sync = AppointmentSyncService();
+  final LocalCustomerRepository _localCustomers = LocalCustomerRepository();
+  bool get _pendingCreate => widget.appointment?['id']
+          ?.toString().startsWith('local-appointment-') == true;
+  // Existing appointments are always edited locally first in Auto mode too.
+  bool get _offlineEditing => _editing;
 
   final _title = TextEditingController(text: 'Service appointment');
   final _description = TextEditingController();
@@ -75,13 +87,47 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   }
 
   Future<void> _load() async {
+    if (_offlineEditing || BriskersConnectionModeController.instance.forceOffline) {
+      final item = widget.appointment ?? const <String,dynamic>{};
+      final cachedCustomers = _pendingCreate || !_editing ||
+              widget.appointment?['job_id'] == null
+          ? await _localCustomers.customers(widget.businessId)
+          : <Map<String,dynamic>>[];
+      if ((_pendingCreate || !_editing || widget.appointment?['job_id'] == null) && _customerId != null) {
+        await _loadLocalVehicles(_customerId!);
+      }
+      setState(() {
+        _customers = _pendingCreate || !_editing || widget.appointment?['job_id'] == null ? cachedCustomers : [{'id':_customerId, 'display_name':item['customer'] ?? 'Customer'}];
+        if (!_pendingCreate && widget.appointment?['job_id'] != null) {
+          _vehicles = _vehicleId == null ? const [] : [{
+            'id': _vehicleId, 'year': item['vehicle_year'],
+            'make': item['vehicle_make'], 'model': item['vehicle_model'],
+          }];
+        }
+        _employees = _employeeId == null ? const [] : [{
+          'id':_employeeId, 'display_name':item['mechanic'] ?? 'Assigned',
+        }];
+        _loading = false;
+      });
+      return;
+    }
     try {
-      final results = await Future.wait<dynamic>([
-        _api.customers(widget.businessId, limit: 100),
-        _api.assignableEmployees(widget.businessId),
-      ]);
-      final customers = List<Map<String, dynamic>>.from(results[0] as List);
-      final employees = List<Map<String, dynamic>>.from(results[1] as List);
+      // Automatic mode is local-first: a network failure must not prevent
+      // opening the appointment editor or choosing a cached customer.
+      final localCustomers = await _localCustomers.customers(widget.businessId);
+      final customers = localCustomers.isNotEmpty
+          ? localCustomers
+          : await _api.customers(widget.businessId, limit: 100);
+      List<Map<String, dynamic>> employees;
+      try {
+        employees = await _api.assignableEmployees(widget.businessId);
+      } catch (_) {
+        employees = _employeeId == null ? <Map<String, dynamic>>[] : [{
+          'id': _employeeId,
+          'name': widget.appointment?['mechanic'] ?? 'Assigned',
+          'position_name': 'Employee',
+        }];
+      }
 
       if (_editing &&
           _customerId != null &&
@@ -94,7 +140,16 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
       }
 
       if (_customerId != null) {
-        await _loadVehicles(_customerId!, updateState: false);
+        if (localCustomers.isNotEmpty) {
+          final detail = await _localCustomers.customerDetail(
+            widget.businessId, _customerId!,
+          );
+          _vehicles = List<Map<String,dynamic>>.from(
+            detail?['vehicles'] as List? ?? const [],
+          );
+        } else {
+          await _loadVehicles(_customerId!, updateState: false);
+        }
       }
 
       if (!mounted) return;
@@ -110,6 +165,20 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
         _error = error.toString();
       });
     }
+  }
+
+  Future<void> _loadLocalVehicles(String customerId) async {
+    final detail = await _localCustomers.customerDetail(widget.businessId,customerId);
+    final vehicles = List<Map<String,dynamic>>.from(
+      detail?['vehicles'] as List? ?? const [],
+    );
+    if (!mounted) return;
+    setState(() {
+      _vehicles = vehicles;
+      if (!_vehicles.any((v) => v['id']?.toString() == _vehicleId)) {
+        _vehicleId = null;
+      }
+    });
   }
 
   Future<void> _loadVehicles(
@@ -187,6 +256,16 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   }
 
   Future<void> _save() async {
+    if (_editing && !AppointmentActionPolicy.canEdit(
+      canManage: true,
+      isOwner: widget.isOwner,
+      linkedJob: widget.appointment?['job_id'] != null,
+      status: widget.appointment?['status']?.toString() ?? '',
+      conflict: widget.appointment?['sync_state'] == 'conflict',
+    )) {
+      setState(() => _error = 'This appointment cannot be edited with your permissions.');
+      return;
+    }
     final customerId = _customerId;
     final title = _title.text.trim();
     if (customerId == null) {
@@ -205,22 +284,35 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
 
     try {
       final endsAt = _startsAt.add(Duration(minutes: _durationMinutes));
-      if (_editing) {
+      if (!_editing) {
+        await _sync.queueCreate(widget.businessId,
+          customerId: customerId,vehicleId: _vehicleId,
+          title: title,
+          description: _description.text.trim().isEmpty
+              ? null : _description.text.trim(),
+          startsAt: _startsAt,endsAt: endsAt,employeeId: _employeeId,
+        );
+      } else if (_offlineEditing) {
+        if (_pendingCreate && (customerId != widget.appointment!['customer_id']?.toString() ||
+            _vehicleId != widget.appointment!['vehicle_id']?.toString())) {
+          await _sync.reassignPendingCreate(widget.businessId,
+            widget.appointment!['id'].toString(),
+            customerId: customerId,vehicleId: _vehicleId);
+        }
+        await _sync.queueEdit(
+          widget.businessId, widget.appointment!['id'].toString(),
+          title: title,
+          description: _description.text.trim().isEmpty ? null : _description.text.trim(),
+          startsAt: _startsAt, endsAt: endsAt,
+          employeeId: _employeeId,
+          customerId: _pendingCreate ? null : customerId,
+          vehicleId: _vehicleId,
+          isOwner: widget.isOwner,
+        );
+      } else if (_editing) {
         await _api.updateAppointment(
           widget.businessId,
           widget.appointment!['id'].toString(),
-          customerId: customerId,
-          vehicleId: _vehicleId,
-          title: title,
-          description:
-              _description.text.trim().isEmpty ? null : _description.text.trim(),
-          startsAt: _startsAt,
-          endsAt: endsAt,
-          employeeId: _employeeId,
-        );
-      } else {
-        await _api.createAppointment(
-          widget.businessId,
           customerId: customerId,
           vehicleId: _vehicleId,
           title: title,
@@ -276,13 +368,20 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                   ),
                 )
                 .toList(),
-            onChanged: (value) async {
+            onChanged: _editing && widget.appointment?['job_id'] != null
+                ? null : (value) async {
               setState(() {
                 _customerId = value;
                 _vehicleId = null;
                 _vehicles = const [];
               });
-              if (value != null) await _loadVehicles(value);
+              if (value != null) {
+                if (_offlineEditing || BriskersConnectionModeController.instance.forceOffline ||
+                    await _localCustomers.hasBootstrap(widget.businessId)) {
+                  await _loadLocalVehicles(value);
+                }
+                else { await _loadVehicles(value); }
+              }
             },
           ),
           const SizedBox(height: 12),
@@ -313,7 +412,8 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                 ),
               ),
             ],
-            onChanged: (value) => setState(() => _vehicleId = value),
+            onChanged: _editing && widget.appointment?['job_id'] != null
+                ? null : (value) => setState(() => _vehicleId = value),
           ),
           const SizedBox(height: 12),
           TextField(

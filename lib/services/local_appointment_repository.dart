@@ -34,7 +34,7 @@ class LocalAppointmentRepository {
     final now = DateTime.now().toUtc();
     final today = DateTime.utc(now.year, now.month, now.day);
     final tomorrow = today.add(const Duration(days: 1));
-    final where = <String>['a.business_id = ?'];
+    final where = <String>["a.business_id = ?", "a.sync_state <> 'pending_delete'"];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
 
     if (filter == 'today') {

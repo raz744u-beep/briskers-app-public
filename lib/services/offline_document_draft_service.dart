@@ -8,6 +8,7 @@ import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_document_detail_cache.dart';
 import 'local_document_repository.dart';
+import 'offline_invoice_payment_ledger.dart';
 
 class OfflineDocumentDraftService {
   OfflineDocumentDraftService({
@@ -773,6 +774,14 @@ class OfflineDocumentDraftService {
             '_server_document_id': serverId,
           },
         );
+
+        if (payload['kind'] == 'invoice') {
+          await OfflineInvoicePaymentLedger(database: _database).remapInvoice(
+            businessId,
+            localId,
+            serverId,
+          );
+        }
 
         if (payload['kind'] == 'estimate') {
           await _remapPendingEstimateMerges(

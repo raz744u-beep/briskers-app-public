@@ -1,0 +1,47 @@
+name: Briskers iOS compile check
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'test/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/ios-compile.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ios-compile:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate iOS runner
+        run: |
+          mkdir generated
+          cd generated
+          flutter create --platforms=ios --org com.briskers --project-name briskers_app .
+          rm -rf lib test
+          cp -R ../lib ./lib
+          cp -R ../test ./test
+          if [ -d ../assets ]; then cp -R ../assets ./assets; fi
+          cp ../pubspec.yaml ./pubspec.yaml
+          cp ../analysis_options.yaml ./analysis_options.yaml
+      - name: Resolve Flutter dependencies
+        working-directory: generated
+        run: flutter pub get
+      - name: Generate Drift database files
+        working-directory: generated
+        run: dart run build_runner build --delete-conflicting-outputs
+      - name: Analyze shared Flutter code
+        working-directory: generated
+        run: flutter analyze
+      - name: Compile iOS without code signing
+        working-directory: generated
+        run: flutter build ios --no-codesign

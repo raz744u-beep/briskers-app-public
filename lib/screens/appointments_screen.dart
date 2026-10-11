@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
+import '../core/appointment_action_policy.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
@@ -145,8 +146,53 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   List<Map<String, dynamic>> get _visibleAppointments =>
       _appointments ?? const <Map<String, dynamic>>[];
 
+  Future<void> _showDeletionConflicts() async {
+    if (widget.roleCode != 'owner') return;
+    try {
+      final conflicts = await _appointmentSync.deletionConflicts(
+        widget.businessId, isOwner: true,
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Appointment deletion conflicts'),
+          content: SizedBox(
+            width: 440,
+            child: conflicts.isEmpty
+                ? const Text('No unresolved deletion conflicts.')
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: conflicts.length,
+                    separatorBuilder: (context, index) => const Divider(),
+                    itemBuilder: (_, index) {
+                      final conflict = conflicts[index];
+                      return ListTile(
+                        title: Text(conflict['customer']?.toString() ??
+                            conflict['title']?.toString() ?? 'Appointment'),
+                        subtitle: Text(
+                          'ID: ${conflict['appointment_id']}\n'
+                          'Reason: ${conflict['error'] ?? 'Server version changed'}',
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
   Future<void> _addAppointment() async {
-    if (!_onlineReady || !_canManage) return;
+    if (!_canManage) return;
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -159,13 +205,15 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   }
 
   Future<void> _editAppointment(Map<String, dynamic> item) async {
-    if (!_onlineReady || !_canManage) return;
+    if (!_canManage) return;
+    // A cached appointment remains editable when Auto loses connectivity.
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => AppointmentManageScreen(
           businessId: widget.businessId,
           appointment: item,
+          isOwner: widget.roleCode == 'owner',
         ),
       ),
     );
@@ -220,7 +268,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   }
 
   Future<void> _deleteAppointment(Map<String, dynamic> item) async {
-    if (!_onlineReady || widget.roleCode != 'owner') return;
+    if (widget.roleCode != 'owner') return;
+    final isPendingCreate = item['id']?.toString().startsWith('local-appointment-') == true;
+
     final ok = await _confirm(
       title: 'Delete appointment?',
       message:
@@ -230,7 +280,14 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     );
     if (!ok) return;
     try {
-      await _api.deleteAppointment(widget.businessId, item['id'].toString());
+      if (isPendingCreate) {
+        await _appointmentSync.deletePendingCreate(widget.businessId,
+          item['id'].toString(), isOwner: true);
+      } else {
+        await _appointmentSync.queueDeleteSynced(
+          widget.businessId,item['id'].toString(),isOwner:true,
+        );
+      }
       await _load();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -241,13 +298,25 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     Map<String, dynamic> item,
     String status,
   ) async {
-    if (!_onlineReady || !_canManage) return;
+    if (!_canManage) return;
     try {
-      await _api.setAppointmentStatus(
-        widget.businessId,
-        item['id'].toString(),
-        status,
-      );
+      if (status == 'cancelled') {
+        if (item['id'].toString().startsWith('local-appointment-')) {
+          await _appointmentSync.cancelPendingCreate(
+            widget.businessId,item['id'].toString(),canManage:true,
+          );
+        } else {
+          await _appointmentSync.queueCancel(
+            widget.businessId, item['id'].toString(),
+            canManage: true,
+          );
+        }
+      } else {
+        if (!_onlineReady) return;
+        await _api.setAppointmentStatus(
+          widget.businessId,item['id'].toString(),status,
+        );
+      }
       await _load();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -357,23 +426,31 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final syncState = item['sync_state']?.toString() ?? 'synced';
     final queued = syncState == 'pending';
     final conflict = syncState == 'conflict';
-    final canEdit = _onlineReady &&
-        _canManage &&
-        {'confirmed', 'tentative'}.contains(status) &&
-        item['job_id'] == null &&
-        !queued &&
-        !conflict;
+    final canEdit = AppointmentActionPolicy.canEdit(
+      canManage: _canManage,
+      isOwner: widget.roleCode == 'owner',
+      linkedJob: item['job_id'] != null,
+      status: status,
+      conflict: conflict,
+    );
     final canCheckIn = _canCheckIn &&
         item['can_check_in'] == true &&
         item['job_id'] == null &&
-        !queued &&
-        !conflict;
-    final canCancel = canEdit;
-    final canDelete = _onlineReady &&
-        widget.roleCode == 'owner' &&
-        item['job_id'] == null &&
-        item['request_id'] == null &&
-        {'confirmed', 'tentative', 'cancelled', 'no_show'}.contains(status);
+        !queued && !conflict;
+    final canCancel = AppointmentActionPolicy.canCancel(
+      canManage: _canManage,
+      linkedJob: item['job_id'] != null,
+      status: status,
+      pending: queued,
+      conflict: conflict,
+    );
+    final canDelete = AppointmentActionPolicy.canDelete(
+      isOwner: widget.roleCode == 'owner',
+      linkedJob: item['job_id'] != null,
+      linkedRequest: item['request_id'] != null,
+      pending: queued,
+      conflict: conflict,
+    );
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -586,7 +663,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                         ),
                       ),
                     ),
-                    if (_canManage && _onlineReady) ...[
+                    if (_canManage) ...[
                       const SizedBox(width: 8),
                       FilledButton.icon(
                         style: FilledButton.styleFrom(
@@ -597,6 +674,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                         label: Text(tr('add')),
                       ),
                     ],
+                    if (widget.roleCode == 'owner')
+                      IconButton(
+                        tooltip: 'Deletion conflicts',
+                        onPressed: _showDeletionConflicts,
+                        icon: const Icon(Icons.rule_folder_outlined),
+                      ),
                     const Spacer(),
                     Text(
                       '${tr('total')} $total',

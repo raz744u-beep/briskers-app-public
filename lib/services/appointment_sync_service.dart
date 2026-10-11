@@ -211,6 +211,487 @@ class AppointmentSyncService {
     }
   }
 
+  /// A never-synchronized appointment starts as one local create operation.
+  /// The server must allocate its permanent identity through an idempotent
+  /// create endpoint before this queue is enabled for release.
+  Future<String> queueCreate(
+    String businessId, {
+    required String customerId,
+    String? vehicleId,
+    required String title,
+    String? description,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    String? employeeId,
+  }) async {
+    if (customerId.isEmpty || title.trim().isEmpty ||
+        !endsAt.isAfter(startsAt)) {
+      throw ArgumentError('Valid customer, title, and appointment times required.');
+    }
+    await _checkCachedVehicleAssociation(businessId,customerId,vehicleId);
+    final operationId = _operationId('appointment-create');
+    final localId = 'local-appointment-$operationId';
+    final payload = <String, dynamic>{
+      'operation_id': operationId,
+      'local_id': localId,
+      'customer_id': customerId,
+      'vehicle_id': vehicleId,
+      'title': title.trim(),
+      'description': description,
+      'starts_at': startsAt.toUtc().toIso8601String(),
+      'ends_at': endsAt.toUtc().toIso8601String(),
+      'employee_id': employeeId,
+    };
+    await _database.transaction(() async {
+      await _database.customStatement(
+        """INSERT INTO local_appointments (
+          id,business_id,customer_id,vehicle_id,employee_id,
+          starts_at,ends_at,status,title,description,
+          can_check_in,sync_state
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,0,'pending')""",
+        [localId,businessId,customerId,vehicleId,employeeId,
+         _unix(startsAt),_unix(endsAt),'confirmed',title.trim(),description],
+      );
+      await _database.customStatement(
+        """INSERT INTO sync_outbox (
+          business_id,entity_type,entity_id,operation,payload_json,
+          base_row_version,state,attempt_count,created_at,last_attempt_at,last_error
+        ) VALUES (?,'appointment_create',?,'create',?,NULL,'pending',0,?,NULL,NULL)""",
+        [businessId,localId,jsonEncode(payload),_unix(DateTime.now().toUtc())],
+      );
+    });
+    _syncEvents.add(businessId);
+    return localId;
+  }
+
+  /// Cancel an appointment created offline before any upload attempt.
+  /// Its original create operation is retained and modified to send status
+  /// after creation, so the cancellation remains in appointment history.
+  Future<void> cancelPendingCreate(
+    String businessId, String appointmentId, {
+    required bool canManage,
+  }) async {
+    if (!canManage) throw StateError('Appointment management access required.');
+    if (!appointmentId.startsWith('local-appointment-')) {
+      throw StateError('Expected a never-synced appointment.');
+    }
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        """SELECT job_id,status FROM local_appointments
+           WHERE business_id=? AND id=?""",
+        variables:[Variable<String>(businessId),Variable<String>(appointmentId)],
+      ).get();
+      if (rows.length!=1 || rows.single.readNullable<String>('job_id')!=null ||
+          !{'confirmed','tentative'}.contains(rows.single.read<String>('status'))) {
+        throw StateError('Appointment cannot be cancelled.');
+      }
+      final queued=await _database.customSelect(
+        """SELECT id,payload_json,attempt_count,last_attempt_at
+           FROM sync_outbox WHERE business_id=? AND entity_id=?
+           AND entity_type='appointment_create' AND state='pending' LIMIT 1""",
+        variables:[Variable<String>(businessId),Variable<String>(appointmentId)],
+      ).get();
+      if (queued.length!=1 || queued.single.read<int>('attempt_count')!=0 ||
+          queued.single.readNullable<int>('last_attempt_at')!=null) {
+        throw StateError('Creation has started syncing; reconcile first.');
+      }
+      final payload=Map<String,dynamic>.from(
+        jsonDecode(queued.single.read<String>('payload_json')) as Map);
+      payload['cancel_after_create']=true;
+      await _database.customStatement(
+        'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+        [jsonEncode(payload),queued.single.read<int>('id')],
+      );
+      await _database.customStatement(
+        """UPDATE local_appointments SET status='cancelled',can_check_in=0
+           WHERE business_id=? AND id=?""",
+        [businessId,appointmentId],
+      );
+    });
+    _syncEvents.add(businessId);
+  }
+
+  /// Stage a secretary/owner cancellation locally, without deleting history.
+  /// Server replay is a separate release gate; never mark queued cancel synced
+  /// until the version-guarded cancellation endpoint confirms it.
+  Future<void> queueCancel(
+    String businessId, String appointmentId, {
+    required bool canManage,
+  }) async {
+    if (!canManage) throw StateError('Appointment management access required.');
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        'SELECT * FROM local_appointments WHERE business_id=? AND id=?',
+        variables:[Variable<String>(businessId),Variable<String>(appointmentId)],
+      ).get();
+      if (rows.length != 1) throw StateError('Appointment is not cached.');
+      final row=rows.single;
+      if (row.readNullable<String>('job_id') != null) {
+        throw StateError('Linked Job appointments cannot be cancelled offline.');
+      }
+      if (!{'confirmed','tentative'}.contains(row.read<String>('status'))) {
+        throw StateError('Appointment is not eligible for cancellation.');
+      }
+      if (row.read<String>('sync_state') != 'synced') {
+        throw StateError('Resolve pending appointment operations before cancellation.');
+      }
+      await _database.customStatement(
+        """INSERT INTO sync_outbox
+          (business_id,entity_type,entity_id,operation,payload_json,
+           base_row_version,state,attempt_count,created_at)
+          VALUES (?,'appointment_cancel',?,'cancel',?,?,'pending',0,?)""",
+        [businessId,appointmentId,jsonEncode({
+          'operation_id':_operationId('appointment-cancel'),
+          'appointment_id':appointmentId,
+          'status':'cancelled',
+        }),row.readNullable<int>('row_version'),
+         _unix(DateTime.now().toUtc())],
+      );
+      await _database.customStatement(
+        """UPDATE local_appointments SET status='cancelled',sync_state='pending',
+           can_check_in=0 WHERE business_id=? AND id=?""",
+        [businessId,appointmentId],
+      );
+    });
+    _syncEvents.add(businessId);
+  }
+
+  /// Owner-only read of unresolved appointment deletion conflicts.
+  /// Tombstoned records remain hidden from regular appointment lists.
+  Future<List<Map<String, dynamic>>> deletionConflicts(
+    String businessId, {required bool isOwner}) async {
+    if (!isOwner) throw StateError('Owner access required.');
+    final rows = await _database.customSelect(
+      """SELECT o.id,o.entity_id,o.last_error,o.attempt_count,
+                a.customer_name,a.title,a.status
+         FROM sync_outbox o
+         LEFT JOIN local_appointments a
+           ON a.business_id=o.business_id AND a.id=o.entity_id
+         WHERE o.business_id=? AND o.entity_type='appointment_delete'
+           AND o.state='conflict'
+         ORDER BY o.id""",
+      variables:[Variable<String>(businessId)],
+    ).get();
+    return rows.map((row)=> <String,dynamic>{
+      'queue_id':row.read<int>('id'),
+      'appointment_id':row.read<String>('entity_id'),
+      'customer':row.readNullable<String>('customer_name'),
+      'title':row.readNullable<String>('title'),
+      'status':row.readNullable<String>('status'),
+      'attempts':row.read<int>('attempt_count'),
+      'error':row.readNullable<String>('last_error'),
+    }).toList();
+  }
+
+  /// Stage owner-only deletion of a synchronized, unlinked appointment.
+  /// A local tombstone prevents sync pulls from resurrecting it.
+  Future<void> queueDeleteSynced(
+    String businessId, String appointmentId, {
+    required bool isOwner,
+  }) async {
+    if (!isOwner) throw StateError('Only the owner can delete appointments.');
+    await _database.transaction(() async {
+      final rows=await _database.customSelect(
+        'SELECT * FROM local_appointments WHERE business_id=? AND id=?',
+        variables:[Variable<String>(businessId),Variable<String>(appointmentId)],
+      ).get();
+      if (rows.length!=1) throw StateError('Appointment not cached.');
+      final row=rows.single;
+      if (row.read<String>('sync_state')!='synced' ||
+          row.readNullable<String>('job_id')!=null ||
+          row.readNullable<String>('request_id')!=null) {
+        throw StateError('Resolve sync or linked records before deleting.');
+      }
+      await _database.customStatement(
+        """INSERT INTO sync_outbox
+          (business_id,entity_type,entity_id,operation,payload_json,
+           base_row_version,state,attempt_count,created_at)
+          VALUES (?,'appointment_delete',?,'delete',?,?,'pending',0,?)""",
+        [businessId,appointmentId,jsonEncode({
+          'operation_id':_operationId('appointment-delete'),
+          'appointment_id':appointmentId,
+        }),row.readNullable<int>('row_version'),
+         _unix(DateTime.now().toUtc())],
+      );
+      await _database.customStatement(
+        """UPDATE local_appointments SET sync_state='pending_delete',
+           can_check_in=0 WHERE business_id=? AND id=?""",
+        [businessId,appointmentId],
+      );
+    });
+    _syncEvents.add(businessId);
+  }
+
+  /// Owner-only deletion before first upload: remove the cached appointment
+  /// and its unsent create operation in one transaction. Never delete an
+  /// already-attempted create because the server may have accepted it.
+  Future<void> deletePendingCreate(
+    String businessId, String appointmentId, {
+    required bool isOwner,
+  }) async {
+    if (!isOwner) throw StateError('Only the owner can delete appointments.');
+    if (!appointmentId.startsWith('local-appointment-')) {
+      throw StateError('Synced appointments require server-side deletion.');
+    }
+    await _database.transaction(() async {
+      final records = await _database.customSelect(
+        'SELECT job_id FROM local_appointments WHERE business_id=? AND id=?',
+        variables: [Variable<String>(businessId),
+                    Variable<String>(appointmentId)],
+      ).get();
+      if (records.length != 1 ||
+          records.single.readNullable<String>('job_id') != null) {
+        throw StateError('Linked or missing appointments cannot be deleted.');
+      }
+      final queue = await _database.customSelect(
+        """SELECT id,attempt_count,last_attempt_at FROM sync_outbox
+           WHERE business_id=? AND entity_id=?
+           AND entity_type='appointment_create' AND state='pending'""",
+        variables: [Variable<String>(businessId),
+                    Variable<String>(appointmentId)],
+      ).get();
+      if (queue.length != 1 || queue.single.read<int>('attempt_count') != 0 ||
+          queue.single.readNullable<int>('last_attempt_at') != null) {
+        throw StateError('Appointment creation may already have reached server.');
+      }
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id=?',
+        [queue.single.read<int>('id')],
+      );
+      await _database.customStatement(
+        'DELETE FROM local_appointments WHERE business_id=? AND id=?',
+        [businessId,appointmentId],
+      );
+    });
+    _syncEvents.add(businessId);
+  }
+
+  /// Reassign an appointment that has never been uploaded. Both its cached
+  /// record and original create payload change in the same transaction.
+  Future<void> reassignPendingCreate(
+    String businessId, String appointmentId, {
+    required String customerId,
+    String? vehicleId,
+  }) async {
+    if (!appointmentId.startsWith('local-appointment-') ||
+        customerId.trim().isEmpty) {
+      throw ArgumentError('A pending appointment and customer are required.');
+    }
+    await _database.transaction(() async {
+      final records = await _database.customSelect(
+        """SELECT job_id FROM local_appointments
+           WHERE business_id=? AND id=? LIMIT 1""",
+        variables: [Variable<String>(businessId),
+                    Variable<String>(appointmentId)],
+      ).get();
+      if (records.length != 1 ||
+          records.single.readNullable<String>('job_id') != null) {
+        throw StateError('Appointment is missing or linked to a Job.');
+      }
+      final queue = await _database.customSelect(
+        """SELECT id,payload_json,attempt_count,last_attempt_at
+           FROM sync_outbox WHERE business_id=? AND entity_id=?
+           AND entity_type='appointment_create' AND state='pending' LIMIT 1""",
+        variables: [Variable<String>(businessId),
+                    Variable<String>(appointmentId)],
+      ).get();
+      if (queue.length != 1 ||
+          queue.single.read<int>('attempt_count') != 0 ||
+          queue.single.readNullable<int>('last_attempt_at') != null) {
+        throw StateError('Appointment creation has started synchronizing.');
+      }
+      final data = Map<String,dynamic>.from(
+        jsonDecode(queue.single.read<String>('payload_json')) as Map);
+      await _checkCachedVehicleAssociation(businessId,customerId,vehicleId);
+      data['customer_id'] = customerId;
+      data['vehicle_id'] = vehicleId;
+      await _database.customStatement(
+        'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+        [jsonEncode(data),queue.single.read<int>('id')],
+      );
+      await _database.customStatement(
+        """UPDATE local_appointments SET customer_id=?,vehicle_id=?,
+           customer_name=NULL,vehicle_label=NULL,
+           vehicle_year=NULL,vehicle_make=NULL,vehicle_model=NULL
+           WHERE business_id=? AND id=?""",
+        [customerId,vehicleId,businessId,appointmentId],
+      );
+    });
+    _syncEvents.add(businessId);
+  }
+
+  /// First stage of offline appointment editing. This records the complete
+  /// requested edit atomically with its base revision. It does not attempt
+  /// network writes; a server conflict-aware replay is required before this
+  /// can be exposed as a completed UI workflow.
+  /// Reject vehicle selections not linked to the selected local customer.
+  Future<void> _checkCachedVehicleAssociation(
+    String businessId, String customerId, String? vehicleId,
+  ) async {
+    if (vehicleId == null) return;
+    final rows = await _database.customSelect(
+      """SELECT 1 FROM local_customer_vehicles
+         WHERE business_id=? AND customer_id=? AND vehicle_id=? LIMIT 1""",
+      variables: [
+        Variable<String>(businessId),Variable<String>(customerId),
+        Variable<String>(vehicleId),
+      ],
+    ).get();
+    if (rows.isEmpty) {
+      throw StateError('Selected vehicle is not associated with this customer.');
+    }
+  }
+
+  Future<void> queueEdit(
+    String businessId,
+    String appointmentId, {
+    required String title,
+    String? description,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    String? employeeId,
+    String? customerId,
+    String? vehicleId,
+    required bool isOwner,
+  }) async {
+    if (!endsAt.isAfter(startsAt)) {
+      throw ArgumentError('Appointment end must follow start.');
+    }
+    if (title.trim().isEmpty) {
+      throw ArgumentError('Appointment title is required.');
+    }
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        'SELECT * FROM local_appointments WHERE business_id=? AND id=? LIMIT 1',
+        variables: [Variable<String>(businessId), Variable<String>(appointmentId)],
+      ).get();
+      if (rows.isEmpty) {
+        throw StateError('Appointment is not cached on this device.');
+      }
+      final row = rows.single;
+      if (appointmentId.startsWith('local-appointment-')) {
+        final creates = await _database.customSelect(
+          """SELECT id,payload_json,attempt_count,last_attempt_at
+             FROM sync_outbox WHERE business_id=? AND entity_id=?
+             AND entity_type='appointment_create' AND state='pending'
+             LIMIT 1""",
+          variables: [Variable<String>(businessId),
+                      Variable<String>(appointmentId)],
+        ).get();
+        if (creates.length != 1 ||
+            creates.single.read<int>('attempt_count') > 0 ||
+            creates.single.readNullable<int>('last_attempt_at') != null) {
+          throw StateError('Appointment creation is already synchronizing.');
+        }
+        final pendingCreate = Map<String,dynamic>.from(
+          jsonDecode(creates.single.read<String>('payload_json')) as Map);
+        pendingCreate['title'] = title.trim();
+        pendingCreate['description'] = description;
+        pendingCreate['starts_at'] = startsAt.toUtc().toIso8601String();
+        pendingCreate['ends_at'] = endsAt.toUtc().toIso8601String();
+        pendingCreate['employee_id'] = employeeId;
+        await _database.customStatement(
+          'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+          [jsonEncode(pendingCreate),creates.single.read<int>('id')],
+        );
+        await _database.customStatement(
+          """UPDATE local_appointments SET title=?,description=?,starts_at=?,
+             ends_at=?,employee_id=? WHERE business_id=? AND id=?""",
+          [title.trim(),description,_unix(startsAt),_unix(endsAt),
+           employeeId,businessId,appointmentId],
+        );
+        return;
+      }
+      final syncState = row.read<String>('sync_state');
+      if (syncState == 'conflict') {
+        throw StateError('Resolve the synchronization conflict first.');
+      }
+      final queued = await _database.customSelect(
+        """SELECT id, payload_json, attempt_count, last_attempt_at
+           FROM sync_outbox WHERE business_id=? AND entity_id=?
+           AND entity_type='appointment_edit' AND state='pending'
+           ORDER BY id LIMIT 1""",
+        variables: [Variable<String>(businessId),
+                    Variable<String>(appointmentId)],
+      ).get();
+      if (syncState != 'synced' && queued.isEmpty) {
+        throw StateError('An unfinished appointment operation needs review.');
+      }
+      if (queued.isNotEmpty &&
+          (queued.single.read<int>('attempt_count') > 0 ||
+           queued.single.readNullable<int>('last_attempt_at') != null)) {
+        throw StateError(
+          'This edit may already have reached the server. Sync before editing again.',
+        );
+      }
+      if (!isOwner &&
+          (row.read<String>('status') != 'confirmed' ||
+           row.readNullable<String>('job_id') != null)) {
+        throw StateError('Owner access required for this appointment.');
+      }
+      final oldCustomer = row.read<String>('customer_id');
+      final oldVehicle = row.readNullable<String>('vehicle_id');
+      final selectedCustomer = customerId ?? oldCustomer;
+      final selectedVehicle = customerId == null ? oldVehicle : vehicleId;
+      final reassigned = selectedCustomer != oldCustomer ||
+          selectedVehicle != oldVehicle;
+      if (reassigned) {
+        await _checkCachedVehicleAssociation(
+          businessId,selectedCustomer,selectedVehicle,
+        );
+      }
+      if (reassigned && row.readNullable<String>('job_id') != null) {
+        throw StateError('Cannot reassign an appointment linked to a Job.');
+      }
+      final existingPayload = queued.isEmpty
+          ? null
+          : Map<String, dynamic>.from(
+              jsonDecode(queued.single.read<String>('payload_json')) as Map);
+      final op = existingPayload?['operation_id']?.toString() ??
+          _operationId('appointment-edit');
+      final payload = jsonEncode({
+        'operation_id': op,
+        'appointment_id': appointmentId,
+        if (reassigned || existingPayload?['customer_id'] != null)
+          'customer_id': selectedCustomer,
+        if (reassigned || existingPayload?['customer_id'] != null)
+          'vehicle_id': selectedVehicle,
+        'title': title.trim(),
+        'description': description,
+        'starts_at': startsAt.toUtc().toIso8601String(),
+        'ends_at': endsAt.toUtc().toIso8601String(),
+        'employee_id': employeeId,
+      });
+      if (queued.isEmpty) {
+        await _database.customStatement(
+          """INSERT INTO sync_outbox (
+            business_id,entity_type,entity_id,operation,payload_json,
+            base_row_version,state,attempt_count,created_at,last_attempt_at,last_error
+          ) VALUES (?, 'appointment_edit', ?, 'update', ?, ?, 'pending', 0, ?, NULL, NULL)""",
+          [businessId, appointmentId, payload,
+           row.readNullable<int>('row_version'), _unix(DateTime.now().toUtc())],
+        );
+      } else {
+        // This UUID has not been attempted, so replacing its payload cannot
+        // cause a mismatched retry of an already accepted server operation.
+        await _database.customStatement(
+          'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+          [payload, queued.single.read<int>('id')],
+        );
+      }
+      await _database.customStatement(
+        """UPDATE local_appointments SET title=?,description=?,starts_at=?,
+          ends_at=?,employee_id=?,customer_id=?,vehicle_id=?,
+          sync_state='pending' WHERE business_id=? AND id=?""",
+        [
+          title.trim(), description, _unix(startsAt), _unix(endsAt),
+          employeeId, selectedCustomer, selectedVehicle,
+          businessId, appointmentId,
+        ],
+      );
+    });
+  }
+
   Future<void> queueCheckIn(
     String businessId,
     String appointmentId,
@@ -310,6 +791,309 @@ class AppointmentSyncService {
         [businessId, appointmentId],
       );
     });
+  }
+
+  /// Atomically retain the acknowledged appointment in the local list.
+  /// Kept separate so diagnostics can exercise the real SQLite transition.
+  Future<void> acknowledgeCreatedAppointment(
+    String businessId, String localId, String serverId, int queueId, {
+    int serverVersion = 1,
+  }) async {
+    if (serverId.isEmpty || serverId.startsWith('local-')) {
+      throw StateError('A permanent appointment ID is required.');
+    }
+    await _database.transaction(() async {
+      final existing = await _database.customSelect(
+        'SELECT id FROM local_appointments WHERE business_id=? AND id=?',
+        variables: [Variable<String>(businessId), Variable<String>(serverId)],
+      ).get();
+      if (existing.isNotEmpty) {
+        await _database.customStatement(
+          'DELETE FROM local_appointments WHERE business_id=? AND id=?',
+          [businessId,localId],
+        );
+      } else {
+        await _database.customStatement(
+          """UPDATE local_appointments SET id=?,sync_state='synced',
+             row_version=? WHERE business_id=? AND id=?""",
+          [serverId,serverVersion,businessId,localId],
+        );
+      }
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id=? AND business_id=?',
+        [queueId,businessId],
+      );
+    });
+  }
+
+  /// Do not send an appointment while its referenced customer or vehicle is
+  /// still a local-only record. A dependent appointment stays safely queued.
+  Future<bool> dependenciesReadyForCreate(
+    String businessId, String customerId, String? vehicleId,
+  ) async {
+    if (customerId.startsWith('local-') ||
+        (vehicleId?.startsWith('local-') ?? false)) {
+      return false;
+    }
+    final customers=await _database.customSelect(
+      'SELECT sync_state FROM local_customers WHERE business_id=? AND id=?',
+      variables:[Variable<String>(businessId),Variable<String>(customerId)],
+    ).get();
+    if (customers.isNotEmpty &&
+        customers.single.read<String>('sync_state') != 'synced') {
+      return false;
+    }
+    if (vehicleId != null) {
+      final vehicles=await _database.customSelect(
+        'SELECT sync_state FROM local_vehicles WHERE business_id=? AND id=?',
+        variables:[Variable<String>(businessId),Variable<String>(vehicleId)],
+      ).get();
+      if (vehicles.isNotEmpty &&
+          vehicles.single.read<String>('sync_state') != 'synced') {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Send never-synchronized creations before queued edits/check-ins.
+  /// A retry retains the original operation ID until the server confirms it.
+  Future<void> flushCreates(String businessId) async {
+    final rows = await _database.customSelect(
+      """SELECT * FROM sync_outbox WHERE business_id=?
+         AND entity_type='appointment_create'
+         AND state IN ('pending','inflight') ORDER BY id""",
+      variables: [Variable<String>(businessId)],
+    ).get();
+    for (final row in rows) {
+      final queueId = row.read<int>('id');
+      final localId = row.read<String>('entity_id');
+      final data = Map<String,dynamic>.from(
+        jsonDecode(row.read<String>('payload_json')) as Map);
+      try {
+        if (!await dependenciesReadyForCreate(
+            businessId,data['customer_id'].toString(),
+            data['vehicle_id']?.toString())) {
+          // Keep the create operation untouched for a later sync cycle.
+          break;
+        }
+        final serverId = await _api.syncOfflineAppointmentCreate(
+          businessId,
+          operationId: data['operation_id'].toString(),
+          customerId: data['customer_id'].toString(),
+          vehicleId: data['vehicle_id']?.toString(),
+          title: data['title'].toString(),
+          description: data['description']?.toString(),
+          startsAt: DateTime.parse(data['starts_at'].toString()),
+          endsAt: DateTime.parse(data['ends_at'].toString()),
+          employeeId: data['employee_id']?.toString(),
+        );
+        if (serverId.isEmpty) {
+          throw StateError('Server did not return appointment identity.');
+        }
+        var acceptedVersion = 1;
+        if (data['cancel_after_create'] == true) {
+          // A cancelled newly-created appointment has a newer row_version
+          // than the initial create; keep that authoritative revision.
+          acceptedVersion = await _api.syncOfflineAppointmentCancel(
+            businessId, serverId,
+            operationId: data['operation_id'].toString(),
+            baseVersion: 1,
+          );
+        }
+        await acknowledgeCreatedAppointment(
+          businessId, localId, serverId, queueId,
+          serverVersion: acceptedVersion,
+        );
+        // Ensure the new record is fetched on the normal sync pull.
+        _syncEvents.add(businessId);
+      } catch (error) {
+        await _database.customStatement(
+          """UPDATE sync_outbox SET attempt_count=attempt_count+1,
+            last_attempt_at=?,last_error=? WHERE id=?""",
+          [_unix(DateTime.now().toUtc()),error.toString(),queueId],
+        );
+        break;
+      }
+    }
+  }
+
+  /// Replay owner-authorized deletion; retain tombstone on network errors,
+  /// and retain conflict state for manual resolution of stale revisions.
+  Future<void> flushDeletes(String businessId) async {
+    final rows=await _database.customSelect(
+      """SELECT * FROM sync_outbox WHERE business_id=?
+         AND entity_type='appointment_delete' AND state='pending' ORDER BY id""",
+      variables:[Variable<String>(businessId)],
+    ).get();
+    for (final row in rows) {
+      final queueId=row.read<int>('id');
+      final appointmentId=row.read<String>('entity_id');
+      final payload=Map<String,dynamic>.from(
+        jsonDecode(row.read<String>('payload_json')) as Map);
+      try {
+        final deleted=await _api.syncOfflineAppointmentDelete(
+          businessId,appointmentId,
+          operationId:payload['operation_id'].toString(),
+          baseVersion:row.read<int>('base_row_version'),
+        );
+        if (!deleted) throw StateError('Server did not acknowledge deletion.');
+        await _database.transaction(() async {
+          await _database.customStatement(
+            'DELETE FROM local_appointments WHERE business_id=? AND id=?',
+            [businessId,appointmentId],
+          );
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE id=?',[queueId],
+          );
+        });
+        _syncEvents.add(businessId);
+      } catch (error) {
+        final message=error.toString();
+        final conflict=message.contains('40001') ||
+          message.contains('Appointment changed on another device');
+        await _database.transaction(() async {
+          await _database.customStatement(
+            """UPDATE sync_outbox SET state=?,attempt_count=attempt_count+1,
+               last_attempt_at=?,last_error=? WHERE id=?""",
+            [conflict ? 'conflict':'pending',
+             _unix(DateTime.now().toUtc()),message,queueId],
+          );
+          // Preserve pending_delete tombstone even on a server conflict.
+          // The outbox 'conflict' state signals owner review; changing the
+          // appointment to 'conflict' would resurrect it in the local list.
+        });
+        break;
+      }
+    }
+  }
+
+  Future<void> flushCancels(String businessId) async {
+    final rows=await _database.customSelect(
+      """SELECT * FROM sync_outbox WHERE business_id=?
+         AND entity_type='appointment_cancel' AND state='pending' ORDER BY id""",
+      variables:[Variable<String>(businessId)],
+    ).get();
+    for (final row in rows) {
+      final id=row.read<int>('id');
+      final appointmentId=row.read<String>('entity_id');
+      final payload=Map<String,dynamic>.from(
+        jsonDecode(row.read<String>('payload_json')) as Map);
+      try {
+        final version=await _api.syncOfflineAppointmentCancel(
+          businessId,appointmentId,
+          operationId:payload['operation_id'].toString(),
+          baseVersion:row.read<int>('base_row_version'),
+        );
+        await _database.transaction(() async {
+          await _database.customStatement(
+            """UPDATE local_appointments SET row_version=?,sync_state='synced'
+               WHERE business_id=? AND id=? AND sync_state='pending'""",
+            [version,businessId,appointmentId],
+          );
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE id=?',[id],
+          );
+        });
+        _syncEvents.add(businessId);
+      } catch (error) {
+        final message=error.toString();
+        final conflict=message.contains('40001') ||
+          message.contains('Appointment changed on another device');
+        await _database.transaction(() async {
+          await _database.customStatement(
+            """UPDATE sync_outbox SET state=?,attempt_count=attempt_count+1,
+               last_attempt_at=?,last_error=? WHERE id=?""",
+            [conflict ? 'conflict':'pending',
+             _unix(DateTime.now().toUtc()),message,id],
+          );
+          if (conflict) {
+            await _database.customStatement(
+              """UPDATE local_appointments SET sync_state='conflict'
+                 WHERE business_id=? AND id=?""",
+              [businessId,appointmentId],
+            );
+          }
+        });
+        break;
+      }
+    }
+  }
+
+  /// Replays offline appointment edits using the authenticated revision-guarded
+  /// RPC. A conflict is retained for owner review rather than overwritten.
+  Future<void> flushEdits(String businessId) async {
+    final rows = await _database.customSelect(
+      """SELECT * FROM sync_outbox WHERE business_id=?
+         AND entity_type='appointment_edit' AND state='pending' ORDER BY id""",
+      variables: [Variable<String>(businessId)],
+    ).get();
+    for (final row in rows) {
+      final outboxId = row.read<int>('id');
+      final appointmentId = row.read<String>('entity_id');
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(row.read<String>('payload_json')) as Map,
+      );
+      try {
+        final changedCustomer = payload['customer_id']?.toString();
+        final changedVehicle = payload['vehicle_id']?.toString();
+        final version = changedCustomer != null
+            ? await _api.syncOfflineAppointmentReassign(
+                businessId,appointmentId,
+                operationId:payload['operation_id'].toString(),
+                baseVersion:row.read<int>('base_row_version'),
+                customerId:changedCustomer,vehicleId:changedVehicle,
+                title:payload['title'].toString(),
+                description:payload['description']?.toString(),
+                startsAt:DateTime.parse(payload['starts_at'].toString()),
+                endsAt:DateTime.parse(payload['ends_at'].toString()),
+                employeeId:payload['employee_id']?.toString(),
+              )
+            : await _api.syncOfflineAppointmentEdit(
+          businessId, appointmentId,
+          operationId: payload['operation_id'].toString(),
+          baseVersion: row.read<int>('base_row_version'),
+          title: payload['title'].toString(),
+          description: payload['description']?.toString(),
+          startsAt: DateTime.parse(payload['starts_at'].toString()),
+          endsAt: DateTime.parse(payload['ends_at'].toString()),
+          employeeId: payload['employee_id']?.toString(),
+        );
+        await _database.transaction(() async {
+          await _database.customStatement(
+            """UPDATE local_appointments SET row_version=?,
+               sync_state='synced' WHERE business_id=? AND id=?
+               AND sync_state='pending'""",
+            [version,businessId,appointmentId],
+          );
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE id=?',
+            [outboxId],
+          );
+        });
+        _syncEvents.add(businessId);
+      } catch (error) {
+        final message = error.toString();
+        final conflict = message.contains('40001') ||
+            message.contains('Appointment changed on another device');
+        await _database.transaction(() async {
+          await _database.customStatement(
+            """UPDATE sync_outbox SET state=?,attempt_count=attempt_count+1,
+               last_attempt_at=?,last_error=? WHERE id=?""",
+            [conflict ? 'conflict' : 'pending',
+             _unix(DateTime.now().toUtc()),message,outboxId],
+          );
+          if (conflict) {
+            await _database.customStatement(
+              """UPDATE local_appointments SET sync_state='conflict'
+                 WHERE business_id=? AND id=?""",
+              [businessId,appointmentId],
+            );
+          }
+        });
+        break;
+      }
+    }
   }
 
   Future<Map<String, String>> flush(String businessId) async {
@@ -453,11 +1237,11 @@ class AppointmentSyncService {
       ],
     ).get();
 
-    if (!force && existing.isNotEmpty) {
+    if (existing.isNotEmpty) {
       final state = existing.first.read<String>('sync_state');
-      if (state == 'pending' || state == 'conflict') {
-        return;
-      }
+      // Never resurrect a local deletion, even during forced bootstrap.
+      if (state == 'pending_delete') return;
+      if (!force && (state == 'pending' || state == 'conflict')) return;
     }
 
     await _database.customStatement(

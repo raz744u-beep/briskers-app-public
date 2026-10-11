@@ -5,6 +5,7 @@ import '../../core/formatters.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/vehicle_options.dart';
 import '../../services/briskers_api.dart';
+import '../../services/offline_customer_vehicle_admin_service.dart';
 import 'new_vehicle_screen.dart';
 
 class NewCustomerScreen extends StatefulWidget {
@@ -18,6 +19,7 @@ class NewCustomerScreen extends StatefulWidget {
 
 class _NewCustomerScreenState extends State<NewCustomerScreen> {
   static const _api = BriskersApi();
+  final _offline = OfflineCustomerVehicleAdminService();
   final _name = TextEditingController();
   final _phone = TextEditingController();
   final _email = TextEditingController();
@@ -115,24 +117,24 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
     });
 
     try {
-      final customerId = await _api.createCustomer(
-        widget.businessId,
-        name: name,
-        phone: phoneDigits.isEmpty ? null : phoneDigits,
-        email: email.isEmpty ? null : email,
-        billingAddress: <String, dynamic>{
-          if (_address1.text.trim().isNotEmpty)
-            'line1': _address1.text.trim(),
-          if (_address2.text.trim().isNotEmpty)
-            'line2': _address2.text.trim(),
-          if (_city.text.trim().isNotEmpty)
-            'city': _city.text.trim(),
-          if ((_state ?? '').isNotEmpty) 'state': _state,
-          if (_zip.text.trim().isNotEmpty)
-            'postal_code': _zip.text.trim(),
-          'country': 'US',
-        },
-      );
+      final billing = <String,dynamic>{
+        if (_address1.text.trim().isNotEmpty) 'line1':_address1.text.trim(),
+        if (_address2.text.trim().isNotEmpty) 'line2':_address2.text.trim(),
+        if (_city.text.trim().isNotEmpty) 'city':_city.text.trim(),
+        if ((_state ?? '').isNotEmpty) 'state':_state,
+        if (_zip.text.trim().isNotEmpty) 'postal_code':_zip.text.trim(),
+        'country':'US',
+      };
+      final phone = phoneDigits.isEmpty ? null : phoneDigits;
+      final customerId = _createOnlineAccount
+          ? await _api.createCustomer(widget.businessId,
+              name:name,phone:phone,
+              email:email.isEmpty ? null : email,
+              billingAddress:billing)
+          : await _offline.queueCustomerCreate(widget.businessId,
+              name:name,phone:phone,
+              email:email.isEmpty ? null : email,
+              billingAddress:billing);
 
       if (_createOnlineAccount) {
         final credentials = await _api.customerAccountAction(

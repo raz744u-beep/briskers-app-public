@@ -12,7 +12,10 @@ import 'document_pdf_service.dart';
 import 'local_document_detail_cache.dart';
 import 'local_financial_cache.dart';
 import 'offline_customer_vehicle_admin_service.dart';
+import 'appointment_sync_service.dart';
+import '../core/appointment_action_policy.dart';
 import 'offline_document_draft_service.dart';
+import 'offline_invoice_payment_ledger.dart';
 import 'offline_estimate_invoice_service.dart';
 import 'offline_financial_write_service.dart';
 import 'offline_job_admin_service.dart';
@@ -164,6 +167,79 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkOfflineInvoiceCancel,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-013',
+      title: 'Offline received-payment outbox and balances',
+      success: 'Configured payment recorded durably with UUID, exact cents, and correct local balance; rejected excess and preserved queue.',
+      action: _checkOfflineReceivedPayment,
+    );
+
+    await _scenario(
+      checks,
+      id: 'FUNC-014',
+      title: 'Offline payment permanent invoice remapping',
+      success: 'Pending payments preserve operation identities and amounts while switching to a permanent invoice ID; a repeated remap does not duplicate rows.',
+      action: _checkPaymentInvoiceRemap,
+    );
+
+    await _scenario(
+      checks,
+      id: 'FUNC-015',
+      title: 'Payment acknowledgment identity verification',
+      success: 'A matching server payment ID is required before clearing local queue; matching amount alone cannot acknowledge a payment.',
+      action: _checkPaymentAcknowledgment,
+    );
+
+    await _scenario(
+      checks,
+      id: 'FUNC-016',
+      title: 'Interrupted payment replay and idempotent retry',
+      success: 'Lost response retains one queued payment; retry reuses the same UUID, verifies matching server ID, caches invoice and retires queue.',
+      action: _checkInterruptedPaymentReplay,
+    );
+
+    await _scenario(
+      checks,
+      id: 'FUNC-017',
+      title: 'Simultaneous local payment queue replay',
+      success: 'Concurrent flush triggers share one in-process submission; queue is retired once after server acknowledgment.',
+      action: _checkSimultaneousPaymentFlush,
+    );
+
+    await _scenario(
+      checks,
+      id: 'FUNC-018',
+      title: 'Payment cache failure preserves replay queue',
+      success: 'A failed local invoice cache write retains the payment and original UUID until a successful retry.',
+      action: _checkPaymentCacheFailure,
+    );
+
+
+    await _scenario(
+      checks,
+      id: 'FUNC-021',
+      title: 'Offline customer → appointment identity reconciliation',
+      success: 'Customer creates locally, retains stable sync identity, and appointment link is remapped to the permanent customer ID.',
+      action: _checkOfflineCustomerAppointment,
+    );
+
+    await _scenario(
+      checks,
+      id: 'FUNC-019',
+      title: 'Appointment owner/secretary action guards',
+      success: 'Owner and secretary permissions and linked Job deletion restrictions passed.',
+      action: _checkAppointmentActionPolicy,
+    );
+
+    await _scenario(
+      checks,
+      id: 'FUNC-020',
+      title: 'Offline customer → vehicle → appointment reference chain',
+      success: 'Temporary vehicle and customer references are safely deferred and rekeyed before an appointment upload.',
+      action: _checkOfflineCustomerVehicleAppointment,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -215,6 +291,373 @@ class BriskersFunctionalDiagnosticsService {
       await database.close();
     }
   }
+
+  Future<void> _checkAppointmentActionPolicy(
+    BriskersLocalDatabase database, String businessId,
+  ) async {
+    _require(AppointmentActionPolicy.canEdit(
+      canManage:true,isOwner:true,linkedJob:true,
+      status:'cancelled',conflict:false), 'Owner linked appointment edit blocked.');
+    _require(!AppointmentActionPolicy.canEdit(
+      canManage:true,isOwner:false,linkedJob:true,
+      status:'confirmed',conflict:false), 'Secretary linked edit allowed.');
+    _require(AppointmentActionPolicy.canCancel(
+      canManage:true,linkedJob:false,status:'confirmed',
+      pending:false,conflict:false), 'Secretary cancellation blocked.');
+    _require(!AppointmentActionPolicy.canDelete(
+      isOwner:false,linkedJob:false,linkedRequest:false,
+      pending:false,conflict:false), 'Secretary delete allowed.');
+    _require(!AppointmentActionPolicy.canDelete(
+      isOwner:true,linkedJob:true,linkedRequest:false,
+      pending:false,conflict:false), 'Linked Job delete allowed.');
+  }
+
+  Future<void> _checkOfflineCustomerAppointment(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final customers=OfflineCustomerVehicleAdminService(database:database);
+    final appointments=AppointmentSyncService(database:database);
+    final customerId=await customers.queueCustomerCreate(
+      businessId,name:'Diagnostic customer',
+    );
+    final starts=DateTime.utc(2026,10,11,10);
+    final appointmentId=await appointments.queueCreate(
+      businessId,customerId:customerId,title:'Diagnostic visit',
+      startsAt:starts,endsAt:starts.add(const Duration(hours:1)),
+    );
+    _require(
+      !await appointments.dependenciesReadyForCreate(
+        businessId,customerId,null),
+      'Temporary customer was incorrectly considered uploadable.',
+    );
+    final rows=await database.customSelect(
+      """SELECT id FROM sync_outbox
+         WHERE business_id=? AND entity_type='customer_create'""",
+      variables:[Variable<String>(businessId)],
+    ).get();
+    _require(rows.length==1,'Missing or duplicate customer create operation.');
+    await customers.reconcileCreatedCustomerId(
+      businessId,customerId,'server-diagnostic-customer',
+      rows.single.read<int>('id'),
+    );
+    final linked=await database.customSelect(
+      'SELECT customer_id FROM local_appointments WHERE business_id=? AND id=?',
+      variables:[Variable<String>(businessId),Variable<String>(appointmentId)],
+    ).getSingle();
+    _require(linked.read<String>('customer_id')=='server-diagnostic-customer',
+      'Appointment retained temporary customer reference.');
+    final queued=await database.customSelect(
+      """SELECT payload_json FROM sync_outbox WHERE business_id=?
+         AND entity_type='appointment_create'""",
+      variables:[Variable<String>(businessId)],
+    ).getSingle();
+    final payload=jsonDecode(queued.read<String>('payload_json')) as Map;
+    _require(payload['customer_id']=='server-diagnostic-customer',
+      'Queued appointment retained temporary customer ID.');
+    _require(
+      await appointments.dependenciesReadyForCreate(
+        businessId,'server-diagnostic-customer',null),
+      'Synchronized customer could not be used by appointment.',
+    );
+  }
+
+  Future<void> _checkOfflineCustomerVehicleAppointment(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final service=OfflineCustomerVehicleAdminService(database:database);
+    final appointment=AppointmentSyncService(database:database);
+    final customer=await service.queueCustomerCreate(
+      businessId,name:'Sandbox new customer');
+    final vehicle=await service.queueVehicle(
+      businessId,customer,make:'BMW',model:'X5');
+    final start=DateTime.utc(2026,10,11,11);
+    final appt=await appointment.queueCreate(
+      businessId,customerId:customer,vehicleId:vehicle,
+      title:'Sandbox visit',startsAt:start,
+      endsAt:start.add(const Duration(hours:1)),
+    );
+    _require(!await appointment.dependenciesReadyForCreate(
+      businessId,customer,vehicle),'Temporary customer/vehicle uploaded early.');
+    final customerRows=await database.customSelect(
+      """SELECT id FROM sync_outbox WHERE business_id=?
+         AND entity_type='customer_create'""",
+      variables:[Variable<String>(businessId)],
+    ).get();
+    _require(customerRows.length==1,'Missing customer queue operation.');
+    await service.reconcileCreatedCustomerId(
+      businessId,customer,'server-customer-test',
+      customerRows.single.read<int>('id'),
+    );
+    final vehicleRows=await database.customSelect(
+      """SELECT id FROM sync_outbox WHERE business_id=?
+         AND entity_type='vehicle_create'""",
+      variables:[Variable<String>(businessId)],
+    ).get();
+    _require(vehicleRows.length==1,'Missing vehicle queue operation.');
+    await service.reconcileCreatedVehicleId(
+      businessId,vehicle,'server-vehicle-test',
+      vehicleRows.single.read<int>('id'),
+    );
+    final link=await database.customSelect(
+      'SELECT customer_id,vehicle_id FROM local_appointments WHERE business_id=? AND id=?',
+      variables:[Variable<String>(businessId),Variable<String>(appt)],
+    ).getSingle();
+    _require(link.read<String>('customer_id')=='server-customer-test' &&
+        link.read<String>('vehicle_id')=='server-vehicle-test',
+        'Appointment local references not rekeyed.');
+    final queue=await database.customSelect(
+      """SELECT payload_json FROM sync_outbox WHERE business_id=?
+         AND entity_type='appointment_create'""",
+      variables:[Variable<String>(businessId)],
+    ).getSingle();
+    final payload=jsonDecode(queue.read<String>('payload_json')) as Map;
+    _require(payload['customer_id']=='server-customer-test' &&
+        payload['vehicle_id']=='server-vehicle-test',
+        'Appointment outbox references not rekeyed.');
+    _require(await appointment.dependenciesReadyForCreate(
+      businessId,'server-customer-test','server-vehicle-test'),
+      'Resolved dependencies incorrectly blocked.');
+  }
+
+  Future<void> _checkOfflineReceivedPayment(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final ledger = OfflineInvoicePaymentLedger(database: database);
+    const invoiceId = 'local-invoice-sandbox';
+    final operationId = await ledger.recordReceivedPayment(
+      businessId,
+      invoiceId,
+      amount: 500,
+      remainingBeforePaymentCents: 50000,
+      methodId: 'configured-test-method',
+      methodName: 'Zelle',
+    );
+    final pending = await ledger.pendingForInvoice(businessId, invoiceId);
+    _require(pending.length == 1, 'Expected one durable local payment.');
+    _require(pending.single['operation_id'] == operationId,
+        'Queued payment operation ID changed.');
+    _require(pending.single['amount_cents'] == 50000,
+        'Amount was not stored as exact cents.');
+    _require(pending.single['method_name'] == 'Zelle',
+        'Selected payment method was lost.');
+    _require(
+      OfflineInvoicePaymentLedger.remainingCents(
+        total: 500, finalized: 0, pendingOnServer: 0,
+        queuedLocally: const [500],
+      ) == 0,
+      'Received payment did not reduce balance to zero.',
+    );
+    var rejected = false;
+    try {
+      await ledger.recordReceivedPayment(
+        businessId, invoiceId,
+        amount: 501,
+        remainingBeforePaymentCents: 50000,
+        methodId: 'configured-test-method',
+        methodName: 'Zelle',
+      );
+    } catch (_) {
+      rejected = true;
+    }
+    _require(rejected, 'Excess payment was not rejected.');
+    _require((await ledger.pendingForInvoice(businessId, invoiceId)).length == 1,
+        'Rejected payment changed the local queue.');
+  }
+
+  Future<void> _checkPaymentInvoiceRemap(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final ledger = OfflineInvoicePaymentLedger(database: database);
+    const local = 'local-invoice-diagnostic';
+    const permanent = 'server-invoice-diagnostic';
+    final op = await ledger.recordReceivedPayment(
+      businessId, local,
+      amount: 200,
+      remainingBeforePaymentCents: 50000,
+      methodId: 'method-check',
+      methodName: 'Check',
+    );
+    await ledger.remapInvoice(businessId, local, permanent);
+    await ledger.remapInvoice(businessId, local, permanent);
+    final old = await ledger.pendingForInvoice(businessId, local);
+    final updated = await ledger.pendingForInvoice(businessId, permanent);
+    _require(old.isEmpty, 'Local invoice retained a payment after remapping.');
+    _require(updated.length == 1, 'Remapping duplicated or lost a payment.');
+    _require(updated.single['operation_id'] == op,
+        'Remapping changed the idempotency key.');
+    _require(updated.single['invoice_id'] == permanent,
+        'Queued payment still references a temporary invoice.');
+    _require(updated.single['amount_cents'] == 20000,
+        'Remapping changed the payment amount.');
+  }
+
+  Future<void> _checkPaymentAcknowledgment(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    _require(
+      OfflineInvoicePaymentLedger.serverAcknowledgesPayment(
+        {'payments': [{'id': 'server-payment-1', 'amount': 500}]},
+        'server-payment-1',
+      ),
+      'Known payment ID was not recognized.',
+    );
+    _require(
+      !OfflineInvoicePaymentLedger.serverAcknowledgesPayment(
+        {'payments': [{'id': 'another-payment', 'amount': 500}]},
+        'server-payment-1',
+      ),
+      'Matching amount incorrectly acknowledged a different payment.',
+    );
+    _require(
+      !OfflineInvoicePaymentLedger.serverAcknowledgesPayment(
+        {'payments': []}, 'server-payment-1',
+      ),
+      'Missing payment was incorrectly acknowledged.',
+    );
+  }
+
+  Future<void> _checkInterruptedPaymentReplay(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final ledger = OfflineInvoicePaymentLedger(database: database);
+    const invoiceId = 'server-invoice-diagnostic';
+    final operationId = await ledger.recordReceivedPayment(
+      businessId, invoiceId,
+      amount: 500, remainingBeforePaymentCents: 50000,
+      methodId: 'test-method', methodName: 'Cash',
+    );
+    final accepted = <String, String>{};
+    var networkCalls = 0;
+    var cacheWrites = 0;
+    Future<String> submit(
+      String business, String invoice, num amount, String method, String op,
+    ) async {
+      networkCalls++;
+      _require(op == operationId, 'Retry changed payment operation ID.');
+      final serverId = accepted.putIfAbsent(op, () => 'payment-server-1');
+      if (networkCalls == 1) {
+        throw StateError('Simulated lost network response after acceptance');
+      }
+      return serverId;
+    }
+    Future<Map<String, dynamic>> fetch(String business, String invoice) async =>
+        {'payments': [{'id': accepted[operationId], 'amount': 500}],
+         'pending_payment': 500, 'paid_amount': 0, 'total_amount': 500};
+    await ledger.flush(businessId,
+      submitPayment: submit,
+      fetchInvoice: fetch,
+      cacheInvoice: (b, i, detail) async { cacheWrites++; },
+    );
+    _require((await ledger.pendingForInvoice(businessId, invoiceId)).length == 1,
+        'Lost response prematurely removed local payment.');
+    await ledger.flush(businessId,
+      submitPayment: submit,
+      fetchInvoice: fetch,
+      cacheInvoice: (b, i, detail) async {
+        cacheWrites++;
+        _require(
+          OfflineInvoicePaymentLedger.serverAcknowledgesPayment(
+            detail, 'payment-server-1'),
+          'Invoice was cached without an authoritative payment ID.',
+        );
+      },
+    );
+    _require(networkCalls == 2,
+        'Interrupted submission did not retry exactly once.');
+    _require(accepted.length == 1,
+        'Retry created a second synthetic server payment.');
+    _require(cacheWrites == 1,
+        'Refreshed server invoice was not cached exactly once.');
+    _require((await ledger.pendingForInvoice(businessId, invoiceId)).isEmpty,
+        'Acknowledged payment remains in local outbox.');
+  }
+
+  Future<void> _checkSimultaneousPaymentFlush(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final ledger = OfflineInvoicePaymentLedger(database: database);
+    const invoice = 'server-invoice-concurrent-test';
+    await ledger.recordReceivedPayment(
+      businessId, invoice, amount: 500,
+      remainingBeforePaymentCents: 50000,
+      methodId: 'cash-method', methodName: 'Cash',
+    );
+    var submissions = 0;
+    Future<String> submit(
+      String business, String invoiceId, num amount,
+      String methodId, String operationId,
+    ) async {
+      submissions++;
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      return 'ack-payment-1';
+    }
+    Future<Map<String, dynamic>> fetch(
+      String business, String invoiceId,
+    ) async => {'payments': [{'id': 'ack-payment-1', 'amount': 500}]};
+    await Future.wait([
+      ledger.flush(businessId, submitPayment: submit, fetchInvoice: fetch,
+          cacheInvoice: (b, i, d) async {}),
+      ledger.flush(businessId, submitPayment: submit, fetchInvoice: fetch,
+          cacheInvoice: (b, i, d) async {}),
+    ]);
+    _require(submissions == 1, 'Concurrent workers sent a payment twice.');
+    _require((await ledger.pendingForInvoice(businessId, invoice)).isEmpty,
+        'Concurrent replay did not reconcile local payment.');
+  }
+
+  Future<void> _checkPaymentCacheFailure(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final ledger = OfflineInvoicePaymentLedger(database: database);
+    const invoice = 'server-invoice-cache-failure';
+    final operationId = await ledger.recordReceivedPayment(
+      businessId, invoice, amount: 125,
+      remainingBeforePaymentCents: 12500,
+      methodId: 'check-method', methodName: 'Check',
+    );
+    final seenOperations = <String>[];
+    Future<String> submit(
+      String b, String i, num amount, String methodId, String op,
+    ) async {
+      seenOperations.add(op);
+      return 'server-payment-cache-retry';
+    }
+    Future<Map<String,dynamic>> fetch(String b, String i) async => {
+      'payments': [{'id': 'server-payment-cache-retry', 'amount': 125}],
+      'pending_payment': 125, 'paid_amount': 0, 'total_amount': 125,
+    };
+    await ledger.flush(businessId,
+      submitPayment: submit,
+      fetchInvoice: fetch,
+      cacheInvoice: (b, i, data) async {
+        throw StateError('Simulated disk write failure');
+      },
+    );
+    final retained = await ledger.pendingForInvoice(businessId, invoice);
+    _require(retained.length == 1 && retained.single['operation_id'] == operationId,
+        'Cache write failure lost the recorded payment.');
+    var saved = false;
+    await ledger.flush(businessId,
+      submitPayment: submit,
+      fetchInvoice: fetch,
+      cacheInvoice: (b, i, data) async { saved = true; },
+    );
+    _require(saved, 'Retry did not save authoritative invoice cache.');
+    _require(seenOperations.length == 2 &&
+        seenOperations.every((op) => op == operationId),
+        'Cache write retry changed operation identity.');
+    _require((await ledger.pendingForInvoice(businessId, invoice)).isEmpty,
+        'Queue was not retired after successful cache refresh.');
+  }
+
 
   Future<void> _checkOfflineInvoiceCancel(
     BriskersLocalDatabase database,

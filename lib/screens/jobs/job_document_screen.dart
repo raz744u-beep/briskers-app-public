@@ -28,6 +28,8 @@ import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_document_edit_service.dart';
 import '../../services/local_tax_settings_cache.dart';
+import '../../services/offline_invoice_payment_ledger.dart';
+import '../../services/local_payment_methods_cache.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'customer_invoice_signature_screen.dart';
@@ -75,6 +77,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   final LocalTaxSettingsCache _taxSettingsCache =
       LocalTaxSettingsCache();
   final _catalogSync = CatalogSyncService();
+  final OfflineInvoicePaymentLedger _offlinePayments = OfflineInvoicePaymentLedger();
+  final LocalPaymentMethodsCache _paymentMethodsCache = const LocalPaymentMethodsCache();
   final ImagePicker _picker = ImagePicker();
   final ScrollController _workspaceHeaderController = ScrollController();
   final GlobalKey _workspaceHeaderKey = GlobalKey();
@@ -331,6 +335,35 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               cached;
       final datedCached =
           await _withRecoveredDocumentDate(repairedCached);
+      if (!_estimate) {
+        final localPayments = await _offlinePayments.pendingForInvoice(
+          widget.businessId,
+          widget.documentId,
+        );
+        if (localPayments.isNotEmpty) {
+          final queuedAmount = localPayments.fold<num>(
+            0,
+            (total, p) => total +
+                ((num.tryParse(p['amount_cents']?.toString() ?? '') ?? 0) / 100),
+          );
+          datedCached['pending_payment'] =
+              _number(datedCached['pending_payment']) + queuedAmount;
+          final existingPayments = List<dynamic>.from(
+            datedCached['payments'] ?? const [],
+          );
+          datedCached['payments'] = [
+            ...existingPayments,
+            ...localPayments.map((p) => <String, dynamic>{
+              'id': p['operation_id'],
+              'state': 'pending',
+              'amount':
+                  (num.tryParse(p['amount_cents']?.toString() ?? '') ?? 0) / 100,
+              'payment_method_name': p['method_name'],
+              'payment_method_id': p['method_id'],
+            }),
+          ];
+        }
+      }
       if (!mounted) return;
       setState(() {
         _detail = datedCached;
@@ -361,8 +394,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           widget.documentId,
         );
         if (cached != null && mounted) {
-          final recovered = await _withRecoveredDocumentDate(cached);
-          final cachedTax = await _taxSettingsCache.load(widget.businessId);
+          // These local reads are independent. Start both together so a
+          // slow settings lookup cannot serialize cached invoice first paint.
+          final local = await Future.wait<dynamic>([
+            _withRecoveredDocumentDate(cached),
+            _taxSettingsCache.load(widget.businessId),
+          ]);
+          final recovered = Map<String, dynamic>.from(local[0] as Map);
+          final cachedTax = local[1] as Map<String, dynamic>?;
           if (!mounted) return;
           setState(() {
             _detail = recovered;
@@ -2374,10 +2413,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _paymentMethods() async {
-    final options = await _api.paymentOptions(widget.businessId);
-    return List<dynamic>.from(options['methods'] ?? const [])
-        .map((raw) => Map<String, dynamic>.from(raw as Map))
-        .toList();
+    final cached = await _paymentMethodsCache.load(widget.businessId);
+    if (BriskersConnectionModeController.instance.forceOffline ||
+        _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      return cached;
+    }
+    try {
+      final options = await _api.paymentOptions(widget.businessId);
+      final methods = List<dynamic>.from(options['methods'] ?? const [])
+          .map((raw) => Map<String, dynamic>.from(raw as Map))
+          .toList();
+      await _paymentMethodsCache.save(widget.businessId, methods);
+      return methods;
+    } catch (_) {
+      if (cached.isNotEmpty) return cached;
+      rethrow;
+    }
   }
 
   Future<void> _enterPayment() async {
@@ -2415,6 +2466,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     );
     if (result == null) return;
 
+    final isOffline = BriskersConnectionModeController.instance.forceOffline ||
+        _offlineDocumentDraft.isLocalDraftId(widget.documentId);
+    if (isOffline) {
+      final chosen = methods.firstWhere(
+        (m) => m['id']?.toString() == result['method_id'].toString(),
+      );
+      await _run(() async {
+        await _offlinePayments.recordReceivedPayment(
+          widget.businessId,
+          widget.documentId,
+          amount: result['amount'] as num,
+          remainingBeforePaymentCents: (remaining * 100).round(),
+          methodId: result['method_id'].toString(),
+          methodName: chosen['name']?.toString() ?? '',
+        );
+      });
+      return;
+    }
     await _run(() async {
       await _api.addPendingInvoicePayment(
         widget.businessId,

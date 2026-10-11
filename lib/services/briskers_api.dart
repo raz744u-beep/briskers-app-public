@@ -188,6 +188,23 @@ class BriskersApi {
         .toList();
   }
 
+  Future<Map<String, dynamic>> createMissingWorkVisit(
+    String businessId, String jobId, {
+    required String operationId,
+    required String workSummary,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_create_missing_work_visit_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+        'p_operation_id': operationId,
+        'p_work_summary': workSummary,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> syncSaveWorkSummary(
     String businessId,
     String jobId, {
@@ -614,6 +631,28 @@ class BriskersApi {
     );
   }
 
+  Future<String> createCustomerOfflineIdempotent(
+    String businessId, {
+    required String operationId,
+    required String name,
+    String? phone,
+    String? email,
+    Map<String, dynamic>? billingAddress,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_offline_create_customer_idempotent',
+      params: {
+        'p_business_id': businessId,
+        'p_operation_id': operationId,
+        'p_name': name,
+        'p_email': email,
+        'p_phone': phone,
+        'p_billing_address': billingAddress ?? const <String, dynamic>{},
+      },
+    );
+    return result.toString();
+  }
+
   Future<String> createCustomer(
     String businessId, {
     required String name,
@@ -939,6 +978,41 @@ class BriskersApi {
 
   Future<String> signedAttachmentUrl(String bucket, String key) {
     return networkSupabase.storage.from(bucket).createSignedUrl(key, 3600);
+  }
+
+  Future<String> createVehicleOfflineIdempotent(
+    String businessId, String customerId, {
+    required String operationId,
+    required String localVehicleId,
+    required String make,
+    required String model,
+    int? year,
+    String? vin,
+    String? licensePlate,
+    String? licenseState,
+    num? mileage,
+    String? color,
+    String? keyPassword,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_offline_create_vehicle_idempotent',
+      params: {
+        'p_business_id': businessId,
+        'p_operation_id': operationId,
+        'p_local_vehicle_id': localVehicleId,
+        'p_customer_id': customerId,
+        'p_make': make,
+        'p_model': model,
+        'p_year': year,
+        'p_vin': vin,
+        'p_license_plate': licensePlate,
+        'p_license_state': licenseState,
+        'p_mileage': mileage,
+        'p_color': color,
+        'p_key_password': keyPassword,
+      },
+    );
+    return result.toString();
   }
 
   Future<String> createVehicle(
@@ -2454,6 +2528,67 @@ class BriskersApi {
         .toList();
   }
 
+  /// Safe replay for locally queued appointment edits. Requires the server
+  /// operation-key migration; retries always reuse the stored UUID.
+  Future<int> syncOfflineAppointmentReassign(
+    String businessId, String appointmentId, {
+    required String operationId,
+    required int baseVersion,
+    required String customerId,
+    String? vehicleId,
+    required String title,
+    String? description,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    String? employeeId,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_sync_offline_appointment_reassign',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+        'p_operation_id': operationId,
+        'p_base_version': baseVersion,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_title': title,
+        'p_description': description,
+        'p_starts_at': startsAt.toUtc().toIso8601String(),
+        'p_ends_at': endsAt.toUtc().toIso8601String(),
+        'p_employee_id': employeeId,
+      },
+    );
+    return (result as num).toInt();
+  }
+
+  Future<int> syncOfflineAppointmentEdit(
+    String businessId,
+    String appointmentId, {
+    required String operationId,
+    required int baseVersion,
+    required String title,
+    String? description,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    String? employeeId,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_sync_offline_appointment_edit',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+        'p_operation_id': operationId,
+        'p_base_version': baseVersion,
+        'p_title': title,
+        'p_description': description,
+        'p_starts_at': startsAt.toUtc().toIso8601String(),
+        'p_ends_at': endsAt.toUtc().toIso8601String(),
+        'p_employee_id': employeeId,
+      },
+    );
+    return (result as num).toInt();
+  }
+
   Future<void> updateAppointment(
     String businessId,
     String appointmentId, {
@@ -2520,6 +2655,68 @@ class BriskersApi {
         'p_appointment_id': appointmentId,
       },
     );
+  }
+
+  Future<bool> syncOfflineAppointmentDelete(
+    String businessId, String appointmentId, {
+    required String operationId,
+    required int baseVersion,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_sync_offline_appointment_delete',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+        'p_operation_id': operationId,
+        'p_base_version': baseVersion,
+      },
+    );
+    return result == true;
+  }
+
+  Future<int> syncOfflineAppointmentCancel(
+    String businessId, String appointmentId, {
+    required String operationId,
+    required int baseVersion,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_sync_offline_appointment_cancel',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+        'p_operation_id': operationId,
+        'p_base_version': baseVersion,
+      },
+    );
+    return int.parse(result.toString());
+  }
+
+  Future<String> syncOfflineAppointmentCreate(
+    String businessId, {
+    required String operationId,
+    required String customerId,
+    String? vehicleId,
+    required String title,
+    String? description,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    String? employeeId,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_sync_offline_appointment_create',
+      params: {
+        'p_business_id': businessId,
+        'p_operation_id': operationId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_title': title,
+        'p_description': description,
+        'p_starts_at': startsAt.toUtc().toIso8601String(),
+        'p_ends_at': endsAt.toUtc().toIso8601String(),
+        'p_employee_id': employeeId,
+      },
+    );
+    return result.toString();
   }
 
   Future<String> createAppointment(
@@ -4099,6 +4296,28 @@ class BriskersApi {
         'p_invoice_id': invoiceId,
         'p_amount': amount,
         'p_method_id': methodId,
+      },
+    );
+    return result.toString();
+  }
+
+  /// Retry-safe receiver for locally recorded payments. The unique operation
+  /// ID is generated and persisted *before* a network attempt; retries reuse it.
+  Future<String> addPendingInvoicePaymentOnce(
+    String businessId,
+    String invoiceId, {
+    required num amount,
+    required String methodId,
+    required String operationId,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_add_pending_invoice_payment_once',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+        'p_amount': amount,
+        'p_method_id': methodId,
+        'p_operation_id': operationId,
       },
     );
     return result.toString();

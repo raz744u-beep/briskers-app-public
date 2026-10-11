@@ -7,6 +7,41 @@ import 'package:briskers_app/services/document_pdf_service.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  group('Offline receipt number', () {
+    test('uses full collision-resistant local invoice ID in the existing number field', () async {
+      const id = 'local-invoice-12345678-1234-4234-9234-123456789abc';
+      final detail = <String, dynamic>{
+        'id': id,
+        'kind': 'invoice',
+        'document_number': null,
+        'total_amount': 500,
+        'paid_amount': 0,
+        'pending_payment': 500,
+        'lines': <Map<String, dynamic>>[],
+      };
+      expect(
+        DocumentPdfService.fileName(detail),
+        'Briskers-Invoice-TMP-12345678-1234-4234-9234-123456789abc.pdf',
+      );
+      final bytes = await DocumentPdfService.build(detail);
+      expect(utf8.decode(bytes.sublist(0, 5)), '%PDF-');
+    });
+
+    test('permanent number supersedes temporary ID on the PDF', () {
+      expect(DocumentPdfService.fileName({
+        'id': 'local-invoice-12345678-1234-4234-9234-123456789abc',
+        'kind': 'invoice',
+        'document_number': '6332',
+      }), 'Briskers-Invoice-6332.pdf');
+    });
+
+    test('unrelated missing-number documents do not get invented references', () {
+      expect(DocumentPdfService.fileName({
+        'kind': 'invoice', 'document_number': null,
+      }), 'Briskers-Invoice.pdf');
+    });
+  });
+
   group('Invoice PDF payment balance', () {
     test('unpaid invoice owes the full amount', () {
       final amounts = DocumentPdfService.invoicePaymentAmounts({
