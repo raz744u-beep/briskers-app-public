@@ -13,6 +13,7 @@ import 'local_document_detail_cache.dart';
 import 'local_financial_cache.dart';
 import 'offline_customer_vehicle_admin_service.dart';
 import 'appointment_sync_service.dart';
+import '../core/appointment_action_policy.dart';
 import 'offline_document_draft_service.dart';
 import 'offline_estimate_invoice_service.dart';
 import 'offline_financial_write_service.dart';
@@ -167,10 +168,18 @@ class BriskersFunctionalDiagnosticsService {
 
     await _scenario(
       checks,
-      id: 'FUNC-019',
+      id: 'FUNC-021',
       title: 'Offline customer → appointment identity reconciliation',
       success: 'Customer creates locally, retains stable sync identity, and appointment link is remapped to the permanent customer ID.',
       action: _checkOfflineCustomerAppointment,
+    );
+
+    await _scenario(
+      checks,
+      id: 'FUNC-019',
+      title: 'Appointment owner/secretary action guards',
+      success: 'Owner and secretary permissions and linked Job deletion restrictions passed.',
+      action: _checkAppointmentActionPolicy,
     );
 
     await _scenario(
@@ -231,6 +240,26 @@ class BriskersFunctionalDiagnosticsService {
       await _cleanupPreferences(businessId);
       await database.close();
     }
+  }
+
+  Future<void> _checkAppointmentActionPolicy(
+    BriskersLocalDatabase database, String businessId,
+  ) async {
+    _require(AppointmentActionPolicy.canEdit(
+      canManage:true,isOwner:true,linkedJob:true,
+      status:'cancelled',conflict:false), 'Owner linked appointment edit blocked.');
+    _require(!AppointmentActionPolicy.canEdit(
+      canManage:true,isOwner:false,linkedJob:true,
+      status:'confirmed',conflict:false), 'Secretary linked edit allowed.');
+    _require(AppointmentActionPolicy.canCancel(
+      canManage:true,linkedJob:false,status:'confirmed',
+      pending:false,conflict:false), 'Secretary cancellation blocked.');
+    _require(!AppointmentActionPolicy.canDelete(
+      isOwner:false,linkedJob:false,linkedRequest:false,
+      pending:false,conflict:false), 'Secretary delete allowed.');
+    _require(!AppointmentActionPolicy.canDelete(
+      isOwner:true,linkedJob:true,linkedRequest:false,
+      pending:false,conflict:false), 'Linked Job delete allowed.');
   }
 
   Future<void> _checkOfflineCustomerAppointment(
