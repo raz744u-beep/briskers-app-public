@@ -72,10 +72,12 @@ class OfflineJobAdminService {
         """INSERT INTO local_jobs
           (id,business_id,access_scope,job_number,title,requested_work,
            status,status_name,customer_id,customer_name,vehicle_id,vehicle_label,
-           planned_hours,created_at,sync_state)
-          VALUES (?,?,'full','Pending sync',?,?,'open','Open',?,?,?,?,?,?,'pending')""",
+           planned_hours,assigned_employee_id,assigned_employee_name,
+           is_unassigned,created_at,sync_state)
+          VALUES (?,?,'full','Pending sync',?,?,'open','Open',?,?,?,?,?,?,?,?,?,'pending')""",
         [id,businessId,title.trim(),requestedWork,customerId,customerName,
          vehicleId,vehicleLabel,plannedHours.toDouble(),
+         employeeId,employeeName,employeeId == null ? 1 : 0,
          now.millisecondsSinceEpoch ~/ 1000],
       );
       await _database.customStatement(
