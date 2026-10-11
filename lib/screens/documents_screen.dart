@@ -15,6 +15,7 @@ import '../services/local_document_repository.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
 import '../widgets/briskers_page_header.dart';
+import '../widgets/connection_header_toggle.dart';
 import 'jobs/blank_invoice_setup_screen.dart';
 import 'jobs/job_document_screen.dart';
 import 'jobs/invoice_deletion_choice.dart';
@@ -1222,14 +1223,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           children: [
             Row(
               children: [
-                Text(
-                  _title,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: accent,
-                      ),
-                ),
-                const SizedBox(width: 8),
+                if (!_estimate) ...[
+                  Text(
+                    _title,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: accent,
+                        ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 PopupMenuButton<String>(
                   tooltip: 'Filter $_title',
                   onSelected: (value) => setState(() {
