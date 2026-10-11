@@ -16,6 +16,7 @@ import '../services/offline_job_admin_service.dart';
 import '../widgets/job_compact_card.dart';
 import 'jobs/job_detail_screen.dart';
 import 'jobs/job_create_screen.dart';
+import 'jobs/job_customer_picker_screen.dart';
 import 'jobs/job_document_screen.dart';
 
 class JobsScreen extends StatefulWidget {
@@ -88,55 +89,11 @@ class _JobsScreenState extends State<JobsScreen> {
 
   Future<void> _createNewJob() async {
     if (!_canManage) return;
-    final customers = await LocalCustomerRepository().customers(widget.businessId);
-    if (!mounted) return;
-    final search = TextEditingController();
-    final selected = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, update) {
-          final needle = search.text.trim().toLowerCase();
-          final matches = customers.where((customer) =>
-              (customer['display_name']?.toString() ?? '')
-                  .toLowerCase().contains(needle)).take(40).toList();
-          return AlertDialog(
-            title: const Text('New job — choose customer'),
-            content: SizedBox(
-              width: 450,
-              height: 420,
-              child: Column(children: [
-                TextField(
-                  controller: search,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    hintText: 'Search customer',
-                    prefixIcon: Icon(Icons.search),
-                  ),
-                  onChanged: (_) => update(() {}),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: matches.length,
-                    itemBuilder: (context, index) {
-                      final customer = matches[index];
-                      return ListTile(
-                        title: Text(customer['display_name']?.toString() ?? 'Customer'),
-                        onTap: () => Navigator.pop(dialogContext, customer),
-                      );
-                    },
-                  ),
-                ),
-              ]),
-            ),
-            actions: [TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            )],
-          );
-        },
-      ),
+    final selected = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (_) =>
+          JobCustomerPickerScreen(businessId: widget.businessId)),
     );
-    search.dispose();
     if (selected == null || !mounted) return;
     try {
       final id = selected['id']?.toString() ?? '';
