@@ -59,7 +59,9 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
 
   Future<void> _loadEmployees() async {
     try {
-      final employees = await _offlineJobs.refreshEmployees(widget.businessId);
+      final employees = BriskersConnectionModeController.instance.forceOffline
+          ? await _offlineJobs.cachedEmployees(widget.businessId)
+          : await _offlineJobs.refreshEmployees(widget.businessId);
       if (!mounted) return;
       setState(() {
         _employees = employees;
