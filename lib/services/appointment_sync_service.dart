@@ -530,6 +530,8 @@ class AppointmentSyncService {
     required DateTime startsAt,
     required DateTime endsAt,
     String? employeeId,
+    String? customerId,
+    String? vehicleId,
     required bool isOwner,
   }) async {
     if (!endsAt.isAfter(startsAt)) {
@@ -607,6 +609,15 @@ class AppointmentSyncService {
            row.readNullable<String>('job_id') != null)) {
         throw StateError('Owner access required for this appointment.');
       }
+      final oldCustomer = row.read<String>('customer_id');
+      final oldVehicle = row.readNullable<String>('vehicle_id');
+      final selectedCustomer = customerId ?? oldCustomer;
+      final selectedVehicle = customerId == null ? oldVehicle : vehicleId;
+      final reassigned = selectedCustomer != oldCustomer ||
+          selectedVehicle != oldVehicle;
+      if (reassigned && row.readNullable<String>('job_id') != null) {
+        throw StateError('Cannot reassign an appointment linked to a Job.');
+      }
       final existingPayload = queued.isEmpty
           ? null
           : Map<String, dynamic>.from(
@@ -616,6 +627,8 @@ class AppointmentSyncService {
       final payload = jsonEncode({
         'operation_id': op,
         'appointment_id': appointmentId,
+        'customer_id': selectedCustomer,
+        'vehicle_id': selectedVehicle,
         'title': title.trim(),
         'description': description,
         'starts_at': startsAt.toUtc().toIso8601String(),
@@ -955,7 +968,21 @@ class AppointmentSyncService {
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
       try {
-        final version = await _api.syncOfflineAppointmentEdit(
+        final changedCustomer = payload['customer_id']?.toString();
+        final changedVehicle = payload['vehicle_id']?.toString();
+        final version = changedCustomer != null
+            ? await _api.syncOfflineAppointmentReassign(
+                businessId,appointmentId,
+                operationId:payload['operation_id'].toString(),
+                baseVersion:row.read<int>('base_row_version'),
+                customerId:changedCustomer,vehicleId:changedVehicle,
+                title:payload['title'].toString(),
+                description:payload['description']?.toString(),
+                startsAt:DateTime.parse(payload['starts_at'].toString()),
+                endsAt:DateTime.parse(payload['ends_at'].toString()),
+                employeeId:payload['employee_id']?.toString(),
+              )
+            : await _api.syncOfflineAppointmentEdit(
           businessId, appointmentId,
           operationId: payload['operation_id'].toString(),
           baseVersion: row.read<int>('base_row_version'),
