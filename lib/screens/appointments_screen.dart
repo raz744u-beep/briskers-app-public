@@ -30,6 +30,9 @@ class AppointmentsScreen extends StatefulWidget {
 
 class _AppointmentsScreenState extends State<AppointmentsScreen> {
   static const _api = BriskersApi();
+  // Avoid full remote reload each time the Appointments tab is reopened.
+  static final Map<String, DateTime> _lastSuccessfulPull = {};
+  static const _entryRefreshInterval = Duration(minutes: 2);
   final AppointmentSyncService _appointmentSync =
       AppointmentSyncService();
   final JobSyncService _jobSync = JobSyncService();
@@ -62,10 +65,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _load(initialEntry: true);
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool initialEntry = false}) async {
     var localAvailable = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
@@ -90,6 +93,13 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       }
     }
 
+    // Local rows were displayed first. Manual refresh and mutations still sync.
+    final lastPull = _lastSuccessfulPull[widget.businessId];
+    if (initialEntry && !forceOnline && localAvailable && lastPull != null &&
+        DateTime.now().difference(lastPull) < _entryRefreshInterval) {
+      return;
+    }
+
     try {
       final appliedJobs =
           await _appointmentSync.flush(widget.businessId);
@@ -100,6 +110,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       }
 
       await _appointmentSync.pull(widget.businessId);
+      _lastSuccessfulPull[widget.businessId] = DateTime.now();
       final localRows =
           await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim());
       final bootstrapped =
@@ -861,6 +872,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                         onTap: (_canManage || _canCheckIn)
                                   ? () => _showOptions(item)
                                   : null,
+                         onLongPress: (_canManage || _canCheckIn)
+                             ? () => _showOptions(item)
+                             : null,
                         child: Padding(
                                 padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
                                 child: Row(
