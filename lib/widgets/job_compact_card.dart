@@ -44,7 +44,7 @@ class JobCompactCard extends StatelessWidget {
         '';
     final requested = job['requested_work']?.toString().trim() ?? '';
     final title = job['title']?.toString().trim() ?? '';
-    final description = requested.isNotEmpty ? requested : title;
+    final description = title.isNotEmpty ? title : requested;
     final vehicle = job['vehicle']?.toString().trim() ?? '';
     final employee = (job['assigned_employee'] ?? job['mechanic'])
             ?.toString()
