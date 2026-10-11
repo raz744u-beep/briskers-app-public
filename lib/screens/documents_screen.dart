@@ -1356,6 +1356,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   ),
               ],
             ),
+            if (!_estimate && widget.isOwner) ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: BriskersColors.invoices,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: _showCloseInvoices,
+                  icon: const Icon(Icons.lock_outline),
+                  label: const Text('Close invoices'),
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
             Row(
               children: [
@@ -1399,21 +1414,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   ),
               ],
             ),
-            if (!_estimate && widget.isOwner) ...[
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: BriskersColors.invoices,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: _showCloseInvoices,
-                  icon: const Icon(Icons.lock_outline),
-                  label: const Text('Close invoices'),
-                ),
-              ),
-            ],
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
