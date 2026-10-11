@@ -88,15 +88,16 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   Future<void> _load() async {
     if (_offlineEditing || BriskersConnectionModeController.instance.forceOffline) {
       final item = widget.appointment ?? const <String,dynamic>{};
-      final cachedCustomers = _pendingCreate || !_editing
+      final cachedCustomers = _pendingCreate || !_editing ||
+              widget.appointment?['job_id'] == null
           ? await _localCustomers.customers(widget.businessId)
           : <Map<String,dynamic>>[];
-      if ((_pendingCreate || !_editing) && _customerId != null) {
+      if ((_pendingCreate || !_editing || widget.appointment?['job_id'] == null) && _customerId != null) {
         await _loadLocalVehicles(_customerId!);
       }
       setState(() {
-        _customers = _pendingCreate || !_editing ? cachedCustomers : [{'id':_customerId, 'display_name':item['customer'] ?? 'Customer'}];
-        if (!_pendingCreate) {
+        _customers = _pendingCreate || !_editing || widget.appointment?['job_id'] == null ? cachedCustomers : [{'id':_customerId, 'display_name':item['customer'] ?? 'Customer'}];
+        if (!_pendingCreate && widget.appointment?['job_id'] != null) {
           _vehicles = _vehicleId == null ? const [] : [{
             'id': _vehicleId, 'year': item['vehicle_year'],
             'make': item['vehicle_make'], 'model': item['vehicle_model'],
@@ -292,7 +293,10 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
           title: title,
           description: _description.text.trim().isEmpty ? null : _description.text.trim(),
           startsAt: _startsAt, endsAt: endsAt,
-          employeeId: _employeeId, isOwner: widget.isOwner,
+          employeeId: _employeeId,
+          customerId: _pendingCreate ? null : customerId,
+          vehicleId: _vehicleId,
+          isOwner: widget.isOwner,
         );
       } else if (_editing) {
         await _api.updateAppointment(
@@ -353,7 +357,8 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                   ),
                 )
                 .toList(),
-            onChanged: _offlineEditing && !_pendingCreate ? null : (value) async {
+            onChanged: _offlineEditing && !_pendingCreate &&
+                widget.appointment?['job_id'] != null ? null : (value) async {
               setState(() {
                 _customerId = value;
                 _vehicleId = null;
@@ -396,7 +401,8 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                 ),
               ),
             ],
-            onChanged: _offlineEditing && !_pendingCreate ? null : (value) => setState(() => _vehicleId = value),
+            onChanged: _offlineEditing && !_pendingCreate &&
+                widget.appointment?['job_id'] != null ? null : (value) => setState(() => _vehicleId = value),
           ),
           const SizedBox(height: 12),
           TextField(
