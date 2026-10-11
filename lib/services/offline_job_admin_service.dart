@@ -110,7 +110,9 @@ class OfflineJobAdminService {
         final customerId = data['customer_id']?.toString() ?? '';
         final vehicleId = data['vehicle_id']?.toString();
         if (customerId.startsWith('local-') ||
-            (vehicleId != null && vehicleId.startsWith('local-'))) continue;
+            (vehicleId != null && vehicleId.startsWith('local-'))) {
+          continue;
+        }
         try {
           await _api.createJob(businessId,
             id:id,customerId:customerId,
