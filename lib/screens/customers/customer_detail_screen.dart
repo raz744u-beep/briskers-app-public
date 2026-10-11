@@ -147,7 +147,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         leading: const Icon(Icons.dashboard_outlined),
         title: const Text('Customer Overview'),
         subtitle: Text(snapshot.hasError ? 'Could not read saved activity'
-          : snapshot.hasData ? rows.length.toString() + ' active records' : 'Loading activity...'),
+          : snapshot.hasData ? '${rows.length} active records' : 'Loading activity...'),
         children: [
           for (final item in rows)
             ListTile(
@@ -156,7 +156,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 item['type']=='Appointment' ? Icons.calendar_month_outlined :
                 Icons.description_outlined),
               title: Text(item['title'].toString()),
-              subtitle: Text(item['type'].toString() + ' · ' + item['status'].toString()),
+              subtitle: Text("${item['type']} · ${item['status']}"),
               onTap: item['id'] == null ? null : () =>
                 Navigator.push(context, MaterialPageRoute(builder: (_) =>
                   JobDocumentScreen(businessId:widget.businessId,
