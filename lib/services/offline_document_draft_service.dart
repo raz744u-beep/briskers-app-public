@@ -751,6 +751,65 @@ class OfflineDocumentDraftService {
     await _cache.save(businessId, documentId, updated);
   }
 
+  // Reconcile a converted invoice to the latest locally edited draft.
+  // Every retry fetches current server lines and applies at most one change,
+  // so an interrupted response cannot add a duplicate on replay.
+  Future<Map<String, dynamic>> _reconcileConvertedInvoice(
+    String businessId, String invoiceId, Map<String, dynamic> localDetail,
+  ) async {
+    final desired = _lines(localDetail);
+    for (var attempt = 0; attempt < desired.length * 4 + 40; attempt++) {
+      final remote = await _api.documentDetail(businessId, invoiceId);
+      final existing = _lines(remote);
+      bool same(Map<String, dynamic> a, Map<String, dynamic> b) =>
+          (a['name']?.toString() ?? '') == (b['name']?.toString() ?? '') &&
+          (a['description']?.toString() ?? '') == (b['description']?.toString() ?? '') &&
+          (a['line_kind']?.toString() ?? '') == (b['line_kind']?.toString() ?? '') &&
+          (_number(a['quantity']) - _number(b['quantity'])).abs() < 0.00001 &&
+          (_number(a['unit_price']) - _number(b['unit_price'])).abs() < 0.00001 &&
+          (_number(a['tax_rate']) - _number(b['tax_rate'])).abs() < 0.00001;
+      if (existing.length == desired.length &&
+          List.generate(desired.length, (i) => same(existing[i], desired[i]))
+              .every((ok) => ok)) return remote;
+      final version = int.tryParse(remote['row_version']?.toString() ?? '') ?? 1;
+      if (existing.length > desired.length) {
+        await _api.deleteDocumentLine(businessId, existing.last['id'].toString(),
+            expectedVersion: version);
+        continue;
+      }
+      var corrected = false;
+      for (var i = 0; i < existing.length; i++) {
+        final a = existing[i];
+        final b = desired[i];
+        if (same(a, b)) continue;
+        if (a['name']?.toString() == b['name']?.toString() &&
+            a['line_kind']?.toString() == b['line_kind']?.toString()) {
+          await _api.updateDocumentLine(businessId, a['id'].toString(),
+            expectedVersion: version, quantity: _number(b['quantity']),
+            unitPrice: _number(b['unit_price']), taxRate: _number(b['tax_rate']),
+            description: b['description']?.toString());
+        } else {
+          // Replace an incompatible line; the next retry sees the deletion.
+          await _api.deleteDocumentLine(businessId, a['id'].toString(),
+              expectedVersion: version);
+        }
+        corrected = true;
+        break;
+      }
+      if (corrected) continue;
+      final next = desired[existing.length];
+      await _api.addDocumentLine(businessId, invoiceId,
+        expectedVersion: version, name: next['name']?.toString() ?? 'Item',
+        description: next['description']?.toString(),
+        itemId: next['item_id']?.toString(),
+        quantity: _number(next['quantity']),
+        unitPrice: _number(next['unit_price']),
+        taxRate: _number(next['tax_rate']),
+        lineKind: next['line_kind']?.toString() ?? 'item');
+    }
+    throw StateError('Converted invoice line reconciliation did not complete safely.');
+  }
+
   Future<void> flush(String businessId) async {
     final rows = await _database.customSelect(
       '''
@@ -803,7 +862,8 @@ class OfflineDocumentDraftService {
           } else {
             serverId = await _api.convertEstimate(businessId, estimateServerId);
           }
-          serverDetail = await _api.documentDetail(businessId, serverId);
+          serverDetail = await _reconcileConvertedInvoice(
+              businessId, serverId, localDetail);
           final provisionalJobId = payload['provisional_job_id']?.toString() ?? '';
           if (provisionalJobId.isNotEmpty) {
             final realJobId = serverDetail['job_id']?.toString() ?? '';
