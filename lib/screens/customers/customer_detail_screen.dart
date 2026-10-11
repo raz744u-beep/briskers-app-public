@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:drift/drift.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/briskers_colors.dart';
@@ -9,6 +10,8 @@ import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/customer_detail_cache.dart';
+import '../../services/local_document_detail_cache.dart';
+import '../../local/local_database_provider.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../appointments/appointment_create_screen.dart';
@@ -94,6 +97,78 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     };
   }
 
+
+
+  Future<List<Map<String, dynamic>>> _activeCustomerItems() async {
+    final vars = <Variable<Object>>[
+      Variable<String>(widget.businessId),
+      Variable<String>(widget.customerId),
+    ];
+    final rows = <Map<String, dynamic>>[];
+    final appointments = await localDatabase.customSelect(
+      "SELECT title,status FROM local_appointments WHERE business_id=? AND customer_id=? "
+      "AND lower(status) NOT IN ('cancelled','canceled','no_show','checked_in','completed')",
+      variables: vars).get();
+    for (final a in appointments) {
+      rows.add({'type':'Appointment','title':a.read<String>('title'),
+        'status':a.read<String>('status')});
+    }
+    final jobs = await localDatabase.customSelect(
+      "SELECT title,status,payment_state FROM local_jobs WHERE business_id=? AND customer_id=? "
+      "AND lower(status) NOT IN ('completed','closed','cancelled')",
+      variables: vars).get();
+    for (final j in jobs) {
+      rows.add({'type':'Job','title':j.read<String>('title'),
+        'status':j.readNullable<String>('payment_state') == 'paid'
+          ? 'Paid, Still Open' : j.read<String>('status')});
+    }
+    final docs = await localDatabase.customSelect(
+      "SELECT id,kind,status,document_number FROM local_documents "
+      "WHERE business_id=? AND customer_id=? AND closed_at IS NULL "
+      "AND lower(COALESCE(status,''))<>'void'",
+      variables: vars).get();
+    for (final d in docs) {
+      final id = d.read<String>('id');
+      final detail = await const LocalDocumentDetailCache().load(widget.businessId,id);
+      rows.add({'type':d.read<String>('kind'),'id':id,
+        'title':detail?['title'] ?? detail?['job_title'] ?? d.read<String>('kind'),
+        'status':d.readNullable<String>('status') ?? '',
+        'number':d.readNullable<String>('document_number') ?? 'Pending sync'});
+    }
+    return rows;
+  }
+
+  Widget _customerOverviewCard() => FutureBuilder<List<Map<String, dynamic>>>(
+    future: _activeCustomerItems(),
+    builder: (context, snapshot) {
+      final rows = snapshot.data ?? const <Map<String,dynamic>>[];
+      return Card(child: ExpansionTile(
+        initiallyExpanded: true,
+        leading: const Icon(Icons.dashboard_outlined),
+        title: const Text('Customer Overview'),
+        subtitle: Text(snapshot.hasError ? 'Could not read saved activity'
+          : snapshot.hasData ? rows.length.toString() + ' active records' : 'Loading activity...'),
+        children: [
+          for (final item in rows)
+            ListTile(
+              dense: true,
+              leading: Icon(item['type']=='Job' ? Icons.build_outlined :
+                item['type']=='Appointment' ? Icons.calendar_month_outlined :
+                Icons.description_outlined),
+              title: Text(item['title'].toString()),
+              subtitle: Text(item['type'].toString() + ' · ' + item['status'].toString()),
+              onTap: item['id'] == null ? null : () =>
+                Navigator.push(context, MaterialPageRoute(builder: (_) =>
+                  JobDocumentScreen(businessId:widget.businessId,
+                    documentId:item['id'].toString(),
+                    isOwner:widget.roleCode=='owner'))),
+            ),
+          if (rows.isEmpty && snapshot.hasData)
+            const ListTile(title: Text('No active records saved locally')),
+        ],
+      ));
+    },
+  );
 
   Widget _offlineCountCard({
     required IconData icon,
@@ -949,6 +1024,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                           : null,
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  _customerOverviewCard(),
                   const SizedBox(height: 10),
                   CustomerProblemFlagCard(
                     customerId: widget.customerId,
