@@ -281,6 +281,59 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     }
   }
 
+  Future<void> _repairTestJobJ8(Map<String, dynamic> item) async {
+    if (widget.roleCode != 'owner' ||
+        item['id']?.toString() != '93356a11-f16a-4939-aaec-db5593273de3' ||
+        item['job_id']?.toString() != '21604efd-f7ab-4415-a97f-b9b2b2fbfe61') {
+      return;
+    }
+    const appointmentId = '93356a11-f16a-4939-aaec-db5593273de3';
+    const jobId = '21604efd-f7ab-4415-a97f-b9b2b2fbfe61';
+    try {
+      final result = await localDatabase.transaction<String>(() async {
+        final jobs = await localDatabase.customSelect(
+          'SELECT job_number, title FROM local_jobs WHERE business_id=? AND id=?',
+          variables: [Variable<String>(widget.businessId), const Variable<String>(jobId)],
+        ).get();
+        final appointments = await localDatabase.customSelect(
+          'SELECT job_id FROM local_appointments WHERE business_id=? AND id=?',
+          variables: [Variable<String>(widget.businessId), const Variable<String>(appointmentId)],
+        ).get();
+        if (jobs.length != 1 || appointments.length != 1 ||
+            jobs.first.read<String>('job_number') != 'J-8' ||
+            appointments.first.readNullable<String>('job_id') != jobId) {
+          return 'Local J-8 or appointment does not match expected test records. Nothing changed.';
+        }
+        final protected = <String, String>{
+          'documents': 'SELECT COUNT(*) n FROM local_documents WHERE business_id=? AND job_id=?',
+          'pre-inspections': 'SELECT COUNT(*) n FROM local_pre_inspections WHERE business_id=? AND job_id=?',
+          'job history': 'SELECT COUNT(*) n FROM local_job_visits WHERE business_id=? AND job_id=?',
+        };
+        for (final entry in protected.entries) {
+          try {
+            final rows = await localDatabase.customSelect(entry.value,
+              variables: [Variable<String>(widget.businessId), const Variable<String>(jobId)]).get();
+            if (rows.single.read<int>('n') > 0) {
+              return 'Blocked: J-8 has ${entry.key}. Nothing deleted.';
+            }
+          } catch (_) {
+            return 'Could not verify ${entry.key}; deletion blocked.';
+          }
+        }
+        return 'Inspection passed. No records deleted. Cloud deletion and remaining relationships must be verified before cleanup.';
+      });
+      if (!mounted) return;
+      await showDialog<void>(context: context, builder: (context) => AlertDialog(
+        title: const Text('J-8 repair inspection'),
+        content: Text(result),
+        actions: [TextButton(onPressed: () => Navigator.pop(context),
+          child: const Text('Close'))],
+      ));
+    } catch (error) {
+      if (mounted) setState(() => _error = 'J-8 inspection: $error');
+    }
+  }
+
   Future<void> _showAppointmentDependencies(Map<String, dynamic> item) async {
     if (widget.roleCode != 'owner') return;
     final jobId = item['job_id']?.toString();
@@ -647,6 +700,13 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 title: const Text('View dependencies / deletion options'),
                 onTap: () => Navigator.pop(sheetContext, 'dependencies'),
               ),
+            if (widget.roleCode == 'owner' &&
+                item['id']?.toString() == '93356a11-f16a-4939-aaec-db5593273de3')
+              ListTile(
+                leading: const Icon(Icons.rule_folder_outlined),
+                title: const Text('Inspect J-8 test cleanup'),
+                onTap: () => Navigator.pop(sheetContext, 'repair_j8'),
+              ),
             if (canDelete)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.red),
@@ -672,6 +732,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         break;
       case 'cancel':
         await _cancelAppointment(item);
+        break;
+      case 'repair_j8':
+        await _repairTestJobJ8(item);
         break;
       case 'dependencies':
         await _showAppointmentDependencies(item);
