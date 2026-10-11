@@ -98,5 +98,18 @@ void main() {
     expect(picker, contains('onTap: () => Navigator.pop(context, customer)'));
   });
 
+  test('shared header exposes real connection preferences and sync timestamp', () async {
+    final shell = await File('lib/screens/shell_screen.dart').readAsString();
+    final header = await File('lib/widgets/connection_header_toggle.dart')
+        .readAsString();
+    expect(shell, contains('ConnectionHeaderToggle(businessId: widget.businessId)'));
+    expect(header, contains('BriskersConnectionMode.offline'));
+    expect(header, contains('BriskersConnectionMode.online'));
+    expect(header, contains('BriskersConnectionMode.auto'));
+    expect(header, contains('await _controller.setMode(next)'));
+    expect(header, contains('MAX(last_pull_at)'));
+    expect(header, contains('Not yet synced'));
+  });
+
 }
 
