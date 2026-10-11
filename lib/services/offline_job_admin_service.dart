@@ -76,7 +76,8 @@ class OfflineJobAdminService {
            planned_hours,created_at,sync_state)
           VALUES (?,?,'full','Pending sync',?,?,'open','Open',?,?,?,?,?,?,'pending')""",
         [id,businessId,title.trim(),requestedWork,customerId,customerName,
-         vehicleId,vehicleLabel,plannedHours.toDouble(),now],
+         vehicleId,vehicleLabel,plannedHours.toDouble(),
+         now.millisecondsSinceEpoch ~/ 1000],
       );
       await _database.customStatement(
         """INSERT INTO sync_outbox
