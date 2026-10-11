@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/offline_job_admin_service.dart';
+import 'package:briskers_app/services/briskers_api.dart';
 
 void main() {
   test('offline new Job persists with one queued stable-ID creation', () async {
@@ -45,6 +46,27 @@ void main() {
     }
   });
 
+  test('uncertain server replay uses the same ID and one Job', () async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    final api=FakeJobApi()..failUpdateOnce=true;
+    final service=OfflineJobAdminService(database:db,api:api);
+    try {
+      final jobId=await service.queueJobCreate('shop-1',
+        customerId:'customer-1',customerName:'Test',
+        title:'Offline created job');
+      await service.flushCreates('shop-1');
+      expect(api.createdIds,[jobId]);
+      final retained=await db.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type='job_create'").get();
+      expect(retained.length,1);
+      await service.flushCreates('shop-1');
+      expect(api.createdIds,[jobId]);
+      final pending=await db.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type='job_create'").get();
+      expect(pending,isEmpty);
+    } finally { await db.close(); }
+  });
+
   test('pending local-only customer cannot produce unresolvable Job', () async {
     final db=BriskersLocalDatabase(NativeDatabase.memory());
     try {
@@ -56,4 +78,31 @@ void main() {
       );
     } finally { await db.close(); }
   });
+}
+
+class FakeJobApi extends BriskersApi {
+  final List<String> createdIds=[];
+  bool failUpdateOnce=false;
+  @override
+  Future<String> createJob(String businessId, {
+    required String customerId, String? vehicleId,
+    required String title, String? description, String? id,
+  }) async {
+    if(id==null) throw StateError('Missing stable ID');
+    if(!createdIds.contains(id)) createdIds.add(id);
+    return id;
+  }
+  @override
+  Future<void> updateJob(String businessId,String jobId,{
+    required String customerId,String? vehicleId,required String title,
+    String? requestedWork,required num plannedHours,
+  }) async {
+    if(failUpdateOnce) {
+      failUpdateOnce=false;
+      throw StateError('simulated transient network loss');
+    }
+  }
+  @override
+  Future<Map<String,dynamic>> jobDetail(String businessId,String jobId) async =>
+      {'id':jobId,'customer_id':'customer-1'};
 }
