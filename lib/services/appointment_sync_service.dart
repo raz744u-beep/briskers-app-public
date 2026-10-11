@@ -656,11 +656,12 @@ class AppointmentSyncService {
       }
       await _database.customStatement(
         """UPDATE local_appointments SET title=?,description=?,starts_at=?,
-          ends_at=?,employee_id=?,sync_state='pending'
-          WHERE business_id=? AND id=?""",
+          ends_at=?,employee_id=?,customer_id=?,vehicle_id=?,
+          sync_state='pending' WHERE business_id=? AND id=?""",
         [
           title.trim(), description, _unix(startsAt), _unix(endsAt),
-          employeeId, businessId, appointmentId,
+          employeeId, selectedCustomer, selectedVehicle,
+          businessId, appointmentId,
         ],
       );
     });
