@@ -151,5 +151,12 @@ void main() {
     expect(invoice, contains("child: const Text('Complete Job')"));
   });
 
+  test('Standalone estimates use shared connection header without repeated title', () async {
+    final source = await File('lib/screens/documents_screen.dart').readAsString();
+    expect(source, contains('ConnectionHeaderToggle(businessId: widget.businessId)'));
+    expect(source, contains('if (!_estimate) ...['));
+    expect(source, contains('const BriskersLogo(height: 44, maxWidth: 148)'));
+  });
+
 }
 
