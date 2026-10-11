@@ -107,6 +107,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       !_offlineDocumentDraft.isLocalDraftId(widget.documentId) &&
       !_detail!.containsKey('legacy_read_only');
   bool get _readOnly => (_estimate && _converted) ||
+      _detail?['converted_from_estimate_id'] != null ||
       _detail?['legacy_read_only'] == true ||
       (!_estimate && _detail?['closed_at'] != null) ||
       _editLockUnverified;
