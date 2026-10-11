@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
+import '../../services/offline_job_admin_service.dart';
+import '../../core/connection_mode.dart';
 
 class JobCreateScreen extends StatefulWidget {
   const JobCreateScreen({
@@ -23,6 +25,7 @@ class JobCreateScreen extends StatefulWidget {
 
 class _JobCreateScreenState extends State<JobCreateScreen> {
   static const _api = BriskersApi();
+  final _offlineJobs = OfflineJobAdminService();
 
   final _title = TextEditingController();
   final _requestedWork = TextEditingController();
@@ -76,6 +79,16 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
     ].where((part) => part.isNotEmpty).join(' ');
   }
 
+  String? _vehiclesLabel() {
+    if (_vehicleId == null) return null;
+    for (final raw in widget.vehicles) {
+      if (raw is Map && raw['id']?.toString() == _vehicleId) {
+        return _vehicleName(Map<String,dynamic>.from(raw));
+      }
+    }
+    return null;
+  }
+
   Future<void> _save() async {
     final title = _title.text.trim();
     if (title.isEmpty && _createdJobId == null) {
@@ -96,38 +109,27 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
 
     try {
       final jobId = _createdJobId ??
-          await _api.createJob(
+          await _offlineJobs.queueJobCreate(
             widget.businessId,
             customerId: widget.customerId,
+            customerName: widget.customerName,
             vehicleId: _vehicleId,
+            vehicleLabel: _vehiclesLabel(),
             title: title,
-            description: _requestedWork.text.trim().isEmpty
-                ? null
-                : _requestedWork.text.trim(),
+            requestedWork: _requestedWork.text.trim().isEmpty
+                ? null : _requestedWork.text.trim(),
+            plannedHours: plannedHours,
           );
-
       _createdJobId = jobId;
-
-      await _api.updateJob(
-        widget.businessId,
-        jobId,
-        customerId: widget.customerId,
-        vehicleId: _vehicleId,
-        title: title,
-        requestedWork: _requestedWork.text.trim().isEmpty
-            ? null
-            : _requestedWork.text.trim(),
-        plannedHours: plannedHours,
-      );
-
-      if (_employeeId != null) {
-        await _api.setPrimaryJobEmployee(
-          widget.businessId,
-          jobId,
-          _employeeId!,
-        );
+      // A queued job is usable immediately. Never wait for the network
+      // to mark the form as successfully saved.
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await _offlineJobs.flushCreates(widget.businessId);
+        } catch (_) {
+          // Creation is durable locally; syncing will retry.
+        }
       }
-
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (!mounted) return;
