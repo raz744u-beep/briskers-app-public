@@ -110,12 +110,22 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
       return;
     }
     try {
-      final results = await Future.wait<dynamic>([
-        _api.customers(widget.businessId, limit: 100),
-        _api.assignableEmployees(widget.businessId),
-      ]);
-      final customers = List<Map<String, dynamic>>.from(results[0] as List);
-      final employees = List<Map<String, dynamic>>.from(results[1] as List);
+      // Automatic mode is local-first: a network failure must not prevent
+      // opening the appointment editor or choosing a cached customer.
+      final localCustomers = await _localCustomers.customers(widget.businessId);
+      final customers = localCustomers.isNotEmpty
+          ? localCustomers
+          : await _api.customers(widget.businessId, limit: 100);
+      List<Map<String, dynamic>> employees;
+      try {
+        employees = await _api.assignableEmployees(widget.businessId);
+      } catch (_) {
+        employees = _employeeId == null ? <Map<String, dynamic>>[] : [{
+          'id': _employeeId,
+          'name': widget.appointment?['mechanic'] ?? 'Assigned',
+          'position_name': 'Employee',
+        }];
+      }
 
       if (_editing &&
           _customerId != null &&
@@ -128,7 +138,16 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
       }
 
       if (_customerId != null) {
-        await _loadVehicles(_customerId!, updateState: false);
+        if (localCustomers.isNotEmpty) {
+          final detail = await _localCustomers.customerDetail(
+            widget.businessId, _customerId!,
+          );
+          _vehicles = List<Map<String,dynamic>>.from(
+            detail?['vehicles'] as List? ?? const [],
+          );
+        } else {
+          await _loadVehicles(_customerId!, updateState: false);
+        }
       }
 
       if (!mounted) return;
@@ -341,7 +360,10 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                 _vehicles = const [];
               });
               if (value != null) {
-                if (_offlineEditing || BriskersConnectionModeController.instance.forceOffline) { await _loadLocalVehicles(value); }
+                if (_offlineEditing || BriskersConnectionModeController.instance.forceOffline ||
+                    await _localCustomers.hasBootstrap(widget.businessId)) {
+                  await _loadLocalVehicles(value);
+                }
                 else { await _loadVehicles(value); }
               }
             },
