@@ -831,20 +831,26 @@ class AppointmentSyncService {
     String businessId, String customerId, String? vehicleId,
   ) async {
     if (customerId.startsWith('local-') ||
-        (vehicleId?.startsWith('local-') ?? false)) return false;
+        (vehicleId?.startsWith('local-') ?? false)) {
+      return false;
+    }
     final customers=await _database.customSelect(
       'SELECT sync_state FROM local_customers WHERE business_id=? AND id=?',
       variables:[Variable<String>(businessId),Variable<String>(customerId)],
     ).get();
     if (customers.isNotEmpty &&
-        customers.single.read<String>('sync_state') != 'synced') return false;
+        customers.single.read<String>('sync_state') != 'synced') {
+      return false;
+    }
     if (vehicleId != null) {
       final vehicles=await _database.customSelect(
         'SELECT sync_state FROM local_vehicles WHERE business_id=? AND id=?',
         variables:[Variable<String>(businessId),Variable<String>(vehicleId)],
       ).get();
       if (vehicles.isNotEmpty &&
-          vehicles.single.read<String>('sync_state') != 'synced') return false;
+          vehicles.single.read<String>('sync_state') != 'synced') {
+        return false;
+      }
     }
     return true;
   }
