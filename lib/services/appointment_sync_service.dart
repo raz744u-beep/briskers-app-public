@@ -627,8 +627,10 @@ class AppointmentSyncService {
       final payload = jsonEncode({
         'operation_id': op,
         'appointment_id': appointmentId,
-        'customer_id': selectedCustomer,
-        'vehicle_id': selectedVehicle,
+        if (reassigned || existingPayload?['customer_id'] != null)
+          'customer_id': selectedCustomer,
+        if (reassigned || existingPayload?['customer_id'] != null)
+          'vehicle_id': selectedVehicle,
         'title': title.trim(),
         'description': description,
         'starts_at': startsAt.toUtc().toIso8601String(),
