@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:drift/drift.dart';
+
+import '../local/local_database_provider.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
@@ -280,48 +283,99 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   Future<void> _showAppointmentDependencies(Map<String, dynamic> item) async {
     if (widget.roleCode != 'owner') return;
-    final job = item['job_id']?.toString();
-    final request = item['request_id']?.toString();
+    final jobId = item['job_id']?.toString();
+    final requestId = item['request_id']?.toString();
     final id = item['id']?.toString() ?? '';
     final sync = item['sync_state']?.toString() ?? 'synced';
-    final hasLinks = (job != null && job.isNotEmpty) ||
-        (request != null && request.isNotEmpty);
-    final canTryDelete = !hasLinks && sync != 'conflict' &&
-        (sync == 'synced' || id.startsWith('local-appointment-'));
+
+    // Read the phone's SQLite data, not just the cached card snapshot.
+    // Inspection is deliberately read-only; financial history is never
+    // deleted as a side effect of removing an appointment.
+    String jobSummary = 'No job reference';
+    String documentSummary = 'Not applicable';
+    String queueSummary = 'Unknown';
+    String inspectionError = '';
+    bool jobFound = false;
+    bool inspected = false;
+    try {
+      final queue = await localDatabase.customSelect(
+        'SELECT entity_type, state, attempt_count FROM sync_outbox '
+        'WHERE business_id = ? AND entity_id = ?',
+        variables: [Variable<String>(widget.businessId), Variable<String>(id)],
+      ).get();
+      queueSummary = queue.isEmpty
+          ? 'No appointment operations queued'
+          : queue.map((row) => '${row.read<String>('entity_type')}: '
+              '${row.read<String>('state')} '
+              '(attempts: ${row.read<int>('attempt_count')})').join('; ');
+      if (jobId != null && jobId.isNotEmpty) {
+        final jobs = await localDatabase.customSelect(
+          'SELECT job_number, title, status FROM local_jobs '
+          'WHERE business_id = ? AND id = ? LIMIT 1',
+          variables: [
+            Variable<String>(widget.businessId), Variable<String>(jobId),
+          ],
+        ).get();
+        jobFound = jobs.isNotEmpty;
+        jobSummary = jobFound
+            ? 'Found locally: ${jobs.first.readNullable<String>('job_number') ?? '(unnumbered)'} '
+              '— ${jobs.first.readNullable<String>('title') ?? '(no title)'} '
+              '[${jobs.first.readNullable<String>('status') ?? 'unknown'}]'
+            : 'MISSING from local_jobs (orphaned local link possible)';
+        final documents = await localDatabase.customSelect(
+          'SELECT kind, document_number FROM local_documents '
+          'WHERE business_id = ? AND job_id = ?',
+          variables: [
+            Variable<String>(widget.businessId), Variable<String>(jobId),
+          ],
+        ).get();
+        documentSummary = documents.isEmpty
+            ? 'No locally cached documents linked to this job'
+            : documents.map((row) =>
+                '${row.readNullable<String>('kind') ?? 'document'} '
+                '${row.readNullable<String>('document_number') ?? ''}')
+              .join(', ');
+      }
+      inspected = true;
+    } catch (error) {
+      inspectionError = error.toString();
+    }
     if (!mounted) return;
-    final delete = await showDialog<bool>(
+    final linked = (jobId != null && jobId.isNotEmpty) ||
+        (requestId != null && requestId.isNotEmpty);
+    // Keep the existing no-dependency safe delete path; never infer that
+    // a locally missing job is safe to cascade-delete on the server.
+    final canTryDelete = inspected && !linked && sync != 'conflict' &&
+        (sync == 'synced' || id.startsWith('local-appointment-'));
+    final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Appointment dependencies'),
+        title: const Text('Appointment local inspection'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Appointment ID: $id'),
-              Text('Sync status: $sync'),
-              const SizedBox(height: 10),
-              Text(job == null || job.isEmpty
-                  ? 'Linked job: none recorded locally'
-                  : 'Linked job ID: $job'),
-              Text(request == null || request.isEmpty
-                  ? 'Customer request: none recorded locally'
-                  : 'Customer request ID: $request'),
-              const SizedBox(height: 10),
-              Text(hasLinks
-                  ? 'Deletion is blocked because related records exist. '
-                    'Deleting a job could also destroy estimates, invoices, '
-                    'payments, and service history. Those records are NOT '
-                    'automatically deleted.'
-                  : 'No job or request link is recorded in the local '
-                    'appointment. Other server-side relationships have not '
-                    'been independently verified.'),
-              if (!canTryDelete)
-                const Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: Text('Safe deletion is not available in the current '
-                      'sync state. Refresh or resolve linked records first.'),
-                ),
+              Text('Sync state: $sync'),
+              const SizedBox(height: 12),
+              Text('Linked job ID: ${jobId ?? 'none'}'),
+              Text('Local job: $jobSummary'),
+              Text('Job documents: $documentSummary'),
+              Text('Customer request ID: ${requestId ?? 'none'}'),
+              Text('Sync queue: $queueSummary'),
+              if (inspectionError.isNotEmpty)
+                Text('Inspection incomplete: $inspectionError'),
+              const SizedBox(height: 12),
+              Text(jobFound
+                  ? 'This job exists on the device. Do not delete it without '
+                    'checking related invoices, payments and service history.'
+                  : linked
+                      ? 'A dependency is recorded but its linked job may be '
+                        'missing locally. This is NOT proof that the server '
+                        'has no job. No records will be removed.'
+                      : 'No direct job or request links appear in this '
+                        'appointment. Server relationships are not verified.'),
             ],
           ),
         ),
@@ -338,7 +392,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         ],
       ),
     );
-    if (delete == true && mounted) await _deleteAppointment(item);
+    if (shouldDelete == true && mounted) await _deleteAppointment(item);
   }
 
   Future<void> _deleteAppointment(Map<String, dynamic> item) async {
