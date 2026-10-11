@@ -24,6 +24,9 @@ void main() {
         endsAt: start.add(const Duration(hours: 3)),
         isOwner: false,
       );
+      await db.customStatement(
+        "INSERT INTO local_customer_vehicles(business_id,customer_id,vehicle_id) VALUES('shop-test','customer-replacement','vehicle-replacement')",
+      );
       await service.reassignPendingCreate(
         'shop-test',id,customerId:'customer-replacement',
         vehicleId:'vehicle-replacement',
