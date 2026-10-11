@@ -323,6 +323,12 @@ class OfflineCustomerVehicleAdminService {
             [businessId, entityId],
           );
         } else if (type == 'vehicle_create') {
+          final parentCustomer=payload['customer_id']?.toString() ?? '';
+          if (parentCustomer.startsWith('local-')) {
+            // A vehicle cannot upload before its new customer has a server ID.
+            // Keep the existing operation untouched for a later sync pass.
+            continue;
+          }
           final serverId = await _api.createVehicleOfflineIdempotent(
             businessId,
             payload['customer_id']?.toString() ?? '',
