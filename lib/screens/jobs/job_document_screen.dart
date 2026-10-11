@@ -1984,11 +1984,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     }
 
     if (BriskersConnectionModeController.instance.forceOffline) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Creating a new invoice from an estimate still requires a connection.',
+      String? localInvoiceId;
+      await _run(() async {
+        localInvoiceId = await _offlineDocumentDraft.convertEstimateOffline(
+          widget.businessId, widget.documentId);
+      });
+      if (!mounted || localInvoiceId == null || _error != null) return;
+      await Navigator.pushReplacement<void, void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => JobDocumentScreen(
+            businessId: widget.businessId,
+            documentId: localInvoiceId!,
+            isOwner: widget.isOwner,
+            canManageExpenses: widget.canManageExpenses,
           ),
         ),
       );
