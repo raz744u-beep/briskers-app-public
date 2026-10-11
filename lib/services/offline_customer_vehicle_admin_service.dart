@@ -365,7 +365,18 @@ class OfflineCustomerVehicleAdminService {
       variables: [Variable<String>(businessId)],
     ).get();
 
-    for (final row in rows) {
+    for (final queued in rows) {
+      // Re-read after prior customer/vehicle rekeys: the original snapshot
+      // contains stale temporary dependency IDs.
+      final fresh = await _database.customSelect(
+        'SELECT * FROM sync_outbox WHERE id=? AND state=? LIMIT 1',
+        variables: [
+          Variable<int>(queued.read<int>('id')),
+          const Variable<String>('pending'),
+        ],
+      ).get();
+      if (fresh.isEmpty) continue;
+      final row = fresh.single;
       final outboxId = row.read<int>('id');
       final type = row.read<String>('entity_type');
       final entityId = row.read<String>('entity_id');
