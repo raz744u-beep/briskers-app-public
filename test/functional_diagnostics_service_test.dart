@@ -12,11 +12,11 @@ void main() {
 
     final report = await service.run();
 
-    expect(report.checks, hasLength(15));
+    expect(report.checks, hasLength(21));
     final ids = report.checks.map((check) => check.id).toSet();
-    expect(ids, containsAll(<String>['FUNC-019', 'FUNC-020', 'FUNC-021']));
+    expect(ids, containsAll(<String>['FUNC-013', 'FUNC-014', 'FUNC-015', 'FUNC-016', 'FUNC-017', 'FUNC-018', 'FUNC-019', 'FUNC-020', 'FUNC-021']));
     expect(ids.length, report.checks.length);
-    expect(report.passed, 15);
+    expect(report.passed, 21);
     expect(report.warnings, 0);
     expect(report.failed, 0);
   });
