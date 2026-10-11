@@ -77,12 +77,14 @@ void main() {
     expect(expenses, contains("tooltip: 'Add transaction'"));
   });
 
-  test('offline new Job action is not mistaken for functional create', () async {
-    final jobs = await File('lib/screens/jobs_screen.dart').readAsString();
-    final admin = await File('lib/services/offline_job_admin_service.dart').readAsString();
-    // A durable create queue + idempotent server replay must replace this gate.
-    expect(jobs, contains('New job creation needs a connection in this version'));
-    expect(admin, isNot(contains('queueJobCreate(')));
+  test('offline New Job routes to durable create queue', () async {
+    final jobs=await File('lib/screens/jobs_screen.dart').readAsString();
+    final form=await File('lib/screens/jobs/job_create_screen.dart').readAsString();
+    final admin=await File('lib/services/offline_job_admin_service.dart').readAsString();
+    expect(jobs, isNot(contains('New job creation needs a connection in this version')));
+    expect(form, contains('_offlineJobs.queueJobCreate('));
+    expect(admin, contains('Future<String> queueJobCreate('));
+    expect(admin, contains('Future<void> flushCreates('));
   });
 
 }
