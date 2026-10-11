@@ -67,15 +67,21 @@ void main() {
     } finally { await db.close(); }
   });
 
-  test('pending local-only customer cannot produce unresolvable Job', () async {
+  test('new Job may wait safely for customer and vehicle sync', () async {
     final db=BriskersLocalDatabase(NativeDatabase.memory());
     try {
-      await expectLater(
-        OfflineJobAdminService(database:db).queueJobCreate('shop-1',
-          customerId:'local-customer-123',
-          customerName:'New Customer',title:'Repair'),
-        throwsStateError,
-      );
+      final id = await OfflineJobAdminService(database:db).queueJobCreate('shop-1',
+        customerId:'local-customer-123',
+        customerName:'New Customer',
+        vehicleId:'local-vehicle-456',
+        title:'Repair');
+      final rows=await db.customSelect(
+        "SELECT payload_json FROM sync_outbox WHERE entity_type='job_create'").get();
+      expect(rows.length,1);
+      final payload=jsonDecode(rows.single.read<String>('payload_json')) as Map;
+      expect(payload['customer_id'],'local-customer-123');
+      expect(payload['vehicle_id'],'local-vehicle-456');
+      expect(id,isNotEmpty);
     } finally { await db.close(); }
   });
 }
