@@ -105,21 +105,13 @@ class BriskersFunctionalDiagnosticsService {
       success: 'Job edit, status and assignment merged into one pending change.',
       action: _checkJobAdmin,
     );
-    // Existing offline job updates are supported, but standalone new-job
-    // creation still uses an online-only API. Make that limitation visible
-    // rather than reporting a misleading all-green functional result.
-    checks.add(const DiagnosticCheck(
+    await _scenario(
+      checks,
       id: 'FUNC-JOB-CREATE',
-      category: 'Functional',
-      title: 'New job creation while offline',
-      level: BriskersDiagnosticLevel.warning,
-      summary: 'Standalone New Job still requires internet; offline new-job '
-          'create and replay are not yet implemented.',
-      details: [
-        'Existing job edits can be queued offline.',
-        'Do not treat FUNC-004 as a test of creating a new Job.',
-      ],
-    ));
+      title: 'New Job creation offline and stable replay identity',
+      success: 'New Job and immutable UUID saved locally with one retry-safe create outbox operation.',
+      action: _checkOfflineJobCreate,
+    );
 
     await _scenario(
       checks,
@@ -1310,6 +1302,33 @@ class BriskersFunctionalDiagnosticsService {
       }),
       'Customer/vehicle outbox operations are incomplete.',
     );
+  }
+
+  Future<void> _checkOfflineJobCreate(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final service = OfflineJobAdminService(database:database);
+    final id = await service.queueJobCreate(businessId,
+      customerId:'customer-test',customerName:'Diagnostic Customer',
+      title:'Diagnostic work',plannedHours:1);
+    final rows = await database.customSelect(
+      'SELECT title,sync_state FROM local_jobs WHERE business_id=? AND id=?',
+      variables:[Variable<String>(businessId),Variable<String>(id)],
+    ).get();
+    _require(rows.length==1 && rows.single.read<String>('sync_state')=='pending',
+      'Offline job is missing from local job cache.');
+    final pending = await database.customSelect(
+      "SELECT payload_json FROM sync_outbox WHERE business_id=? "
+      "AND entity_type='job_create' AND entity_id=?",
+      variables:[Variable<String>(businessId),Variable<String>(id)],
+    ).get();
+    _require(pending.length==1,'Offline Job create did not persist one outbox row.');
+    final payload=Map<String,dynamic>.from(
+      jsonDecode(pending.single.read<String>('payload_json')) as Map);
+    _require(payload['job_id']==id &&
+      payload['operation_id']=='job-create-$id',
+      'Job creation sync identity changed or was missing.');
   }
 
   Future<void> _checkJobAdmin(
