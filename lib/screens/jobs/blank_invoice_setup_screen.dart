@@ -253,67 +253,60 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
             style: const TextStyle(color: Color(0xFF667085)),
           ),
           const SizedBox(height: 16),
-          if (widget.initialCustomerId == null)
-          TextField(
-            controller: _customerSearch,
-            enabled: !_saving,
-            onChanged: _onCustomerSearch,
-            decoration: InputDecoration(
-              labelText: 'Find customer',
-              hintText: 'Search by name, phone or email',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: _customerSearch.text.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: 'Clear search',
-                      onPressed: () {
-                        _customerSearch.clear();
-                        _onCustomerSearch('');
-                      },
-                      icon: const Icon(Icons.close),
-                    ),
+          if (widget.initialCustomerId == null) ...[
+            TextField(
+              controller: _customerSearch,
+              enabled: !_saving,
+              onChanged: _onCustomerSearch,
+              decoration: InputDecoration(
+                labelText: 'Customer',
+                hintText: 'Start typing name, phone, or email',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _customerSearch.text.isEmpty ? null
+                    : IconButton(
+                        tooltip: 'Clear customer',
+                        onPressed: () {
+                          _customerSearch.clear();
+                          _onCustomerSearch('');
+                        },
+                        icon: const Icon(Icons.close),
+                      ),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          if (widget.initialCustomerId != null)
+            if (_searchingCustomers) const LinearProgressIndicator(),
+            if (!_searchingCustomers && _customerId == null &&
+                _customerSearch.text.isNotEmpty)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 240),
+                child: _customers.isEmpty
+                    ? const Text('No matching customers.')
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _customers.length,
+                        itemBuilder: (context, index) {
+                          final customer = _customers[index];
+                          final id = customer['id']?.toString() ?? '';
+                          final name = customer['display_name']?.toString() ??
+                              customer['name']?.toString() ?? 'Customer';
+                          return ListTile(
+                            title: Text(name),
+                            onTap: _saving || id.isEmpty ? null : () {
+                              setState(() {
+                                _customerId = id;
+                                _customerSearch.text = name;
+                              });
+                              _loadVehicles(id);
+                            },
+                          );
+                        },
+                      ),
+              ),
+          ] else
             ListTile(
               leading: const Icon(Icons.person_outline),
               title: const Text('Customer'),
               subtitle: Text(widget.initialCustomerName ?? 'Customer'),
             ),
-          if (widget.initialCustomerId == null && _searchingCustomers)
-            const LinearProgressIndicator()
-          else if (widget.initialCustomerId == null && _customers.isEmpty)
-            const Text('No matching customers. Try another search.'),
-          if (widget.initialCustomerId == null && !_searchingCustomers && _customers.isNotEmpty)
-          DropdownButtonFormField<String>(
-            key: ValueKey(_customerDropdownVersion),
-            initialValue: _customerId,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Customer',
-              prefixIcon: Icon(Icons.person_outline),
-            ),
-            items: _customers
-                .map(
-                  (customer) => DropdownMenuItem<String>(
-                    value: customer['id']?.toString(),
-                    child: Text(
-                      customer['display_name']?.toString() ??
-                          customer['name']?.toString() ??
-                          'Customer',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                )
-                .toList(),
-            onChanged: _saving
-                ? null
-                : (value) {
-                    setState(() => _customerId = value);
-                    if (value != null) _loadVehicles(value);
-                  },
-          ),
           const SizedBox(height: 12),
           if (_loadingVehicles)
             const LinearProgressIndicator()
