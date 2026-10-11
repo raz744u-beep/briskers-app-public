@@ -111,5 +111,16 @@ void main() {
     expect(header, contains('Not yet synced'));
   });
 
+  test('New Job form exposes complaint and save controls with keyboard safe scroll', () async {
+    final form = await File('lib/screens/jobs/job_create_screen.dart').readAsString();
+    expect(form, contains('resizeToAvoidBottomInset: true'));
+    expect(form, contains('ScrollViewKeyboardDismissBehavior.onDrag'));
+    expect(form, contains('MediaQuery.viewInsetsOf(context).bottom'));
+    expect(form, contains("labelText: 'Requested work / complaint'"));
+    expect(form, contains("hintText: 'Describe the customer complaint or requested service'"));
+    expect(form, contains('enabledBorder: OutlineInputBorder('));
+    expect(form, contains("onPressed: _saving ? null : _save"));
+  });
+
 }
 
