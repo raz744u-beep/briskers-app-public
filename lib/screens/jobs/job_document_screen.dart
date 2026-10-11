@@ -394,8 +394,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           widget.documentId,
         );
         if (cached != null && mounted) {
-          final recovered = await _withRecoveredDocumentDate(cached);
-          final cachedTax = await _taxSettingsCache.load(widget.businessId);
+          // These local reads are independent. Start both together so a
+          // slow settings lookup cannot serialize cached invoice first paint.
+          final local = await Future.wait<dynamic>([
+            _withRecoveredDocumentDate(cached),
+            _taxSettingsCache.load(widget.businessId),
+          ]);
+          final recovered = Map<String, dynamic>.from(local[0] as Map);
+          final cachedTax = local[1] as Map<String, dynamic>?;
           if (!mounted) return;
           setState(() {
             _detail = recovered;
