@@ -18,11 +18,13 @@ void main() {
         vehicleLabel: '2011 Infiniti M37',
         title: 'Test repair',
         requestedWork: 'Diagnostics',
-        plannedHours: 2);
+        plannedHours: 2,
+        employeeId:'mechanic-1',
+        employeeName:'Chris');
       expect(jobId, matches(RegExp(
         r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')));
       final job = await db.customSelect(
-        'SELECT sync_state,title,job_number,planned_hours FROM local_jobs '
+        'SELECT sync_state,title,job_number,planned_hours,assigned_employee_id,assigned_employee_name,is_unassigned FROM local_jobs '
         'WHERE business_id=? AND id=?',
         variables:[const Variable<String>('shop-1'),Variable<String>(jobId)],
       ).getSingle();
@@ -30,6 +32,9 @@ void main() {
       expect(job.read<String>('title'),'Test repair');
       expect(job.read<String>('job_number'),'Pending sync');
       expect(job.read<double>('planned_hours'),2.0);
+      expect(job.read<String>('assigned_employee_id'),'mechanic-1');
+      expect(job.read<String>('assigned_employee_name'),'Chris');
+      expect(job.read<int>('is_unassigned'),0);
       final queue = await db.customSelect(
         "SELECT payload_json FROM sync_outbox "
         "WHERE entity_type='job_create' AND entity_id=?",
@@ -41,6 +46,7 @@ void main() {
       expect(payload['operation_id'],'job-create-$jobId');
       expect(payload['job_id'],jobId);
       expect(payload['customer_id'],'customer-1');
+      expect(payload['employee_id'],'mechanic-1');
     } finally {
       await db.close();
     }
