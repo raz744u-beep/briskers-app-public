@@ -105,6 +105,19 @@ class OfflineCustomerVehicleAdminService {
         ? 'local-vehicle-${DateTime.now().microsecondsSinceEpoch}'
         : vehicleId;
 
+    if (!creating && id.startsWith('local-vehicle-')) {
+      final rows=await _database.customSelect(
+        """SELECT attempt_count,last_attempt_at FROM sync_outbox
+           WHERE business_id=? AND entity_type='vehicle_create'
+             AND entity_id=? AND state='pending' LIMIT 1""",
+        variables:[Variable<String>(businessId),Variable<String>(id)],
+      ).get();
+      if (rows.isNotEmpty &&
+          (rows.single.read<int>('attempt_count') > 0 ||
+           rows.single.readNullable<int>('last_attempt_at') != null)) {
+        throw StateError('Vehicle creation is being reconciled; edit after sync.');
+      }
+    }
     await _database.transaction(() async {
       await _database.customStatement(
         '''
