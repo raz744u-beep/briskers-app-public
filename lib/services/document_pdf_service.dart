@@ -252,11 +252,10 @@ class DocumentPdfService {
     final permanent = detail['document_number']?.toString().trim() ?? '';
     if (permanent.isNotEmpty) return permanent;
     final id = detail['id']?.toString() ?? '';
-    if (id.startsWith('local-invoice-')) {
-      return 'TMP-${id.substring('local-invoice-'.length)}';
-    }
-    if (id.startsWith('local-estimate-')) {
-      return 'TMP-${id.substring('local-estimate-'.length)}';
+    if (id.startsWith('local-invoice-') || id.startsWith('local-estimate-')) {
+      // A local UUID is an internal sync identity, never a customer-facing
+      // invoice/estimate number. Server numbering is assigned on reconciliation.
+      return 'Pending sync';
     }
     return '';
   }
