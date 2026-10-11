@@ -21,7 +21,7 @@ void main() {
       };
       expect(
         DocumentPdfService.fileName(detail),
-        'Briskers-Invoice-TMP-12345678-1234-4234-9234-123456789abc.pdf',
+        'Briskers-Invoice-Pending sync.pdf',
       );
       final bytes = await DocumentPdfService.build(detail);
       expect(utf8.decode(bytes.sublist(0, 5)), '%PDF-');
