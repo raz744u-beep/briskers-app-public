@@ -770,7 +770,9 @@ class OfflineDocumentDraftService {
           (_number(a['tax_rate']) - _number(b['tax_rate'])).abs() < 0.00001;
       if (existing.length == desired.length &&
           List.generate(desired.length, (i) => same(existing[i], desired[i]))
-              .every((ok) => ok)) return remote;
+              .every((ok) => ok)) {
+        return remote;
+      }
       final version = int.tryParse(remote['row_version']?.toString() ?? '') ?? 1;
       if (existing.length > desired.length) {
         await _api.deleteDocumentLine(businessId, existing.last['id'].toString(),
