@@ -248,7 +248,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   backgroundColor: BriskersColors.actionBlue,
                   foregroundColor: Colors.white,
                 ),
-                onPressed: _onlineReady && _canManageCustomers ? _add : null,
+                onPressed: _canManageCustomers ? _add : null,
                 tooltip: tr('addCustomer'),
                 icon: const Icon(Icons.person_add),
               ),
