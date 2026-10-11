@@ -886,17 +886,6 @@ class _JobsScreenState extends State<JobsScreen> {
                       },
                     ),
                   ),
-                    if (_canManage) ...[
-                      const SizedBox(width: 8),
-                      FilledButton.icon(
-                        onPressed: _createNewJob,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: BriskersColors.actionBlue,
-                        ),
-                        icon: const Icon(Icons.add),
-                        label: const Text('New'),
-                      ),
-                    ],
                     const Spacer(),
                     if (_rows != null)
                       Text(
@@ -909,7 +898,8 @@ class _JobsScreenState extends State<JobsScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                SearchBar(
+                Row(children: [
+                  Expanded(child: SearchBar(
                   controller: _search,
                   hintText: 'Search job, customer, vehicle, VIN, plate or invoice #',
                   leading: const Icon(Icons.search),
@@ -925,6 +915,16 @@ class _JobsScreenState extends State<JobsScreen> {
                         },
                         icon: const Icon(Icons.close),
                       ),
+
+                  const SizedBox(width: 8),
+                  if (_canManage) IconButton.filled(
+                    tooltip: 'New Job',
+                    style: IconButton.styleFrom(backgroundColor: BriskersColors.jobs,
+                      foregroundColor: Colors.white),
+                    onPressed: _createNewJob,
+                    icon: const Icon(Icons.add),
+                  ),
+                ]),
                   ],
                   onChanged: (_) {
                     setState(() {});
