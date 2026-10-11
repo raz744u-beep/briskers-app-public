@@ -139,8 +139,12 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
     });
 
     try {
-      final detail = BriskersConnectionModeController.instance.forceOffline
-          ? await _localCustomers.customerDetail(widget.businessId, customerId)
+      final localDetail = await _localCustomers.customerDetail(
+        widget.businessId, customerId,
+      );
+      final detail = localDetail != null ||
+              BriskersConnectionModeController.instance.forceOffline
+          ? localDetail
           : await _api.customerDetail(widget.businessId, customerId);
       final vehicles = List<dynamic>.from(detail?['vehicles'] ?? const [])
           .whereType<Map>()
