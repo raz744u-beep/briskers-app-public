@@ -17,6 +17,8 @@ import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../appointments/appointment_create_screen.dart';
 import '../jobs/job_create_screen.dart';
 import '../jobs/job_document_screen.dart';
+import '../jobs/job_detail_screen.dart';
+import '../appointments/appointment_manage_screen.dart';
 import '../jobs/blank_invoice_setup_screen.dart';
 import 'customer_quick_actions.dart';
 import 'customer_problem_flag_card.dart';
@@ -106,24 +108,26 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     ];
     final rows = <Map<String, dynamic>>[];
     final appointments = await localDatabase.customSelect(
-      "SELECT title,status FROM local_appointments WHERE business_id=? AND customer_id=? "
+      "SELECT id,title,status FROM local_appointments WHERE business_id=? AND customer_id=? "
       "AND lower(status) NOT IN ('cancelled','canceled','no_show','checked_in','completed')",
       variables: vars).get();
     for (final a in appointments) {
-      rows.add({'type':'Appointment','title':a.read<String>('title'),
+      rows.add({'type':'Appointment','id':a.read<String>('id'),
+        'title':a.read<String>('title'),
         'status':a.read<String>('status')});
     }
     final jobs = await localDatabase.customSelect(
-      "SELECT title,status,payment_state FROM local_jobs WHERE business_id=? AND customer_id=? "
+      "SELECT id,title,status,payment_state FROM local_jobs WHERE business_id=? AND customer_id=? "
       "AND lower(status) NOT IN ('completed','closed','cancelled')",
       variables: vars).get();
     for (final j in jobs) {
-      rows.add({'type':'Job','title':j.read<String>('title'),
+      rows.add({'type':'Job','id':j.read<String>('id'),
+        'title':j.read<String>('title'),
         'status':j.readNullable<String>('payment_state') == 'paid'
           ? 'Paid, Still Open' : j.read<String>('status')});
     }
     final docs = await localDatabase.customSelect(
-      "SELECT id,kind,status,document_number FROM local_documents "
+      "SELECT id,kind,status,document_number,total FROM local_documents "
       "WHERE business_id=? AND customer_id=? AND closed_at IS NULL "
       "AND lower(COALESCE(status,''))<>'void'",
       variables: vars).get();
@@ -133,7 +137,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       rows.add({'type':d.read<String>('kind'),'id':id,
         'title':detail?['title'] ?? detail?['job_title'] ?? d.read<String>('kind'),
         'status':d.readNullable<String>('status') ?? '',
-        'number':d.readNullable<String>('document_number') ?? 'Pending sync'});
+        'number':d.readNullable<String>('document_number') ?? 'Pending sync',
+        'total':d.read<double>('total'),
+        'paid':num.tryParse(detail?['paid_amount']?.toString() ?? '')});
     }
     return rows;
   }
@@ -143,25 +149,56 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     builder: (context, snapshot) {
       final rows = snapshot.data ?? const <Map<String,dynamic>>[];
       return Card(child: ExpansionTile(
-        initiallyExpanded: true,
-        leading: const Icon(Icons.dashboard_outlined),
-        title: const Text('Customer Overview'),
+        initiallyExpanded: false,
+        leading: const Icon(Icons.dashboard_outlined, color: BriskersColors.customers),
+        title: const Text('Customer Overview', style: TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text(snapshot.hasError ? 'Could not read saved activity'
           : snapshot.hasData ? '${rows.length} active records' : 'Loading activity...'),
         children: [
           for (final item in rows)
             ListTile(
               dense: true,
-              leading: Icon(item['type']=='Job' ? Icons.build_outlined :
-                item['type']=='Appointment' ? Icons.calendar_month_outlined :
-                Icons.description_outlined),
+              leading: Icon(
+                item['type'] == 'Job' ? Icons.build_outlined :
+                item['type'] == 'Appointment' ? Icons.calendar_month_outlined :
+                item['type'] == 'estimate' ? Icons.description_outlined :
+                Icons.receipt_long_outlined,
+                color: item['type'] == 'Job' ? BriskersColors.jobs :
+                  item['type'] == 'Appointment' ? BriskersColors.schedule :
+                  item['type'] == 'estimate' ? BriskersColors.estimates :
+                  BriskersColors.invoices,
+              ),
               title: Text(item['title'].toString()),
               subtitle: Text("${item['type']} · ${item['status']}"),
-              onTap: item['id'] == null ? null : () =>
-                Navigator.push(context, MaterialPageRoute(builder: (_) =>
-                  JobDocumentScreen(businessId:widget.businessId,
-                    documentId:item['id'].toString(),
-                    isOwner:widget.roleCode=='owner'))),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (item['total'] is num)
+                  Text(
+                    '${String.fromCharCode(36)}${(item['total'] as num).toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                const SizedBox(width: 6),
+                const Icon(Icons.chevron_right, size: 18),
+              ]),
+              onTap: () {
+                final id = item['id']?.toString();
+                if (id == null || id.isEmpty) return;
+                final type = item['type']?.toString();
+                if (type == 'Job') {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) =>
+                    JobDetailScreen(businessId:widget.businessId,jobId:id,
+                      roleCode:widget.roleCode)));
+                } else if (type == 'Appointment') {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) =>
+                    AppointmentManageScreen(businessId: widget.businessId,
+                      isOwner: widget.roleCode == 'owner',
+                      appointment: {'id':id,'customer_id':widget.customerId,
+                        'title':item['title'],'status':item['status']})));
+                } else {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) =>
+                    JobDocumentScreen(businessId:widget.businessId,
+                      documentId:id,isOwner:widget.roleCode=='owner')));
+                }
+              },
             ),
           if (rows.isEmpty && snapshot.hasData)
             const ListTile(title: Text('No active records saved locally')),
@@ -967,7 +1004,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                       ),
                     ),
                   Card(
-                    child: ListTile(
+                    child: ExpansionTile(
+                      initiallyExpanded: false,
+                      leading: const Icon(Icons.person_outline, color: BriskersColors.customers),
+                      title: const Text('Customer information', style: TextStyle(fontWeight: FontWeight.bold)),
+                      children: [ListTile(
                       leading: const CircleAvatar(
                         child: Icon(Icons.person_outline),
                       ),
@@ -1022,7 +1063,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                       onTap: _canEditLocal
                           ? () => _editCustomer(customer)
                           : null,
-                    ),
+                    )],
                   ),
                   const SizedBox(height: 10),
                   _customerOverviewCard(),
