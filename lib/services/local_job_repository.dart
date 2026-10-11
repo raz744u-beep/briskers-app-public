@@ -50,7 +50,12 @@ class LocalJobRepository {
   }) async {
     final where = <String>['j.business_id = ?'];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
-    if (status != null && status.isNotEmpty) {
+    if (status == 'paid_still_open') {
+      // Only jobs explicitly reported paid by the job snapshot are listed.
+      // Never assume a partial or merely pending payment means paid.
+      where.add("lower(COALESCE(j.payment_state, '')) = 'paid'");
+      where.add("lower(j.status) NOT IN ('completed','cancelled','closed')");
+    } else if (status != null && status.isNotEmpty) {
       where.add('j.status = ?');
       variables.add(Variable<String>(status));
     }
@@ -139,7 +144,10 @@ class LocalJobRepository {
   }) async {
     final where = <String>['business_id = ?'];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
-    if (status != null && status.isNotEmpty) {
+    if (status == 'paid_still_open') {
+      where.add("lower(COALESCE(payment_state, '')) = 'paid'");
+      where.add("lower(status) NOT IN ('completed','cancelled','closed')");
+    } else if (status != null && status.isNotEmpty) {
       where.add('status = ?');
       variables.add(Variable<String>(status));
     }
