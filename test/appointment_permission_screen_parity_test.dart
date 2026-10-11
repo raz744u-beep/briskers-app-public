@@ -171,7 +171,7 @@ void main() {
 
   test('Customer Overview reads active offline records and excludes history', () async {
     final source = await File('lib/screens/customers/customer_detail_screen.dart').readAsString();
-    expect(source, contains("Widget _overviewSection()"));
+    expect(source, contains("Widget _customerOverviewCard()"));
     expect(source, contains('local_appointments'));
     expect(source, contains('local_jobs'));
     expect(source, contains('local_documents'));
