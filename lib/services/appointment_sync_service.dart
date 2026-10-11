@@ -228,6 +228,7 @@ class AppointmentSyncService {
         !endsAt.isAfter(startsAt)) {
       throw ArgumentError('Valid customer, title, and appointment times required.');
     }
+    await _checkCachedVehicleAssociation(businessId,customerId,vehicleId);
     final operationId = _operationId('appointment-create');
     final localId = 'local-appointment-$operationId';
     final payload = <String, dynamic>{
@@ -501,6 +502,7 @@ class AppointmentSyncService {
       }
       final data = Map<String,dynamic>.from(
         jsonDecode(queue.single.read<String>('payload_json')) as Map);
+      await _checkCachedVehicleAssociation(businessId,customerId,vehicleId);
       data['customer_id'] = customerId;
       data['vehicle_id'] = vehicleId;
       await _database.customStatement(
@@ -522,6 +524,24 @@ class AppointmentSyncService {
   /// requested edit atomically with its base revision. It does not attempt
   /// network writes; a server conflict-aware replay is required before this
   /// can be exposed as a completed UI workflow.
+  /// Reject vehicle selections not linked to the selected local customer.
+  Future<void> _checkCachedVehicleAssociation(
+    String businessId, String customerId, String? vehicleId,
+  ) async {
+    if (vehicleId == null) return;
+    final rows = await _database.customSelect(
+      """SELECT 1 FROM local_customer_vehicles
+         WHERE business_id=? AND customer_id=? AND vehicle_id=? LIMIT 1""",
+      variables: [
+        Variable<String>(businessId),Variable<String>(customerId),
+        Variable<String>(vehicleId),
+      ],
+    ).get();
+    if (rows.isEmpty) {
+      throw StateError('Selected vehicle is not associated with this customer.');
+    }
+  }
+
   Future<void> queueEdit(
     String businessId,
     String appointmentId, {
@@ -615,6 +635,11 @@ class AppointmentSyncService {
       final selectedVehicle = customerId == null ? oldVehicle : vehicleId;
       final reassigned = selectedCustomer != oldCustomer ||
           selectedVehicle != oldVehicle;
+      if (reassigned) {
+        await _checkCachedVehicleAssociation(
+          businessId,selectedCustomer,selectedVehicle,
+        );
+      }
       if (reassigned && row.readNullable<String>('job_id') != null) {
         throw StateError('Cannot reassign an appointment linked to a Job.');
       }
