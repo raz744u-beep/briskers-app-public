@@ -155,8 +155,12 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
         backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10),
         title: const Text('Create job'),
       ),
+      resizeToAvoidBottomInset: true,
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: EdgeInsets.fromLTRB(
+          16, 16, 16, 100 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
         children: [
           Card(
             color: BriskersColors.customers.withValues(alpha: 0.08),
@@ -225,12 +229,24 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
           TextField(
             controller: _requestedWork,
             enabled: _createdJobId == null,
-            minLines: 3,
-            maxLines: 5,
+            minLines: 2,
+            maxLines: 3,
             textCapitalization: TextCapitalization.sentences,
             decoration: const InputDecoration(
               labelText: 'Requested work / complaint',
+              hintText: 'Describe the customer complaint or requested service',
+              hintStyle: TextStyle(color: Color(0xFF64748B)),
               alignLabelWithHint: true,
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+              border: OutlineInputBorder(),
+              enabledBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: Color(0xFF64748B), width: 1.4),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: BriskersColors.jobs, width: 2),
+              ),
             ),
           ),
           const SizedBox(height: 12),
