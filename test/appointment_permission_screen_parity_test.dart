@@ -39,5 +39,18 @@ void main() {
     expect(diagnostics, contains("a.sync_state <> 'pending_delete'"));
   });
 
+  test('main list pages keep Add action beside search and invoice close', () async {
+    final jobs = await File('lib/screens/jobs_screen.dart').readAsString();
+    final documents = await File('lib/screens/documents_screen.dart').readAsString();
+    final expenses = await File('lib/screens/expenses_screen.dart').readAsString();
+    expect(jobs, contains("tooltip: 'New Job'"));
+    expect(jobs, contains('onPressed: _createNewJob'));
+    expect(documents, contains("tooltip: _estimate ? 'New Estimate' : 'New Invoice'"));
+    expect(documents, contains('onPressed: _showCloseInvoices'));
+    expect(expenses, contains("tooltip: 'Add transaction'"));
+    expect(expenses, contains('onPressed: _importing ? null : _showAddMenu'));
+    expect(expenses, isNot(contains('_importing || _showingLocal ? null : _showAddMenu')));
+  });
+
 }
 
