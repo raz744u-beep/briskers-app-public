@@ -30,5 +30,14 @@ void main() {
     expect(list, contains('Linked job ID:'));
     expect(list, contains('Customer request ID:'));
   });
+  test('REL-001 diagnostics flags orphaned appointment job relationships', () async {
+    final diagnostics = await File('lib/services/diagnostics_service.dart')
+        .readAsString();
+    expect(diagnostics, contains("'Appointments missing job': await _count("));
+    expect(diagnostics, contains('LEFT JOIN local_jobs j'));
+    expect(diagnostics, contains('a.job_id IS NOT NULL'));
+    expect(diagnostics, contains("a.sync_state <> 'pending_delete'"));
+  });
+
 }
 
