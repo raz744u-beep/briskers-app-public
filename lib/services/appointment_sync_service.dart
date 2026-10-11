@@ -825,6 +825,30 @@ class AppointmentSyncService {
     });
   }
 
+  /// Do not send an appointment while its referenced customer or vehicle is
+  /// still a local-only record. A dependent appointment stays safely queued.
+  Future<bool> dependenciesReadyForCreate(
+    String businessId, String customerId, String? vehicleId,
+  ) async {
+    if (customerId.startsWith('local-') ||
+        (vehicleId?.startsWith('local-') ?? false)) return false;
+    final customers=await _database.customSelect(
+      'SELECT sync_state FROM local_customers WHERE business_id=? AND id=?',
+      variables:[Variable<String>(businessId),Variable<String>(customerId)],
+    ).get();
+    if (customers.isNotEmpty &&
+        customers.single.read<String>('sync_state') != 'synced') return false;
+    if (vehicleId != null) {
+      final vehicles=await _database.customSelect(
+        'SELECT sync_state FROM local_vehicles WHERE business_id=? AND id=?',
+        variables:[Variable<String>(businessId),Variable<String>(vehicleId)],
+      ).get();
+      if (vehicles.isNotEmpty &&
+          vehicles.single.read<String>('sync_state') != 'synced') return false;
+    }
+    return true;
+  }
+
   /// Send never-synchronized creations before queued edits/check-ins.
   /// A retry retains the original operation ID until the server confirms it.
   Future<void> flushCreates(String businessId) async {
@@ -840,6 +864,12 @@ class AppointmentSyncService {
       final data = Map<String,dynamic>.from(
         jsonDecode(row.read<String>('payload_json')) as Map);
       try {
+        if (!await dependenciesReadyForCreate(
+            businessId,data['customer_id'].toString(),
+            data['vehicle_id']?.toString())) {
+          // Keep the create operation untouched for a later sync cycle.
+          break;
+        }
         final serverId = await _api.syncOfflineAppointmentCreate(
           businessId,
           operationId: data['operation_id'].toString(),
