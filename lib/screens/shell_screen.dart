@@ -30,11 +30,13 @@ class ShellScreen extends StatefulWidget {
     required this.businessId,
     required this.businessName,
     required this.roleCode,
+    this.initialIndex = 0,
   });
 
   final String businessId;
   final String businessName;
   final String roleCode;
+  final int initialIndex;
 
   @override
   State<ShellScreen> createState() => _ShellScreenState();
@@ -85,6 +87,7 @@ class _ShellScreenState extends State<ShellScreen> {
   void initState() {
     super.initState();
     _businessName = widget.businessName;
+    _index = widget.initialIndex.clamp(0, 5);
     BriskersConnectionModeController.instance.addListener(_connectionChanged);
     _refreshHomeJobsCount();
     _homeJobsCountSubscription = _localJobs
