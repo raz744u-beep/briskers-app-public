@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/appointment_action_policy.dart';
 import '../../core/connection_mode.dart';
 import '../../services/appointment_sync_service.dart';
 import '../../services/local_customer_repository.dart';
@@ -255,6 +256,16 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   }
 
   Future<void> _save() async {
+    if (_editing && !AppointmentActionPolicy.canEdit(
+      canManage: true,
+      isOwner: widget.isOwner,
+      linkedJob: widget.appointment?['job_id'] != null,
+      status: widget.appointment?['status']?.toString() ?? '',
+      conflict: widget.appointment?['sync_state'] == 'conflict',
+    )) {
+      setState(() => _error = 'This appointment cannot be edited with your permissions.');
+      return;
+    }
     final customerId = _customerId;
     final title = _title.text.trim();
     if (customerId == null) {
@@ -357,8 +368,8 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                   ),
                 )
                 .toList(),
-            onChanged: _offlineEditing && !_pendingCreate &&
-                widget.appointment?['job_id'] != null ? null : (value) async {
+            onChanged: _editing && widget.appointment?['job_id'] != null
+                ? null : (value) async {
               setState(() {
                 _customerId = value;
                 _vehicleId = null;
@@ -401,8 +412,8 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
                 ),
               ),
             ],
-            onChanged: _offlineEditing && !_pendingCreate &&
-                widget.appointment?['job_id'] != null ? null : (value) => setState(() => _vehicleId = value),
+            onChanged: _editing && widget.appointment?['job_id'] != null
+                ? null : (value) => setState(() => _vehicleId = value),
           ),
           const SizedBox(height: 12),
           TextField(
