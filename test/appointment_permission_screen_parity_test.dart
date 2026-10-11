@@ -71,9 +71,18 @@ void main() {
 
   test('expenses search has matching elevated pill style', () async {
     final expenses = await File('lib/screens/expenses_screen.dart').readAsString();
-    expect(expenses, contains('shadowColor: Colors.black26'));
-    expect(expenses, contains('borderRadius: BorderRadius.circular(32)'));
+    expect(expenses, contains('child: SearchBar('));
+    expect(expenses, contains('WidgetStatePropertyAll<double>(3)'));
+    expect(expenses, contains('WidgetStatePropertyAll<Color>('));
     expect(expenses, contains("tooltip: 'Add transaction'"));
+  });
+
+  test('offline new Job action is not mistaken for functional create', () async {
+    final jobs = await File('lib/screens/jobs_screen.dart').readAsString();
+    final admin = await File('lib/services/offline_job_admin_service.dart').readAsString();
+    // A durable create queue + idempotent server replay must replace this gate.
+    expect(jobs, contains('New job creation needs a connection in this version'));
+    expect(admin, isNot(contains('queueJobCreate(')));
   });
 
 }
