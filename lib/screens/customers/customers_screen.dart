@@ -177,7 +177,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
   }
 
   Future<void> _add() async {
-    if (!_onlineReady) return;
+    if (!_canManageCustomers) return;
     final created = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
