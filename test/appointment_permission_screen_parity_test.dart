@@ -87,5 +87,16 @@ void main() {
     expect(admin, contains('Future<void> flushCreates('));
   });
 
+  test('New Job uses a keyboard-safe full screen customer picker', () async {
+    final jobs = await File('lib/screens/jobs_screen.dart').readAsString();
+    final picker = await File('lib/screens/jobs/job_customer_picker_screen.dart')
+        .readAsString();
+    expect(jobs, contains('JobCustomerPickerScreen(businessId: widget.businessId)'));
+    expect(jobs, isNot(contains("title: const Text('New job — choose customer')")));
+    expect(picker, contains('Scaffold('));
+    expect(picker, contains('Expanded('));
+    expect(picker, contains('onTap: () => Navigator.pop(context, customer)'));
+  });
+
 }
 
