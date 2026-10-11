@@ -1212,8 +1212,23 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       backgroundColor: Colors.white,
       appBar: widget.showAppBar
           ? AppBar(
-              toolbarHeight: 68,
-              title: BriskersPageTitle(title: _title, logoHeight: 40),
+              toolbarHeight: 78,
+              titleSpacing: 10,
+              backgroundColor: accent.withValues(alpha: 0.08),
+              title: Row(
+                children: [
+                  const BriskersLogo(height: 44, maxWidth: 148),
+                  const Spacer(),
+                  ConnectionHeaderToggle(businessId: widget.businessId),
+                ],
+              ),
+              actions: [
+                if (widget.isOwner)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 12),
+                    child: Center(child: Text('OWNER')),
+                  ),
+              ],
             )
           : null,
       body: RefreshIndicator(
