@@ -24,6 +24,23 @@ void main() {
       expect(queue.length,1);
       final payload=jsonDecode(queue.single.read<String>('payload_json')) as Map;
       expect(payload['operation_id'],'customer-create-$id');
+      await service.queueCustomerProfile('shop-1',id,
+        name:'Changed name',phone:'5045550000',email:null,
+        billingAddress:const {});
+      final combined=await db.customSelect(
+        "SELECT payload_json FROM sync_outbox WHERE entity_type='customer_create'",
+      ).get();
+      expect(combined.length,1);
+      expect(jsonDecode(combined.single.read<String>('payload_json'))['name'],
+        'Changed name');
+      await db.customStatement(
+        "UPDATE sync_outbox SET attempt_count=1 WHERE entity_type='customer_create'",
+      );
+      await expectLater(
+        service.queueCustomerProfile('shop-1',id,name:'Unsafe edit',
+          billingAddress:const {}),
+        throwsStateError,
+      );
     } finally {await db.close();}
   });
   test('customer ID reconciliation updates vehicle and appointment dependencies', () async {
