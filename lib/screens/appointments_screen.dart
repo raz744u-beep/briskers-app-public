@@ -863,17 +863,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                         ),
                       ),
                     ),
-                    if (_canManage) ...[
-                      const SizedBox(width: 8),
-                      FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: BriskersColors.actionBlue,
-                        ),
-                        onPressed: _addAppointment,
-                        icon: const Icon(Icons.add),
-                        label: Text(tr('add')),
-                      ),
-                    ],
                     if (widget.roleCode == 'owner')
                       IconButton(
                         tooltip: 'Deletion conflicts',
@@ -937,26 +926,40 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                SearchBar(
-                  controller: _search,
-                  hintText: 'Search appointments',
-                  leading: const Icon(Icons.search),
-                  trailing: [
-                    if (_search.text.isNotEmpty)
-                      IconButton(
-                        onPressed: () {
-                                _search.clear();
-                                setState(() {});
-                                _load();
-                        },
-                        icon: const Icon(Icons.close),
+                Row(children: [
+                  Expanded(child: SearchBar(
+                    controller: _search,
+                    hintText: 'Search appointments',
+                    leading: const Icon(Icons.search),
+                    trailing: [
+                      if (_search.text.isNotEmpty)
+                        IconButton(
+                          tooltip: 'Clear',
+                          onPressed: () {
+                            _search.clear();
+                            setState(() {});
+                            _load();
+                          },
+                          icon: const Icon(Icons.close),
+                        ),
+                    ],
+                    onChanged: (_) {
+                      setState(() {});
+                      _load();
+                    },
+                  )),
+                  const SizedBox(width: 8),
+                  if (_canManage)
+                    IconButton.filled(
+                      tooltip: 'Add appointment',
+                      style: IconButton.styleFrom(
+                        backgroundColor: BriskersColors.actionBlue,
+                        foregroundColor: Colors.white,
                       ),
-                  ],
-                  onChanged: (_) {
-                    setState(() {});
-                    _load();
-                  },
-                ),
+                      onPressed: _addAppointment,
+                      icon: const Icon(Icons.add),
+                    ),
+                ]),
 
               ],
             ),
