@@ -101,10 +101,14 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
     final generation = ++_searchGeneration;
     final term = _customerSearch.text.trim();
     try {
-      final customers = BriskersConnectionModeController.instance.forceOffline
-          ? await _localCustomers.customers(
-              widget.businessId, search: term.isEmpty ? null : term,
-            )
+      final localMatches = await _localCustomers.customers(
+        widget.businessId,
+        search: term.isEmpty ? null : term,
+      );
+      // Auto mode must remain usable when the network silently drops.
+      final customers = localMatches.isNotEmpty ||
+              BriskersConnectionModeController.instance.forceOffline
+          ? localMatches
           : await _api.customers(
               widget.businessId,
               search: term.isEmpty ? null : term,
