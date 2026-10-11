@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
+import '../core/appointment_action_policy.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
@@ -425,24 +426,31 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final syncState = item['sync_state']?.toString() ?? 'synced';
     final queued = syncState == 'pending';
     final conflict = syncState == 'conflict';
-    final canEdit = _canManage &&
-        !conflict &&
-        (widget.roleCode == 'owner' ||
-         (item['job_id'] == null &&
-          {'confirmed', 'tentative'}.contains(status)));
+    final canEdit = AppointmentActionPolicy.canEdit(
+      canManage: _canManage,
+      isOwner: widget.roleCode == 'owner',
+      linkedJob: item['job_id'] != null,
+      status: status,
+      conflict: conflict,
+    );
     final canCheckIn = _canCheckIn &&
         item['can_check_in'] == true &&
         item['job_id'] == null &&
-        !queued &&
-        !conflict;
-    final canCancel = _canManage && !queued && !conflict &&
-        item['job_id'] == null &&
-        {'confirmed','tentative'}.contains(status);
-    final canDelete = widget.roleCode == 'owner' &&
-        !queued && !conflict &&
-        item['job_id'] == null &&
-        item['request_id'] == null &&
-        {'confirmed', 'tentative', 'cancelled', 'no_show'}.contains(status);
+        !queued && !conflict;
+    final canCancel = AppointmentActionPolicy.canCancel(
+      canManage: _canManage,
+      linkedJob: item['job_id'] != null,
+      status: status,
+      pending: queued,
+      conflict: conflict,
+    );
+    final canDelete = AppointmentActionPolicy.canDelete(
+      isOwner: widget.roleCode == 'owner',
+      linkedJob: item['job_id'] != null,
+      linkedRequest: item['request_id'] != null,
+      pending: queued,
+      conflict: conflict,
+    );
 
     final action = await showModalBottomSheet<String>(
       context: context,
