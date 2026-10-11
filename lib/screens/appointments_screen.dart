@@ -278,6 +278,69 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     }
   }
 
+  Future<void> _showAppointmentDependencies(Map<String, dynamic> item) async {
+    if (widget.roleCode != 'owner') return;
+    final job = item['job_id']?.toString();
+    final request = item['request_id']?.toString();
+    final id = item['id']?.toString() ?? '';
+    final sync = item['sync_state']?.toString() ?? 'synced';
+    final hasLinks = (job != null && job.isNotEmpty) ||
+        (request != null && request.isNotEmpty);
+    final canTryDelete = !hasLinks && sync != 'conflict' &&
+        (sync == 'synced' || id.startsWith('local-appointment-'));
+    if (!mounted) return;
+    final delete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Appointment dependencies'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Appointment ID: $id'),
+              Text('Sync status: $sync'),
+              const SizedBox(height: 10),
+              Text(job == null || job.isEmpty
+                  ? 'Linked job: none recorded locally'
+                  : 'Linked job ID: $job'),
+              Text(request == null || request.isEmpty
+                  ? 'Customer request: none recorded locally'
+                  : 'Customer request ID: $request'),
+              const SizedBox(height: 10),
+              Text(hasLinks
+                  ? 'Deletion is blocked because related records exist. '
+                    'Deleting a job could also destroy estimates, invoices, '
+                    'payments, and service history. Those records are NOT '
+                    'automatically deleted.'
+                  : 'No job or request link is recorded in the local '
+                    'appointment. Other server-side relationships have not '
+                    'been independently verified.'),
+              if (!canTryDelete)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text('Safe deletion is not available in the current '
+                      'sync state. Refresh or resolve linked records first.'),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Close'),
+          ),
+          if (canTryDelete)
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete appointment'),
+            ),
+        ],
+      ),
+    );
+    if (delete == true && mounted) await _deleteAppointment(item);
+  }
+
   Future<void> _deleteAppointment(Map<String, dynamic> item) async {
     if (widget.roleCode != 'owner') return;
     final isPendingCreate = item['id']?.toString().startsWith('local-appointment-') == true;
@@ -524,6 +587,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 ),
                 onTap: () => Navigator.pop(sheetContext, 'cancel'),
               ),
+            if (widget.roleCode == 'owner')
+              ListTile(
+                leading: const Icon(Icons.account_tree_outlined),
+                title: const Text('View dependencies / deletion options'),
+                onTap: () => Navigator.pop(sheetContext, 'dependencies'),
+              ),
             if (canDelete)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.red),
@@ -549,6 +618,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         break;
       case 'cancel':
         await _cancelAppointment(item);
+        break;
+      case 'dependencies':
+        await _showAppointmentDependencies(item);
         break;
       case 'delete':
         await _deleteAppointment(item);
