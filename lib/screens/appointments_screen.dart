@@ -163,7 +163,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 : ListView.separated(
                     shrinkWrap: true,
                     itemCount: conflicts.length,
-                    separatorBuilder: (_, __) => const Divider(),
+                    separatorBuilder: (context, index) => const Divider(),
                     itemBuilder: (_, index) {
                       final conflict = conflicts[index];
                       return ListTile(
