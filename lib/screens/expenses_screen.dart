@@ -1412,7 +1412,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                   ),
                   const SizedBox(height: 10),
                   Row(children: [
-                    Expanded(child: TextField(
+                    Expanded(child: Material(
+                      elevation: 2,
+                      shadowColor: Colors.black26,
+                      borderRadius: BorderRadius.circular(32),
+                      child: TextField(
                     controller: _searchController,
                     onChanged: (value) {
                       setState(() {});
@@ -1435,13 +1439,13 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                               icon: const Icon(Icons.close),
                             ),
                       filled: true,
-                      fillColor: const Color(0xFFF1F2F7),
+                      fillColor: const Color(0xFFE8E7EF),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(32), borderSide: BorderSide.none),
                       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(32), borderSide: BorderSide.none),
                       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(32), borderSide: BorderSide.none),
                       isDense: true,
                     ),
-                    )),
+                    ))),
                     const SizedBox(width: 8),
                     IconButton.filled(
                       tooltip: 'Add transaction',
