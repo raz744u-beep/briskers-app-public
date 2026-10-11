@@ -88,17 +88,6 @@ class _JobsScreenState extends State<JobsScreen> {
 
   Future<void> _createNewJob() async {
     if (!_canManage) return;
-    // The legacy JobCreateScreen still uses online create/update APIs.
-    // Never imply offline creation succeeds until durable queuing is wired.
-    if (!_onlineReady) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(
-          'New job creation needs a connection in this version. '
-          'Saved jobs remain accessible offline.',
-        )),
-      );
-      return;
-    }
     final customers = await LocalCustomerRepository().customers(widget.businessId);
     if (!mounted) return;
     final search = TextEditingController();
@@ -152,7 +141,10 @@ class _JobsScreenState extends State<JobsScreen> {
     try {
       final id = selected['id']?.toString() ?? '';
       if (id.isEmpty) return;
-      final detail = await _api.customerDetail(widget.businessId, id);
+      final localDetail = await LocalCustomerRepository()
+          .customerDetail(widget.businessId, id);
+      final detail = localDetail ??
+          await _api.customerDetail(widget.businessId, id);
       if (!mounted) return;
       final created = await Navigator.push<bool>(
         context,
