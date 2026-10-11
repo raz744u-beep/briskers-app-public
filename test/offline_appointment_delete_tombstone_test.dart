@@ -29,6 +29,17 @@ void main() {
         "SELECT sync_state FROM local_appointments WHERE id='appt-1'",
       ).getSingle();
       expect(local.read<String>('sync_state'),'pending_delete');
+      // A conflicting server response is recorded on the outbox rather than
+      // changing the tombstone into a visible appointment.
+      await db.customStatement(
+        "UPDATE sync_outbox SET state='conflict',last_error='40001' WHERE entity_id='appt-1'",
+      );
+      expect(await repository.appointments('shop-1'),isEmpty);
+      final pending=await db.customSelect(
+        "SELECT sync_state FROM local_appointments WHERE id='appt-1'",
+      ).getSingle();
+      expect(pending.read<String>('sync_state'),'pending_delete');
+
     } finally {
       await db.close();
     }
