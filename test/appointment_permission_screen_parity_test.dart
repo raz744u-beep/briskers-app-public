@@ -175,7 +175,7 @@ void main() {
     expect(source, contains('local_appointments'));
     expect(source, contains('local_jobs'));
     expect(source, contains('local_documents'));
-    expect(source, contains("doc['id'].toString()"));
+    expect(source, contains("item['id'].toString()"));
   });
 
   test('Document cards show a title under the customer name', () async {
