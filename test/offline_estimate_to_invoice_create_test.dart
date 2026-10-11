@@ -31,7 +31,7 @@ void main() {
     expect(invoiceId, startsWith('local-invoice-'));
     final invoice = await cache.load('shop', invoiceId);
     expect(invoice?['kind'], 'invoice');
-    expect(invoice?['job_id'], isNull);
+    expect(invoice?['job_id'], startsWith('local-conversion-job-'));
     expect(invoice?['total_amount'], 125);
     expect(invoice?['lines'], hasLength(2));
     expect(invoice?['converted_from_estimate_id'], estimateId);
@@ -45,7 +45,8 @@ void main() {
     expect(outbox, hasLength(1));
     final localJobs = await db.customSelect(
       "SELECT id FROM local_jobs WHERE business_id='shop'").get();
-    expect(localJobs, isEmpty);
+    expect(localJobs, hasLength(1));
+    expect(localJobs.single.read<String>('id'), invoice?['job_id']);
     final documents = await LocalDocumentRepository(database:db)
       .listByKind('shop', kind:'invoice');
     expect(documents, hasLength(1));
