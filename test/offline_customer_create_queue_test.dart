@@ -64,6 +64,12 @@ void main() {
         VALUES('shop-1','appointment_create','local-appointment-1','create',?,
           'pending',0,100)
       """,[jsonEncode({'customer_id':local})]);
+      await db.customStatement("""
+        INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,
+          payload_json,state,attempt_count,created_at)
+        VALUES('shop-1','vehicle_create','local-vehicle-1','create',?,
+          'pending',0,100)
+      """,[jsonEncode({'customer_id':local,'make':'BMW','model':'X5'})]);
       final queue=await db.customSelect(
         "SELECT id FROM sync_outbox WHERE entity_type='customer_create'",
       ).getSingle();
@@ -82,6 +88,20 @@ void main() {
       ).getSingle();
       expect(jsonDecode(dep.read<String>('payload_json'))['customer_id'],
         'server-customer-1');
+      final vehicleQueue=await db.customSelect(
+        "SELECT payload_json FROM sync_outbox WHERE entity_type='vehicle_create'",
+      ).getSingle();
+      expect(jsonDecode(vehicleQueue.read<String>('payload_json'))['customer_id'],
+        'server-customer-1');
+      final updatedCustomer=await db.customSelect(
+        "SELECT id,sync_state FROM local_customers WHERE business_id='shop-1'",
+      ).getSingle();
+      expect(updatedCustomer.read<String>('id'),'server-customer-1');
+      expect(updatedCustomer.read<String>('sync_state'),'synced');
+      final oldCreate=await db.customSelect(
+        "SELECT count(*) AS n FROM sync_outbox WHERE entity_type='customer_create'",
+      ).getSingle();
+      expect(oldCreate.read<int>('n'),0);
     } finally {await db.close();}
   });
 
