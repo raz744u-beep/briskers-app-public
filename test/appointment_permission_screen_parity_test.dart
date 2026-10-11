@@ -128,5 +128,10 @@ void main() {
     expect(repository, contains('THEN j.created_at END DESC'));
   });
 
+  test('Jobs cards prefer job title over customer requested work', () async {
+    final card = await File('lib/widgets/job_compact_card.dart').readAsString();
+    expect(card, contains('final description = title.isNotEmpty ? title : requested;'));
+  });
+
 }
 
