@@ -105,6 +105,22 @@ class BriskersFunctionalDiagnosticsService {
       success: 'Job edit, status and assignment merged into one pending change.',
       action: _checkJobAdmin,
     );
+    // Existing offline job updates are supported, but standalone new-job
+    // creation still uses an online-only API. Make that limitation visible
+    // rather than reporting a misleading all-green functional result.
+    checks.add(const DiagnosticCheck(
+      id: 'FUNC-JOB-CREATE',
+      category: 'Functional',
+      title: 'New job creation while offline',
+      level: BriskersDiagnosticLevel.warning,
+      summary: 'Standalone New Job still requires internet; offline new-job '
+          'create and replay are not yet implemented.',
+      details: [
+        'Existing job edits can be queued offline.',
+        'Do not treat FUNC-004 as a test of creating a new Job.',
+      ],
+    ));
+
     await _scenario(
       checks,
       id: 'FUNC-005',
