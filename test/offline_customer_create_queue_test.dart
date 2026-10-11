@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:drift/drift.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -133,4 +134,9 @@ void main() {
     } finally {await db.close();}
   });
 
+  test('Customers screen does not disable Add solely because offline', () async {
+    final screen = await File('lib/screens/customers/customers_screen.dart').readAsString();
+    expect(screen, contains('onPressed: _canManageCustomers ? _add : null'));
+    expect(screen, isNot(contains('onPressed: _onlineReady && _canManageCustomers ? _add : null')));
+  });
 }
