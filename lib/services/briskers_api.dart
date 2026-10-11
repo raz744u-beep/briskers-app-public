@@ -188,6 +188,23 @@ class BriskersApi {
         .toList();
   }
 
+  Future<Map<String, dynamic>> createMissingWorkVisit(
+    String businessId, String jobId, {
+    required String operationId,
+    required String workSummary,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_create_missing_work_visit_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_job_id': jobId,
+        'p_operation_id': operationId,
+        'p_work_summary': workSummary,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> syncSaveWorkSummary(
     String businessId,
     String jobId, {
