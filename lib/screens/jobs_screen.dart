@@ -751,6 +751,14 @@ class _JobsScreenState extends State<JobsScreen> {
                       _load();
                     },
                     itemBuilder: (_) => [
+                      const PopupMenuItem<String>(
+                        value: 'paid_still_open',
+                        child: Row(children: [
+                          Icon(Icons.payments_outlined),
+                          SizedBox(width: 10),
+                          Text('Paid, Still Open'),
+                        ]),
+                      ),
                       PopupMenuItem<String>(
                         value: '__all__',
                         child: Row(
@@ -799,7 +807,9 @@ class _JobsScreenState extends State<JobsScreen> {
                         final color = selected == null
                                   ? BriskersColors.jobs
                                   : colorFromHex(selected['color_hex']?.toString());
-                        final label = selected == null
+                        final label = _selectedStatus == 'paid_still_open'
+                                  ? 'Paid, Still Open'
+                                  : selected == null
                                   ? tr('all')
                                   : jobStatusLabel(selected['code']?.toString(), selected['name']?.toString() ?? '');
 
