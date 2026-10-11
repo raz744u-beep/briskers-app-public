@@ -52,5 +52,29 @@ void main() {
     expect(expenses, isNot(contains('_importing || _showingLocal ? null : _showAddMenu')));
   });
 
+  test('customer Add tap and appointment Add work while offline', () async {
+    final customers = await File('lib/screens/customers/customers_screen.dart').readAsString();
+    final appointments = await File('lib/screens/appointments_screen.dart').readAsString();
+    expect(customers, contains('if (!_canManageCustomers) return;'));
+    expect(customers, isNot(contains('if (!_onlineReady) return;')));
+    expect(appointments, contains("tooltip: 'Add appointment'"));
+    expect(appointments, contains('onPressed: _addAppointment'));
+  });
+
+  test('invoice customer autocomplete replaces duplicated dropdown', () async {
+    final form = await File('lib/screens/jobs/blank_invoice_setup_screen.dart').readAsString();
+    expect(form, contains("hintText: 'Start typing name, phone, or email'"));
+    expect(form, contains('ListView.builder('));
+    expect(form, isNot(contains("labelText: 'Find customer'")));
+    expect(form, isNot(contains('_customerDropdownVersion')));
+  });
+
+  test('expenses search has matching elevated pill style', () async {
+    final expenses = await File('lib/screens/expenses_screen.dart').readAsString();
+    expect(expenses, contains('shadowColor: Colors.black26'));
+    expect(expenses, contains('borderRadius: BorderRadius.circular(32)'));
+    expect(expenses, contains("tooltip: 'Add transaction'"));
+  });
+
 }
 
