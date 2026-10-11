@@ -1,0 +1,55 @@
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/services/offline_document_draft_service.dart';
+import 'package:briskers_app/services/local_document_detail_cache.dart';
+import 'package:briskers_app/services/local_document_repository.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('offline estimate conversion retains one job and survives local restart', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final cache = const LocalDocumentDetailCache();
+    final service = OfflineDocumentDraftService(
+      database: db,
+      cache: cache,
+      documents: LocalDocumentRepository(database: db),
+    );
+    final estimateId = await service.createStandaloneEstimate('shop',
+      customerId: 'customer-id', customerName: 'Customer');
+    await service.addLine('shop', estimateId,
+      name: 'Oil change', quantity: 1, unitPrice: 100, taxRate: 0,
+      lineKind: 'labor');
+    await service.addLine('shop', estimateId,
+      name: 'Oil filter', quantity: 1, unitPrice: 25, taxRate: 0,
+      lineKind: 'part');
+
+    final invoiceId = await service.convertEstimateOffline('shop', estimateId);
+    expect(invoiceId, startsWith('local-invoice-'));
+    final invoice = await cache.load('shop', invoiceId);
+    expect(invoice?['kind'], 'invoice');
+    expect(invoice?['job_id'], isNull);
+    expect(invoice?['total_amount'], 125);
+    expect(invoice?['lines'], hasLength(2));
+    expect(invoice?['converted_from_estimate_id'], estimateId);
+    final source = await cache.load('shop', estimateId);
+    expect(source?['converted'], isTrue);
+    expect(source?['converted_invoice_id'], invoiceId);
+
+    final outbox = await db.customSelect(
+      "SELECT operation,payload_json FROM sync_outbox "
+      "WHERE business_id='shop' AND operation='convert_estimate'").get();
+    expect(outbox, hasLength(1));
+    final localJobs = await db.customSelect(
+      "SELECT id FROM local_jobs WHERE business_id='shop'").get();
+    expect(localJobs, isEmpty);
+    final documents = await LocalDocumentRepository(database:db)
+      .listByKind('shop', kind:'invoice');
+    expect(documents, hasLength(1));
+    expect(documents.single['id'], invoiceId);
+    await db.close();
+  });
+}
