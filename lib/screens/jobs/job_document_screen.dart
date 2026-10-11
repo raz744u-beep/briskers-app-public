@@ -6889,6 +6889,7 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
   String? _error;
   bool _quantityCleared = false;
   bool _priceCleared = false;
+  bool _taxCleared = false;
 
   @override
   void initState() {
@@ -7161,12 +7162,14 @@ class _EditLineDialogState extends State<_EditLineDialog> {
     final viewInsets = MediaQuery.viewInsetsOf(context);
     final keyboardOpen = viewInsets.bottom > 0;
 
-    return AnimatedPadding(
+    return SafeArea(
+      top: false,
+      child: AnimatedPadding(
       duration: const Duration(milliseconds: 150),
       curve: Curves.easeOut,
       padding: EdgeInsets.only(bottom: viewInsets.bottom),
       child: FractionallySizedBox(
-        heightFactor: keyboardOpen ? 0.94 : 0.86,
+        heightFactor: keyboardOpen ? 0.94 : 0.80,
         child: Material(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: const BorderRadius.vertical(
@@ -7262,7 +7265,8 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                                     _quantityCleared) {
                                   return;
                                 }
-                                _quantity.clear();
+                                _quantity.selection = TextSelection(baseOffset: 0,
+                                  extentOffset: _quantity.text.length);
                                 _quantityCleared = true;
                               },
                               decoration: InputDecoration(
@@ -7287,7 +7291,8 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                                     _priceCleared) {
                                   return;
                                 }
-                                _price.clear();
+                                _price.selection = TextSelection(baseOffset: 0,
+                                  extentOffset: _price.text.length);
                                 _priceCleared = true;
                               },
                               decoration: InputDecoration(
@@ -7304,6 +7309,12 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                         TextField(
                         scrollPadding: const EdgeInsets.only(bottom: 180),
                           controller: _taxPercent,
+                          onTap: () {
+                            if (!widget.clearNumericOnFirstTap || _taxCleared) return;
+                            _taxPercent.selection = TextSelection(baseOffset: 0,
+                              extentOffset: _taxPercent.text.length);
+                            _taxCleared = true;
+                          },
                           keyboardType:
                               const TextInputType.numberWithOptions(decimal: true),
                           decoration: InputDecoration(
@@ -7391,6 +7402,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
