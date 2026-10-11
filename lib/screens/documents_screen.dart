@@ -17,6 +17,7 @@ import '../services/local_invoice_status_styles_cache.dart';
 import '../widgets/briskers_page_header.dart';
 import '../widgets/connection_header_toggle.dart';
 import 'jobs/blank_invoice_setup_screen.dart';
+import 'shell_screen.dart';
 import 'jobs/job_document_screen.dart';
 import 'jobs/invoice_deletion_choice.dart';
 import 'expenses/expense_detail_screen.dart';
@@ -29,9 +30,13 @@ class DocumentsScreen extends StatefulWidget {
     required this.isOwner,
     this.canManageExpenses = false,
     this.showAppBar = true,
+    this.businessName = 'Briskers',
+    this.roleCode,
   });
 
   final bool showAppBar;
+  final String businessName;
+  final String? roleCode;
   final String businessId;
   final String kind;
   final bool isOwner;
@@ -1240,6 +1245,31 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       ),
                     )),
                   ),
+              ],
+            )
+          : null,
+      bottomNavigationBar: widget.showAppBar && _estimate
+          ? NavigationBar(
+              selectedIndex: 5,
+              labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+              onDestinationSelected: (index) {
+                Navigator.of(context).pushReplacement(MaterialPageRoute(
+                  builder: (_) => ShellScreen(
+                    businessId: widget.businessId,
+                    businessName: widget.businessName,
+                    roleCode: widget.roleCode ??
+                        (widget.isOwner ? 'owner' : 'office'),
+                    initialIndex: index,
+                  ),
+                ));
+              },
+              destinations: const [
+                NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Home'),
+                NavigationDestination(icon: Icon(Icons.people_outline), label: 'Customers'),
+                NavigationDestination(icon: Icon(Icons.calendar_month_outlined), label: 'Schedule'),
+                NavigationDestination(icon: Icon(Icons.build_outlined), label: 'Jobs'),
+                NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Invoices'),
+                NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
               ],
             )
           : null,
