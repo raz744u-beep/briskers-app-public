@@ -59,15 +59,19 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
 
   Future<void> _loadEmployees() async {
     try {
-      final employees = await _api.assignableEmployees(widget.businessId);
+      final employees = await _offlineJobs.refreshEmployees(widget.businessId);
       if (!mounted) return;
       setState(() {
         _employees = employees;
         _loadingEmployees = false;
       });
     } catch (_) {
+      final cached = await _offlineJobs.cachedEmployees(widget.businessId);
       if (!mounted) return;
-      setState(() => _loadingEmployees = false);
+      setState(() {
+        _employees = cached;
+        _loadingEmployees = false;
+      });
     }
   }
 
@@ -119,6 +123,9 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
             requestedWork: _requestedWork.text.trim().isEmpty
                 ? null : _requestedWork.text.trim(),
             plannedHours: plannedHours,
+            employeeId: _employeeId,
+            employeeName: _employees.where((e) => e['id']?.toString() == _employeeId)
+                .map((e) => e['name']?.toString() ?? '').firstOrNull,
           );
       _createdJobId = jobId;
       // A queued job is usable immediately. Never wait for the network
@@ -252,6 +259,9 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
           const SizedBox(height: 12),
           TextField(
             controller: _plannedHours,
+            onTap: () => _plannedHours.selection = TextSelection(
+              baseOffset: 0, extentOffset: _plannedHours.text.length,
+            ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: const InputDecoration(
               labelText: 'Planned / assigned time',
