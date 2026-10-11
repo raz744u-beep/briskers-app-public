@@ -65,6 +65,21 @@ class _FakeApi extends BriskersApi {
   }
 
   @override
+  Future<Map<String, dynamic>> createMissingWorkVisit(
+    String businessId, String jobId, {
+    required String operationId,
+    required String workSummary,
+  }) async => {
+    'status':'applied',
+    'visit':{
+      'id':'visit-server-first','job_id':jobId,'visit_number':1,
+      'reason':null,'planned_hours':0,'work_summary':workSummary,
+      'opened_at':'2026-10-10T22:30:00Z','closed_at':null,
+      'updated_at':'2026-10-10T22:30:00Z','row_version':1,
+    },
+  };
+
+  @override
   Future<Map<String, dynamic>> syncCreateFinding(
     String businessId,
     String jobId, {
@@ -177,6 +192,39 @@ class _FakeApi extends BriskersApi {
 }
 
 void main() {
+  test('JOB-005 first genuine work save creates and syncs missing visit', () async {
+    final database=BriskersLocalDatabase(NativeDatabase.memory());
+    final service=OfflineWorkFindingsService(
+      api:_FakeApi(),database:database,
+      mediaDirectoryProvider:() async => Directory.systemTemp,
+    );
+    try {
+      await database.customStatement(
+        """INSERT INTO local_jobs(id,business_id,access_scope,title,status)
+           VALUES('job-no-visit','business-1','all','Imported job','completed')""",
+      );
+      final before=await database.customSelect(
+        "SELECT COUNT(*) AS n FROM local_job_visits WHERE job_id='job-no-visit'",
+      ).getSingle();
+      expect(before.read<int>('n'),0);
+      final local=await service.saveLocalWorkSummary(
+        'business-1','job-no-visit',
+        workSummary:'Replaced thermostat and hoses',
+      );
+      expect(local['work_summary'],'Replaced thermostat and hoses');
+      expect(local['sync_state'],'pending');
+      await service.flush('business-1');
+      final synced=await database.customSelect(
+        "SELECT id,work_summary,sync_state FROM local_job_visits WHERE job_id='job-no-visit'",
+      ).get();
+      expect(synced.length,1);
+      expect(synced.single.read<String>('id'),'visit-server-first');
+      expect(synced.single.read<String>('work_summary'),'Replaced thermostat and hoses');
+      expect(synced.single.read<String>('sync_state'),'synced');
+    } finally {await database.close();}
+  });
+
+
   test('work performed saves locally then flushes', () async {
     final database = BriskersLocalDatabase(NativeDatabase.memory());
     final api = _FakeApi();
