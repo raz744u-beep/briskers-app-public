@@ -1351,7 +1351,7 @@ class BriskersApi {
         'p_vehicle_id': vehicleId,
         'p_title': title,
         'p_description': description,
-        if (id != null) 'p_id': id,
+        'p_id': ?id,
       },
     );
     return result.toString();
