@@ -122,5 +122,11 @@ void main() {
     expect(form, contains("onPressed: _saving ? null : _save"));
   });
 
+  test('offline new Jobs are sorted before historical jobs', () async {
+    final repository = await File('lib/services/local_job_repository.dart').readAsString();
+    expect(repository, contains("j.sync_state = 'pending' AND j.job_number = 'Pending sync'"));
+    expect(repository, contains('THEN j.created_at END DESC'));
+  });
+
 }
 
