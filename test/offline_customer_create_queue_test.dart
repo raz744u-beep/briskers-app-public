@@ -26,4 +26,45 @@ void main() {
       expect(payload['operation_id'],'customer-create-$id');
     } finally {await db.close();}
   });
+  test('customer ID reconciliation updates vehicle and appointment dependencies', () async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    final service=OfflineCustomerVehicleAdminService(database:db);
+    try {
+      final local=await service.queueCustomerCreate('shop-1',name:'Customer');
+      await db.customStatement("""
+        INSERT INTO local_customer_vehicles(business_id,customer_id,vehicle_id)
+        VALUES('shop-1',?,'local-vehicle-1')
+      """,[local]);
+      await db.customStatement("""
+        INSERT INTO local_appointments(id,business_id,customer_id,starts_at,
+          ends_at,status,title,can_check_in,sync_state)
+        VALUES('local-appointment-1','shop-1',?,100,200,'confirmed','Visit',0,'pending')
+      """,[local]);
+      await db.customStatement("""
+        INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,
+          payload_json,state,attempt_count,created_at)
+        VALUES('shop-1','appointment_create','local-appointment-1','create',?,
+          'pending',0,100)
+      """,[jsonEncode({'customer_id':local})]);
+      final queue=await db.customSelect(
+        "SELECT id FROM sync_outbox WHERE entity_type='customer_create'",
+      ).getSingle();
+      await service.reconcileCreatedCustomerId(
+        'shop-1',local,'server-customer-1',queue.read<int>('id'));
+      final record=await db.customSelect(
+        "SELECT customer_id FROM local_appointments WHERE id='local-appointment-1'",
+      ).getSingle();
+      expect(record.read<String>('customer_id'),'server-customer-1');
+      final link=await db.customSelect(
+        "SELECT customer_id FROM local_customer_vehicles WHERE business_id='shop-1'",
+      ).getSingle();
+      expect(link.read<String>('customer_id'),'server-customer-1');
+      final dep=await db.customSelect(
+        "SELECT payload_json FROM sync_outbox WHERE entity_type='appointment_create'",
+      ).getSingle();
+      expect(jsonDecode(dep.read<String>('payload_json'))['customer_id'],
+        'server-customer-1');
+    } finally {await db.close();}
+  });
+
 }
