@@ -1412,23 +1412,26 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                   ),
                   const SizedBox(height: 10),
                   Row(children: [
-                    Expanded(child: Material(
-                      elevation: 2,
-                      shadowColor: Colors.black26,
-                      borderRadius: BorderRadius.circular(32),
-                      child: TextField(
-                    controller: _searchController,
-                    onChanged: (value) {
-                      setState(() {});
-                      _searchChanged(value);
-                    },
-                    textInputAction: TextInputAction.search,
-                    decoration: InputDecoration(
-                      hintText: 'Search transactions…',
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: _searchController.text.isEmpty
-                          ? null
-                          : IconButton(
+                    Expanded(
+                      child: SearchBar(
+                        controller: _searchController,
+                        hintText: 'Search transactions…',
+                        leading: const Icon(Icons.search),
+                        elevation: const WidgetStatePropertyAll<double>(3),
+                        shadowColor: const WidgetStatePropertyAll<Color>(
+                          Colors.black26,
+                        ),
+                        onChanged: (value) {
+                          setState(() {});
+                          _searchChanged(value);
+                        },
+                        onSubmitted: (_) {
+                          _searchDebounce?.cancel();
+                          _load(showLoading: false);
+                        },
+                        trailing: [
+                          if (_searchController.text.isNotEmpty)
+                            IconButton(
                               tooltip: 'Clear search',
                               onPressed: () {
                                 _searchDebounce?.cancel();
@@ -1438,14 +1441,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                               },
                               icon: const Icon(Icons.close),
                             ),
-                      filled: true,
-                      fillColor: const Color(0xFFE8E7EF),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(32), borderSide: BorderSide.none),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(32), borderSide: BorderSide.none),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(32), borderSide: BorderSide.none),
-                      isDense: true,
+                        ],
+                      ),
                     ),
-                    ))),
                     const SizedBox(width: 8),
                     IconButton.filled(
                       tooltip: 'Add transaction',
