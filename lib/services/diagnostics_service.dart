@@ -1201,6 +1201,19 @@ class BriskersDiagnosticsService {
         ''',
         [Variable<String>(businessId)],
       ),
+      'Appointments missing job': await _count(
+        '''
+        SELECT COUNT(*) AS count
+        FROM local_appointments a
+        LEFT JOIN local_jobs j
+          ON j.business_id = a.business_id AND j.id = a.job_id
+        WHERE a.business_id = ?
+          AND a.job_id IS NOT NULL
+          AND j.id IS NULL
+          AND a.sync_state <> 'pending_delete'
+        ''',
+        [Variable<String>(businessId)],
+      ),
       'Appointments missing vehicle': await _count(
         '''
         SELECT COUNT(*) AS count
