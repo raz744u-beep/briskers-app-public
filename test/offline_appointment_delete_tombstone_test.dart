@@ -39,6 +39,14 @@ void main() {
         "SELECT sync_state FROM local_appointments WHERE id='appt-1'",
       ).getSingle();
       expect(pending.read<String>('sync_state'),'pending_delete');
+      await expectLater(
+        service.deletionConflicts('shop-1',isOwner:false),throwsStateError,
+      );
+      final conflicts=await service.deletionConflicts('shop-1',isOwner:true);
+      expect(conflicts.length,1);
+      expect(conflicts.single['appointment_id'],'appt-1');
+      expect(conflicts.single['error'],'40001');
+
 
     } finally {
       await db.close();
