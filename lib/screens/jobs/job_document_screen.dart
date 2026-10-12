@@ -26,6 +26,7 @@ import '../../services/local_document_repository.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_document_draft_service.dart';
+import '../../services/local_standard_notes_service.dart';
 import '../../services/offline_document_edit_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
@@ -80,6 +81,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       LocalInvoiceStatusStylesCache();
   final OfflineEstimateInvoiceService _offlineEstimateInvoice =
       OfflineEstimateInvoiceService();
+  final LocalStandardNotesService _standardNotes = LocalStandardNotesService();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
   final OfflineDocumentEditService _offlineDocumentEdit =
@@ -283,6 +285,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
     var unsyncedDraft = false;
+    if (!forceOffline) {
+      // Retry offline-created reusable notes after returning online.
+      unawaited(_standardNotes.flushPending(widget.businessId)
+          .catchError((Object _) {}));
+    }
+
 
     if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
       final cached = await _detailCache.load(
@@ -2461,13 +2469,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     try {
       methods = await _paymentMethods();
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not load payment methods: $error')));
+      }
       return;
     }
 
     if (!mounted) return;
     if (methods.isEmpty) {
-      setState(() => _error = 'No payment methods are configured.');
+      final offline = BriskersConnectionModeController.instance.forceOffline ||
+        _offlineDocumentDraft.isLocalDraftId(widget.documentId);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(offline
+          ? 'No payment methods saved offline. Connect and sync payment methods once before recording payments.'
+          : 'No payment methods are configured for this shop.')));
       return;
     }
 
@@ -5489,7 +5505,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       return null;
     }
     try {
-      final existing = await _api.documentNoteTemplates(widget.businessId);
+      final offline = BriskersConnectionModeController.instance.forceOffline;
+      final existing = await _standardNotes.available(
+        widget.businessId, offline: offline);
       final normalizedName = result['name']!.trim().toLowerCase();
       if (existing.any((note) =>
           (note['name']?.toString().trim().toLowerCase() ?? '') ==
@@ -5501,11 +5519,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         }
         return null;
       }
-      await _api.saveDocumentNoteTemplate(
-        widget.businessId,
-        name: result['name']!,
-        body: result['body']!,
-      );
+      if (offline) {
+        await _standardNotes.saveOffline(widget.businessId,
+          name: result['name']!, body: result['body']!);
+      } else {
+        await _api.saveDocumentNoteTemplate(widget.businessId,
+          name: result['name']!, body: result['body']!);
+        await _standardNotes.available(widget.businessId, offline: false);
+      }
       if (!mounted) return null;
       if (!addToInvoice) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -5561,9 +5582,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     List<Map<String, dynamic>> templates;
     try {
-      templates = await _api.documentNoteTemplates(widget.businessId);
+      templates = await _standardNotes.available(widget.businessId,
+        offline: BriskersConnectionModeController.instance.forceOffline);
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not load standard notes: $error')));
+      }
       return;
     }
 
@@ -6606,7 +6631,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               delegate: _DocumentTabsHeaderDelegate(
                 accent: _accent,
                 isEstimate: _estimate,
-                onTap: (_) => _collapseWorkspaceHeader(),
+                onTap: (_) {
+                  if (_error != null) setState(() => _error = null);
+                  _collapseWorkspaceHeader();
+                },
               ),
             ),
           ],
