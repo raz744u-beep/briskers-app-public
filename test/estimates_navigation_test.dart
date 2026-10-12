@@ -7,6 +7,7 @@ import 'package:briskers_app/screens/shell_screen.dart';
 
 // Header and route tests intentionally do not wait for document loading.
 // The production loading indicator may animate while local storage is pending.
+// One second covers the Material route transition (450 ms on Android).
 void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
@@ -45,9 +46,10 @@ void main() {
         ),
       );
       for (var index = 0; index < 6; index++) {
+        selected = -1;
         await tester.tap(find.text('Open Estimates'));
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(const Duration(seconds: 1));
         expect(find.text('OWNER'), findsOneWidget);
         final pill = find.ancestor(
           of: find.text('OWNER'),
@@ -63,7 +65,7 @@ void main() {
         );
         await tester.tap(find.byType(NavigationDestination).at(index));
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(const Duration(seconds: 1));
         expect(selected, index);
         expect(find.byType(DocumentsScreen), findsNothing);
         expect(find.byType(ShellScreen), findsNothing);
@@ -87,7 +89,7 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(seconds: 1));
       expect(find.text('OWNER'), findsNothing);
       expect(
         tester.widget<DocumentsScreen>(find.byType(DocumentsScreen)).roleCode,
