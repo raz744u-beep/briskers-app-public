@@ -7271,9 +7271,6 @@ class _EditLineDialogState extends State<_EditLineDialog> {
   late final TextEditingController _taxPercent;
   late String _lineKind;
   String? _error;
-  bool _quantityCleared = false;
-  bool _priceCleared = false;
-  bool _taxCleared = false;
 
   @override
   void initState() {
@@ -7444,13 +7441,9 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                                 decimal: true,
                               ),
                               onTap: () {
-                                if (!widget.clearNumericOnFirstTap ||
-                                    _quantityCleared) {
-                                  return;
-                                }
+                                if (!widget.clearNumericOnFirstTap) return;
                                 _quantity.selection = TextSelection(baseOffset: 0,
                                   extentOffset: _quantity.text.length);
-                                _quantityCleared = true;
                               },
                               decoration: InputDecoration(
                                 labelText: tr('qtyColumn'),
@@ -7470,13 +7463,9 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                                 decimal: true,
                               ),
                               onTap: () {
-                                if (!widget.clearNumericOnFirstTap ||
-                                    _priceCleared) {
-                                  return;
-                                }
+                                if (!widget.clearNumericOnFirstTap) return;
                                 _price.selection = TextSelection(baseOffset: 0,
                                   extentOffset: _price.text.length);
-                                _priceCleared = true;
                               },
                               decoration: InputDecoration(
                                 labelText: tr('price'),
@@ -7493,10 +7482,9 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                         scrollPadding: const EdgeInsets.only(bottom: 180),
                           controller: _taxPercent,
                           onTap: () {
-                            if (!widget.clearNumericOnFirstTap || _taxCleared) return;
+                            if (!widget.clearNumericOnFirstTap) return;
                             _taxPercent.selection = TextSelection(baseOffset: 0,
                               extentOffset: _taxPercent.text.length);
-                            _taxCleared = true;
                           },
                           keyboardType:
                               const TextInputType.numberWithOptions(decimal: true),
