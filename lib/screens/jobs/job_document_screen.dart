@@ -2635,16 +2635,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       final complete = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Invoices paid — job still open'),
+          title: const Text('Mark Job Completed?'),
           content: const Text(
-            'All linked invoices are paid, but this job is still open. '
-            'Is the repair work finished? You can complete the job now '
-            'or keep it open if work remains.',
+            'Payment received in full. Is the repair work finished? '
+            'You can mark the job Completed now or keep it In Progress. '
+            'The invoice will remain paid either way.',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Keep Job Open'),
+              child: const Text('Keep In Progress'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
