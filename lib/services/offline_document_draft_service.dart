@@ -931,6 +931,18 @@ class OfflineDocumentDraftService {
           }
           serverDetail = await _reconcileConvertedInvoice(
               businessId, serverId, localDetail);
+          final localMemo = localDetail['memo']?.toString().trim() ?? '';
+          final remoteMemo = serverDetail['memo']?.toString().trim() ?? '';
+          if (localMemo != remoteMemo) {
+            final version = int.tryParse(
+                serverDetail['row_version']?.toString() ?? '') ?? 1;
+            await _api.updateDocumentNotes(
+              businessId, serverId,
+              expectedVersion: version,
+              memo: localMemo.isEmpty ? null : localMemo,
+            );
+            serverDetail = await _api.documentDetail(businessId, serverId);
+          }
           final provisionalJobId = payload['provisional_job_id']?.toString() ?? '';
           if (provisionalJobId.isNotEmpty) {
             final realJobId = serverDetail['job_id']?.toString() ?? '';
