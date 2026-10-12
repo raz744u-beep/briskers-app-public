@@ -19,6 +19,7 @@ import 'offline_invoice_payment_ledger.dart';
 import 'offline_estimate_invoice_service.dart';
 import 'offline_financial_write_service.dart';
 import 'offline_job_admin_service.dart';
+import 'local_job_repository.dart';
 import 'weather_service.dart';
 import 'historical_photo_matcher.dart';
 import '../screens/customers/customer_quick_actions.dart';
@@ -248,6 +249,14 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkOfflineCustomerVehicleAppointment,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-021',
+      title: 'Jobs sorting and pagination',
+      success: 'Newest, oldest, customer, status and recently-updated ordering checked in local database.',
+      action: _checkJobSorting,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -298,6 +307,39 @@ class BriskersFunctionalDiagnosticsService {
       await _cleanupPreferences(businessId);
       await database.close();
     }
+  }
+
+  Future<void> _checkJobSorting(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final jobs = LocalJobRepository(database: database);
+    await database.customStatement(
+      'INSERT INTO local_job_statuses(business_id,code,name,sort_order) '
+      "VALUES (?, 'open', 'Open', 20), (?, 'in_progress', 'In progress', 10)",
+      [businessId, businessId],
+    );
+    for (final item in [
+      ['j8', 'J-8', 'Zoe', 'open', 100, 100],
+      ['j11', 'J-11', 'Alice', 'in_progress', 200, 300],
+      ['j12', 'J-12', 'Bob', 'open', 300, 200],
+    ]) {
+      await database.customStatement(
+        'INSERT INTO local_jobs '
+        '(id,business_id,access_scope,job_number,title,status,customer_name,'
+        'created_at,server_updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [item[0], businessId, 'full', item[1], 'Test', item[3],
+         item[2], item[4], item[5]],
+      );
+    }
+    Future<String> first(String sort) async =>
+        (await jobs.listJobs(businessId, sort: sort, limit: 1))
+            .single['job_number'].toString();
+    _require(await first('newest') == 'J-12', 'Newest-first not global.');
+    _require(await first('oldest') == 'J-8', 'Oldest-first not global.');
+    _require(await first('customer') == 'J-11', 'Customer A-Z incorrect.');
+    _require(await first('status') == 'J-11', 'Status order incorrect.');
+    _require(await first('updated') == 'J-11', 'Recently updated incorrect.');
   }
 
   Future<void> _checkAppointmentActionPolicy(
