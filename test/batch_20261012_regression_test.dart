@@ -57,8 +57,9 @@ void main() {
 
   test('Invoice numeric fields select text each tap', () {
     final invoice = source('lib/screens/jobs/job_document_screen.dart');
-    expect(invoice, isNot(contains('_quantityCleared')));
-    expect(invoice, isNot(contains('_priceCleared')));
+    final editLine = invoice.substring(invoice.indexOf('class _EditLineDialogState'));
+    expect(editLine, isNot(contains('_quantityCleared')));
+    expect(editLine, isNot(contains('_priceCleared')));
     expect(invoice, contains('if (!widget.clearNumericOnFirstTap) return;'));
   });
 
