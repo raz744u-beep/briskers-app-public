@@ -205,7 +205,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool navigationRefresh = false}) async {
     var localShown = false;
     final forceOnline =
         BriskersConnectionModeController.instance.forceOnline;
@@ -237,6 +237,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         }
       } catch (_) {}
     }
+
+    // Returning from invoice detail should show locally saved documents
+    // without triggering a second full online list and style refresh.
+    // Explicit refresh and initial load still fetch server data.
+    if (navigationRefresh && localShown && !forceOnline) return;
 
     if (forceOffline) {
       if (mounted && !localShown) {
@@ -436,7 +441,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       ),
     );
 
-    if (mounted) unawaited(_load());
+    if (mounted) unawaited(_load(navigationRefresh: true));
   }
 
   Future<void> _deleteDocument(Map<String, dynamic> row) async {
