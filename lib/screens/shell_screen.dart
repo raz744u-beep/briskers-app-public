@@ -432,6 +432,7 @@ class _ShellScreenState extends State<ShellScreen> {
               businessId: widget.businessId,
               kind: 'invoice',
               isOwner: widget.roleCode == 'owner',
+              canManageExpenses: <String>{'owner', 'manager', 'office'}.contains(widget.roleCode),
               showAppBar: false,
             );
           default:
