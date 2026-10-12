@@ -161,7 +161,9 @@ class _ShellScreenState extends State<ShellScreen> {
   /// Never invent method IDs or block app navigation on connectivity.
   Future<void> _prepareOfflineChoices() async {
     if (_preparingOfflineChoices ||
-        BriskersConnectionModeController.instance.forceOffline) return;
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     _preparingOfflineChoices = true;
     try {
       final options = await _api.paymentOptions(widget.businessId);
