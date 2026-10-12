@@ -5536,7 +5536,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       return result;
     } catch (error) {
       if (mounted) {
-        setState(() => _error = error.toString());
+        // An optional template operation must not leave a raw network
+        // exception underneath the invoice totals on a different tab.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not save standard note: $error')),
         );
