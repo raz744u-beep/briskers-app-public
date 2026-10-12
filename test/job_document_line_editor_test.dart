@@ -63,10 +63,14 @@ void main() {
           TextSelection(baseOffset: 0, extentOffset: controller.text.length),
         );
         await tester.enterText(field(entry.key), entry.value);
-        await tester.tap(find.text('Edit item'));
+        await tester.ensureVisible(field(0));
+        await tester.tap(field(0));
+        await tester.pump(const Duration(milliseconds: 600));
+        await tester.ensureVisible(field(entry.key));
         await tester.tap(field(entry.key));
         await tester.pumpAndSettle();
         expect(controller.text, entry.value);
+        expect(controller.selection.isCollapsed, isTrue);
       }
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
@@ -83,6 +87,8 @@ void main() {
       Map<String, dynamic>? saved;
       await openEditor(tester, onResult: (value) => saved = value);
       await tester.ensureVisible(field(3));
+      await tester.tap(field(3));
+      await tester.pumpAndSettle();
       await tester.enterText(field(3), '99');
       await tester.tap(find.byTooltip('Close'));
       await tester.pumpAndSettle();
@@ -113,19 +119,27 @@ void main() {
       tester.view.padding = const FakeViewPadding(top: 24, bottom: 24);
       tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 24);
       addTearDown(tester.view.reset);
-      await openEditor(tester);
-      expect(tester.getRect(find.text('Save')).bottom, lessThanOrEqualTo(616));
+      Map<String, dynamic>? saved;
+      await openEditor(tester, onResult: (value) => saved = value);
+      expect(
+        tester.getRect(find.byType(FilledButton)).bottom,
+        lessThanOrEqualTo(616),
+      );
       tester.view.viewInsets = const FakeViewPadding(bottom: 280);
       tester.view.padding = const FakeViewPadding(top: 24);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      expect(tester.getRect(find.text('Save')).bottom, lessThanOrEqualTo(360));
+      expect(
+        tester.getRect(find.byType(FilledButton)).bottom,
+        lessThanOrEqualTo(360),
+      );
       await tester.ensureVisible(field(4));
       await tester.tap(field(4));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      await tester.tap(find.byTooltip('Close'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
+      expect(saved?['unit_price'], 0);
       expect(find.text('Open editor'), findsOneWidget);
     },
   );
