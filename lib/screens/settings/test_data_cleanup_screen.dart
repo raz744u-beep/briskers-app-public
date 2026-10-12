@@ -69,9 +69,9 @@ class _TestDataCleanupScreenState extends State<TestDataCleanupScreen> {
     final accepted = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Cancel local test invoice?'),
+        title: Text(row['kind'] == 'estimate' ? 'Cancel local estimate?' : 'Cancel local test invoice?'),
         content: Text(
-          'Remove only this never-uploaded invoice and its unshared '
+          'Remove only this never-uploaded document and any unshared '
           'temporary job?\n\n${row['customer']}\n${row['id']}\n\n'
           'The app will refuse if synchronization or payment status is uncertain.',
         ),
@@ -85,8 +85,13 @@ class _TestDataCleanupScreenState extends State<TestDataCleanupScreen> {
     );
     if (accepted != true) return;
     try {
-      await _drafts.cancelNeverSyncedQuickInvoice(
-        widget.businessId, row['id'] as String);
+      if (row['kind'] == 'estimate') {
+        await _drafts.cancelNeverSyncedStandaloneEstimate(
+          widget.businessId, row['id'] as String);
+      } else {
+        await _drafts.cancelNeverSyncedQuickInvoice(
+          widget.businessId, row['id'] as String);
+      }
       await _refresh();
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -104,9 +109,9 @@ class _TestDataCleanupScreenState extends State<TestDataCleanupScreen> {
               const ListTile(
                 title: Text('Local pending documents — review only'),
                 subtitle: Text(
-                  'Only never-uploaded quick invoices without pending payments '
-                  'and without shared jobs can be canceled here. Other jobs, '
-                  'estimates and server records are deliberately protected. '
+                  'Only never-uploaded standalone estimates and quick invoices '
+                  'without pending payments or shared jobs can be canceled here. Other jobs, '
+                  'and server records are deliberately protected. '
                   'Keep J7, invoice 6331 and estimate 1997.',
                 ),
               ),
@@ -117,7 +122,10 @@ class _TestDataCleanupScreenState extends State<TestDataCleanupScreen> {
               if (_records.isEmpty)
                 const ListTile(title: Text('No pending local documents found')),
               ..._records.map((row) {
-                final safe = row['local'] == true && row['queued'] == 0;
+                final safe = (row['local'] == true ||
+                    (row['kind'] == 'estimate' &&
+                     (row['id'] as String).startsWith('local-estimate-'))) &&
+                    row['queued'] == 0;
                 return ListTile(
                   title: Text("${row['customer']} · ${row['kind']}"),
                   subtitle: Text(
