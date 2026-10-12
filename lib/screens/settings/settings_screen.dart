@@ -183,9 +183,9 @@ class SettingsScreen extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.cleaning_services_outlined,
                   color: BriskersColors.settings),
-              title: const Text('Test Data Cleanup'),
+              title: const Text('Delete test jobs'),
               subtitle: const Text(
-                'Review pending local records; guarded cancellation only',
+                'Review test records; protected deletion only',
               ),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.push(
