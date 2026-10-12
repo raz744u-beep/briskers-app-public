@@ -310,6 +310,9 @@ class DocumentPdfService {
     final plateState = detail['vehicle_license_state']?.toString().trim() ?? '';
 
     final jobNumber = detail['job_number']?.toString().trim() ?? '';
+    final numberedJob = jobNumber.isNotEmpty &&
+        jobNumber.toLowerCase() != 'pending sync' &&
+        !jobNumber.startsWith('local-');
     final paymentTerms =
         detail['payment_terms']?.toString().trim() ?? 'Due on receipt';
     final claimNumber = detail['claim_number']?.toString().trim() ?? '';
@@ -439,7 +442,7 @@ class DocumentPdfService {
                       'Date',
                       _date(detail['document_date']),
                     ),
-                    if (jobNumber.isNotEmpty)
+                    if (numberedJob)
                       _metadataRow('Job #', jobNumber),
                     _metadataRow(
                       'Payment Terms',
