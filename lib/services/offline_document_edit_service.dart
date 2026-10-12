@@ -686,14 +686,22 @@ class OfflineDocumentEditService {
       }
     }
 
-    final currentWarranty = await _api.documentWarrantyDetail(
-      businessId,
-      documentId,
-    );
+    // Warranty is invoice-specific and must not make estimate memo/line sync
+    // fail. A metadata fetch failure must also preserve the existing cache.
+    Map<String, dynamic> currentWarranty = const {};
+    if (serverDetail['kind']?.toString() == 'invoice') {
+      try {
+        currentWarranty =
+            await _api.documentWarrantyDetail(businessId, documentId);
+      } catch (_) {}
+    }
+    final previous = await _cache.load(businessId, documentId);
     await _cache.save(businessId, documentId, <String, dynamic>{
       ...serverDetail,
       if (currentWarranty.isNotEmpty)
-        'offline_warranty_detail': currentWarranty,
+        'offline_warranty_detail': currentWarranty
+      else if (previous?['offline_warranty_detail'] is Map)
+        'offline_warranty_detail': previous!['offline_warranty_detail'],
     });
     await _database.customStatement(
       '''
