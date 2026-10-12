@@ -654,7 +654,7 @@ class OfflineDocumentEditService {
             claimNumber: payload['claim_number']?.toString(),
             authorizationNumber: payload['authorization_number']?.toString(),
             approvedAmount: num.tryParse(payload['approved_amount']?.toString() ?? ''),
-            surchargeRate: num.tryParse(payload['surcharge_rate']?.toString() ?? ''),
+            surchargeRate: num.tryParse(payload['surcharge_rate']?.toString() ?? '') ?? 0.03,
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
         } else if (operation == 'memo') {
