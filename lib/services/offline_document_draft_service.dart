@@ -452,6 +452,7 @@ class OfflineDocumentDraftService {
       'converted': false,
       'converted_from_estimate_id': estimateId,
       'job_id': effectiveJobId,
+      'job_number': provisionalJobId != null ? 'Pending sync' : estimate['job_number'],
       'job_title': estimate['job_title'] ?? estimate['title'] ?? 'Estimate repair',
       'paid_amount': 0,
       'pending_payment': 0,
@@ -479,7 +480,7 @@ class OfflineDocumentDraftService {
           '''INSERT INTO local_jobs (id,business_id,access_scope,job_number,title,
                status,status_name,customer_id,customer_name,vehicle_id,vehicle_label,
                created_at,sync_state)
-             VALUES (?,?,'full','Pending sync',?,'open','In progress',?,?,?,?,?,'pending')''',
+             VALUES (?,?,'full','Pending sync',?,'open','Open',?,?,?,?,?,'pending')''',
           [provisionalJobId,businessId,
            (estimate['job_title'] ?? estimate['title'] ?? 'Estimate repair').toString(),
            estimate['customer_id'],estimate['customer_name'],estimate['vehicle_id'],
