@@ -171,7 +171,6 @@ class _JobsScreenState extends State<JobsScreen> {
         _localJobs.jobCount(
           widget.businessId,
           status: _selectedStatus,
-          sort: _sort,
           search: query.isEmpty ? null : query,
         ),
         _localJobs.jobStatusCounts(widget.businessId),
@@ -245,7 +244,6 @@ class _JobsScreenState extends State<JobsScreen> {
         _localJobs.jobCount(
           widget.businessId,
           status: _selectedStatus,
-          sort: _sort,
           search: query.isEmpty ? null : query,
         ),
         _localJobs.jobStatusCounts(widget.businessId),
