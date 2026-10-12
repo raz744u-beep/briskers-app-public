@@ -137,7 +137,7 @@ class LocalJobRepository {
         CASE WHEN j.job_number = 'Pending sync'
                    OR upper(j.job_number) LIKE 'TEMP-%'
              THEN j.created_at END DESC,
-        ${sortSql}
+        $sortSql
       LIMIT ? OFFSET ?
       ''',
       variables: variables,
