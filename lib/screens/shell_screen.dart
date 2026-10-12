@@ -14,6 +14,9 @@ import '../services/job_sync_service.dart';
 import '../services/local_appointment_repository.dart';
 import '../services/local_customer_repository.dart';
 import '../services/local_document_repository.dart';
+import '../services/briskers_api.dart';
+import '../services/local_payment_methods_cache.dart';
+import '../services/local_standard_notes_service.dart';
 import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
 import '../widgets/connection_header_toggle.dart';
@@ -43,6 +46,8 @@ class ShellScreen extends StatefulWidget {
 }
 
 class _ShellScreenState extends State<ShellScreen> {
+  static const _api = BriskersApi();
+  bool _preparingOfflineChoices = false;
   static const _sectionColors = [
     BriskersColors.today,
     BriskersColors.customers,
@@ -89,6 +94,7 @@ class _ShellScreenState extends State<ShellScreen> {
     _businessName = widget.businessName;
     _index = widget.initialIndex.clamp(0, 5);
     BriskersConnectionModeController.instance.addListener(_connectionChanged);
+    unawaited(_prepareOfflineChoices());
     _refreshHomeJobsCount();
     _homeJobsCountSubscription = _localJobs
         .watchActiveJobCount(widget.businessId)
@@ -143,11 +149,40 @@ class _ShellScreenState extends State<ShellScreen> {
 
   void _connectionChanged() {
     if (!mounted) return;
+    unawaited(_prepareOfflineChoices());
     setState(() {
       _lazyPages.clear();
       _customersRefreshToken++;
       _jobsRefreshToken++;
     });
+  }
+
+  /// Preload the shop's actual payment method IDs for future offline use.
+  /// Never invent method IDs or block app navigation on connectivity.
+  Future<void> _prepareOfflineChoices() async {
+    if (_preparingOfflineChoices ||
+        BriskersConnectionModeController.instance.forceOffline) return;
+    _preparingOfflineChoices = true;
+    try {
+      final options = await _api.paymentOptions(widget.businessId);
+      final methods = List<dynamic>.from(options['methods'] ?? const [])
+          .whereType<Map>()
+          .map((value) => Map<String, dynamic>.from(value))
+          .toList();
+      if (methods.isNotEmpty) {
+        await const LocalPaymentMethodsCache().save(widget.businessId, methods);
+      }
+    } catch (_) {
+      // An unavailable network must not prevent local app use.
+    }
+    try {
+      await LocalStandardNotesService().available(
+        widget.businessId, offline: false);
+    } catch (_) {
+      // Unsynced templates remain saved and retry when online again.
+    } finally {
+      _preparingOfflineChoices = false;
+    }
   }
 
   void _applyHomeJobsCount(int count) {
