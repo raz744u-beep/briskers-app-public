@@ -5,6 +5,8 @@ import 'package:briskers_app/core/connection_mode.dart';
 import 'package:briskers_app/screens/documents_screen.dart';
 import 'package:briskers_app/screens/shell_screen.dart';
 
+// Header and route tests intentionally do not wait for document loading.
+// The production loading indicator may animate while local storage is pending.
 void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
@@ -44,7 +46,8 @@ void main() {
       );
       for (var index = 0; index < 6; index++) {
         await tester.tap(find.text('Open Estimates'));
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
         expect(find.text('OWNER'), findsOneWidget);
         final pill = find.ancestor(
           of: find.text('OWNER'),
@@ -59,7 +62,8 @@ void main() {
           ),
         );
         await tester.tap(find.byType(NavigationDestination).at(index));
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
         expect(selected, index);
         expect(find.byType(DocumentsScreen), findsNothing);
         expect(find.byType(ShellScreen), findsNothing);
@@ -82,7 +86,8 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('OWNER'), findsNothing);
       expect(
         tester.widget<DocumentsScreen>(find.byType(DocumentsScreen)).roleCode,
