@@ -109,12 +109,7 @@ class LocalJobRepository {
          j.created_at DESC, j.id""",
       'customer' => "lower(COALESCE(j.customer_name, '')) ASC, j.created_at DESC, j.id",
       'oldest' => 'j.created_at ASC, j.id ASC',
-      _ => """CASE
-           WHEN substr(j.job_number, instr(j.job_number, '-') + 1)
-                GLOB '[0-9]*'
-           THEN CAST(substr(j.job_number, instr(j.job_number, '-') + 1) AS INTEGER)
-           ELSE -1 END DESC,
-           j.created_at DESC, j.id""",
+      _ => 'j.created_at DESC, j.id DESC',
     };
     variables.add(Variable<int>(limit));
     variables.add(Variable<int>(offset));
