@@ -132,7 +132,7 @@ class _JobsScreenState extends State<JobsScreen> {
     }
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool navigationRefresh = false}) async {
     final generation = ++_loadGeneration;
     var localAvailable = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
@@ -186,6 +186,12 @@ class _JobsScreenState extends State<JobsScreen> {
       // Online loading below can still succeed if the local cache is unavailable.
       }
     }
+
+    // Navigation back from a job or invoice must not launch a second full
+    // network bootstrap on top of the regular background synchronization.
+    // Local rows have already painted above. Search/filter and explicit
+    // refresh still use the authoritative online refresh path.
+    if (navigationRefresh && !forceOnline && localAvailable) return;
 
     try {
       // Jobs themselves are refreshed incrementally into the local database.
@@ -281,7 +287,7 @@ class _JobsScreenState extends State<JobsScreen> {
         ),
       ),
     );
-    if (mounted) unawaited(_load());
+    if (mounted) unawaited(_load(navigationRefresh: true));
     widget.onJobsChanged?.call();
   }
 
