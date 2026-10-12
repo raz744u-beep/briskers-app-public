@@ -83,8 +83,9 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
 
   Future<Map<String, dynamic>?> _pickCompany(
     BuildContext context,
-    List<Map<String, dynamic>> companies,
-  ) async {
+    List<Map<String, dynamic>> companies, {
+    bool allowCreate = true,
+  }) async {
     final search = TextEditingController();
     var filtered = List<Map<String, dynamic>>.from(companies);
 
@@ -123,7 +124,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                       ),
                     ),
                   ),
-                  ListTile(
+                  if (allowCreate) ListTile(
                     leading: const Icon(
                       Icons.add_business_outlined,
                       color: BriskersColors.invoices,
@@ -365,97 +366,181 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
     var rate = _number(widget.detail['surcharge_rate']);
     if (rate > 0) rate = _cardSurchargeRate;
     final result = await showModalBottomSheet<Map<String, dynamic>>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) => SafeArea(
-          top: false,
-          child: Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.viewInsetsOf(sheetContext).bottom +
-                  MediaQuery.viewPaddingOf(sheetContext).bottom + 24),
-            child: FractionallySizedBox(
-              heightFactor: MediaQuery.viewInsetsOf(sheetContext).bottom > 0
-                  ? 0.88 : 0.76,
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (sheetContext) => StatefulBuilder(
+          builder: (context, setSheetState) {
+            final selectedName = selected?['name']?.toString() ?? '';
+            final phone = selected?['claims_phone']?.toString() ?? '';
+            final email = selected?['submission_email']?.toString() ?? '';
+
+            return SafeArea(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Text(tr('extendedWarranty'),
-                style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 12),
-              InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: companies.isEmpty ? null : () async {
-                  final choice = await _pickCompany(sheetContext, companies);
-                  if (choice != null) {
-                    setSheetState(() {
-                      selected = choice;
-                      company.text = choice['name']?.toString() ?? '';
-                      phone.text = choice['claims_phone']?.toString() ?? '';
-                      email.text = choice['submission_email']?.toString() ?? '';
-                    });
-                  }
-                },
-                child: InputDecorator(
-                  decoration: InputDecoration(
-                    labelText: tr('warrantyCompany'),
-                    border: const OutlineInputBorder(),
-                    prefixIcon: const Icon(Icons.shield_outlined),
-                    suffixIcon: const Icon(Icons.chevron_right)),
-                  child: Text(company.text.isEmpty
-                    ? tr('selectOrAddCompany') : company.text))),
-              if (companies.isEmpty && previousName.isEmpty)
-                const Text('Warranty companies must be synced once online before selecting a company.'),
-              TextField(controller: phone,
-                decoration: InputDecoration(labelText: tr('claimsPhone'), border: const OutlineInputBorder(), isDense: true)),
-              TextField(controller: email, keyboardType: TextInputType.emailAddress,
-                decoration: InputDecoration(labelText: tr('submissionEmail'), border: const OutlineInputBorder(), isDense: true)),
-              TextField(controller: claim,
-                decoration: InputDecoration(labelText: tr('claimNumberOptional'), border: const OutlineInputBorder(), isDense: true)),
-              TextField(controller: authorization,
-                decoration: InputDecoration(labelText: tr('authorizationNumber'), border: const OutlineInputBorder(), isDense: true)),
-              TextField(controller: approved,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Approved amount', border: OutlineInputBorder(), isDense: true)),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<num>(
-                initialValue: rate,
-                decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
-                items: [
-                  DropdownMenuItem(value: 0, child: Text(tr('warrantyCheckOption'))),
-                  DropdownMenuItem(value: _cardSurchargeRate,
-                    child: Text(tr('warrantyCardOption')
-                      .replaceAll('{percent}', (_cardSurchargeRate * 100).toStringAsFixed(0)))),
-                ],
-                onChanged: (value) {
-                  if (value != null) setSheetState(() => rate = value);
-                },
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  0,
+                  16,
+                  MediaQuery.viewInsetsOf(sheetContext).bottom + 18,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      tr('extendedWarranty'),
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () async {
+                        final picked = await _pickCompany(sheetContext, companies, allowCreate: false);
+                        if (picked != null && sheetContext.mounted) {
+                          setSheetState(() => selected = picked);
+                        }
+                      },
+                      child: InputDecorator(
+                        decoration: InputDecoration(
+                          labelText: tr('warrantyCompany'),
+                          border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.shield_outlined),
+                          suffixIcon: const Icon(Icons.chevron_right),
+                        ),
+                        child: Text(
+                          selectedName.isEmpty
+                              ? tr('selectOrAddCompany')
+                              : selectedName,
+                          style: TextStyle(
+                            fontWeight: selectedName.isEmpty
+                                ? FontWeight.w400
+                                : FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (phone.isNotEmpty || email.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        <String>[
+                          if (phone.isNotEmpty) 'Claims: \$phone',
+                          if (email.isNotEmpty) 'Submit: \$email',
+                        ].join('\n'),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF667085),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: claim,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: InputDecoration(
+                        labelText: tr('claimNumberOptional'),
+                        prefixIcon: const Icon(Icons.assignment_outlined),
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: authorization,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: InputDecoration(
+                        labelText: tr('authorizationNumber'),
+                        prefixIcon: const Icon(Icons.verified_outlined),
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: approved,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Approved warranty amount',
+                        prefixText: '\$ ',
+                        prefixIcon: Icon(Icons.payments_outlined),
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<num>(
+                      initialValue: rate,
+                      decoration: InputDecoration(
+                        labelText: tr('warrantyPaymentType'),
+                        prefixIcon: const Icon(Icons.account_balance_wallet_outlined),
+                        border: const OutlineInputBorder(),
+                      ),
+                      items: [
+                        DropdownMenuItem<num>(
+                          value: 0,
+                          child: Text(tr('warrantyCheckOption')),
+                        ),
+                        DropdownMenuItem<num>(
+                          value: _cardSurchargeRate,
+                          child: Text(
+                            tr('warrantyCardOption').replaceAll(
+                              '{percent}',
+                              (_cardSurchargeRate * 100)
+                                  .toStringAsFixed(
+                                    (_cardSurchargeRate * 100) % 1 == 0 ? 0 : 2,
+                                  ),
+                            ),
+                          ),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setSheetState(() => rate = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      tr('warrantySurchargeExplanation'),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.35,
+                        color: Color(0xFF667085),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: BriskersColors.invoices,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: selected == null
+                          ? null
+                          : () => Navigator.pop(
+                                sheetContext,
+                                {
+                                  'extended_warranty': true,
+                                  'warranty_company_id': selected!['id']?.toString() ?? '',
+                                  'warranty_company_name': selected!['name']?.toString() ?? '',
+                                  'claims_phone': selected!['claims_phone']?.toString() ?? '',
+                                  'submission_email': selected!['submission_email']?.toString() ?? '',
+                                  'claim_number': claim.text.trim(),
+                                  'authorization_number': authorization.text.trim(),
+                                  'approved_amount': num.tryParse(approved.text.trim()),
+                                  'surcharge_rate': rate,
+                                },
+                              ),
+                      child: Text(tr('saveWarrantyInformation')),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () => Navigator.pop(sheetContext, <String, dynamic>{
-                  'extended_warranty': true,
-                  'warranty_company_name': company.text.trim(),
-                  'warranty_company_id': selected?['id']?.toString() ?? '',
-                  'claims_phone': phone.text.trim(),
-                  'submission_email': email.text.trim(),
-                  'claim_number': claim.text.trim(),
-                  'authorization_number': authorization.text.trim(),
-                  'approved_amount': num.tryParse(approved.text.trim()),
-                  'surcharge_rate': rate,
-                }),
-                child: Text(tr('saveWarrantyInformation')),
-              ),
-            ]),
-              ),
-            ),
-          ),
+            );
+          },
         ),
-      ),
-    );
-    company.dispose();
+      );
+
+      company.dispose();
     phone.dispose();
     email.dispose();
     claim.dispose();
