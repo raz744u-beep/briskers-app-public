@@ -47,7 +47,7 @@ void main() {
   Finder field(int index) => find.byType(TextField).at(index);
 
   testWidgets(
-    'each custom numeric default is selected once and saves replacement',
+    'each custom numeric value is selected every tap and saves replacement',
     (tester) async {
       Map<String, dynamic>? saved;
       await openEditor(tester, onResult: (value) => saved = value);
@@ -70,7 +70,8 @@ void main() {
         await tester.tap(field(entry.key));
         await tester.pumpAndSettle();
         expect(controller.text, entry.value);
-        expect(controller.selection.isCollapsed, isTrue);
+        expect(controller.selection,
+          TextSelection(baseOffset: 0, extentOffset: controller.text.length));
       }
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
