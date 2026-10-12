@@ -173,6 +173,8 @@ class OfflineDocumentDraftService {
     if (snapshot == null || snapshot['_server_document_id'] != null) {
       throw StateError('This invoice has synced; reconnect before deleting.');
     }
+    String? restoredEstimateId;
+    Map<String, dynamic>? restoredEstimate;
     await _database.transaction(() async {
       final rows = await _database.customSelect(
         '''
@@ -202,6 +204,84 @@ class OfflineDocumentDraftService {
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
       final jobId = payload['provisional_job_id']?.toString() ?? '';
+      // Converted estimates may already have a job, or use a
+      // local-conversion-job- placeholder. Never apply quick-invoice rules
+      // to them. Restore the source estimate only when neither operation
+      // has ever been sent to the server.
+      if (payload['kind'] == 'convert_invoice') {
+        final estimateId = payload['estimate_id']?.toString() ?? '';
+        if (!estimateId.startsWith('local-estimate-')) {
+          throw StateError('Converted source is not a never-synced estimate.');
+        }
+        final original = await _cache.load(businessId, estimateId);
+        if (original == null ||
+            original['_server_document_id'] != null ||
+            original['converted_invoice_id']?.toString() != documentId ||
+            snapshot['converted_from_estimate_id']?.toString() != estimateId) {
+          throw StateError('Estimate conversion references cannot be verified.');
+        }
+        final otherOps = await _database.customSelect(
+          """SELECT COUNT(*) AS count FROM sync_outbox
+             WHERE business_id=? AND entity_id=?
+               AND entity_type='invoice_payment_received'""",
+          variables: [
+            Variable<String>(businessId),
+            Variable<String>(documentId),
+          ],
+        ).getSingle();
+        if (otherOps.read<int>('count') != 0) {
+          throw StateError('Reconcile queued payments before cancellation.');
+        }
+        final originJob = original['job_id']?.toString() ?? '';
+        final expectedPlaceholder =
+            'local-conversion-job-${payload['operation_id']}';
+        if (jobId.isNotEmpty && jobId != expectedPlaceholder) {
+          throw StateError('Converted temporary Job link is inconsistent.');
+        }
+        if ((snapshot['job_id']?.toString() ?? '') !=
+            (jobId.isNotEmpty ? jobId : originJob)) {
+          throw StateError('Invoice Job does not match its source estimate.');
+        }
+        final shared = jobId.isEmpty
+            ? 0
+            : (await _database.customSelect(
+                'SELECT COUNT(*) AS count FROM local_documents '
+                'WHERE business_id=? AND job_id=? AND id<>?',
+                variables: [
+                  Variable<String>(businessId),
+                  Variable<String>(jobId),
+                  Variable<String>(documentId),
+                ],
+              ).getSingle()).read<int>('count');
+        if (shared != 0) {
+          throw StateError('Temporary Job is shared with other documents.');
+        }
+        await _database.customStatement(
+          'DELETE FROM sync_outbox WHERE id=?', [row.read<int>('id')]);
+        await _database.customStatement(
+          'DELETE FROM local_documents WHERE business_id=? AND id=?',
+          [businessId, documentId]);
+        await _database.customStatement(
+          """UPDATE local_documents SET converted=0, status='draft'
+             WHERE business_id=? AND id=? AND sync_state='pending'""",
+          [businessId, estimateId]);
+        if (jobId.isNotEmpty) {
+          await _database.customStatement(
+            "DELETE FROM local_jobs WHERE business_id=? AND id=? AND sync_state='pending'",
+            [businessId, jobId],
+          );
+        }
+        // Cache writes happen after the database transaction below; mark
+        // the restored source in memory so the outer method can save it.
+        restoredEstimateId = estimateId;
+        restoredEstimate = {
+          ...original,
+          'converted': false,
+          'status': 'draft',
+          'converted_invoice_id': null,
+        };
+        return;
+      }
       if (jobId != 'local-job-${payload['operation_id']}') {
         throw StateError('The temporary Job link is inconsistent.');
       }
@@ -252,6 +332,9 @@ class OfflineDocumentDraftService {
       );
     });
     await _cache.remove(businessId, documentId);
+    if (restoredEstimateId != null && restoredEstimate != null) {
+      await _cache.save(businessId, restoredEstimateId!, restoredEstimate!);
+    }
   }
 
   String _lineId() {
