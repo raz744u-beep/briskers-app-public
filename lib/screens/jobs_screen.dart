@@ -51,6 +51,7 @@ class _JobsScreenState extends State<JobsScreen> {
   List<Map<String, dynamic>> _statuses = const [];
   String? _selectedStatus;
   final TextEditingController _search = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   Timer? _searchDebounce;
   int _loadGeneration = 0;
   int _totalCount = 0;
@@ -76,6 +77,7 @@ class _JobsScreenState extends State<JobsScreen> {
   void dispose() {
     _searchDebounce?.cancel();
     _search.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -113,6 +115,11 @@ class _JobsScreenState extends State<JobsScreen> {
         )),
       );
       if (created == true && mounted) {
+        _searchDebounce?.cancel();
+        _search.clear();
+        setState(() => _selectedStatus = null);
+        if (_scrollController.hasClients) _scrollController.jumpTo(0);
+        // Refresh the durable local row before any optional network work.
         await _load();
         widget.onJobsChanged?.call();
       }
@@ -906,6 +913,7 @@ class _JobsScreenState extends State<JobsScreen> {
           child: RefreshIndicator(
             onRefresh: _load,
             child: ListView(
+              controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 80),
               children: [
                 if (_showingLocal)

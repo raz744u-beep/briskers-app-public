@@ -18,6 +18,7 @@ class InvoiceWarrantyPanel extends StatefulWidget {
     required this.detail,
     required this.onChanged,
     required this.paymentProcessed,
+    this.paymentPendingLabel,
     this.readOnly = false,
     this.onLocalWarrantyChanged,
   });
@@ -29,6 +30,7 @@ class InvoiceWarrantyPanel extends StatefulWidget {
   final Map<String, dynamic> detail;
   final Future<void> Function() onChanged;
   final bool paymentProcessed;
+  final String? paymentPendingLabel;
   final bool readOnly;
   final Future<void> Function(Map<String, dynamic>)? onLocalWarrantyChanged;
 
@@ -1029,7 +1031,9 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color: widget.paymentProcessed
+                    color: widget.paymentPendingLabel != null
+                        ? const Color(0xFFFFF4DE)
+                        : widget.paymentProcessed
                         ? const Color(0xFFEAF8EE)
                         : const Color(0xFFFFECEC),
                     borderRadius: BorderRadius.circular(999),
@@ -1038,23 +1042,29 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        widget.paymentProcessed
+                        widget.paymentPendingLabel != null
+                            ? Icons.schedule
+                            : widget.paymentProcessed
                             ? Icons.check
                             : Icons.close,
                         size: 13,
-                        color: widget.paymentProcessed
+                        color: widget.paymentPendingLabel != null
+                            ? const Color(0xFF946200)
+                            : widget.paymentProcessed
                             ? const Color(0xFF0C9A43)
                             : const Color(0xFFC62828),
                       ),
                       const SizedBox(width: 3),
                       Text(
-                        widget.paymentProcessed
+                        widget.paymentPendingLabel ?? (widget.paymentProcessed
                             ? tr('paid')
-                            : tr('unpaid'),
+                            : tr('unpaid')),
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w800,
-                          color: widget.paymentProcessed
+                          color: widget.paymentPendingLabel != null
+                              ? const Color(0xFF946200)
+                              : widget.paymentProcessed
                               ? const Color(0xFF0C9A43)
                               : const Color(0xFFC62828),
                         ),

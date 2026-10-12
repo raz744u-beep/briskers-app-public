@@ -8,6 +8,7 @@ import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_document_detail_cache.dart';
 import 'local_document_repository.dart';
+import 'local_job_repository.dart';
 import 'offline_invoice_payment_ledger.dart';
 
 class OfflineDocumentDraftService {
@@ -946,23 +947,6 @@ class OfflineDocumentDraftService {
             );
             serverDetail = await _api.documentDetail(businessId, serverId);
           }
-          final provisionalJobId = payload['provisional_job_id']?.toString() ?? '';
-          if (provisionalJobId.isNotEmpty) {
-            final realJobId = serverDetail['job_id']?.toString() ?? '';
-            if (realJobId.isEmpty) {
-              throw StateError('Converted invoice has no server-linked Job.');
-            }
-            // The server conversion creates exactly one Job for an unlinked
-            // estimate. Replace the temporary local Job with its real identity.
-            await _database.transaction(() async {
-              await _database.customStatement(
-                'UPDATE local_documents SET job_id=? WHERE business_id=? AND job_id=?',
-                [realJobId,businessId,provisionalJobId]);
-              await _database.customStatement(
-                'DELETE FROM local_jobs WHERE business_id=? AND id=? AND sync_state=?',
-                [businessId,provisionalJobId,'pending']);
-            });
-          }
         } else if (payload['kind'] == 'invoice') {
           final operationId = payload['operation_id']?.toString() ?? '';
           final customerId = payload['customer_id']?.toString() ?? '';
@@ -1041,6 +1025,20 @@ class OfflineDocumentDraftService {
         if (payload['kind'] == 'invoice' || payload['kind'] == 'convert_invoice') {
           serverDetail = await _applyPendingInvoiceWarranty(
             businessId, serverId, localDetail);
+          final provisionalJobId =
+              payload['provisional_job_id']?.toString() ?? '';
+          if (provisionalJobId.isNotEmpty) {
+            final jobNumber = await LocalJobRepository(database: _database)
+                .remapProvisionalJob(
+              businessId,
+              provisionalJobId,
+              serverDetail['job_id']?.toString() ?? '',
+              jobNumber: serverDetail['job_number']?.toString(),
+            );
+            // Some document responses omit the number. Keep the same visible,
+            // clickable TEMP label until the real Job number is downloaded.
+            serverDetail = {...serverDetail, 'job_number': jobNumber};
+          }
         }
         await _documents.upsertFromServer(
           businessId,
@@ -1068,7 +1066,7 @@ class OfflineDocumentDraftService {
             });
           }
         }
-        if (payload['kind'] == 'invoice') {
+        if (payload['kind'] == 'invoice' || payload['kind'] == 'convert_invoice') {
           await OfflineInvoicePaymentLedger(database: _database).remapInvoice(
             businessId,
             localId,
@@ -1085,23 +1083,6 @@ class OfflineDocumentDraftService {
         }
 
         await _database.transaction(() async {
-          if (payload['kind'] == 'invoice') {
-            // Do not remove pending local Job until authoritative invoice
-            // and its linked real Job are safely cached.
-            final provisionalJobId =
-                payload['provisional_job_id']?.toString() ?? '';
-            if (provisionalJobId.isNotEmpty) {
-              await _database.customStatement(
-                'DELETE FROM local_job_visits WHERE business_id = ? AND job_id = ?',
-                [businessId, provisionalJobId],
-              );
-              await _database.customStatement(
-                'DELETE FROM local_jobs WHERE business_id = ? AND id = ? '
-                "AND sync_state = 'pending'",
-                [businessId, provisionalJobId],
-              );
-            }
-          }
           await _database.customStatement(
             'DELETE FROM local_documents WHERE business_id = ? AND id = ?',
             [businessId, localId],

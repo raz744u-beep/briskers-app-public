@@ -7,6 +7,7 @@ import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/offline_document_draft_service.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_document_repository.dart';
+import 'package:briskers_app/services/local_job_repository.dart';
 
 class _InterruptedSyncApi extends BriskersApi {
   final List<String> operationIds = [];
@@ -78,6 +79,8 @@ void main() {
       variables: [Variable<String>(id)],
     ).get();
     expect(before.single.read<String>('job_id'), startsWith('local-job-'));
+    final tempJobNumber = (await cache.load('sandbox', id))?['job_number'];
+    expect(tempJobNumber, startsWith('TEMP-'));
     await drafts.flush('sandbox');
     final jobStillQueued = await db.customSelect(
       "select id from local_jobs where business_id='sandbox' and sync_state='pending'",
@@ -96,6 +99,11 @@ void main() {
     final remote = await cache.load('sandbox',id);
     expect(remote?['_server_document_id'],
         '00000000-0000-4000-8000-000000006332');
+    expect(remote?['job_number'], tempJobNumber);
+    final visibleJobs = await LocalJobRepository(database: db).listJobs('sandbox');
+    expect(visibleJobs, hasLength(1));
+    expect(visibleJobs.single['id'], remote?['job_id']);
+    expect(visibleJobs.single['job_number'], tempJobNumber);
     final remains = await db.customSelect(
       "select id from sync_outbox where business_id='sandbox'"
     ).get();
@@ -113,6 +121,8 @@ void main() {
       "select id from local_job_visits where business_id='sandbox' and id like 'local-visit-%'",
     ).get();
     expect(provisionalVisits, isEmpty);
+    await drafts.flush('sandbox');
+    expect(await LocalJobRepository(database: db).jobCount('sandbox'), 1);
     await db.close();
   });
   test('cancel never-uploaded offline invoice removes draft, Job, visit and outbox', () async {

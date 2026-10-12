@@ -124,8 +124,24 @@ void main() {
 
   test('offline new Jobs are sorted before historical jobs', () async {
     final repository = await File('lib/services/local_job_repository.dart').readAsString();
-    expect(repository, contains("j.sync_state = 'pending' AND j.job_number = 'Pending sync'"));
+    expect(repository, contains("j.job_number = 'Pending sync'"));
+    expect(repository, contains("OR upper(j.job_number) LIKE 'TEMP-%'"));
+    expect(repository, isNot(contains("j.sync_state = 'pending' AND j.job_number")));
     expect(repository, contains('THEN j.created_at END DESC'));
+  });
+
+  test('new Job refresh resets filters and Jobs tab passes a current refresh token',
+      () async {
+    final jobs = await File('lib/screens/jobs_screen.dart').readAsString();
+    final shell = await File('lib/screens/shell_screen.dart').readAsString();
+    final created = jobs.substring(jobs.indexOf('if (created == true && mounted)'));
+    expect(created.indexOf('_search.clear();'), lessThan(created.indexOf('await _load();')));
+    expect(created.indexOf('_selectedStatus = null'), lessThan(created.indexOf('await _load();')));
+    expect(created.indexOf('_scrollController.jumpTo(0)'), lessThan(created.indexOf('await _load();')));
+    expect(shell.indexOf('return JobsScreen('),
+        lessThan(shell.indexOf('_lazyPages.putIfAbsent(index')));
+    expect(shell, contains('refreshToken: _jobsRefreshToken'));
+    expect(jobs, contains('oldWidget.refreshToken != widget.refreshToken'));
   });
 
   test('Jobs cards prefer job title over customer requested work', () async {

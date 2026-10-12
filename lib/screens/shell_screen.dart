@@ -402,6 +402,17 @@ class _ShellScreenState extends State<ShellScreen> {
           attentionRefreshToken: _homeAttentionRefreshToken,
         );
       }
+      if (index == 3) {
+        // Deliver a fresh refreshToken even when Jobs is already selected.
+        // Reusing the cached Widget bypasses JobsScreen.didUpdateWidget.
+        return JobsScreen(
+          businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          refreshToken: _jobsRefreshToken,
+          onJobsChanged: _refreshHomeJobsCount,
+          jobDetailBottomNavigationBar: _shellNavigationBar(),
+        );
+      }
       return _lazyPages.putIfAbsent(index, () {
         switch (index) {
           case 1:
@@ -414,14 +425,6 @@ class _ShellScreenState extends State<ShellScreen> {
             return AppointmentsScreen(
               businessId: widget.businessId,
               roleCode: widget.roleCode,
-            );
-          case 3:
-            return JobsScreen(
-              businessId: widget.businessId,
-              roleCode: widget.roleCode,
-              refreshToken: _jobsRefreshToken,
-              onJobsChanged: _refreshHomeJobsCount,
-              jobDetailBottomNavigationBar: _shellNavigationBar(),
             );
           case 4:
             return DocumentsScreen(
