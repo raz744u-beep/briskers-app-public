@@ -51,6 +51,26 @@ void main() {
       taxRate: 0, lineKind: 'labor');
     final afterEdit = await cache.load('shop', invoiceId);
     expect(afterEdit?['total_amount'], 225);
+    await service.savePendingInvoiceWarranty('shop', invoiceId, {
+      'extended_warranty': true,
+      'warranty_company_name': 'Example Warranty',
+      'authorization_number': 'AUTH-123',
+      'claim_number': 'CLAIM-8',
+      'approved_amount': 125,
+      'surcharge_rate': 0.03,
+    });
+    final warrantyInvoice = await cache.load('shop', invoiceId);
+    final warranty = warrantyInvoice?['offline_warranty_detail'] as Map;
+    expect(warranty['extended_warranty'], isTrue);
+    expect(warranty['authorization_number'], 'AUTH-123');
+    expect(warrantyInvoice?['total_amount'], 225);
+    await service.savePendingInvoiceWarranty('shop', invoiceId, {
+      ...Map<String, dynamic>.from(warranty),
+      'extended_warranty': false,
+    });
+    expect((await cache.load('shop', invoiceId))?
+      ['offline_warranty_detail']['extended_warranty'], isFalse);
+
     final outbox = await db.customSelect(
       "SELECT operation,payload_json FROM sync_outbox "
       "WHERE business_id='shop' AND operation='convert_estimate'").get();
