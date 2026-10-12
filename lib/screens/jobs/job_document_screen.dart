@@ -1107,7 +1107,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _showInvoiceExpenses() async {
     if (_estimate || !_canManageInvoiceExpenses) return;
     try {
-      final offline = BriskersConnectionModeController.instance.forceOffline;
+      final offline = BriskersConnectionModeController.instance.forceOffline ||
+          _offlineDocumentDraft.isLocalDraftId(widget.documentId);
       final cached = await LocalFinancialCache().loadLinkedExpenses(
         widget.businessId,
       );
@@ -5595,7 +5596,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     List<Map<String, dynamic>> templates;
     try {
       templates = await _standardNotes.available(widget.businessId,
-        offline: BriskersConnectionModeController.instance.forceOffline);
+        offline: BriskersConnectionModeController.instance.forceOffline ||
+          _offlineDocumentDraft.isLocalDraftId(widget.documentId));
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
