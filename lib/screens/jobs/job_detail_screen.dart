@@ -296,6 +296,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       }
     }
 
+    // Temporary jobs have no server-side ID until their offline create
+    // operation is synchronized. Keep their local detail usable in Auto mode.
+    if (widget.jobId.startsWith('local-') && !forceOnline) {
+      if (localShown) {
+        _scheduleInitialAction();
+        return;
+      }
+    }
+
     if (forceOffline) {
       if (localShown) _scheduleInitialAction();
       if (!localShown && mounted) {
