@@ -336,7 +336,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           !_copying) {
         _autoScanLaunched = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _takeReceiptPhoto();
+          if (mounted) _takeReceiptPhoto(scanWithAi: true);
         });
       }
     } catch (error) {
