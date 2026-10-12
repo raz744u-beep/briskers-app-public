@@ -6630,7 +6630,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                 .savePendingInvoiceWarranty(
                                   widget.businessId, widget.documentId, warranty)
                                 .then((_) => _load())
-                            : null,
+                            : BriskersConnectionModeController.instance.forceOffline
+                                ? (warranty) => _offlineDocumentEdit
+                                    .saveWarranty(widget.businessId,
+                                        widget.documentId, warranty)
+                                    .then((_) => _load())
+                                : null,
                     ),
                   _openFindingsBanner(),
                   if (_estimate && _converted) _convertedInvoiceBanner(),
