@@ -35,6 +35,7 @@ class HomeScreen extends StatefulWidget {
     this.estimatesOpenCount = 0,
     this.invoicesOpenCount = 0,
     this.attentionRefreshToken = 0,
+    this.estimatesNavigationBar,
   });
 
   final VoidCallback onCustomersTap;
@@ -50,6 +51,7 @@ class HomeScreen extends StatefulWidget {
   final int estimatesOpenCount;
   final int invoicesOpenCount;
   final int attentionRefreshToken;
+  final Widget? estimatesNavigationBar;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -890,6 +892,7 @@ class _HomeScreenState extends State<HomeScreen> {
           businessId: widget.businessId,
           kind: 'estimate',
           roleCode: widget.roleCode,
+          sharedBottomNavigationBar: widget.estimatesNavigationBar,
           onPrimaryDestinationSelected: (index) {
             Navigator.of(context).pop();
             switch (index) {
