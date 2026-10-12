@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 import '../../core/briskers_colors.dart';
 import '../../core/briskers_i18n.dart';
@@ -303,9 +305,53 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
     }
   }
 
+  String get _companiesKey => 'briskers_warranty_companies_${widget.businessId}';
+
+  Future<List<Map<String, dynamic>>> _cachedWarrantyCompanies() async {
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      final decoded = jsonDecode(prefs.getString(_companiesKey) ?? '[]');
+      return (decoded as List)
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _cacheWarrantyCompanies(
+      List<Map<String, dynamic>> companies) async {
+    if (companies.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_companiesKey, jsonEncode(companies));
+  }
+
   Future<void> _editLocalWarranty() async {
+    final companies = await _cachedWarrantyCompanies();
+    if (!mounted) return;
+    Map<String, dynamic>? selected;
+    final previousId = widget.detail['warranty_company_id']?.toString() ?? '';
+    final previousName = widget.detail['warranty_company_name']?.toString() ?? '';
+    for (final entry in companies) {
+      if (entry['id']?.toString() == previousId ||
+          (previousId.isEmpty && entry['name']?.toString() == previousName)) {
+        selected = entry;
+        break;
+      }
+    }
+    // An existing company's saved details remain available when its list has
+    // not yet been cached. Do not silently discard the saved ID.
+    selected ??= previousName.isNotEmpty
+        ? <String, dynamic>{
+            'id': previousId,
+            'name': previousName,
+            'claims_phone': widget.detail['claims_phone'] ?? '',
+            'submission_email': widget.detail['submission_email'] ?? '',
+          }
+        : null;
     final company = TextEditingController(
-      text: widget.detail['warranty_company_name']?.toString() ?? '');
+      text: previousName);
     final phone = TextEditingController(
       text: widget.detail['claims_phone']?.toString() ?? '');
     final email = TextEditingController(
@@ -339,8 +385,29 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
               Text(tr('extendedWarranty'),
                 style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
-              TextField(controller: company,
-                decoration: InputDecoration(labelText: tr('warrantyCompany'), border: const OutlineInputBorder(), isDense: true)),
+              InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: companies.isEmpty ? null : () async {
+                  final choice = await _pickCompany(sheetContext, companies);
+                  if (choice != null) {
+                    setSheetState(() {
+                      selected = choice;
+                      company.text = choice['name']?.toString() ?? '';
+                      phone.text = choice['claims_phone']?.toString() ?? '';
+                      email.text = choice['submission_email']?.toString() ?? '';
+                    });
+                  }
+                },
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    labelText: tr('warrantyCompany'),
+                    border: const OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.shield_outlined),
+                    suffixIcon: const Icon(Icons.chevron_right)),
+                  child: Text(company.text.isEmpty
+                    ? tr('selectOrAddCompany') : company.text))),
+              if (companies.isEmpty && previousName.isEmpty)
+                const Text('Warranty companies must be synced once online before selecting a company.'),
               TextField(controller: phone,
                 decoration: InputDecoration(labelText: tr('claimsPhone'), border: const OutlineInputBorder(), isDense: true)),
               TextField(controller: email, keyboardType: TextInputType.emailAddress,
@@ -371,6 +438,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                 onPressed: () => Navigator.pop(sheetContext, <String, dynamic>{
                   'extended_warranty': true,
                   'warranty_company_name': company.text.trim(),
+                  'warranty_company_id': selected?['id']?.toString() ?? '',
                   'claims_phone': phone.text.trim(),
                   'submission_email': email.text.trim(),
                   'claim_number': claim.text.trim(),
@@ -513,6 +581,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
 
     try {
       final companies = await _api.warrantyCompanies(widget.businessId);
+      await _cacheWarrantyCompanies(companies);
       if (!mounted) return;
 
       Map<String, dynamic>? selected;
