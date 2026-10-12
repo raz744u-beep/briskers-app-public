@@ -28,7 +28,7 @@ Color invoiceStatusDefaultColor(String? statusOrCode) {
     case 'pending':
       return const Color(0xFFE58A00);
     case 'closed':
-      return const Color(0xFF00897B);
+      return const Color(0xFF4856A6);
     case 'void':
       return const Color(0xFFC62828);
     case 'draft':
@@ -101,7 +101,7 @@ const invoiceStatusColorChoices = <String>[
   '#2E7D32',
   '#169B62',
   '#1976D2',
-  '#00897B',
+  '#4856A6',
   '#7E57C2',
   '#E58A00',
   '#EF6C00',
