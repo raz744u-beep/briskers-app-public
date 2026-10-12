@@ -273,9 +273,10 @@ void main() {
   });
   test('customer PDFs show Draft rather than a pending sync identifier', () async {
     final source = await File('lib/services/document_pdf_service.dart').readAsString();
-    expect(source, contains('— Draft'));
+    expect(source, contains('- Draft'));
     expect(source, contains("jobNumber.toLowerCase() != 'pending sync'"));
     expect(source, contains('if (numberedJob)'));
+    expect(source, contains('if (notes.isNotEmpty)'));
   });
 
 }
