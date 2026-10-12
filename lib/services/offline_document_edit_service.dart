@@ -256,6 +256,35 @@ class OfflineDocumentEditService {
     );
   }
 
+  Future<void> saveWarranty(
+    String businessId,
+    String documentId,
+    Map<String, dynamic> warranty,
+  ) async {
+    final detail = await _requireCached(businessId, documentId);
+    final updatedWarranty = <String, dynamic>{
+      if (detail['offline_warranty_detail'] is Map)
+        ...Map<String, dynamic>.from(detail['offline_warranty_detail'] as Map),
+      ...warranty,
+    };
+    await _cache.save(
+      businessId,
+      documentId,
+      <String, dynamic>{
+        ...detail,
+        'offline_warranty_detail': updatedWarranty,
+        'sync_state': 'pending',
+      },
+    );
+    await _queue(
+      businessId,
+      documentId,
+      'warranty',
+      updatedWarranty,
+      replaceSameOperation: true,
+    );
+  }
+
   Future<void> _saveDesired(
     String businessId,
     String documentId,
@@ -615,6 +644,19 @@ class OfflineDocumentEditService {
             direction: payload['direction']?.toString() ?? 'down',
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
+        } else if (operation == 'warranty') {
+          await _api.updateDocumentWarranty(
+            businessId,
+            documentId,
+            expectedVersion: version,
+            extendedWarranty: payload['extended_warranty'] == true,
+            warrantyCompanyId: payload['warranty_company_id']?.toString(),
+            claimNumber: payload['claim_number']?.toString(),
+            authorizationNumber: payload['authorization_number']?.toString(),
+            approvedAmount: num.tryParse(payload['approved_amount']?.toString() ?? ''),
+            surchargeRate: num.tryParse(payload['surcharge_rate']?.toString() ?? ''),
+          );
+          serverDetail = await _api.documentDetail(businessId, documentId);
         } else if (operation == 'memo') {
           await _api.updateDocumentNotes(
             businessId,
@@ -644,7 +686,15 @@ class OfflineDocumentEditService {
       }
     }
 
-    await _cache.save(businessId, documentId, serverDetail);
+    final currentWarranty = await _api.documentWarrantyDetail(
+      businessId,
+      documentId,
+    );
+    await _cache.save(businessId, documentId, <String, dynamic>{
+      ...serverDetail,
+      if (currentWarranty.isNotEmpty)
+        'offline_warranty_detail': currentWarranty,
+    });
     await _database.customStatement(
       '''
       UPDATE local_documents
