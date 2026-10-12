@@ -512,6 +512,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       final invoiceStyles = (results[1] as List)
           .map((value) => Map<String, dynamic>.from(value as Map)).toList();
       final warrantyDetail = Map<String, dynamic>.from(results[2] as Map);
+      // Warranty metadata is fetched separately from document detail. Persist
+      // it with the document so Force Offline reopens the same saved values.
+      if (invoice && warrantyDetail.isNotEmpty) {
+        await _detailCache.save(
+          widget.businessId,
+          widget.documentId,
+          <String, dynamic>{
+            ...detail,
+            'offline_warranty_detail': warrantyDetail,
+          },
+        );
+      }
       final signatureStatus = Map<String, dynamic>.from(results[3] as Map);
       final submissionReadiness = Map<String, dynamic>.from(results[4] as Map);
       final findings = (results[5] as List)
