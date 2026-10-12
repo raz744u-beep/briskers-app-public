@@ -252,6 +252,25 @@ void main() {
     expect(invoice, contains("'offline_warranty_detail': warrantyDetail"));
   });
 
+  test('Payment method cache survives empty online refresh', () async {
+    final screen = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    final shell = await File('lib/screens/shell_screen.dart').readAsString();
+    expect(screen, contains('if (methods.isEmpty && cached.isNotEmpty) return cached;'));
+    expect(screen, contains('if (methods.isNotEmpty) {'));
+    expect(shell, contains('if (methods.isNotEmpty) {'));
+    expect(screen, contains('_offlinePayments.recordReceivedPayment('));
+    expect(screen, contains('remainingBeforePaymentCents: (remaining * 100).round()'));
+  });
+
+  test('Offline payment ledger keeps an idempotent operation per payment', () async {
+    final ledger = await File('lib/services/offline_invoice_payment_ledger.dart').readAsString();
+    expect(ledger, contains("'operation_id': operationId"));
+    expect(ledger, contains('addPendingInvoicePaymentOnce('));
+    expect(ledger, contains('serverAcknowledgesPayment(detail, paymentId)'));
+    expect(ledger, contains('if (invoiceId.startsWith(\'local-\')) continue;'));
+    expect(ledger, contains("DELETE FROM sync_outbox WHERE id=?"));
+  });
+
   test('Offline warranty editor fits above system navigation and keyboard', () async {
     final source = await File('lib/screens/jobs/invoice_warranty_panel.dart').readAsString();
     expect(source, contains('isScrollControlled: true'));
