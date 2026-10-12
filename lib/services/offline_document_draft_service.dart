@@ -422,6 +422,70 @@ class OfflineDocumentDraftService {
     return id;
   }
 
+  /// Save a warranty draft on a never-synced invoice. No network request
+  /// is made; the invoice's existing create/convert operation owns replay.
+  Future<void> savePendingInvoiceWarranty(
+    String businessId,
+    String documentId,
+    Map<String, dynamic> warranty,
+  ) async {
+    if (!documentId.startsWith('local-invoice-')) {
+      throw StateError('This warranty draft requires an unsynced local invoice.');
+    }
+    final detail = await _requireDraft(businessId, documentId);
+    await _cache.save(businessId, documentId, {
+      ...detail,
+      'offline_warranty_detail': Map<String, dynamic>.from(warranty),
+      'sync_state': 'pending',
+    });
+  }
+
+  Future<Map<String, dynamic>> _applyPendingInvoiceWarranty(
+    String businessId,
+    String serverInvoiceId,
+    Map<String, dynamic> localInvoice,
+  ) async {
+    final raw = localInvoice['offline_warranty_detail'];
+    if (raw is! Map) {
+      return _api.documentDetail(businessId, serverInvoiceId);
+    }
+    final warranty = Map<String, dynamic>.from(raw);
+    String? companyId = warranty['warranty_company_id']?.toString();
+    if (warranty['extended_warranty'] == true &&
+        (companyId == null || companyId.isEmpty)) {
+      final name = warranty['warranty_company_name']?.toString().trim() ?? '';
+      if (name.isNotEmpty) {
+        final existing = await _api.warrantyCompanies(businessId);
+        for (final company in existing) {
+          if ((company['name']?.toString().trim().toLowerCase() ?? '') ==
+              name.toLowerCase()) {
+            companyId = company['id']?.toString();
+            break;
+          }
+        }
+        companyId ??= await _api.createWarrantyCompany(
+          businessId,
+          name: name,
+          claimsPhone: warranty['claims_phone']?.toString(),
+          submissionEmail: warranty['submission_email']?.toString(),
+        );
+      }
+    }
+    final current = await _api.documentDetail(businessId, serverInvoiceId);
+    final version = int.tryParse(current['row_version']?.toString() ?? '') ?? 1;
+    await _api.updateDocumentWarranty(
+      businessId, serverInvoiceId,
+      expectedVersion: version,
+      extendedWarranty: warranty['extended_warranty'] == true,
+      warrantyCompanyId: companyId,
+      claimNumber: warranty['claim_number']?.toString(),
+      authorizationNumber: warranty['authorization_number']?.toString(),
+      approvedAmount: num.tryParse(warranty['approved_amount']?.toString() ?? ''),
+      surchargeRate: num.tryParse(warranty['surcharge_rate']?.toString() ?? '') ?? 0.03,
+    );
+    return _api.documentDetail(businessId, serverInvoiceId);
+  }
+
   /// Converts a cached estimate without creating another Job. The server
   /// conversion is deferred until the source estimate has a permanent ID.
   Future<String> convertEstimateOffline(String businessId, String estimateId) async {
@@ -959,6 +1023,10 @@ class OfflineDocumentDraftService {
           }
         }
 
+        if (payload['kind'] == 'invoice' || payload['kind'] == 'convert_invoice') {
+          serverDetail = await _applyPendingInvoiceWarranty(
+            businessId, serverId, localDetail);
+        }
         await _documents.upsertFromServer(
           businessId,
           [serverDetail],
