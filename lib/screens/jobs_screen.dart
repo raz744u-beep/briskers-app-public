@@ -1,3 +1,4 @@
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -50,6 +51,7 @@ class _JobsScreenState extends State<JobsScreen> {
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _statuses = const [];
   String? _selectedStatus;
+  String _sort = 'newest';
   final TextEditingController _search = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   Timer? _searchDebounce;
@@ -70,7 +72,23 @@ class _JobsScreenState extends State<JobsScreen> {
   @override
   void initState() {
     super.initState();
+    _restoreSort();
     _load();
+  }
+
+  Future<void> _restoreSort() async {
+    final prefs = await SharedPreferences.getInstance();
+    final chosen = prefs.getString('briskers_job_sort_${widget.businessId}_${widget.roleCode}');
+    if (!mounted || chosen == null) return;
+    setState(() => _sort = chosen);
+    unawaited(_load());
+  }
+
+  Future<void> _setSort(String value) async {
+    setState(() => _sort = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('briskers_job_sort_${widget.businessId}_${widget.roleCode}', value);
+    if (mounted) unawaited(_load());
   }
 
   @override
@@ -144,6 +162,7 @@ class _JobsScreenState extends State<JobsScreen> {
         _localJobs.listJobs(
           widget.businessId,
           status: _selectedStatus,
+          sort: _sort,
           search: query.isEmpty ? null : query,
           limit: 30,
         ),
@@ -152,6 +171,7 @@ class _JobsScreenState extends State<JobsScreen> {
         _localJobs.jobCount(
           widget.businessId,
           status: _selectedStatus,
+          sort: _sort,
           search: query.isEmpty ? null : query,
         ),
         _localJobs.jobStatusCounts(widget.businessId),
@@ -218,12 +238,14 @@ class _JobsScreenState extends State<JobsScreen> {
         _localJobs.listJobs(
           widget.businessId,
           status: _selectedStatus,
+          sort: _sort,
           search: query.isEmpty ? null : query,
           limit: 30,
         ),
         _localJobs.jobCount(
           widget.businessId,
           status: _selectedStatus,
+          sort: _sort,
           search: query.isEmpty ? null : query,
         ),
         _localJobs.jobStatusCounts(widget.businessId),
@@ -757,6 +779,34 @@ class _JobsScreenState extends State<JobsScreen> {
                                 ),
                     ),
                     const SizedBox(width: 8),
+                    PopupMenuButton<String>(
+                      tooltip: 'Sort jobs',
+                      onSelected: _setSort,
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(value: 'newest', child: Text('Newest first')),
+                        PopupMenuItem(value: 'updated', child: Text('Recently updated')),
+                        PopupMenuItem(value: 'status', child: Text('By job status')),
+                        PopupMenuItem(value: 'appointment', child: Text('Appointment date')),
+                        PopupMenuItem(value: 'customer', child: Text('Customer A–Z')),
+                        PopupMenuItem(value: 'oldest', child: Text('Oldest first')),
+                      ],
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.sort, color: BriskersColors.jobs, size: 19),
+                          const SizedBox(width: 3),
+                          Text({
+                            'newest':'Newest first',
+                            'updated':'Recently updated',
+                            'status':'By status',
+                            'appointment':'Appointment date',
+                            'customer':'Customer A–Z',
+                            'oldest':'Oldest first',
+                          }[_sort] ?? 'Newest first', style: const TextStyle(fontSize: 12)),
+                          const Icon(Icons.arrow_drop_down, size: 19),
+                        ]),
+                      ),
+                    ),
                     PopupMenuButton<String>(
                     tooltip: tr('filterJobs'),
                     onSelected: (value) {
