@@ -328,10 +328,11 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
           top: false,
           child: Padding(
             padding: EdgeInsets.only(
-              bottom: MediaQuery.viewInsetsOf(sheetContext).bottom),
+              bottom: MediaQuery.viewInsetsOf(sheetContext).bottom +
+                  MediaQuery.viewPaddingOf(sheetContext).bottom + 24),
             child: FractionallySizedBox(
               heightFactor: MediaQuery.viewInsetsOf(sheetContext).bottom > 0
-                  ? 0.94 : 0.82,
+                  ? 0.88 : 0.76,
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
