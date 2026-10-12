@@ -337,6 +337,73 @@ class OfflineDocumentDraftService {
     }
   }
 
+  /// Cancel a standalone estimate before any upload attempt. Converted or
+  /// server-backed estimates must be resolved separately.
+  Future<void> cancelNeverSyncedStandaloneEstimate(
+    String businessId,
+    String estimateId,
+  ) async {
+    if (!estimateId.startsWith('local-estimate-')) {
+      throw StateError('Only local standalone estimates can be canceled.');
+    }
+    final snapshot = await _cache.load(businessId, estimateId);
+    if (snapshot == null ||
+        snapshot['_server_document_id'] != null ||
+        snapshot['converted'] == true ||
+        (snapshot['converted_invoice_id']?.toString().isNotEmpty ?? false)) {
+      throw StateError('This estimate is synced or linked to a conversion.');
+    }
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        """SELECT id,operation,payload_json,attempt_count,last_attempt_at,state
+           FROM sync_outbox
+           WHERE business_id=? AND entity_id=?
+             AND entity_type='document_draft_create'""",
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(estimateId),
+        ],
+      ).get();
+      if (rows.length != 1 ||
+          rows.single.read<String>('operation') != 'create_estimate' ||
+          rows.single.read<String>('state') != 'pending' ||
+          rows.single.read<int>('attempt_count') != 0 ||
+          rows.single.data['last_attempt_at'] != null) {
+        throw StateError('Estimate upload state is uncertain.');
+      }
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(rows.single.read<String>('payload_json')) as Map,
+      );
+      if (payload['local_id']?.toString() != estimateId ||
+          payload['kind']?.toString() != 'estimate' ||
+          snapshot['job_id']?.toString().isNotEmpty == true) {
+        throw StateError('Standalone estimate references do not match.');
+      }
+      final related = await _database.customSelect(
+        """SELECT COUNT(*) AS count FROM sync_outbox
+           WHERE business_id=? AND entity_id=?
+             AND entity_type<>'document_draft_create'""",
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(estimateId),
+        ],
+      ).getSingle();
+      if (related.read<int>('count') != 0) {
+        throw StateError('Estimate has other queued operations.');
+      }
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id=?',
+        [rows.single.read<int>('id')],
+      );
+      await _database.customStatement(
+        'DELETE FROM local_documents WHERE business_id=? AND id=? '
+        "AND sync_state='pending' AND converted=0",
+        [businessId, estimateId],
+      );
+    });
+    await _cache.remove(businessId, estimateId);
+  }
+
   String _lineId() {
     final now = DateTime.now().toUtc().microsecondsSinceEpoch;
     final salt = _random.nextInt(1 << 32).toRadixString(16);
