@@ -1122,7 +1122,11 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                     _money(fee),
                   ),
                   _summaryRow(
-                    tr('warrantyAppliedToInvoice'),
+                    widget.paymentProcessed
+                        ? tr('warrantyAppliedToInvoice')
+                        : (widget.paymentPendingLabel != null
+                            ? 'Warranty payment pending'
+                            : 'Warranty amount to apply'),
                     _money(terminal),
                   ),
                   _summaryRow(
