@@ -364,12 +364,30 @@ class OfflineDocumentDraftService {
           Variable<String>(estimateId),
         ],
       ).get();
-      if (rows.length != 1 ||
-          rows.single.read<String>('operation') != 'create_estimate' ||
-          rows.single.read<String>('state') != 'pending' ||
-          rows.single.read<int>('attempt_count') != 0 ||
-          rows.single.data['last_attempt_at'] != null) {
-        throw StateError('Estimate upload state is uncertain.');
+      if (rows.length != 1) {
+        throw StateError(
+          'Estimate cannot be deleted safely: expected one local create '
+          'operation, found ${rows.length}. It may have synchronized.',
+        );
+      }
+      final upload = rows.single;
+      if (upload.read<String>('operation') != 'create_estimate') {
+        throw StateError(
+          'Estimate cannot be deleted safely: its creation operation is '
+          'not a standalone estimate.',
+        );
+      }
+      if (upload.read<String>('state') != 'pending') {
+        throw StateError(
+          'Estimate cannot be deleted safely: upload is not pending.',
+        );
+      }
+      if (upload.read<int>('attempt_count') != 0 ||
+          upload.data['last_attempt_at'] != null) {
+        throw StateError(
+          'Estimate cannot be deleted safely: a server upload was already '
+          'attempted. Reconcile the server record first.',
+        );
       }
       final payload = Map<String, dynamic>.from(
         jsonDecode(rows.single.read<String>('payload_json')) as Map,
