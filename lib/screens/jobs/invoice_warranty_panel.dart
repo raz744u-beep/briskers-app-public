@@ -324,30 +324,37 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
       useSafeArea: true,
       showDragHandle: true,
       builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.viewInsetsOf(sheetContext).bottom),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
+        builder: (context, setSheetState) => SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(sheetContext).bottom),
+            child: FractionallySizedBox(
+              heightFactor: MediaQuery.viewInsetsOf(sheetContext).bottom > 0
+                  ? 0.94 : 0.82,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
               Text(tr('extendedWarranty'),
                 style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
               TextField(controller: company,
-                decoration: InputDecoration(labelText: tr('warrantyCompany'))),
+                decoration: InputDecoration(labelText: tr('warrantyCompany'), border: const OutlineInputBorder(), isDense: true)),
               TextField(controller: phone,
-                decoration: InputDecoration(labelText: tr('claimsPhone'))),
+                decoration: InputDecoration(labelText: tr('claimsPhone'), border: const OutlineInputBorder(), isDense: true)),
               TextField(controller: email, keyboardType: TextInputType.emailAddress,
-                decoration: InputDecoration(labelText: tr('submissionEmail'))),
+                decoration: InputDecoration(labelText: tr('submissionEmail'), border: const OutlineInputBorder(), isDense: true)),
               TextField(controller: claim,
-                decoration: InputDecoration(labelText: tr('claimNumberOptional'))),
+                decoration: InputDecoration(labelText: tr('claimNumberOptional'), border: const OutlineInputBorder(), isDense: true)),
               TextField(controller: authorization,
-                decoration: InputDecoration(labelText: tr('authorizationNumber'))),
+                decoration: InputDecoration(labelText: tr('authorizationNumber'), border: const OutlineInputBorder(), isDense: true)),
               TextField(controller: approved,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Approved amount')),
+                decoration: const InputDecoration(labelText: 'Approved amount', border: OutlineInputBorder(), isDense: true)),
+              const SizedBox(height: 8),
               DropdownButtonFormField<num>(
                 initialValue: rate,
+                decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
                 items: [
                   DropdownMenuItem(value: 0, child: Text(tr('warrantyCheckOption'))),
                   DropdownMenuItem(value: _cardSurchargeRate,
@@ -373,6 +380,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                 child: Text(tr('saveWarrantyInformation')),
               ),
             ]),
+              ),
+            ),
           ),
         ),
       ),
