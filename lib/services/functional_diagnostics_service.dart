@@ -251,7 +251,7 @@ class BriskersFunctionalDiagnosticsService {
 
     await _scenario(
       checks,
-      id: 'FUNC-021',
+      id: 'FUNC-022',
       title: 'Jobs sorting and pagination',
       success: 'Newest, oldest, customer, status and recently-updated ordering checked in local database.',
       action: _checkJobSorting,
