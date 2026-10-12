@@ -898,14 +898,14 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
-            ),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
+              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF167F43)),
               title: const Text('Take photo'),
               onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
             ),
           ],
         ),
