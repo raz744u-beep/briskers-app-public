@@ -33,12 +33,14 @@ class DocumentsScreen extends StatefulWidget {
     this.businessName = 'Briskers',
     required this.roleCode,
     this.onPrimaryDestinationSelected,
+    this.sharedBottomNavigationBar,
   });
 
   final bool showAppBar;
   final String businessName;
   final String roleCode;
   final ValueChanged<int>? onPrimaryDestinationSelected;
+  final Widget? sharedBottomNavigationBar;
   final String businessId;
   final String kind;
   final bool isOwner;
@@ -1251,7 +1253,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             )
           : null,
       bottomNavigationBar: widget.showAppBar && _estimate
-          ? NavigationBar(
+          ? (widget.sharedBottomNavigationBar ?? NavigationBar(
               selectedIndex: 5,
               labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
               onDestinationSelected: (index) {
@@ -1277,7 +1279,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Invoices'),
                 NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
               ],
-            )
+            ))
           : null,
       body: RefreshIndicator(
         onRefresh: _load,
