@@ -200,5 +200,14 @@ void main() {
     expect(screen, contains('_price.selection = TextSelection('));
   });
 
+  test('Estimates navigation reuses shell badges, not an isolated More tab', () async {
+    final shell = await File('lib/screens/shell_screen.dart').readAsString();
+    final home = await File('lib/screens/home_screen.dart').readAsString();
+    final docs = await File('lib/screens/documents_screen.dart').readAsString();
+    expect(shell, contains('estimatesNavigationBar: _shellNavigationBar()'));
+    expect(home, contains('sharedBottomNavigationBar: widget.estimatesNavigationBar'));
+    expect(docs, contains('widget.sharedBottomNavigationBar ?? NavigationBar('));
+  });
+
 }
 
