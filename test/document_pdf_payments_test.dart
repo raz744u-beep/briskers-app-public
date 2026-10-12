@@ -271,4 +271,11 @@ void main() {
       expect(utf8.decode(estimateBytes.sublist(0, 5)), '%PDF-');
     });
   });
+  test('customer PDFs show Draft rather than a pending sync identifier', () async {
+    final source = await File('lib/services/document_pdf_service.dart').readAsString();
+    expect(source, contains("'\\$kindTitle — Draft'".replaceAll('\\', '')));
+    expect(source, contains("jobNumber.toLowerCase() != 'pending sync'"));
+    expect(source, contains('if (numberedJob)'));
+  });
+
 }
