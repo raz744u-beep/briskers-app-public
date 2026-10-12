@@ -212,9 +212,10 @@ void main() {
   test('Standalone offline conversion keeps new Job open and linked on invoice', () async {
     final draft = await File('lib/services/offline_document_draft_service.dart').readAsString();
     final invoice = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
-    expect(draft, contains("'job_number': provisionalJobId != null ? 'Pending sync'"));
-    expect(draft, contains("'Pending sync',?,'open','Open'"));
-    expect(invoice, contains("jobId.startsWith('local-') ? 'Pending sync' : ''"));
+    expect(draft, contains("'job_number': provisionalJobId != null ? temporaryJobNumber"));
+    expect(draft, contains("final temporaryJobNumber = 'TEMP-"));
+    expect(draft, contains("'open','Open'"));
+    expect(invoice, contains("final job = rawJob.isNotEmpty ? rawJob"));
     expect(invoice, contains("onTap: jobId.isEmpty ? null : _openLinkedJob"));
   });
 
@@ -229,9 +230,10 @@ void main() {
 
   test('Offline warranty editor fits above system navigation and keyboard', () async {
     final source = await File('lib/screens/jobs/invoice_warranty_panel.dart').readAsString();
-    expect(source, contains('builder: (context, setSheetState) => SafeArea('));
-    expect(source, contains('heightFactor: MediaQuery.viewInsetsOf(sheetContext).bottom > 0'));
-    expect(source, contains('EdgeInsets.fromLTRB(16, 12, 16, 28)'));
+    expect(source, contains('isScrollControlled: true'));
+    expect(source, contains('MediaQuery.viewInsetsOf(sheetContext).bottom + 18'));
+    expect(source, contains("allowCreate: false"));
+    expect(source, contains("tr('saveWarrantyInformation')"));
   });
 
 }
