@@ -634,9 +634,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     List<Map<String, dynamic>> server,
     List<Map<String, dynamic>> local,
   ) {
+    // The UI can retain a provisional finding after sync replaces its ID.
+    // Only the repository's current local rows may keep that placeholder.
+    final currentLocalIds = local
+        .map((finding) => finding['id']?.toString() ?? '')
+        .toSet();
     final serverById = <String, Map<String, dynamic>>{
       for (final finding in server)
-        if ((finding['id']?.toString() ?? '').isNotEmpty)
+        if ((finding['id']?.toString() ?? '').isNotEmpty &&
+            (!finding['id'].toString().startsWith('local-finding-') ||
+                currentLocalIds.contains(finding['id'].toString())))
           finding['id'].toString(): finding,
     };
 
@@ -660,7 +667,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
     for (final serverFinding in server) {
       final id = serverFinding['id']?.toString() ?? '';
-      if (id.isEmpty || seen.contains(id)) continue;
+      if (id.isEmpty || seen.contains(id) ||
+          (id.startsWith('local-finding-') && !currentLocalIds.contains(id))) {
+        continue;
+      }
       merged.add(Map<String, dynamic>.from(serverFinding));
     }
 
