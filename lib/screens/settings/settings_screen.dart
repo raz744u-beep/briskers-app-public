@@ -494,6 +494,7 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
+          ],
           const Divider(),
           ListTile(
             leading: const Icon(
@@ -530,7 +531,6 @@ class SettingsScreen extends StatelessWidget {
             title: Text(tr('notifications')),
             subtitle: Text(tr('notificationsSub')),
           ),
-          ],
         ],
       ),
     );
