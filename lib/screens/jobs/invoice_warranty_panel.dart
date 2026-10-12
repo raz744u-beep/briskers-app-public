@@ -17,6 +17,7 @@ class InvoiceWarrantyPanel extends StatefulWidget {
     required this.onChanged,
     required this.paymentProcessed,
     this.readOnly = false,
+    this.onLocalWarrantyChanged,
   });
 
   final String businessId;
@@ -27,6 +28,7 @@ class InvoiceWarrantyPanel extends StatefulWidget {
   final Future<void> Function() onChanged;
   final bool paymentProcessed;
   final bool readOnly;
+  final Future<void> Function(Map<String, dynamic>)? onLocalWarrantyChanged;
 
   @override
   State<InvoiceWarrantyPanel> createState() => _InvoiceWarrantyPanelState();
@@ -46,7 +48,9 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
   void initState() {
     super.initState();
     _localEnabled = widget.detail['extended_warranty'] == true;
-    _loadWarrantyPaymentSettings();
+    if (widget.onLocalWarrantyChanged == null) {
+      _loadWarrantyPaymentSettings();
+    }
   }
 
   Future<void> _loadWarrantyPaymentSettings() async {
@@ -279,8 +283,126 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
     };
   }
 
+  Future<void> _saveLocalWarranty(Map<String, dynamic> values) async {
+    final save = widget.onLocalWarrantyChanged;
+    if (save == null) return;
+    try {
+      await save(values);
+      if (mounted) {
+        setState(() {
+          _localEnabled = values['extended_warranty'] == true;
+          _expanded = _localEnabled;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save warranty offline: $error')),
+        );
+      }
+    }
+  }
+
+  Future<void> _editLocalWarranty() async {
+    final company = TextEditingController(
+      text: widget.detail['warranty_company_name']?.toString() ?? '');
+    final phone = TextEditingController(
+      text: widget.detail['claims_phone']?.toString() ?? '');
+    final email = TextEditingController(
+      text: widget.detail['submission_email']?.toString() ?? '');
+    final claim = TextEditingController(
+      text: widget.detail['claim_number']?.toString() ?? '');
+    final authorization = TextEditingController(
+      text: widget.detail['authorization_number']?.toString() ?? '');
+    final approved = TextEditingController(
+      text: widget.detail['approved_amount']?.toString() ?? '');
+    var rate = _number(widget.detail['surcharge_rate']);
+    if (rate > 0) rate = _cardSurchargeRate;
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(sheetContext).bottom),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text(tr('extendedWarranty'),
+                style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              TextField(controller: company,
+                decoration: InputDecoration(labelText: tr('warrantyCompany'))),
+              TextField(controller: phone,
+                decoration: InputDecoration(labelText: tr('claimsPhone'))),
+              TextField(controller: email, keyboardType: TextInputType.emailAddress,
+                decoration: InputDecoration(labelText: tr('submissionEmail'))),
+              TextField(controller: claim,
+                decoration: InputDecoration(labelText: tr('claimNumberOptional'))),
+              TextField(controller: authorization,
+                decoration: InputDecoration(labelText: tr('authorizationNumber'))),
+              TextField(controller: approved,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Approved amount')),
+              DropdownButtonFormField<num>(
+                initialValue: rate,
+                items: [
+                  DropdownMenuItem(value: 0, child: Text(tr('warrantyCheckOption'))),
+                  DropdownMenuItem(value: _cardSurchargeRate,
+                    child: Text(tr('warrantyCardOption')
+                      .replaceAll('{percent}', (_cardSurchargeRate * 100).toStringAsFixed(0)))),
+                ],
+                onChanged: (value) {
+                  if (value != null) setSheetState(() => rate = value);
+                },
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: () => Navigator.pop(sheetContext, <String, dynamic>{
+                  'extended_warranty': true,
+                  'warranty_company_name': company.text.trim(),
+                  'claims_phone': phone.text.trim(),
+                  'submission_email': email.text.trim(),
+                  'claim_number': claim.text.trim(),
+                  'authorization_number': authorization.text.trim(),
+                  'approved_amount': num.tryParse(approved.text.trim()),
+                  'surcharge_rate': rate,
+                }),
+                child: Text(tr('saveWarrantyInformation')),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+    company.dispose();
+    phone.dispose();
+    email.dispose();
+    claim.dispose();
+    authorization.dispose();
+    approved.dispose();
+    if (result == null) return;
+    final approvedAmount = _number(result['approved_amount']);
+    final cardRate = _number(result['surcharge_rate']);
+    final terminal = approvedAmount / (1 + cardRate);
+    await _saveLocalWarranty({
+      ...widget.detail,
+      ...result,
+      'terminal_amount': terminal,
+      'processor_fee': approvedAmount - terminal,
+      'customer_responsibility':
+          (widget.invoiceTotal - terminal).clamp(0, double.infinity),
+    });
+  }
+
   Future<void> _enableWarranty() async {
     if (widget.readOnly || _busy) return;
+    if (widget.onLocalWarrantyChanged != null) {
+      await _saveLocalWarranty({...widget.detail, 'extended_warranty': true});
+      return;
+    }
 
     setState(() {
       _localEnabled = true;
@@ -340,6 +462,10 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
         false;
 
     if (!confirmed) return;
+    if (widget.onLocalWarrantyChanged != null) {
+      await _saveLocalWarranty({...widget.detail, 'extended_warranty': false});
+      return;
+    }
 
     setState(() {
       _localEnabled = false;
@@ -368,6 +494,10 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
 
   Future<void> _editWarranty() async {
     if (widget.readOnly || _busy) return;
+    if (widget.onLocalWarrantyChanged != null) {
+      await _editLocalWarranty();
+      return;
+    }
 
     setState(() => _busy = true);
 
