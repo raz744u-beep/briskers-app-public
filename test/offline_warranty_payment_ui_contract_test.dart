@@ -21,7 +21,7 @@ void main() {
   });
 
   test('all four invoice load paths restore pending local payments', () {
-    final start = screen.indexOf('Future<void> _load()');
+    final start = screen.indexOf('Future<void> _load({');
     final end = screen.indexOf('int get _version', start);
     final load = screen.substring(start, end);
     expect('_withLocalPayments('.allMatches(load), hasLength(4));
