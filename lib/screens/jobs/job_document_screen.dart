@@ -2779,7 +2779,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     Map<String, dynamic> payment,
   ) async {
     if (_busy || payment['pending_sync'] == true ||
-        payment['state']?.toString() != 'pending') return;
+        payment['state']?.toString() != 'pending') {
+      return;
+    }
 
     final action = await showModalBottomSheet<String>(
       context: context,
