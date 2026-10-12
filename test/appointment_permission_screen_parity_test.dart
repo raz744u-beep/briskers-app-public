@@ -209,5 +209,14 @@ void main() {
     expect(docs, contains('widget.sharedBottomNavigationBar ?? NavigationBar('));
   });
 
+  test('Standalone offline conversion keeps new Job open and linked on invoice', () async {
+    final draft = await File('lib/services/offline_document_draft_service.dart').readAsString();
+    final invoice = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    expect(draft, contains("'job_number': provisionalJobId != null ? 'Pending sync'"));
+    expect(draft, contains("'Pending sync',?,'open','Open'"));
+    expect(invoice, contains("jobId.startsWith('local-') ? 'Pending sync' : ''"));
+    expect(invoice, contains("onTap: jobId.isEmpty ? null : _openLinkedJob"));
+  });
+
 }
 
