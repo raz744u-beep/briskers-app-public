@@ -163,7 +163,8 @@ void main() {
     expect(invoice, contains('_offerCompletePaidJob()'));
     expect(invoice, contains("paid >= total - 0.005"));
     expect(invoice, contains("await _api.jobDocuments(widget.businessId, jobId)"));
-    expect(invoice, contains("child: const Text('Keep Job Open')"));
+    expect(invoice, contains("child: const Text('Keep In Progress')"));
+    expect(invoice, contains("title: const Text('Mark Job Completed?')"));
     expect(invoice, contains("child: const Text('Complete Job')"));
   });
 
