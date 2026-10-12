@@ -51,6 +51,9 @@ void main() {
       taxRate: 0, lineKind: 'labor');
     final afterEdit = await cache.load('shop', invoiceId);
     expect(afterEdit?['total_amount'], 225);
+    await service.saveMemo('shop', invoiceId, 'Offline service note');
+    expect((await cache.load('shop', invoiceId))?['memo'],
+      'Offline service note');
     await service.savePendingInvoiceWarranty('shop', invoiceId, {
       'extended_warranty': true,
       'warranty_company_name': 'Example Warranty',
