@@ -889,6 +889,22 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => DocumentsScreen(
           businessId: widget.businessId,
           kind: 'estimate',
+          roleCode: widget.roleCode,
+          onPrimaryDestinationSelected: (index) {
+            Navigator.of(context).pop();
+            switch (index) {
+              case 1:
+                widget.onCustomersTap();
+              case 2:
+                widget.onAppointmentsTap();
+              case 3:
+                widget.onJobsTap();
+              case 4:
+                widget.onInvoicesTap();
+              case 5:
+                widget.onMoreTap();
+            }
+          },
           isOwner: widget.roleCode == 'owner',
           canManageExpenses: _canManage,
         ),

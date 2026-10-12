@@ -123,8 +123,13 @@ class _ConnectionHeaderToggleState extends State<ConnectionHeaderToggle> {
                 children: [
                   Icon(icon, color: color, size: 17),
                   const SizedBox(width: 4),
-                  Text(label, style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w700)),
+                  Flexible(
+                    child: Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w700)),
+                  ),
                   const Icon(Icons.keyboard_arrow_down, size: 15),
                 ],
               ),

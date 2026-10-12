@@ -372,6 +372,7 @@ class _ShellScreenState extends State<ShellScreen> {
             );
           case 4:
             return DocumentsScreen(
+              roleCode: widget.roleCode,
               businessId: widget.businessId,
               kind: 'invoice',
               isOwner: widget.roleCode == 'owner',

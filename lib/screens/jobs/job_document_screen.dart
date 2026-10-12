@@ -55,6 +55,16 @@ class JobDocumentScreen extends StatefulWidget {
   final bool canManageExpenses;
   final String? initialAction;
 
+  @visibleForTesting
+  static Widget lineEditorForTesting({
+    required Map<String, dynamic> line,
+    bool clearNumericOnFirstTap = false,
+  }) => _EditLineDialog(
+    line: line,
+    accent: Colors.blue,
+    clearNumericOnFirstTap: clearNumericOnFirstTap,
+  );
+
   @override
   State<JobDocumentScreen> createState() => _JobDocumentScreenState();
 }
@@ -6889,7 +6899,6 @@ class _CustomLineDialogState extends State<_CustomLineDialog> {
   String? _error;
   bool _quantityCleared = false;
   bool _priceCleared = false;
-  bool _taxCleared = false;
 
   @override
   void initState() {
@@ -7091,6 +7100,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
   String? _error;
   bool _quantityCleared = false;
   bool _priceCleared = false;
+  bool _taxCleared = false;
 
   @override
   void initState() {
