@@ -218,5 +218,14 @@ void main() {
     expect(invoice, contains("onTap: jobId.isEmpty ? null : _openLinkedJob"));
   });
 
+  test('Shell preloads real payment method IDs and note templates when online', () async {
+    final shell = await File('lib/screens/shell_screen.dart').readAsString();
+    final screen = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    expect(shell, contains('Future<void> _prepareOfflineChoices()'));
+    expect(shell, contains('LocalPaymentMethodsCache().save(widget.businessId, methods)'));
+    expect(shell, contains('LocalStandardNotesService().available('));
+    expect(screen, contains('No payment methods saved offline.'));
+  });
+
 }
 
