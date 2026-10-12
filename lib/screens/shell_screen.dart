@@ -339,6 +339,7 @@ class _ShellScreenState extends State<ShellScreen> {
           onJobsTap: () => _goTo(3),
           onInvoicesTap: () => _goTo(4),
           onMoreTap: () => _goTo(5),
+          estimatesNavigationBar: _shellNavigationBar(),
           businessId: widget.businessId,
           roleCode: widget.roleCode,
           jobsCount: _homeJobsCount,
