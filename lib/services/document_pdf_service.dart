@@ -429,7 +429,7 @@ class DocumentPdfService {
                       alignment: pw.Alignment.centerRight,
                       child: pw.Text(
                         documentNumber.isEmpty || documentNumber == 'Pending sync'
-                            ? '$kindTitle — Draft'
+                            ? '$kindTitle - Draft'
                             : '$kindTitle #$documentNumber',
                         style: const pw.TextStyle(
                           fontSize: 18,
@@ -588,11 +588,12 @@ class DocumentPdfService {
               ],
             ),
           ],
-          _fullWidthSection(
-            'Notes',
-            notes.join('\n'),
-            minHeight: 44,
-          ),
+          if (notes.isNotEmpty)
+            _fullWidthSection(
+              'Notes',
+              notes.join('\n'),
+              minHeight: 44,
+            ),
           if (showSignature) ...[
             pw.SizedBox(height: 10),
             _signatureBox(
