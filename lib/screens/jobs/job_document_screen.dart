@@ -2465,7 +2465,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       final methods = List<dynamic>.from(options['methods'] ?? const [])
           .map((raw) => Map<String, dynamic>.from(raw as Map))
           .toList();
-      await _paymentMethodsCache.save(widget.businessId, methods);
+      // An empty/transient response must not erase previously synced
+      // real method IDs needed for safe offline payment recording.
+      if (methods.isEmpty && cached.isNotEmpty) return cached;
+      if (methods.isNotEmpty) {
+        await _paymentMethodsCache.save(widget.businessId, methods);
+      }
       return methods;
     } catch (_) {
       if (cached.isNotEmpty) return cached;
