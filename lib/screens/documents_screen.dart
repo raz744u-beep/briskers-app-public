@@ -31,12 +31,14 @@ class DocumentsScreen extends StatefulWidget {
     this.canManageExpenses = false,
     this.showAppBar = true,
     this.businessName = 'Briskers',
-    this.roleCode,
+    required this.roleCode,
+    this.onPrimaryDestinationSelected,
   });
 
   final bool showAppBar;
   final String businessName;
-  final String? roleCode;
+  final String roleCode;
+  final ValueChanged<int>? onPrimaryDestinationSelected;
   final String businessId;
   final String kind;
   final bool isOwner;
@@ -1253,12 +1255,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               selectedIndex: 5,
               labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
               onDestinationSelected: (index) {
+                final selectDestination = widget.onPrimaryDestinationSelected;
+                if (selectDestination != null) {
+                  selectDestination(index);
+                  return;
+                }
                 Navigator.of(context).pushReplacement(MaterialPageRoute(
                   builder: (_) => ShellScreen(
                     businessId: widget.businessId,
                     businessName: widget.businessName,
-                    roleCode: widget.roleCode ??
-                        (widget.isOwner ? 'owner' : 'office'),
+                    roleCode: widget.roleCode,
                     initialIndex: index,
                   ),
                 ));

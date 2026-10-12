@@ -1148,6 +1148,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => DocumentsScreen(
+          roleCode: widget.roleCode,
           businessId: widget.businessId,
           kind: kind,
           isOwner: widget.roleCode == 'owner',
