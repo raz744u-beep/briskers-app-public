@@ -228,6 +228,30 @@ void main() {
     expect(screen, contains('No payment methods saved offline.'));
   });
 
+  test('Offline warranty on synced invoice queues changes for replay', () async {
+    final screen = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    final edits = await File('lib/services/offline_document_edit_service.dart').readAsString();
+    expect(screen, contains('.saveWarranty(widget.businessId,'));
+    expect(edits, contains("'warranty',"));
+    expect(edits, contains("operation == 'warranty'"));
+    expect(edits, contains('await _api.updateDocumentWarranty('));
+    expect(edits, contains("'offline_warranty_detail': updatedWarranty"));
+  });
+
+  test('Unsynced invoices use local standard notes even in Auto mode', () async {
+    final screen = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    expect(screen, contains('final offline = BriskersConnectionModeController.instance.forceOffline ||'));
+    expect(screen, contains('_offlineDocumentDraft.isLocalDraftId(widget.documentId);'));
+    expect(screen, contains('await _standardNotes.saveOffline('));
+  });
+
+  test('Warranty options and detail cache are prepared for offline reopening', () async {
+    final shell = await File('lib/screens/shell_screen.dart').readAsString();
+    final invoice = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    expect(shell, contains('briskers_warranty_companies_'));
+    expect(invoice, contains("'offline_warranty_detail': warrantyDetail"));
+  });
+
   test('Offline warranty editor fits above system navigation and keyboard', () async {
     final source = await File('lib/screens/jobs/invoice_warranty_panel.dart').readAsString();
     expect(source, contains('isScrollControlled: true'));
