@@ -63,6 +63,7 @@ class OfflineDocumentDraftService {
     final operationId = _offlineOperationUuid();
     final id = 'local-invoice-$operationId';
     final provisionalJobId = 'local-job-$operationId';
+    final temporaryJobNumber = 'TEMP-${operationId.substring(0, 8).toUpperCase()}';
     final now = DateTime.now();
     final date = now.toIso8601String().split('T').first;
     final detail = <String, dynamic>{
@@ -73,6 +74,7 @@ class OfflineDocumentDraftService {
       'display_status': 'Pending sync',
       'display_status_code': 'open',
       'job_id': provisionalJobId,
+      'job_number': temporaryJobNumber,
       'customer_id': customerId,
       'customer_name': customerName,
       'vehicle_id': vehicleId,
@@ -106,11 +108,11 @@ class OfflineDocumentDraftService {
           id,business_id,access_scope,job_number,title,requested_work,
           status,status_name,customer_id,customer_name,vehicle_id,
           vehicle_label,created_at,sync_state
-        ) VALUES (?,?,'full',NULL,'Invoice',NULL,'open','In progress',
+        ) VALUES (?,?,'full',?,'Invoice',NULL,'open','In progress',
                   ?,?,?,?,?,'pending')
         ''',
         [
-          provisionalJobId,businessId,customerId,customerName,
+          provisionalJobId,businessId,temporaryJobNumber,customerId,customerName,
           vehicleId,vehicleLabel,_unixNow(),
         ],
       );
@@ -504,6 +506,7 @@ class OfflineDocumentDraftService {
     final originalJobId = estimate['job_id']?.toString() ?? '';
     final provisionalJobId = originalJobId.isEmpty ? 'local-conversion-job-$operationId' : null;
     final effectiveJobId = provisionalJobId ?? originalJobId;
+    final temporaryJobNumber = 'TEMP-${operationId.substring(0, 8).toUpperCase()}';
     final now = DateTime.now();
     final detail = <String, dynamic>{
       ...estimate,
@@ -516,7 +519,7 @@ class OfflineDocumentDraftService {
       'converted': false,
       'converted_from_estimate_id': estimateId,
       'job_id': effectiveJobId,
-      'job_number': provisionalJobId != null ? 'Pending sync' : estimate['job_number'],
+      'job_number': provisionalJobId != null ? temporaryJobNumber : estimate['job_number'],
       'job_title': estimate['job_title'] ?? estimate['title'] ?? 'Estimate repair',
       'paid_amount': 0,
       'pending_payment': 0,
@@ -544,8 +547,8 @@ class OfflineDocumentDraftService {
           '''INSERT INTO local_jobs (id,business_id,access_scope,job_number,title,
                status,status_name,customer_id,customer_name,vehicle_id,vehicle_label,
                created_at,sync_state)
-             VALUES (?,?,'full','Pending sync',?,'open','Open',?,?,?,?,?,'pending')''',
-          [provisionalJobId,businessId,
+             VALUES (?,?,'full',?,?,'open','Open',?,?,?,?,?,'pending')''',
+          [provisionalJobId,businessId,temporaryJobNumber,
            (estimate['job_title'] ?? estimate['title'] ?? 'Estimate repair').toString(),
            estimate['customer_id'],estimate['customer_name'],estimate['vehicle_id'],
            estimate['vehicle'],_unixNow()],
