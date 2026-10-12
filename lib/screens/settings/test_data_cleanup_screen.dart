@@ -5,8 +5,9 @@ import '../../local/local_database_provider.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/offline_document_draft_service.dart';
 
-/// Owner-only review. Only never-uploaded quick invoices can be canceled;
-/// all other records remain visible for manual reconciliation.
+/// Owner-only review for deletion of confirmed test records.
+/// Never-uploaded local drafts can be canceled only after strict safety checks.
+/// Server-side and uncertain records remain locked for reconciliation.
 class TestDataCleanupScreen extends StatefulWidget {
   const TestDataCleanupScreen({super.key, required this.businessId});
   final String businessId;
@@ -100,19 +101,19 @@ class _TestDataCleanupScreenState extends State<TestDataCleanupScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Test Data Cleanup')),
+    appBar: AppBar(title: const Text('Delete test jobs')),
     body: _loading
         ? const Center(child: CircularProgressIndicator())
         : RefreshIndicator(
             onRefresh: _refresh,
             child: ListView(children: [
               const ListTile(
-                title: Text('Local pending documents — review only'),
+                title: Text('Test job documents — review before deletion'),
                 subtitle: Text(
                   'Only never-uploaded standalone estimates and quick invoices '
                   'without pending payments or shared jobs can be canceled here. Other jobs, '
                   'and server records are deliberately protected. '
-                  'Keep J7, invoice 6331 and estimate 1997.',
+                  'Protect real jobs, including J7 and J11, invoice 6331 and 6332, and estimate 1997.',
                 ),
               ),
               if (_error != null) ListTile(
