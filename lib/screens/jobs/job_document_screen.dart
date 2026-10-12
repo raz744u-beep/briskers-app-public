@@ -316,7 +316,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         _detail?['_local_queued_payment_operation_ids'] ?? const [],
       ).map((id) => id.toString()).toSet();
 
-  Future<void> _load() async {
+  Future<void> _load({bool fastAfterMutation = false}) async {
     final generation = ++_loadGeneration;
     final loadWatch = Stopwatch()..start();
     final forceOffline =
@@ -489,6 +489,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             'offline_warranty_detail': cachedWarranty,
         },
       );
+      // After a successful item/notes mutation, avoid re-fetching seven
+      // unrelated metadata endpoints. The authoritative document detail
+      // already includes updated lines, totals, and payment aggregates.
+      // Preserve the previously loaded settings, warranty and signature UI.
+      if (fastAfterMutation) {
+        if (!mounted || generation != _loadGeneration) return;
+        setState(() {
+          _detail = projected;
+          if (!_notesDirty && !_notesFocusNode.hasFocus) {
+            _notesController.text = detail['memo']?.toString() ?? '';
+          }
+          _loading = false;
+          _error = null;
+        });
+        return;
+      }
       // Independent option/metadata RPCs must not serialize screen opening.
       Future<T> safe<T>(Future<T> future, T fallback) async {
         try {
@@ -833,7 +849,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     });
     try {
       await action();
-      await _load();
+      await _load(fastAfterMutation: true);
       return true;
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
