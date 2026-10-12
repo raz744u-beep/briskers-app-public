@@ -47,6 +47,7 @@ class LocalJobRepository {
     String? search,
     int limit = 50,
     int offset = 0,
+    String sort = 'newest',
   }) async {
     final where = <String>['j.business_id = ?'];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
@@ -92,6 +93,29 @@ class LocalJobRepository {
         variables.add(Variable<String>(like));
       }
     }
+    // Apply sorting in SQL before LIMIT: sorting a 30-row page would
+    // conceal older records that should appear first for a chosen sort.
+    final sortSql = switch (sort) {
+      'updated' => 'COALESCE(j.server_updated_at, j.created_at) DESC, j.created_at DESC, j.id',
+      'status' => 'COALESCE(s.sort_order, 9999), j.created_at DESC, j.id',
+      'appointment' => """CASE WHEN
+        (SELECT MIN(a.starts_at) FROM local_appointments a
+         WHERE a.business_id=j.business_id AND a.job_id=j.id
+           AND a.status NOT IN ('cancelled')) IS NULL
+         THEN 1 ELSE 0 END,
+         (SELECT MIN(a.starts_at) FROM local_appointments a
+          WHERE a.business_id=j.business_id AND a.job_id=j.id
+            AND a.status NOT IN ('cancelled')) ASC,
+         j.created_at DESC, j.id""",
+      'customer' => "lower(COALESCE(j.customer_name, '')) ASC, j.created_at DESC, j.id",
+      'oldest' => 'j.created_at ASC, j.id ASC',
+      _ => """CASE
+           WHEN substr(j.job_number, instr(j.job_number, '-') + 1)
+                GLOB '[0-9]*'
+           THEN CAST(substr(j.job_number, instr(j.job_number, '-') + 1) AS INTEGER)
+           ELSE -1 END DESC,
+           j.created_at DESC, j.id""",
+    };
     variables.add(Variable<int>(limit));
     variables.add(Variable<int>(offset));
 
@@ -112,27 +136,13 @@ class LocalJobRepository {
         ON s.business_id = j.business_id AND s.code = j.status
       WHERE ${where.join(' AND ')}
       ORDER BY
-        -- Pin provisional numbers until the permanent number is cached.
-        -- An upload can finish before the next job pull updates this row.
         CASE WHEN j.job_number = 'Pending sync'
                    OR upper(j.job_number) LIKE 'TEMP-%'
              THEN 0 ELSE 1 END,
         CASE WHEN j.job_number = 'Pending sync'
                    OR upper(j.job_number) LIKE 'TEMP-%'
              THEN j.created_at END DESC,
-        CASE WHEN j.status IN ('completed','cancelled') THEN 1 ELSE 0 END,
-        COALESCE(s.sort_order, 9999),
-        -- Imported MobileBiz created_at records when the import ran, not
-        -- when jobs were originally opened. Use the sequential job number.
-        CASE
-          WHEN substr(j.job_number, instr(j.job_number, '-') + 1)
-               GLOB '[0-9]*'
-          THEN CAST(
-            substr(j.job_number, instr(j.job_number, '-') + 1) AS INTEGER
-          )
-          ELSE -1
-        END DESC,
-        j.created_at DESC, j.id
+        ${sortSql},
       LIMIT ? OFFSET ?
       ''',
       variables: variables,
