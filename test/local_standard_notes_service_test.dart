@@ -63,4 +63,19 @@ void main() {
     expect(api.saves, 1);
     expect((await service.cached('shop')).single['pending_sync'], isNull);
   });
+  test('opening templates online replays pending offline templates exactly once', () async {
+    SharedPreferences.setMockInitialValues({});
+    final api = _TemplatesApi();
+    final service = LocalStandardNotesService(api: api);
+    await service.saveOffline('shop', name: 'Warranty reminder',
+      body: 'Confirm authorization');
+    final first = await service.available('shop', offline: false);
+    expect(first, hasLength(1));
+    expect(api.saves, 1);
+    expect(first.single['pending_sync'], isNull);
+    final second = await service.available('shop', offline: false);
+    expect(second, hasLength(1));
+    expect(api.saves, 1);
+  });
+
 }
