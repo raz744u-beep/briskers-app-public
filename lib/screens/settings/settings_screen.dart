@@ -21,6 +21,7 @@ import 'payment_methods_settings_screen.dart';
 import 'receipt_training_samples_screen.dart';
 import 'shop_info_settings_screen.dart';
 import 'tax_invoicing_settings_screen.dart';
+import 'test_data_cleanup_screen.dart';
 import 'warranty_payment_calculator_screen.dart';
 import 'warranty_workflow_settings_screen.dart';
 
@@ -177,6 +178,22 @@ class SettingsScreen extends StatelessWidget {
                   onTap: () => _chooseConnectionMode(context),
                 );
               },
+            ),
+          if (roleCode == 'owner')
+            ListTile(
+              leading: const Icon(Icons.cleaning_services_outlined,
+                  color: BriskersColors.settings),
+              title: const Text('Test Data Cleanup'),
+              subtitle: const Text(
+                'Review pending local records; guarded cancellation only',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => TestDataCleanupScreen(businessId: businessId),
+                ),
+              ),
             ),
           if (roleCode == 'owner')
             ListTile(
