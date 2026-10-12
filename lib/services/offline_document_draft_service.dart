@@ -218,6 +218,22 @@ class OfflineDocumentDraftService {
       if (linked.read<int>('count') != 0) {
         throw StateError('Other documents still refer to this Job.');
       }
+      // A payment may have been captured while offline. Never erase the
+      // invoice or its temporary Job while an unacknowledged payment exists.
+      final pendingPayments = await _database.customSelect(
+        '''SELECT COUNT(*) AS count FROM sync_outbox
+           WHERE business_id=? AND entity_id=?
+             AND entity_type='invoice_payment_received' ''',
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(documentId),
+        ],
+      ).getSingle();
+      if (pendingPayments.read<int>('count') != 0) {
+        throw StateError(
+          'This invoice has a queued payment. Reconcile it before deleting.',
+        );
+      }
       await _database.customStatement(
         'DELETE FROM sync_outbox WHERE id=?',
         [row.read<int>('id')],
