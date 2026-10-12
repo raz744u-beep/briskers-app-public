@@ -175,7 +175,7 @@ class _JobsScreenState extends State<JobsScreen> {
           _rows = localRows;
           _statuses = localStatuses;
           _showingLocal = true;
-          _onlineReady = false;
+          if (!navigationRefresh) _onlineReady = false;
           _totalCount = localTotal;
           _statusCounts = statusCounts;
           _documentMatches = documentMatches;
