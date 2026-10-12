@@ -2444,8 +2444,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   Future<List<Map<String, dynamic>>> _paymentMethods() async {
     final cached = await _paymentMethodsCache.load(widget.businessId);
-    if (BriskersConnectionModeController.instance.forceOffline ||
-        _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+    if (BriskersConnectionModeController.instance.forceOffline) {
       return cached;
     }
     try {
