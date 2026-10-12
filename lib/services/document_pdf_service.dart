@@ -428,8 +428,8 @@ class DocumentPdfService {
                     pw.Align(
                       alignment: pw.Alignment.centerRight,
                       child: pw.Text(
-                        documentNumber.isEmpty
-                            ? kindTitle
+                        documentNumber.isEmpty || documentNumber == 'Pending sync'
+                            ? '$kindTitle — Draft'
                             : '$kindTitle #$documentNumber',
                         style: const pw.TextStyle(
                           fontSize: 18,
