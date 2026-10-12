@@ -4314,7 +4314,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final date = _dateLabel(
       documentDateRaw.isNotEmpty ? documentDateRaw : createdAtRaw,
     );
-    final job = _detail?['job_number']?.toString().trim() ?? '';
+    final jobId = _detail?['job_id']?.toString().trim() ?? '';
+    final rawJob = _detail?['job_number']?.toString().trim() ?? '';
+    final job = rawJob.isNotEmpty ? rawJob :
+        (jobId.startsWith('local-') ? 'Pending sync' : '');
 
     Widget infoLine(
       IconData icon,
@@ -4436,9 +4439,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           Icons.receipt_long_outlined,
           job.isEmpty ? '—' : '${tr('jobLabel')} $job',
           maxLines: 1,
-          onTap: job.isEmpty ? null : _openLinkedJob,
-          valueColor: job.isEmpty ? null : _accent,
-          underline: job.isNotEmpty,
+          onTap: jobId.isEmpty ? null : _openLinkedJob,
+          valueColor: jobId.isEmpty ? null : _accent,
+          underline: jobId.isNotEmpty,
         ),
       ],
     );
