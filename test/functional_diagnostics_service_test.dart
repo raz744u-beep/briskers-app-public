@@ -16,7 +16,7 @@ void main() {
     final ids = report.checks.map((check) => check.id).toSet();
     expect(ids, containsAll(<String>['FUNC-013', 'FUNC-014', 'FUNC-015', 'FUNC-016', 'FUNC-017', 'FUNC-018', 'FUNC-019', 'FUNC-020', 'FUNC-021', 'FUNC-JOB-CREATE']));
     expect(ids.length, report.checks.length);
-    expect(report.passed, 23);
+    expect(report.passed, 23, reason: report.toText());
     expect(report.warnings, 0);
     expect(report.failed, 0);
   });
