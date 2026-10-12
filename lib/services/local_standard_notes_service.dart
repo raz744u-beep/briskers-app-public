@@ -37,6 +37,12 @@ class LocalStandardNotesService {
     final local = await cached(businessId);
     if (offline) return local;
     try {
+      // Newly created offline templates must actually reach the server.
+      // Replaying here makes reconciliation available when the user opens
+      // Standard Notes online, even if background sync has not run yet.
+      if (local.any((note) => note['pending_sync'] == true)) {
+        await flushPending(businessId);
+      }
       final remote = await _api.documentNoteTemplates(businessId);
       final pending = local.where((note) => note['pending_sync'] == true).toList();
       final names = remote.map((note) =>
