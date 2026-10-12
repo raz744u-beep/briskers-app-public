@@ -227,5 +227,12 @@ void main() {
     expect(screen, contains('No payment methods saved offline.'));
   });
 
+  test('Offline warranty editor fits above system navigation and keyboard', () async {
+    final source = await File('lib/screens/jobs/invoice_warranty_panel.dart').readAsString();
+    expect(source, contains('builder: (context, setSheetState) => SafeArea('));
+    expect(source, contains('heightFactor: MediaQuery.viewInsetsOf(sheetContext).bottom > 0'));
+    expect(source, contains('EdgeInsets.fromLTRB(16, 12, 16, 28)'));
+  });
+
 }
 
