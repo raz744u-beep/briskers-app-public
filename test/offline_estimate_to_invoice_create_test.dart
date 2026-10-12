@@ -68,8 +68,9 @@ void main() {
       ...Map<String, dynamic>.from(warranty),
       'extended_warranty': false,
     });
-    expect((await cache.load('shop', invoiceId))?
-      ['offline_warranty_detail']['extended_warranty'], isFalse);
+    final disabled = await cache.load('shop', invoiceId);
+    expect((disabled?['offline_warranty_detail'] as Map)['extended_warranty'],
+      isFalse);
 
     final outbox = await db.customSelect(
       "SELECT operation,payload_json FROM sync_outbox "
