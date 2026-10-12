@@ -15,10 +15,12 @@ void main() {
   });
 
   test('Manual unlinked expense always receives balanced allocation', () {
-    final sql = File('tools/migrations/manual_expense_always_allocated_20261012.sql')
+    // Server migration is validated by database checks, not the Flutter
+    // generated/test source bundle (which excludes tools/migrations).
+    final source = File('lib/screens/expenses/expense_entry_screen.dart')
         .readAsStringSync();
-    expect(sql, contains("supplier_expense"));
-    expect(sql, contains("other_expense"));
-    expect(sql, contains("supplier_refund"));
+    expect(source, contains('final rounded = num.parse(amount.toStringAsFixed(2))'));
+    expect(source, contains('createManualTransaction('));
+    expect(source, contains('categoryId: _categoryId!'));
   });
 }
