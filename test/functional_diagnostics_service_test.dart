@@ -11,6 +11,11 @@ void main() {
     const service = BriskersFunctionalDiagnosticsService();
 
     final report = await service.run();
+    // Keep failures attributable to the exact isolated scenario.
+    if (report.failed != 0) {
+      // ignore: avoid_print
+      print(report.toText());
+    }
 
     expect(report.checks, hasLength(23));
     final ids = report.checks.map((check) => check.id).toSet();
