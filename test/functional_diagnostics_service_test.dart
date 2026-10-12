@@ -11,7 +11,7 @@ void main() {
     const service = BriskersFunctionalDiagnosticsService();
 
     final report = await service.run();
-    if (report.failed != 0) {
+    if (report.failed != 0 || report.warnings != 0) {
       throw StateError(report.toText());
     }
 
