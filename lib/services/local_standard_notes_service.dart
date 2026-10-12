@@ -73,7 +73,6 @@ class LocalStandardNotesService {
     final notes = await cached(businessId);
     if (!notes.any((note) => note['pending_sync'] == true)) return;
     final remote = await _api.documentNoteTemplates(businessId);
-    final pending = <Map<String, dynamic>>[];
     for (final note in notes) {
       if (note['pending_sync'] != true) continue;
       final name = note['name']?.toString().trim() ?? '';
@@ -95,7 +94,6 @@ class LocalStandardNotesService {
         // If the response was interrupted, a retry first looks for the name,
         // avoiding another create for a successfully committed template.
       }
-      pending.add(note);
     }
     final refreshed = await _api.documentNoteTemplates(businessId);
     final untouched = notes.where((note) => note['pending_sync'] != true);
