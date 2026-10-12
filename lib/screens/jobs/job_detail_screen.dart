@@ -1705,12 +1705,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
+              leading: const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
               title: const Text('Take photo'),
               onTap: () => Navigator.pop(sheetContext, 'camera'),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
               title: const Text('Choose from gallery'),
               onTap: () => Navigator.pop(sheetContext, 'gallery'),
             ),
@@ -1949,7 +1949,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             }
                           },
                           icon:
-                              const Icon(Icons.photo_library_outlined),
+                              const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
                           label: const Text('Gallery'),
                         ),
                       ),
@@ -1968,7 +1968,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             }
                           },
                           icon:
-                              const Icon(Icons.photo_camera_outlined),
+                              const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
                           label: const Text('Camera'),
                         ),
                       ),
@@ -2142,13 +2142,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
+              leading: const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
               title: const Text('Take photo'),
               onTap: () =>
                   Navigator.pop(sheetContext, 'camera'),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
               title: const Text('Choose from gallery'),
               onTap: () =>
                   Navigator.pop(sheetContext, 'gallery'),
@@ -2275,12 +2275,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
+              leading: const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
               title: const Text('Take replacement photo'),
               onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
               title: const Text('Choose replacement from gallery'),
               onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
             ),
