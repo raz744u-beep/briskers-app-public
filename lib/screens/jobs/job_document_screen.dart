@@ -381,7 +381,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           _notesController.text = cached['memo']?.toString() ?? '';
         }
         _identifixMeta = const {};
-        _warrantyDetail = const {};
+        _warrantyDetail = Map<String, dynamic>.from(
+          datedCached['offline_warranty_detail'] is Map
+            ? datedCached['offline_warranty_detail'] as Map
+            : const <String, dynamic>{});
         _signatureStatus = const {};
         _submissionReadiness = const {};
         _invoiceStyles = cachedInvoiceStyles;
@@ -6584,6 +6587,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       readOnly: _readOnly,
                       paymentProcessed: _warrantyPaymentProcessed(),
                       onChanged: _load,
+                      onLocalWarrantyChanged:
+                          _offlineDocumentDraft.isLocalDraftId(widget.documentId)
+                            ? (warranty) => _offlineDocumentDraft
+                                .savePendingInvoiceWarranty(
+                                  widget.businessId, widget.documentId, warranty)
+                                .then((_) => _load())
+                            : null,
                     ),
                   _openFindingsBanner(),
                   if (_estimate && _converted) _convertedInvoiceBanner(),
