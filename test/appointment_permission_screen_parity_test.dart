@@ -252,6 +252,14 @@ void main() {
     expect(invoice, contains("'offline_warranty_detail': warrantyDetail"));
   });
 
+  test('Temporary Job detail stays local in Auto mode until sync', () async {
+    final job = await File('lib/screens/jobs/job_detail_screen.dart').readAsString();
+    final draft = await File('lib/services/offline_document_draft_service.dart').readAsString();
+    expect(job, contains("widget.jobId.startsWith('local-') && !forceOnline"));
+    expect(draft, contains("'job_number': temporaryJobNumber"));
+    expect(draft, contains("'provisional_job_id':provisionalJobId"));
+  });
+
   test('Payment method cache survives empty online refresh', () async {
     final screen = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
     final shell = await File('lib/screens/shell_screen.dart').readAsString();
