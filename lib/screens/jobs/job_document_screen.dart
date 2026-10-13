@@ -5619,6 +5619,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         initialName: template?['name']?.toString() ?? '',
         initialBody: template?['body']?.toString() ?? initialBody ?? '',
         initialColor: standardNoteColorHex(template?['color_hex']),
+        initialCategory: template == null ? 'service' : standardNoteCategory(template),
         editing: template != null,
         addToInvoice: addToInvoice,
       ),
@@ -5636,7 +5637,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       final saved = await _standardNotes.saveOffline(widget.businessId,
         templateId: template?['id']?.toString(), original: template,
         name: result['name']!, body: result['body']!,
-        colorHex: result['color_hex'] ?? standardNoteDefaultColor);
+        colorHex: result['color_hex'] ?? standardNoteDefaultColor,
+        categoryKey: result['category_key'] ?? 'service');
       final notes = await _standardNotes.available(widget.businessId, offline: offline);
       final matching = notes.where((note) => note['id'] == saved['id'] ||
           note['_local_id'] == saved['id']);
