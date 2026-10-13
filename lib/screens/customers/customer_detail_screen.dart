@@ -664,6 +664,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           businessId: widget.businessId,
           customerId: widget.customerId,
           customerName: customer['name']?.toString() ?? 'Customer',
+          roleCode: widget.roleCode,
           vehicles: vehicles,
         ),
       ),
