@@ -4096,35 +4096,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       finalizedPaid: finalizedPaid,
       pendingPaid: pendingPaid,
     );
-    if (BriskersLanguageController.instance.isSpanish) {
-      switch (code) {
-        case 'partial':
-          return tr('invoicePartial');
-        case 'pending_close':
-          return tr('invoicePendingClose');
-        case 'paid':
-          return tr('invoicePaid');
-        case 'void':
-          return tr('documentVoid');
-        default:
-          return tr('invoiceOpen');
-      }
+    if (code == 'void') return tr('documentVoid');
+    if (code == 'pending_close' || code == 'paid') {
+      return 'Paid · Pending Close';
     }
-
-    final style = _invoiceStyle(code);
-    if (style != null) return style['name']?.toString() ?? 'Open';
-    switch (code) {
-      case 'partial':
-        return 'Partial';
-      case 'pending_close':
-        return 'Pending Close';
-      case 'paid':
-        return 'Paid';
-      case 'void':
-        return 'Void';
-      default:
-        return 'Open';
-    }
+    return tr('invoiceOpen');
   }
 
   Color _statusColor(String label, {String? code}) {
