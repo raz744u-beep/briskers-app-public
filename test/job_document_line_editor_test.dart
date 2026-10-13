@@ -83,6 +83,21 @@ void main() {
   );
 
   testWidgets(
+    'pre-existing invoice and estimate lines select numeric values on tap',
+    (tester) async {
+      await openEditor(tester, replaceDefaults: false);
+      for (final index in [2, 3, 4]) {
+        await tester.ensureVisible(field(index));
+        await tester.tap(field(index));
+        await tester.pumpAndSettle();
+        final controller = tester.widget<TextField>(field(index)).controller!;
+        expect(controller.selection,
+          TextSelection(baseOffset: 0, extentOffset: controller.text.length));
+      }
+    },
+  );
+
+  testWidgets(
     'close and cancel preserve the original and reopening resets selection',
     (tester) async {
       Map<String, dynamic>? saved;
