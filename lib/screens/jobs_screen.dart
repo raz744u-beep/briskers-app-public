@@ -846,34 +846,6 @@ class _JobsScreenState extends State<JobsScreen> {
                     ),
                     const SizedBox(width: 8),
                     PopupMenuButton<String>(
-                      tooltip: 'Sort jobs',
-                      onSelected: _setSort,
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(value: 'newest', child: Text('Newest first')),
-                        PopupMenuItem(value: 'updated', child: Text('Recently updated')),
-                        PopupMenuItem(value: 'status', child: Text('By job status')),
-                        PopupMenuItem(value: 'appointment', child: Text('Appointment date')),
-                        PopupMenuItem(value: 'customer', child: Text('Customer A–Z')),
-                        PopupMenuItem(value: 'oldest', child: Text('Oldest first')),
-                      ],
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          const Icon(Icons.sort, color: BriskersColors.jobs, size: 19),
-                          const SizedBox(width: 3),
-                          Text({
-                            'newest':'Newest first',
-                            'updated':'Recently updated',
-                            'status':'By status',
-                            'appointment':'Appointment date',
-                            'customer':'Customer A–Z',
-                            'oldest':'Oldest first',
-                          }[_sort] ?? 'Newest first', style: const TextStyle(fontSize: 12)),
-                          const Icon(Icons.arrow_drop_down, size: 19),
-                        ]),
-                      ),
-                    ),
-                    PopupMenuButton<String>(
                     tooltip: tr('filterJobs'),
                     onSelected: (value) {
                       setState(() => _selectedStatus = value == '__all__' ? null : value);
@@ -976,6 +948,34 @@ class _JobsScreenState extends State<JobsScreen> {
                       },
                     ),
                   ),
+                    PopupMenuButton<String>(
+                      tooltip: 'Sort jobs',
+                      onSelected: _setSort,
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(value: 'newest', child: Text('Newest first')),
+                        PopupMenuItem(value: 'updated', child: Text('Recently updated')),
+                        PopupMenuItem(value: 'status', child: Text('By job status')),
+                        PopupMenuItem(value: 'appointment', child: Text('Appointment date')),
+                        PopupMenuItem(value: 'customer', child: Text('Customer A–Z')),
+                        PopupMenuItem(value: 'oldest', child: Text('Oldest first')),
+                      ],
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.sort, color: BriskersColors.jobs, size: 19),
+                          const SizedBox(width: 3),
+                          Text({
+                            'newest':'Newest first',
+                            'updated':'Recently updated',
+                            'status':'By status',
+                            'appointment':'Appointment date',
+                            'customer':'Customer A–Z',
+                            'oldest':'Oldest first',
+                          }[_sort] ?? 'Newest first', style: const TextStyle(fontSize: 12)),
+                          const Icon(Icons.arrow_drop_down, size: 19),
+                        ]),
+                      ),
+                    ),
                     const Spacer(),
                     if (_rows != null)
                       Text(
