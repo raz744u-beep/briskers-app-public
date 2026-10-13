@@ -7403,7 +7403,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                                 decimal: true,
                               ),
                               onTap: () {
-                                if (!widget.clearNumericOnFirstTap) return;
+                                // Always select the existing value, including historical invoice and estimate lines.
                                 _quantity.selection = TextSelection(baseOffset: 0,
                                   extentOffset: _quantity.text.length);
                               },
@@ -7425,7 +7425,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                                 decimal: true,
                               ),
                               onTap: () {
-                                if (!widget.clearNumericOnFirstTap) return;
+                                // Always select the existing value, including historical invoice and estimate lines.
                                 _price.selection = TextSelection(baseOffset: 0,
                                   extentOffset: _price.text.length);
                               },
@@ -7444,7 +7444,7 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                         scrollPadding: const EdgeInsets.only(bottom: 180),
                           controller: _taxPercent,
                           onTap: () {
-                            if (!widget.clearNumericOnFirstTap) return;
+                            // Always select the existing value, including historical invoice and estimate lines.
                             _taxPercent.selection = TextSelection(baseOffset: 0,
                               extentOffset: _taxPercent.text.length);
                           },
