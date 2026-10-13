@@ -2,6 +2,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/core/standard_note_rules.dart';
 
 void main() {
+  test('standard note categories preserve historical notes and General footer', () {
+    expect(standardNoteCategory({'name': 'Service A'}), 'service');
+    expect(standardNoteCategory({'name': 'Standard Warranty'}), 'warranty');
+    expect(standardNoteCategory({'name': 'Thank You'}), 'general');
+    expect(standardNoteCategory({
+      'name': 'Future Followup', 'category_key': 'inspection',
+    }), 'inspection');
+    final ordered = orderStandardNotes([
+      {'name': 'Thank You', 'category_key': 'general', 'sort_order': 0},
+      {'name': 'Service A', 'category_key': 'service', 'sort_order': 10},
+    ]);
+    expect(ordered.map((note) => note['name']), ['Service A', 'Thank You']);
+    expect(standardNoteCategoryKeys.last, 'general');
+  });
+
   test('General sorts last for old caches, server ranks and mixed casing', () {
     final notes = [
       {'id': 'g', 'name': ' GENERAL ', 'sort_order': -100},
