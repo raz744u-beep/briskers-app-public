@@ -14,7 +14,7 @@ class LocalStandardNotesService {
   final BriskersApi _api;
   final Random _random = Random.secure();
   static final _queues = <String, Future<void>>{};
-  static const _editableFields = ['name', 'body', 'color_hex', 'sort_order'];
+  static const _editableFields = ['name', 'body', 'color_hex', 'sort_order', 'category_key'];
 
   String _key(String businessId) => 'briskers_standard_note_templates_$businessId';
 
@@ -60,6 +60,7 @@ class LocalStandardNotesService {
   Object? _value(Map<String, dynamic> note, String field) {
     if (field == 'color_hex') return standardNoteColorHex(note[field]);
     if (field == 'sort_order') return standardNoteSortOrder(note);
+    if (field == 'category_key') return standardNoteCategory(note);
     return note[field]?.toString().trim() ?? '';
   }
 
@@ -140,6 +141,7 @@ class LocalStandardNotesService {
     required String name,
     required String body,
     String colorHex = standardNoteDefaultColor,
+    String categoryKey = 'service',
   }) => _serialized(businessId, () async {
     if (name.trim().isEmpty || body.trim().isEmpty) {
       throw StateError('A template name and note text are required.');
@@ -154,6 +156,8 @@ class LocalStandardNotesService {
     final changes = <String, dynamic>{
       'name': name.trim(), 'body': body.trim(),
       'color_hex': standardNoteColorHex(colorHex),
+      'category_key': standardNoteCategoryKeys.contains(categoryKey)
+          ? categoryKey : 'service',
     };
     if (index >= 0 && original != null) {
       // Only the fields actually changed in this editor are patches. A refresh
@@ -167,7 +171,9 @@ class LocalStandardNotesService {
         (index < 0 || note['id'] != notes[index]['id']))) {
       throw StateError('A standard note already has this name.');
     }
-    if (index >= 0 && isGeneralStandardNote(notes[index]) && normalized != 'general') {
+    if (index >= 0 &&
+        notes[index]['name']?.toString().trim().toLowerCase() == 'general' &&
+        normalized != 'general') {
       throw StateError('General must keep its name and stay last.');
     }
     late Map<String, dynamic> note;
@@ -221,7 +227,8 @@ class LocalStandardNotesService {
     // The legacy create commits name/body/order, but always uses default color.
     // These acknowledged fields are not edits to replay after a later read:
     // another device may already have changed them between create and fetch.
-    final baseline = {...createPayload, 'color_hex': standardNoteDefaultColor};
+    final baseline = {...createPayload,
+      'color_hex': standardNoteDefaultColor, 'category_key': 'service'};
     final patch = _patch(note)
       ..removeWhere((field, value) => _value(baseline, field) == value);
     return {
