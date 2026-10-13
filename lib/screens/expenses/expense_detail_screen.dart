@@ -92,10 +92,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         _error = null;
       });
     } catch (error) {
-      if (mounted) setState(() {
-        _loading = false;
-        _error = 'Offline expense details unavailable: $error';
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Offline expense details unavailable: $error';
+        });
+      }
     }
   }
 
