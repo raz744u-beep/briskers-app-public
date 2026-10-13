@@ -5,6 +5,17 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/supabase_config.dart';
 
+/// A queued replay can checkpoint each mutation within a multi-stage upload.
+/// Keeping the actual response inside the guard also preserves late receipts.
+typedef AttachmentReplayGuard = Future<T> Function<T>(
+  Future<T> Function() operation,
+);
+
+Future<T> runAttachmentMutation<T>(
+  Future<T> Function() operation, {
+  AttachmentReplayGuard? replayGuard,
+}) => replayGuard == null ? operation() : replayGuard<T>(operation);
+
 class BriskersApi {
   const BriskersApi();
 
@@ -130,13 +141,14 @@ class BriskersApi {
     required String attachmentId,
     required String mimeType,
     required Uint8List bytes,
+    AttachmentReplayGuard? replayGuard,
   }) async {
     try {
-      await networkSupabase.storage.from(bucket).uploadBinary(
+      await runAttachmentMutation(() => networkSupabase.storage.from(bucket).uploadBinary(
         key,
         bytes,
         fileOptions: FileOptions(contentType: mimeType, upsert: false),
-      );
+      ), replayGuard: replayGuard);
     } on StorageException catch (error) {
       final status = error.statusCode?.toString();
       final message = error.message.toLowerCase();
@@ -145,14 +157,14 @@ class BriskersApi {
       if (!alreadyExists) rethrow;
     }
 
-    await networkSupabase.rpc(
+    await runAttachmentMutation(() async => await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
         'p_attachment_id': attachmentId,
         'p_byte_size': bytes.length,
       },
-    );
+    ), replayGuard: replayGuard);
   }
 
   Future<Map<String, dynamic>?> currentVisitSync(
@@ -920,31 +932,32 @@ class BriskersApi {
     required String filename,
     required String mimeType,
     required Uint8List bytes,
+    AttachmentReplayGuard? replayGuard,
   }) async {
-    final registration = await registerCustomerNotePhoto(
+    final registration = await runAttachmentMutation(() => registerCustomerNotePhoto(
       businessId,
       noteId,
       filename: filename,
       mimeType: mimeType,
-    );
+    ), replayGuard: replayGuard);
     final bucket = registration['bucket'].toString();
     final key = registration['key'].toString();
     final attachmentId = registration['attachment_id'].toString();
 
-    await networkSupabase.storage.from(bucket).uploadBinary(
+    await runAttachmentMutation(() => networkSupabase.storage.from(bucket).uploadBinary(
       key,
       bytes,
       fileOptions: FileOptions(contentType: mimeType, upsert: false),
-    );
+    ), replayGuard: replayGuard);
 
-    await networkSupabase.rpc(
+    await runAttachmentMutation(() async => await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
         'p_attachment_id': attachmentId,
         'p_byte_size': bytes.length,
       },
-    );
+    ), replayGuard: replayGuard);
   }
 
   Future<Map<String, dynamic>?> jobPreInspection(String businessId, String jobId) async {
@@ -2856,31 +2869,32 @@ class BriskersApi {
     required String filename,
     required String mimeType,
     required Uint8List bytes,
+    AttachmentReplayGuard? replayGuard,
   }) async {
-    final registration = await registerVehicleFindingPhoto(
+    final registration = await runAttachmentMutation(() => registerVehicleFindingPhoto(
       businessId,
       findingId,
       filename: filename,
       mimeType: mimeType,
-    );
+    ), replayGuard: replayGuard);
     final bucket = registration['bucket'].toString();
     final key = registration['key'].toString();
     final attachmentId = registration['attachment_id'].toString();
 
-    await networkSupabase.storage.from(bucket).uploadBinary(
+    await runAttachmentMutation(() => networkSupabase.storage.from(bucket).uploadBinary(
       key,
       bytes,
       fileOptions: FileOptions(contentType: mimeType, upsert: false),
-    );
+    ), replayGuard: replayGuard);
 
-    await networkSupabase.rpc(
+    await runAttachmentMutation(() async => await networkSupabase.rpc(
       'briskers_finalize_attachment',
       params: {
         'p_business_id': businessId,
         'p_attachment_id': attachmentId,
         'p_byte_size': bytes.length,
       },
-    );
+    ), replayGuard: replayGuard);
   }
 
   Future<void> deleteVehicleFindingPhoto(
@@ -3780,6 +3794,26 @@ class BriskersApi {
       },
     );
     return result.toString();
+  }
+
+  /// Version-checked, field-level update. Older servers leave this queued
+  /// locally until the standard-note styling migration has been deployed.
+  Future<Map<String, dynamic>> patchDocumentNoteTemplate(
+    String businessId, {
+    required String templateId,
+    required int expectedVersion,
+    required Map<String, dynamic> patch,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_patch_document_note_template_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_template_id': templateId,
+        'p_expected_version': expectedVersion,
+        'p_patch': patch,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
   }
 
   Future<List<Map<String, dynamic>>> disclaimerTemplates(

@@ -47,7 +47,7 @@ void main() {
   Finder field(int index) => find.byType(TextField).at(index);
 
   testWidgets(
-    'each custom numeric default is selected once and saves replacement',
+    'each custom numeric value is selected every tap and saves replacement',
     (tester) async {
       Map<String, dynamic>? saved;
       await openEditor(tester, onResult: (value) => saved = value);
@@ -70,7 +70,8 @@ void main() {
         await tester.tap(field(entry.key));
         await tester.pumpAndSettle();
         expect(controller.text, entry.value);
-        expect(controller.selection.isCollapsed, isTrue);
+        expect(controller.selection,
+          TextSelection(baseOffset: 0, extentOffset: controller.text.length));
       }
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
@@ -78,6 +79,21 @@ void main() {
       expect(saved?['unit_price'], 75);
       expect(saved?['tax_rate'], 0.05);
       expect(find.byType(TextField), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'pre-existing invoice and estimate lines select numeric values on tap',
+    (tester) async {
+      await openEditor(tester, replaceDefaults: false);
+      for (final index in [2, 3, 4]) {
+        await tester.ensureVisible(field(index));
+        await tester.tap(field(index));
+        await tester.pumpAndSettle();
+        final controller = tester.widget<TextField>(field(index)).controller!;
+        expect(controller.selection,
+          TextSelection(baseOffset: 0, extentOffset: controller.text.length));
+      }
     },
   );
 

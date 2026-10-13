@@ -6,8 +6,10 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_quarantine.dart';
 import 'local_document_detail_cache.dart';
 import 'local_document_repository.dart';
+import 'local_job_repository.dart';
 import 'offline_invoice_payment_ledger.dart';
 
 class OfflineDocumentDraftService {
@@ -63,6 +65,7 @@ class OfflineDocumentDraftService {
     final operationId = _offlineOperationUuid();
     final id = 'local-invoice-$operationId';
     final provisionalJobId = 'local-job-$operationId';
+    final temporaryJobNumber = 'TEMP-${operationId.substring(0, 8).toUpperCase()}';
     final now = DateTime.now();
     final date = now.toIso8601String().split('T').first;
     final detail = <String, dynamic>{
@@ -73,6 +76,7 @@ class OfflineDocumentDraftService {
       'display_status': 'Pending sync',
       'display_status_code': 'open',
       'job_id': provisionalJobId,
+      'job_number': temporaryJobNumber,
       'customer_id': customerId,
       'customer_name': customerName,
       'vehicle_id': vehicleId,
@@ -106,11 +110,11 @@ class OfflineDocumentDraftService {
           id,business_id,access_scope,job_number,title,requested_work,
           status,status_name,customer_id,customer_name,vehicle_id,
           vehicle_label,created_at,sync_state
-        ) VALUES (?,?,'full',NULL,'Invoice',NULL,'open','In progress',
+        ) VALUES (?,?,'full',?,'Invoice',NULL,'open','In progress',
                   ?,?,?,?,?,'pending')
         ''',
         [
-          provisionalJobId,businessId,customerId,customerName,
+          provisionalJobId,businessId,temporaryJobNumber,customerId,customerName,
           vehicleId,vehicleLabel,_unixNow(),
         ],
       );
@@ -170,6 +174,8 @@ class OfflineDocumentDraftService {
     if (snapshot == null || snapshot['_server_document_id'] != null) {
       throw StateError('This invoice has synced; reconnect before deleting.');
     }
+    String? restoredEstimateId;
+    Map<String, dynamic>? restoredEstimate;
     await _database.transaction(() async {
       final rows = await _database.customSelect(
         '''
@@ -199,6 +205,84 @@ class OfflineDocumentDraftService {
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
       final jobId = payload['provisional_job_id']?.toString() ?? '';
+      // Converted estimates may already have a job, or use a
+      // local-conversion-job- placeholder. Never apply quick-invoice rules
+      // to them. Restore the source estimate only when neither operation
+      // has ever been sent to the server.
+      if (payload['kind'] == 'convert_invoice') {
+        final estimateId = payload['estimate_id']?.toString() ?? '';
+        if (!estimateId.startsWith('local-estimate-')) {
+          throw StateError('Converted source is not a never-synced estimate.');
+        }
+        final original = await _cache.load(businessId, estimateId);
+        if (original == null ||
+            original['_server_document_id'] != null ||
+            original['converted_invoice_id']?.toString() != documentId ||
+            snapshot['converted_from_estimate_id']?.toString() != estimateId) {
+          throw StateError('Estimate conversion references cannot be verified.');
+        }
+        final otherOps = await _database.customSelect(
+          """SELECT COUNT(*) AS count FROM sync_outbox
+             WHERE business_id=? AND entity_id=?
+               AND entity_type='invoice_payment_received'""",
+          variables: [
+            Variable<String>(businessId),
+            Variable<String>(documentId),
+          ],
+        ).getSingle();
+        if (otherOps.read<int>('count') != 0) {
+          throw StateError('Reconcile queued payments before cancellation.');
+        }
+        final originJob = original['job_id']?.toString() ?? '';
+        final expectedPlaceholder =
+            'local-conversion-job-${payload['operation_id']}';
+        if (jobId.isNotEmpty && jobId != expectedPlaceholder) {
+          throw StateError('Converted temporary Job link is inconsistent.');
+        }
+        if ((snapshot['job_id']?.toString() ?? '') !=
+            (jobId.isNotEmpty ? jobId : originJob)) {
+          throw StateError('Invoice Job does not match its source estimate.');
+        }
+        final shared = jobId.isEmpty
+            ? 0
+            : (await _database.customSelect(
+                'SELECT COUNT(*) AS count FROM local_documents '
+                'WHERE business_id=? AND job_id=? AND id<>?',
+                variables: [
+                  Variable<String>(businessId),
+                  Variable<String>(jobId),
+                  Variable<String>(documentId),
+                ],
+              ).getSingle()).read<int>('count');
+        if (shared != 0) {
+          throw StateError('Temporary Job is shared with other documents.');
+        }
+        await _database.customStatement(
+          'DELETE FROM sync_outbox WHERE id=?', [row.read<int>('id')]);
+        await _database.customStatement(
+          'DELETE FROM local_documents WHERE business_id=? AND id=?',
+          [businessId, documentId]);
+        await _database.customStatement(
+          """UPDATE local_documents SET converted=0, status='draft'
+             WHERE business_id=? AND id=? AND sync_state='pending'""",
+          [businessId, estimateId]);
+        if (jobId.isNotEmpty) {
+          await _database.customStatement(
+            "DELETE FROM local_jobs WHERE business_id=? AND id=? AND sync_state='pending'",
+            [businessId, jobId],
+          );
+        }
+        // Cache writes happen after the database transaction below; mark
+        // the restored source in memory so the outer method can save it.
+        restoredEstimateId = estimateId;
+        restoredEstimate = {
+          ...original,
+          'converted': false,
+          'status': 'draft',
+          'converted_invoice_id': null,
+        };
+        return;
+      }
       if (jobId != 'local-job-${payload['operation_id']}') {
         throw StateError('The temporary Job link is inconsistent.');
       }
@@ -214,6 +298,22 @@ class OfflineDocumentDraftService {
       ).getSingle();
       if (linked.read<int>('count') != 0) {
         throw StateError('Other documents still refer to this Job.');
+      }
+      // A payment may have been captured while offline. Never erase the
+      // invoice or its temporary Job while an unacknowledged payment exists.
+      final pendingPayments = await _database.customSelect(
+        '''SELECT COUNT(*) AS count FROM sync_outbox
+           WHERE business_id=? AND entity_id=?
+             AND entity_type='invoice_payment_received' ''',
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(documentId),
+        ],
+      ).getSingle();
+      if (pendingPayments.read<int>('count') != 0) {
+        throw StateError(
+          'This invoice has a queued payment. Reconcile it before deleting.',
+        );
       }
       await _database.customStatement(
         'DELETE FROM sync_outbox WHERE id=?',
@@ -233,6 +333,94 @@ class OfflineDocumentDraftService {
       );
     });
     await _cache.remove(businessId, documentId);
+    if (restoredEstimateId != null && restoredEstimate != null) {
+      await _cache.save(businessId, restoredEstimateId!, restoredEstimate!);
+    }
+  }
+
+  /// Cancel a standalone estimate before any upload attempt. Converted or
+  /// server-backed estimates must be resolved separately.
+  Future<void> cancelNeverSyncedStandaloneEstimate(
+    String businessId,
+    String estimateId,
+  ) async {
+    if (!estimateId.startsWith('local-estimate-')) {
+      throw StateError('Only local standalone estimates can be canceled.');
+    }
+    final snapshot = await _cache.load(businessId, estimateId);
+    if (snapshot == null ||
+        snapshot['_server_document_id'] != null ||
+        snapshot['converted'] == true ||
+        (snapshot['converted_invoice_id']?.toString().isNotEmpty ?? false)) {
+      throw StateError('This estimate is synced or linked to a conversion.');
+    }
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        """SELECT id,operation,payload_json,attempt_count,last_attempt_at,state
+           FROM sync_outbox
+           WHERE business_id=? AND entity_id=?
+             AND entity_type='document_draft_create'""",
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(estimateId),
+        ],
+      ).get();
+      if (rows.length != 1) {
+        throw StateError(
+          'Estimate cannot be deleted safely: expected one local create '
+          'operation, found ${rows.length}. It may have synchronized.',
+        );
+      }
+      final upload = rows.single;
+      if (upload.read<String>('operation') != 'create_estimate') {
+        throw StateError(
+          'Estimate cannot be deleted safely: its creation operation is '
+          'not a standalone estimate.',
+        );
+      }
+      if (upload.read<String>('state') != 'pending') {
+        throw StateError(
+          'Estimate cannot be deleted safely: upload is not pending.',
+        );
+      }
+      if (upload.read<int>('attempt_count') != 0 ||
+          upload.data['last_attempt_at'] != null) {
+        throw StateError(
+          'Estimate cannot be deleted safely: a server upload was already '
+          'attempted. Reconcile the server record first.',
+        );
+      }
+      final payload = Map<String, dynamic>.from(
+        jsonDecode(rows.single.read<String>('payload_json')) as Map,
+      );
+      if (payload['local_id']?.toString() != estimateId ||
+          payload['kind']?.toString() != 'estimate' ||
+          snapshot['job_id']?.toString().isNotEmpty == true) {
+        throw StateError('Standalone estimate references do not match.');
+      }
+      final related = await _database.customSelect(
+        """SELECT COUNT(*) AS count FROM sync_outbox
+           WHERE business_id=? AND entity_id=?
+             AND entity_type<>'document_draft_create'""",
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(estimateId),
+        ],
+      ).getSingle();
+      if (related.read<int>('count') != 0) {
+        throw StateError('Estimate has other queued operations.');
+      }
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id=?',
+        [rows.single.read<int>('id')],
+      );
+      await _database.customStatement(
+        'DELETE FROM local_documents WHERE business_id=? AND id=? '
+        "AND sync_state='pending' AND converted=0",
+        [businessId, estimateId],
+      );
+    });
+    await _cache.remove(businessId, estimateId);
   }
 
   String _lineId() {
@@ -444,6 +632,7 @@ class OfflineDocumentDraftService {
     String businessId,
     String serverInvoiceId,
     Map<String, dynamic> localInvoice,
+    int outboxId,
   ) async {
     final raw = localInvoice['offline_warranty_detail'];
     if (raw is! Map) {
@@ -463,25 +652,35 @@ class OfflineDocumentDraftService {
             break;
           }
         }
-        companyId ??= await _api.createWarrantyCompany(
+        companyId ??= await LocalJobQuarantine.guardReplay(
+          _database,
           businessId,
-          name: name,
-          claimsPhone: warranty['claims_phone']?.toString(),
-          submissionEmail: warranty['submission_email']?.toString(),
+          () => _api.createWarrantyCompany(
+            businessId,
+            name: name,
+            claimsPhone: warranty['claims_phone']?.toString(),
+            submissionEmail: warranty['submission_email']?.toString(),
+          ),
+          outboxId: outboxId,
         );
       }
     }
     final current = await _api.documentDetail(businessId, serverInvoiceId);
     final version = int.tryParse(current['row_version']?.toString() ?? '') ?? 1;
-    await _api.updateDocumentWarranty(
-      businessId, serverInvoiceId,
-      expectedVersion: version,
-      extendedWarranty: warranty['extended_warranty'] == true,
-      warrantyCompanyId: companyId,
-      claimNumber: warranty['claim_number']?.toString(),
-      authorizationNumber: warranty['authorization_number']?.toString(),
-      approvedAmount: num.tryParse(warranty['approved_amount']?.toString() ?? ''),
-      surchargeRate: num.tryParse(warranty['surcharge_rate']?.toString() ?? '') ?? 0.03,
+    await LocalJobQuarantine.guardReplay(
+      _database,
+      businessId,
+      () => _api.updateDocumentWarranty(
+        businessId, serverInvoiceId,
+        expectedVersion: version,
+        extendedWarranty: warranty['extended_warranty'] == true,
+        warrantyCompanyId: companyId,
+        claimNumber: warranty['claim_number']?.toString(),
+        authorizationNumber: warranty['authorization_number']?.toString(),
+        approvedAmount: num.tryParse(warranty['approved_amount']?.toString() ?? ''),
+        surchargeRate: num.tryParse(warranty['surcharge_rate']?.toString() ?? '') ?? 0.03,
+      ),
+      outboxId: outboxId,
     );
     return _api.documentDetail(businessId, serverInvoiceId);
   }
@@ -504,6 +703,7 @@ class OfflineDocumentDraftService {
     final originalJobId = estimate['job_id']?.toString() ?? '';
     final provisionalJobId = originalJobId.isEmpty ? 'local-conversion-job-$operationId' : null;
     final effectiveJobId = provisionalJobId ?? originalJobId;
+    final temporaryJobNumber = 'TEMP-${operationId.substring(0, 8).toUpperCase()}';
     final now = DateTime.now();
     final detail = <String, dynamic>{
       ...estimate,
@@ -516,7 +716,7 @@ class OfflineDocumentDraftService {
       'converted': false,
       'converted_from_estimate_id': estimateId,
       'job_id': effectiveJobId,
-      'job_number': provisionalJobId != null ? 'Pending sync' : estimate['job_number'],
+      'job_number': provisionalJobId != null ? temporaryJobNumber : estimate['job_number'],
       'job_title': estimate['job_title'] ?? estimate['title'] ?? 'Estimate repair',
       'paid_amount': 0,
       'pending_payment': 0,
@@ -544,8 +744,8 @@ class OfflineDocumentDraftService {
           '''INSERT INTO local_jobs (id,business_id,access_scope,job_number,title,
                status,status_name,customer_id,customer_name,vehicle_id,vehicle_label,
                created_at,sync_state)
-             VALUES (?,?,'full','Pending sync',?,'open','Open',?,?,?,?,?,'pending')''',
-          [provisionalJobId,businessId,
+             VALUES (?,?,'full',?,?,'open','Open',?,?,?,?,?,'pending')''',
+          [provisionalJobId,businessId,temporaryJobNumber,
            (estimate['job_title'] ?? estimate['title'] ?? 'Estimate repair').toString(),
            estimate['customer_id'],estimate['customer_name'],estimate['vehicle_id'],
            estimate['vehicle'],_unixNow()],
@@ -821,6 +1021,7 @@ class OfflineDocumentDraftService {
   // so an interrupted response cannot add a duplicate on replay.
   Future<Map<String, dynamic>> _reconcileConvertedInvoice(
     String businessId, String invoiceId, Map<String, dynamic> localDetail,
+    int outboxId,
   ) async {
     final desired = _lines(localDetail);
     for (var attempt = 0; attempt < desired.length * 4 + 40; attempt++) {
@@ -840,8 +1041,13 @@ class OfflineDocumentDraftService {
       }
       final version = int.tryParse(remote['row_version']?.toString() ?? '') ?? 1;
       if (existing.length > desired.length) {
-        await _api.deleteDocumentLine(businessId, existing.last['id'].toString(),
-            expectedVersion: version);
+        await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => _api.deleteDocumentLine(businessId, existing.last['id'].toString(),
+              expectedVersion: version),
+          outboxId: outboxId,
+        );
         continue;
       }
       var corrected = false;
@@ -851,28 +1057,43 @@ class OfflineDocumentDraftService {
         if (same(a, b)) continue;
         if (a['name']?.toString() == b['name']?.toString() &&
             a['line_kind']?.toString() == b['line_kind']?.toString()) {
-          await _api.updateDocumentLine(businessId, a['id'].toString(),
-            expectedVersion: version, quantity: _number(b['quantity']),
-            unitPrice: _number(b['unit_price']), taxRate: _number(b['tax_rate']),
-            description: b['description']?.toString());
+          await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.updateDocumentLine(businessId, a['id'].toString(),
+              expectedVersion: version, quantity: _number(b['quantity']),
+              unitPrice: _number(b['unit_price']), taxRate: _number(b['tax_rate']),
+              description: b['description']?.toString()),
+            outboxId: outboxId,
+          );
         } else {
           // Replace an incompatible line; the next retry sees the deletion.
-          await _api.deleteDocumentLine(businessId, a['id'].toString(),
-              expectedVersion: version);
+          await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.deleteDocumentLine(businessId, a['id'].toString(),
+                expectedVersion: version),
+            outboxId: outboxId,
+          );
         }
         corrected = true;
         break;
       }
       if (corrected) continue;
       final next = desired[existing.length];
-      await _api.addDocumentLine(businessId, invoiceId,
-        expectedVersion: version, name: next['name']?.toString() ?? 'Item',
-        description: next['description']?.toString(),
-        itemId: next['item_id']?.toString(),
-        quantity: _number(next['quantity']),
-        unitPrice: _number(next['unit_price']),
-        taxRate: _number(next['tax_rate']),
-        lineKind: next['line_kind']?.toString() ?? 'item');
+      await LocalJobQuarantine.guardReplay(
+        _database,
+        businessId,
+        () => _api.addDocumentLine(businessId, invoiceId,
+          expectedVersion: version, name: next['name']?.toString() ?? 'Item',
+          description: next['description']?.toString(),
+          itemId: next['item_id']?.toString(),
+          quantity: _number(next['quantity']),
+          unitPrice: _number(next['unit_price']),
+          taxRate: _number(next['tax_rate']),
+          lineKind: next['line_kind']?.toString() ?? 'item'),
+        outboxId: outboxId,
+      );
     }
     throw StateError('Converted invoice line reconciliation did not complete safely.');
   }
@@ -894,6 +1115,11 @@ class OfflineDocumentDraftService {
       final outboxId = row.read<int>('id');
       final localId = row.read<String>('entity_id');
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database,
+          businessId,
+          outboxId: outboxId,
+        );
         // Claim before sending any bytes. A delete can cancel only an
         // untouched operation; reconnect if an upload might have started.
         await _database.customStatement(
@@ -927,38 +1153,31 @@ class OfflineDocumentDraftService {
               throw StateError('Converted estimate has no invoice reference.');
             }
           } else {
-            serverId = await _api.convertEstimate(businessId, estimateServerId);
+            serverId = await LocalJobQuarantine.guardReplay(
+              _database,
+              businessId,
+              () => _api.convertEstimate(businessId, estimateServerId),
+              outboxId: outboxId,
+            );
           }
           serverDetail = await _reconcileConvertedInvoice(
-              businessId, serverId, localDetail);
+              businessId, serverId, localDetail, outboxId);
           final localMemo = localDetail['memo']?.toString().trim() ?? '';
           final remoteMemo = serverDetail['memo']?.toString().trim() ?? '';
           if (localMemo != remoteMemo) {
             final version = int.tryParse(
                 serverDetail['row_version']?.toString() ?? '') ?? 1;
-            await _api.updateDocumentNotes(
-              businessId, serverId,
-              expectedVersion: version,
-              memo: localMemo.isEmpty ? null : localMemo,
+            await LocalJobQuarantine.guardReplay(
+              _database,
+              businessId,
+              () => _api.updateDocumentNotes(
+                businessId, serverId,
+                expectedVersion: version,
+                memo: localMemo.isEmpty ? null : localMemo,
+              ),
+              outboxId: outboxId,
             );
             serverDetail = await _api.documentDetail(businessId, serverId);
-          }
-          final provisionalJobId = payload['provisional_job_id']?.toString() ?? '';
-          if (provisionalJobId.isNotEmpty) {
-            final realJobId = serverDetail['job_id']?.toString() ?? '';
-            if (realJobId.isEmpty) {
-              throw StateError('Converted invoice has no server-linked Job.');
-            }
-            // The server conversion creates exactly one Job for an unlinked
-            // estimate. Replace the temporary local Job with its real identity.
-            await _database.transaction(() async {
-              await _database.customStatement(
-                'UPDATE local_documents SET job_id=? WHERE business_id=? AND job_id=?',
-                [realJobId,businessId,provisionalJobId]);
-              await _database.customStatement(
-                'DELETE FROM local_jobs WHERE business_id=? AND id=? AND sync_state=?',
-                [businessId,provisionalJobId,'pending']);
-            });
           }
         } else if (payload['kind'] == 'invoice') {
           final operationId = payload['operation_id']?.toString() ?? '';
@@ -966,14 +1185,19 @@ class OfflineDocumentDraftService {
           if (operationId.isEmpty || customerId.isEmpty) {
             throw StateError('Offline invoice is missing its sync identity.');
           }
-          serverId = await _api.syncOfflineQuickInvoice(
+          serverId = await LocalJobQuarantine.guardReplay(
+            _database,
             businessId,
-            customerId: customerId,
-            vehicleId: payload['vehicle_id']?.toString(),
-            operationId: operationId,
-            documentDate: payload['document_date']?.toString() ?? '',
-            lines: _lines(localDetail),
-            memo: localDetail['memo']?.toString(),
+            () => _api.syncOfflineQuickInvoice(
+              businessId,
+              customerId: customerId,
+              vehicleId: payload['vehicle_id']?.toString(),
+              operationId: operationId,
+              documentDate: payload['document_date']?.toString() ?? '',
+              lines: _lines(localDetail),
+              memo: localDetail['memo']?.toString(),
+            ),
+            outboxId: outboxId,
           );
           serverDetail = await _api.documentDetail(businessId,serverId);
           if ((serverDetail['job_id']?.toString() ?? '').isEmpty) {
@@ -987,35 +1211,50 @@ class OfflineDocumentDraftService {
             if (operationId.isEmpty || customerId.isEmpty) {
               throw StateError('The offline estimate has no sync identity.');
             }
-            serverId = await _api.syncOfflineStandaloneEstimate(
+            serverId = await LocalJobQuarantine.guardReplay(
+              _database,
               businessId,
-              customerId:customerId,
-              vehicleId:payload['vehicle_id']?.toString(),
-              operationId:operationId,
-              documentDate:payload['document_date']?.toString() ?? '',
-              lines:_lines(localDetail),
-              memo:localDetail['memo']?.toString(),
+              () => _api.syncOfflineStandaloneEstimate(
+                businessId,
+                customerId:customerId,
+                vehicleId:payload['vehicle_id']?.toString(),
+                operationId:operationId,
+                documentDate:payload['document_date']?.toString() ?? '',
+                lines:_lines(localDetail),
+                memo:localDetail['memo']?.toString(),
+              ),
+              outboxId: outboxId,
             );
             serverDetail=await _api.documentDetail(businessId,serverId);
           } else {
-          serverId = await _api.createEstimate(businessId, jobId);
+          serverId = await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.createEstimate(businessId, jobId),
+            outboxId: outboxId,
+          );
           serverDetail = await _api.documentDetail(businessId, serverId);
 
           final lines = _lines(localDetail);
           for (final line in lines) {
             final version =
                 int.tryParse(serverDetail['row_version']?.toString() ?? '') ?? 1;
-            await _api.addDocumentLine(
+            await LocalJobQuarantine.guardReplay(
+              _database,
               businessId,
-              serverId,
-              expectedVersion: version,
-              name: line['name']?.toString() ?? 'Item',
-              description: line['description']?.toString(),
-              itemId: line['item_id']?.toString(),
-              quantity: _number(line['quantity']),
-              unitPrice: _number(line['unit_price']),
-              taxRate: _number(line['tax_rate']),
-              lineKind: line['line_kind']?.toString() ?? 'item',
+              () => _api.addDocumentLine(
+                businessId,
+                serverId,
+                expectedVersion: version,
+                name: line['name']?.toString() ?? 'Item',
+                description: line['description']?.toString(),
+                itemId: line['item_id']?.toString(),
+                quantity: _number(line['quantity']),
+                unitPrice: _number(line['unit_price']),
+                taxRate: _number(line['tax_rate']),
+                lineKind: line['line_kind']?.toString() ?? 'item',
+              ),
+              outboxId: outboxId,
             );
             serverDetail = await _api.documentDetail(businessId,serverId);
           }
@@ -1024,11 +1263,16 @@ class OfflineDocumentDraftService {
           if (memo.isNotEmpty) {
             final version =
                 int.tryParse(serverDetail['row_version']?.toString() ?? '') ?? 1;
-            await _api.updateDocumentNotes(
+            await LocalJobQuarantine.guardReplay(
+              _database,
               businessId,
-              serverId,
-              expectedVersion: version,
-              memo: memo,
+              () => _api.updateDocumentNotes(
+                businessId,
+                serverId,
+                expectedVersion: version,
+                memo: memo,
+              ),
+              outboxId: outboxId,
             );
             serverDetail = await _api.documentDetail(businessId,serverId);
           }
@@ -1037,68 +1281,77 @@ class OfflineDocumentDraftService {
 
         if (payload['kind'] == 'invoice' || payload['kind'] == 'convert_invoice') {
           serverDetail = await _applyPendingInvoiceWarranty(
-            businessId, serverId, localDetail);
+            businessId, serverId, localDetail, outboxId);
         }
-        await _documents.upsertFromServer(
-          businessId,
-          [serverDetail],
-        );
-        await _cache.save(businessId, serverId, serverDetail);
-        await _cache.save(
-          businessId,
-          localId,
-          <String, dynamic>{
-            ...serverDetail,
-            '_server_document_id': serverId,
-          },
-        );
-
-        if (payload['kind'] == 'convert_invoice') {
-          final originalId = payload['estimate_id']?.toString() ?? '';
-          final original = await _cache.load(businessId, originalId);
-          if (original != null) {
-            await _cache.save(businessId, originalId, {
-              ...original,
-              'converted': true,
-              'converted_invoice_id': serverId,
-              'sync_state': 'synced',
-            });
-          }
-        }
-        if (payload['kind'] == 'invoice') {
-          await OfflineInvoicePaymentLedger(database: _database).remapInvoice(
-            businessId,
-            localId,
-            serverId,
-          );
-        }
-
-        if (payload['kind'] == 'estimate') {
-          await _remapPendingEstimateMerges(
-            businessId,
-            localId,
-            serverId,
-          );
-        }
-
         await _database.transaction(() async {
-          if (payload['kind'] == 'invoice') {
-            // Do not remove pending local Job until authoritative invoice
-            // and its linked real Job are safely cached.
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database,
+            businessId,
+            outboxId: outboxId,
+          );
+          if (payload['kind'] == 'invoice' || payload['kind'] == 'convert_invoice') {
             final provisionalJobId =
                 payload['provisional_job_id']?.toString() ?? '';
             if (provisionalJobId.isNotEmpty) {
-              await _database.customStatement(
-                'DELETE FROM local_job_visits WHERE business_id = ? AND job_id = ?',
-                [businessId, provisionalJobId],
+              final jobNumber = await LocalJobRepository(database: _database)
+                  .remapProvisionalJob(
+                businessId,
+                provisionalJobId,
+                serverDetail['job_id']?.toString() ?? '',
+                jobNumber: serverDetail['job_number']?.toString(),
               );
-              await _database.customStatement(
-                'DELETE FROM local_jobs WHERE business_id = ? AND id = ? '
-                "AND sync_state = 'pending'",
-                [businessId, provisionalJobId],
-              );
+              // Some document responses omit the number. Keep the same visible,
+              // clickable TEMP label until the real Job number is downloaded.
+              serverDetail = {...serverDetail, 'job_number': jobNumber};
             }
           }
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database,
+            businessId,
+            outboxId: outboxId,
+          );
+          await _documents.upsertFromServer(
+            businessId,
+            [serverDetail],
+          );
+          await _cache.save(businessId, serverId, serverDetail);
+          await _cache.save(
+            businessId,
+            localId,
+            <String, dynamic>{
+              ...serverDetail,
+              '_server_document_id': serverId,
+            },
+          );
+
+          if (payload['kind'] == 'convert_invoice') {
+            final originalId = payload['estimate_id']?.toString() ?? '';
+            final original = await _cache.load(businessId, originalId);
+            if (original != null) {
+              await _cache.save(businessId, originalId, {
+                ...original,
+                'converted': true,
+                'converted_invoice_id': serverId,
+                'sync_state': 'synced',
+              });
+            }
+          }
+          if (payload['kind'] == 'invoice' || payload['kind'] == 'convert_invoice') {
+            await OfflineInvoicePaymentLedger(database: _database).remapInvoice(
+              businessId,
+              localId,
+              serverId,
+            );
+          }
+
+          if (payload['kind'] == 'estimate') {
+            await _remapPendingEstimateMerges(
+              businessId,
+              localId,
+              serverId,
+            );
+          }
+
           await _database.customStatement(
             'DELETE FROM local_documents WHERE business_id = ? AND id = ?',
             [businessId, localId],

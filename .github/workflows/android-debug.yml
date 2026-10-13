@@ -3,7 +3,7 @@ name: Build Android debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, fix/offline-warranty-payment-ui-20261011]
     paths-ignore:
       - '.github/workflows/**'
 

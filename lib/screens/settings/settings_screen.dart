@@ -21,6 +21,7 @@ import 'payment_methods_settings_screen.dart';
 import 'receipt_training_samples_screen.dart';
 import 'shop_info_settings_screen.dart';
 import 'tax_invoicing_settings_screen.dart';
+import 'test_data_cleanup_screen.dart';
 import 'warranty_payment_calculator_screen.dart';
 import 'warranty_workflow_settings_screen.dart';
 
@@ -177,6 +178,23 @@ class SettingsScreen extends StatelessWidget {
                   onTap: () => _chooseConnectionMode(context),
                 );
               },
+            ),
+          if (roleCode == 'owner')
+            ListTile(
+              leading: const Icon(Icons.cleaning_services_outlined,
+                  color: BriskersColors.settings),
+              title: const Text('Delete test jobs'),
+              subtitle: const Text(
+                'Review test records; protected deletion only',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => TestDataCleanupScreen(
+                    businessId: businessId, roleCode: roleCode),
+                ),
+              ),
             ),
           if (roleCode == 'owner')
             ListTile(
@@ -477,6 +495,7 @@ class SettingsScreen extends StatelessWidget {
               );
             },
           ),
+          ],
           const Divider(),
           ListTile(
             leading: const Icon(
@@ -513,7 +532,6 @@ class SettingsScreen extends StatelessWidget {
             title: Text(tr('notifications')),
             subtitle: Text(tr('notificationsSub')),
           ),
-          ],
         ],
       ),
     );

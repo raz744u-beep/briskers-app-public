@@ -1,0 +1,26 @@
+import 'dart:io';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('Manual expense photos never invoke OCR by default', () {
+    final source = File('lib/screens/expenses/expense_entry_screen.dart')
+        .readAsStringSync();
+    expect(source, contains('_addReceipts({bool scanWithAi = false})'));
+    expect(source, contains('_takeReceiptPhoto({bool scanWithAi = false})'));
+    expect(source, contains('if (scanWithAi) await _readReceipt(file)'));
+    expect(source, contains('if (scanWithAi) await _readReceipt(files.first)'));
+    expect(source, contains("'Attach photo'"));
+    expect(source, contains("'Scan with AI'"));
+    expect(source, contains('_takeReceiptPhoto(scanWithAi: true)'));
+  });
+
+  test('Manual unlinked expense always receives balanced allocation', () {
+    // Server migration is validated by database checks, not the Flutter
+    // generated/test source bundle (which excludes tools/migrations).
+    final source = File('lib/screens/expenses/expense_entry_screen.dart')
+        .readAsStringSync();
+    expect(source, contains('final rounded = num.parse(amount.toStringAsFixed(2))'));
+    expect(source, contains('createManualTransaction('));
+    expect(source, contains('categoryId: _categoryId!'));
+  });
+}

@@ -236,6 +236,12 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         return tr('preInspection');
       case 'preinspection_photo':
         return tr('inspectionPhotos');
+      case 'financial_photo':
+        return 'Expense receipt photo upload';
+      case 'financial_create':
+        return 'Saving expense';
+      case 'financial_update':
+        return 'Updating expense';
       case 'appointment_checkin':
         return tr('appointmentCheckIn');
       case 'kiosk_walkin_registration':

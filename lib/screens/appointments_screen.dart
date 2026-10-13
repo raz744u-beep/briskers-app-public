@@ -13,6 +13,7 @@ import '../core/appointment_action_policy.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
+import '../services/job_summary_visibility.dart';
 import '../services/local_appointment_repository.dart';
 import 'appointments/appointment_manage_screen.dart';
 import 'jobs/job_detail_screen.dart';
@@ -42,6 +43,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   final LocalAppointmentRepository _localAppointments =
       LocalAppointmentRepository();
 
+  late JobSummaryVisibility _jobVisibility;
   List<Map<String, dynamic>>? _appointments;
   String _filter = 'today';
   final TextEditingController _search = TextEditingController();
@@ -61,6 +63,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   @override
   void dispose() {
+    _jobVisibility.dispose();
     _search.dispose();
     super.dispose();
   }
@@ -68,22 +71,62 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   @override
   void initState() {
     super.initState();
+    _listenForQuarantine();
     _load(initialEntry: true);
   }
 
+  void _listenForQuarantine() {
+    _jobVisibility = JobSummaryVisibility(
+      businessId: widget.businessId,
+      onQuarantine: (jobIds) {
+        if (!mounted) return;
+        _lastSuccessfulPull.remove(widget.businessId);
+        setState(() {
+          if (_appointments != null) {
+            final hidden = _appointments!.where(
+                (row) => jobIds.contains(row['job_id']?.toString()));
+            if (hidden.any((row) => row['id']?.toString() == _checkingInId)) {
+              _checkingInId = null;
+            }
+            _appointments = JobSummaryVisibility.withoutJobs(
+                _appointments!, jobIds, jobIdKey: 'job_id');
+          }
+          _onlineReady = false;
+          _showingLocal = _appointments != null;
+        });
+      },
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant AppointmentsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId) {
+      _jobVisibility.dispose();
+      _appointments = null;
+      _pending = 0;
+      _onlineReady = false;
+      _listenForQuarantine();
+      _load(initialEntry: true);
+    }
+  }
+
   Future<void> _load({bool initialEntry = false}) async {
+    final visibility = _jobVisibility;
+    final generation = visibility.beginLoad();
     var localAvailable = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
     if (!forceOnline) {
       try {
-      final localRows =
-          await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim());
+      final localRows = await visibility.filter(
+          await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim()),
+          jobIdKey: 'job_id');
       final bootstrapped =
           await _localAppointments.hasBootstrap(widget.businessId);
       localAvailable = bootstrapped || localRows.isNotEmpty;
 
-      if (mounted && localAvailable) {
+      if (mounted && localAvailable && visibility.isCurrent(generation)) {
         setState(() {
           _appointments = localRows;
           _showingLocal = true;
@@ -95,6 +138,8 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       // Online refresh below can still populate the local appointment cache.
       }
     }
+
+    if (!mounted || !visibility.isCurrent(generation)) return;
 
     // Local rows were displayed first. Manual refresh and mutations still sync.
     final lastPull = _lastSuccessfulPull[widget.businessId];
@@ -113,9 +158,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       }
 
       await _appointmentSync.pull(widget.businessId);
-      _lastSuccessfulPull[widget.businessId] = DateTime.now();
-      final localRows =
-          await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim());
+      final localRows = await visibility.filter(
+          await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim()),
+          jobIdKey: 'job_id');
       final bootstrapped =
           await _localAppointments.hasBootstrap(widget.businessId);
 
@@ -134,8 +179,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         } catch (_) {}
       }
 
-      if (!mounted) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
+        _lastSuccessfulPull[widget.businessId] = DateTime.now();
         _appointments = localRows;
         _pending = pending;
         _onlineReady = bootstrapped;
@@ -143,7 +189,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         _error = null;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _onlineReady = false;
         if (localAvailable && !forceOnline) {

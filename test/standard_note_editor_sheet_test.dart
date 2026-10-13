@@ -46,6 +46,8 @@ void main() {
     expect(output, <String, String>{
       'name': 'Standard Warranty',
       'body': 'Warranty 12 months / 12000 miles',
+      'color_hex': '#1565C0',
+      'category_key': 'service',
     });
   });
 
@@ -64,4 +66,24 @@ void main() {
       find.byKey(const ValueKey('standard-note-submit')),
     ).onPressed, isNull);
   });
+  testWidgets('editing loads the name, text and selected color', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(
+      body: StandardNoteEditorSheet(
+        accent: BriskersColors.invoices, editing: true,
+        initialName: 'General', initialBody: 'Existing reusable text',
+        initialColor: '#C62828',
+      ),
+    )));
+    final name = tester.widget<TextField>(find.byKey(const ValueKey('standard-note-name')));
+    expect(name.controller!.text, 'General');
+    expect(name.readOnly, isTrue);
+    expect(find.text('Existing reusable text'), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.byKey(const ValueKey('standard-note-submit'))).onPressed,
+        isNotNull);
+    await tester.ensureVisible(find.byKey(const ValueKey('standard-note-color-#00796B')));
+    await tester.tap(find.byKey(const ValueKey('standard-note-color-#00796B')));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
 }

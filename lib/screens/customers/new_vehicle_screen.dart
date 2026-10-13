@@ -297,6 +297,10 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
           ],
           const SizedBox(height: 18),
           FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF18529A),
+              foregroundColor: Colors.white,
+            ),
             onPressed: _busy ? null : _save,
             icon: const Icon(Icons.save),
             label: Text(widget.isEditing ? 'Save changes' : 'Save vehicle'),

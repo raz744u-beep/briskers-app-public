@@ -12,6 +12,9 @@ import '../../core/employee_role_style.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/job_sync_service.dart';
+import '../../services/local_job_quarantine.dart';
+import '../../local/local_database_provider.dart';
+import 'job_quarantine_view_guard.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/job_performance_metrics.dart';
@@ -22,6 +25,7 @@ import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../services/offline_work_findings_service.dart';
+import '../../services/work_finding_merge.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'identifix_estimate_import_screen.dart';
@@ -85,6 +89,35 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   bool _showingLocal = false;
   String? _error;
   VoidCallback? _modalRefresh;
+  int _loadEpoch = 0;
+  bool _contentBlocked = false;
+
+  bool _currentLoad(int epoch) => mounted && !_contentBlocked && epoch == _loadEpoch;
+
+  void _blockJobContent() {
+    _loadEpoch++;
+    if (!mounted) return;
+    setState(() {
+      _contentBlocked = true;
+      _job = null;
+      _profitability = null;
+      _profitabilityError = null;
+      _preInspection = null;
+      _employees = const [];
+      _statuses = const [];
+      _documents = const [];
+      _findings = const [];
+      _jobExpenses = const [];
+      _linkedExpensesCached = false;
+      _loading = false;
+      _busy = false;
+      _onlineReady = false;
+      _showingLocal = false;
+      _modalRefresh = null;
+      _initialActionScheduled = true;
+      _error = 'Job access has changed. Saved local work is preserved for review.';
+    });
+  }
 
   bool _jobCapability(String key) {
     final raw = _job?['capabilities'];
@@ -195,11 +228,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   void _scheduleInitialAction() {
+    final epoch = _loadEpoch;
     final action = widget.initialAction;
     if (action == null || _initialActionScheduled) return;
     _initialActionScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
+      if (!_currentLoad(epoch)) return;
       switch (action) {
         case 'edit':
           await _editJob();
@@ -222,6 +256,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _hydrateLocalLinkedExpenses() async {
+    final epoch = _loadEpoch;
     try {
       final linked = await _linkedExpensesCache.loadLinkedExpenses(
         widget.businessId,
@@ -229,7 +264,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       );
       // An online refresh can complete while the disk read is in flight.
       // Never overwrite newer server data with an older local snapshot.
-      if (!mounted || !_showingLocal || _onlineReady) return;
+      if (!_currentLoad(epoch) || !_showingLocal || _onlineReady) return;
       setState(() {
         _jobExpenses = linked ?? const [];
         _linkedExpensesCached = linked != null;
@@ -241,6 +276,18 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _load() async {
+    final epoch = ++_loadEpoch;
+    try {
+      if (await LocalJobQuarantine.isJobBlocked(localDatabase, widget.businessId, widget.jobId)) {
+        if (mounted && epoch == _loadEpoch) _blockJobContent();
+        return;
+      }
+    } catch (_) {
+      if (mounted && epoch == _loadEpoch) _blockJobContent();
+      return;
+    }
+    if (!mounted || epoch != _loadEpoch) return;
+    _contentBlocked = false;
     final loadWatch = Stopwatch()..start();
     var localShown = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
@@ -259,10 +306,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         stage:'local_job_detail',
         milliseconds:loadWatch.elapsedMilliseconds,
       ));
-      if (snapshot != null && mounted) {
+      if (snapshot != null && _currentLoad(epoch)) {
         final localDocuments = _canSeeFinancial
             ? await _localDocumentsForJob()
             : const <Map<String, dynamic>>[];
+        if (!_currentLoad(epoch)) return;
         localShown = true;
         unawaited(const JobPerformanceMetrics().record(
           widget.businessId,
@@ -296,9 +344,20 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       }
     }
 
+    if (!_currentLoad(epoch)) return;
+
+    // Temporary jobs have no server-side ID until their offline create
+    // operation is synchronized. Keep their local detail usable in Auto mode.
+    if (widget.jobId.startsWith('local-') && !forceOnline) {
+      if (localShown) {
+        _scheduleInitialAction();
+        return;
+      }
+    }
+
     if (forceOffline) {
       if (localShown) _scheduleInitialAction();
-      if (!localShown && mounted) {
+      if (!localShown && _currentLoad(epoch)) {
         setState(() {
           _loading = false;
           _onlineReady = false;
@@ -312,6 +371,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
     try {
       final job = await _api.jobDetail(widget.businessId, widget.jobId);
+      if (!_currentLoad(epoch)) return;
       final statuses = await _api.jobStatuses(widget.businessId);
       final rawCapabilities = job['capabilities'];
       final capabilities = rawCapabilities is Map
@@ -372,6 +432,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           widget.businessId,
           widget.jobId,
         );
+        if (!_currentLoad(epoch)) return;
         if (serverCurrentVisit != null) {
           try {
             await _offlineWorkFindings.seedCurrentVisitIfClean(
@@ -445,6 +506,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       try {
         final serverPreInspection =
             await _api.jobPreInspection(widget.businessId, widget.jobId);
+        if (!_currentLoad(epoch)) return;
         if (serverPreInspection != null) {
           try {
             await _offlineInspection.seedServerInspectionIfMissing(
@@ -503,6 +565,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             widget.businessId,
             vehicleId,
           );
+          if (!_currentLoad(epoch)) return;
           try {
             await _offlineWorkFindings.seedServerFindingsIfClean(
               widget.businessId,
@@ -522,7 +585,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             widget.businessId,
             vehicleId,
           );
-          findings = _mergeFindingLists(
+          findings = mergeWorkFindings(
             serverFindings,
             localFindings,
           );
@@ -531,7 +594,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         }
       }
 
-      if (!mounted) return;
+      if (await LocalJobQuarantine.isJobBlocked(localDatabase, widget.businessId, widget.jobId)) {
+        if (mounted && epoch == _loadEpoch) _blockJobContent();
+        return;
+      }
+      if (!_currentLoad(epoch)) return;
       setState(() {
         _job = job;
         _profitability = profitability;
@@ -555,7 +622,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         _persistOnlineJobSnapshot(statuses),
       );
     } catch (error) {
-      if (!mounted) return;
+      if (!_currentLoad(epoch)) return;
       setState(() {
         _loading = false;
         _onlineReady = false;
@@ -573,6 +640,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Future<void> _prefetchFindingPhotos(
     List<Map<String, dynamic>> findings,
   ) async {
+    final epoch = _loadEpoch;
     final pending = <Future<File?>>[];
 
     for (final finding in findings) {
@@ -593,10 +661,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         final key = attachment['key']?.toString() ?? '';
         if (bucket.isEmpty || key.isEmpty) continue;
 
+        if (!_currentLoad(epoch)) return;
         pending.add(_attachmentCache.getOrDownload(bucket, key));
 
         if (pending.length >= 4) {
           await Future.wait(pending);
+          if (!_currentLoad(epoch)) return;
           pending.clear();
         }
       }
@@ -621,46 +691,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
-  List<Map<String, dynamic>> _mergeFindingLists(
-    List<Map<String, dynamic>> server,
-    List<Map<String, dynamic>> local,
-  ) {
-    final serverById = <String, Map<String, dynamic>>{
-      for (final finding in server)
-        if ((finding['id']?.toString() ?? '').isNotEmpty)
-          finding['id'].toString(): finding,
-    };
-
-    final merged = <Map<String, dynamic>>[];
-    final seen = <String>{};
-
-    for (final localFinding in local) {
-      final id = localFinding['id']?.toString() ?? '';
-      if (id.isEmpty) continue;
-      final serverFinding = serverById[id];
-      merged.add(
-        serverFinding == null
-            ? Map<String, dynamic>.from(localFinding)
-            : {
-                ...serverFinding,
-                ...localFinding,
-              },
-      );
-      seen.add(id);
-    }
-
-    for (final serverFinding in server) {
-      final id = serverFinding['id']?.toString() ?? '';
-      if (id.isEmpty || seen.contains(id)) continue;
-      merged.add(Map<String, dynamic>.from(serverFinding));
-    }
-
-    return merged;
-  }
-
   Future<void> _refreshLocalWorkFindings() async {
+    final epoch = _loadEpoch;
     final job = _job;
-    if (job == null) return;
+    if (job == null || !_currentLoad(epoch)) return;
 
     try {
       final localVisit =
@@ -668,7 +702,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         widget.businessId,
         widget.jobId,
       );
-      if (localVisit != null && mounted) {
+      if (localVisit != null && _currentLoad(epoch)) {
         final visits = List<dynamic>.from(
           job['visits'] ?? const <dynamic>[],
         ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
@@ -705,9 +739,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           widget.businessId,
           vehicleId,
         );
-        if (mounted) {
+        if (_currentLoad(epoch)) {
           setState(() {
-            _findings = _mergeFindingLists(
+            _findings = mergeWorkFindings(
               _findings,
               localFindings,
             );
@@ -718,7 +752,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       }
     }
 
-    _modalRefresh?.call();
+    if (_currentLoad(epoch)) _modalRefresh?.call();
   }
 
   Future<void> _flushWorkFindingsQueue() async {
@@ -736,8 +770,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
-  void _applyLocalPreInspection(Map<String, dynamic> data) {
-    if (!mounted) return;
+  void _applyLocalPreInspection(Map<String, dynamic> data, {int? expectedEpoch}) {
+    if (!mounted || _contentBlocked || (expectedEpoch != null && expectedEpoch != _loadEpoch)) return;
     setState(() {
       _preInspection = data;
       _error = null;
@@ -746,12 +780,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _refreshLocalPreInspection() async {
+    final epoch = _loadEpoch;
     try {
       final local = await _offlineInspection.loadLocalInspection(
         widget.businessId,
         widget.jobId,
       );
-      if (local != null) _applyLocalPreInspection(local);
+      if (local != null) _applyLocalPreInspection(local, expectedEpoch: epoch);
     } catch (_) {
       // Local refresh is best-effort; keep the current screen state.
     }
@@ -1577,6 +1612,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _editPreInspectionDetails() async {
+    final epoch = _loadEpoch;
     if (_job == null || _busy || !_canEditInspection) return;
 
     final mileage = TextEditingController(
@@ -1666,7 +1702,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         notes: noteValue,
         odometer: odometerValue,
       );
-      _applyLocalPreInspection(local);
+      _applyLocalPreInspection(local, expectedEpoch: epoch);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1686,6 +1722,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _addPreInspectionPhotos() async {
+    final epoch = _loadEpoch;
     if (_busy || !_canEditInspection) return;
 
     final source = await showModalBottomSheet<String>(
@@ -1696,12 +1733,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
+              leading: const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
               title: const Text('Take photo'),
               onTap: () => Navigator.pop(sheetContext, 'camera'),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
               title: const Text('Choose from gallery'),
               onTap: () => Navigator.pop(sheetContext, 'gallery'),
             ),
@@ -1756,7 +1793,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         );
       }
 
-      if (local != null) _applyLocalPreInspection(local);
+      if (local != null) _applyLocalPreInspection(local, expectedEpoch: epoch);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1782,6 +1819,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   Future<void> _editPreInspectionPhotoNote(
     Map<String, dynamic> photo,
   ) async {
+    final epoch = _loadEpoch;
     final controller = TextEditingController(
       text: photo['note']?.toString() ?? '',
     );
@@ -1824,7 +1862,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           photo['id'].toString(),
           note,
         );
-        _applyLocalPreInspection(local);
+        _applyLocalPreInspection(local, expectedEpoch: epoch);
         unawaited(_flushPreInspectionQueue());
       } catch (error) {
         if (mounted) setState(() => _error = error.toString());
@@ -1940,7 +1978,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             }
                           },
                           icon:
-                              const Icon(Icons.photo_library_outlined),
+                              const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
                           label: const Text('Gallery'),
                         ),
                       ),
@@ -1959,7 +1997,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             }
                           },
                           icon:
-                              const Icon(Icons.photo_camera_outlined),
+                              const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
                           label: const Text('Camera'),
                         ),
                       ),
@@ -2133,13 +2171,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
+              leading: const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
               title: const Text('Take photo'),
               onTap: () =>
                   Navigator.pop(sheetContext, 'camera'),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
               title: const Text('Choose from gallery'),
               onTap: () =>
                   Navigator.pop(sheetContext, 'gallery'),
@@ -2266,12 +2304,12 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
+              leading: const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
               title: const Text('Take replacement photo'),
               onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
               title: const Text('Choose replacement from gallery'),
               onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
             ),
@@ -3543,12 +3581,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _openExpense(String transactionId) async {
+    // Job Expenses already displays its cached row while offline.
+    // Pass that row to the same expense-detail fallback as the main list.
+    Map<String, dynamic>? cached;
+    for (final expense in _jobExpenses) {
+      if (expense['id']?.toString() == transactionId) {
+        cached = Map<String, dynamic>.from(expense);
+        break;
+      }
+    }
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => ExpenseDetailScreen(
           businessId: widget.businessId,
           transactionId: transactionId,
+          cachedDetail: cached,
           allowRecurring:
               widget.roleCode == 'owner' || widget.roleCode == 'manager',
           canDeleteTransaction: widget.roleCode == 'owner',
@@ -4886,7 +4934,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => JobQuarantineViewGuard(
+    businessId: widget.businessId,
+    jobId: widget.jobId,
+    onBlocked: _blockJobContent,
+    onRestored: () { unawaited(_load()); },
+    child: _buildContent(context),
+  );
+
+  Widget _buildContent(BuildContext context) {
     if (_loading) {
       return Scaffold(appBar: AppBar(backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10), title: const Text('Job')), body: const Center(child: CircularProgressIndicator()));
     }

@@ -121,6 +121,33 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     return null;
   }
 
+  // Card background tints are deliberately distinct from pill colors.
+  // In particular, Partial Paid is pale yellow with its blue pill, while
+  // Closed is indigo and Pending Close is a warmer light orange.
+  Color _invoiceCardBackground(String status, Color pillColor) {
+    if (_estimate) {
+      return Color.alphaBlend(pillColor.withValues(alpha: 0.08), Colors.white);
+    }
+    switch (status.trim().toLowerCase().replaceAll('_', ' ')) {
+      case 'partial':
+      case 'partial paid':
+        return const Color(0xFFFFF8DA);
+      case 'pending':
+      case 'pending close':
+        return const Color(0xFFFFE8CD);
+      case 'paid':
+        return const Color(0xFFE8F5ED);
+      case 'closed':
+        return const Color(0xFFE9ECFA);
+      case 'void':
+        return const Color(0xFFFBE6E9);
+      case 'open':
+        return const Color(0xFFF3F3F5);
+      default:
+        return Color.alphaBlend(pillColor.withValues(alpha: 0.08), Colors.white);
+    }
+  }
+
   Color _statusColor(String status) {
     if (!_estimate) {
       final style = _invoiceStyleByName(status);
@@ -178,7 +205,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool navigationRefresh = false}) async {
     var localShown = false;
     final forceOnline =
         BriskersConnectionModeController.instance.forceOnline;
@@ -210,6 +237,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         }
       } catch (_) {}
     }
+
+    // Returning from invoice detail should show locally saved documents
+    // without triggering a second full online list and style refresh.
+    // Explicit refresh and initial load still fetch server data.
+    if (navigationRefresh && localShown && !forceOnline) return;
 
     if (forceOffline) {
       if (mounted && !localShown) {
@@ -409,7 +441,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       ),
     );
 
-    if (mounted) unawaited(_load());
+    if (mounted) unawaited(_load(navigationRefresh: true));
   }
 
   Future<void> _deleteDocument(Map<String, dynamic> row) async {
@@ -1530,10 +1562,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 9),
-                  color: Color.alphaBlend(
-                    color.withValues(alpha: 0.08),
-                    Colors.white,
-                  ),
+                  color: _invoiceCardBackground(status, color),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
                     onTap: () => _open(row),

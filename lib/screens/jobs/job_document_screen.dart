@@ -14,6 +14,7 @@ import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
+import '../../core/standard_note_rules.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/document_pdf_service.dart';
@@ -23,6 +24,7 @@ import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_document_repository.dart';
+import '../../services/local_job_repository.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_document_draft_service.dart';
@@ -37,6 +39,7 @@ import 'customer_invoice_signature_screen.dart';
 import 'invoice_warranty_panel.dart';
 import 'invoice_note_draft_rules.dart';
 import 'standard_note_editor_sheet.dart';
+import 'standard_note_picker_sheet.dart';
 import 'job_detail_screen.dart';
 import 'invoice_deletion_choice.dart';
 
@@ -90,6 +93,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       LocalTaxSettingsCache();
   final _catalogSync = CatalogSyncService();
   final OfflineInvoicePaymentLedger _offlinePayments = OfflineInvoicePaymentLedger();
+  int _loadGeneration = 0;
   final LocalPaymentMethodsCache _paymentMethodsCache = const LocalPaymentMethodsCache();
   final ImagePicker _picker = ImagePicker();
   final ScrollController _workspaceHeaderController = ScrollController();
@@ -280,7 +284,42 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     return recovered;
   }
 
-  Future<void> _load() async {
+  Map<String, dynamic> _cachedWarrantyDetail(Map<String, dynamic> detail) =>
+      Map<String, dynamic>.from(detail['offline_warranty_detail'] is Map
+          ? detail['offline_warranty_detail'] as Map
+          : const <String, dynamic>{});
+
+  Future<Map<String, dynamic>> _withLocalPayments(
+    Map<String, dynamic> detail,
+  ) async {
+    final projected = OfflineInvoicePaymentLedger.projectPendingPayments(
+      detail,
+      await _offlinePayments.pendingForInvoice(
+        widget.businessId, widget.documentId,
+      ),
+    );
+    final jobId = projected['job_id']?.toString().trim() ?? '';
+    final jobNumber = projected['job_number']?.toString().trim() ?? '';
+    if (jobId.isNotEmpty &&
+        (jobNumber.isEmpty || jobNumber == 'Pending sync' ||
+            jobNumber.startsWith('TEMP-'))) {
+      final cachedNumber = await LocalJobRepository().jobNumberForJob(
+        widget.businessId, jobId,
+      );
+      if (cachedNumber != null && cachedNumber.trim().isNotEmpty) {
+        projected['job_number'] = cachedNumber;
+      }
+    }
+    return projected;
+  }
+
+  Set<String> get _queuedPaymentOperationIds =>
+      List<dynamic>.from(
+        _detail?['_local_queued_payment_operation_ids'] ?? const [],
+      ).map((id) => id.toString()).toSet();
+
+  Future<void> _load({bool fastAfterMutation = false}) async {
+    final generation = ++_loadGeneration;
     final loadWatch = Stopwatch()..start();
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
@@ -299,7 +338,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       );
       final serverId = cached?['_server_document_id']?.toString() ?? '';
       if (serverId.isNotEmpty && serverId != widget.documentId) {
-        if (!mounted) return;
+        if (!mounted || generation != _loadGeneration) return;
         await Navigator.pushReplacement<void, void>(
           context,
           MaterialPageRoute(
@@ -324,7 +363,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         widget.businessId,
         widget.documentId,
       );
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       if (cached == null) {
         setState(() {
           _loading = false;
@@ -352,37 +391,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           await _detailCache.load(widget.businessId, widget.documentId) ??
               cached;
       final datedCached =
-          await _withRecoveredDocumentDate(repairedCached);
-      if (!_estimate) {
-        final localPayments = await _offlinePayments.pendingForInvoice(
-          widget.businessId,
-          widget.documentId,
-        );
-        if (localPayments.isNotEmpty) {
-          final queuedAmount = localPayments.fold<num>(
-            0,
-            (total, p) => total +
-                ((num.tryParse(p['amount_cents']?.toString() ?? '') ?? 0) / 100),
-          );
-          datedCached['pending_payment'] =
-              _number(datedCached['pending_payment']) + queuedAmount;
-          final existingPayments = List<dynamic>.from(
-            datedCached['payments'] ?? const [],
-          );
-          datedCached['payments'] = [
-            ...existingPayments,
-            ...localPayments.map((p) => <String, dynamic>{
-              'id': p['operation_id'],
-              'state': 'pending',
-              'amount':
-                  (num.tryParse(p['amount_cents']?.toString() ?? '') ?? 0) / 100,
-              'payment_method_name': p['method_name'],
-              'payment_method_id': p['method_id'],
-            }),
-          ];
-        }
-      }
-      if (!mounted) return;
+          await _withLocalPayments(await _withRecoveredDocumentDate(repairedCached));
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _detail = datedCached;
         if (!_notesDirty && !_notesFocusNode.hasFocus) {
@@ -421,11 +431,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             _withRecoveredDocumentDate(cached),
             _taxSettingsCache.load(widget.businessId),
           ]);
-          final recovered = Map<String, dynamic>.from(local[0] as Map);
+          final recovered = await _withLocalPayments(
+            Map<String, dynamic>.from(local[0] as Map));
           final cachedTax = local[1] as Map<String, dynamic>?;
-          if (!mounted) return;
+          if (!mounted || generation != _loadGeneration) return;
           setState(() {
             _detail = recovered;
+            _warrantyDetail = _cachedWarrantyDetail(recovered);
             _defaultTaxRate = num.tryParse(
               cachedTax?['sales_tax_rate']?.toString() ?? '',
             ) ?? 0;
@@ -447,10 +459,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     final openWatch = Stopwatch()..start();
     try {
+      // Share the existing replay with background sync before taking the
+      // authoritative snapshot. A lost response retries the saved UUID.
+      await _offlinePayments.flush(widget.businessId);
+      if (!mounted || generation != _loadGeneration) return;
       final detail = await _api.documentDetail(
         widget.businessId,
         widget.documentId,
       );
+      if (!mounted || generation != _loadGeneration) return;
+      final projected = await _withLocalPayments(detail);
       debugPrint('PERF-001 document detail RPC: ${openWatch.elapsedMilliseconds}ms');
       unawaited(const InvoicePerformanceMetrics().record(
         widget.businessId,
@@ -458,11 +476,37 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         stage: 'detail_rpc',
         milliseconds: openWatch.elapsedMilliseconds,
       ));
+      // Separate warranty RPCs must not erase the last offline snapshot when
+      // connectivity drops part-way through this refresh.
+      final cachedWarranty = _cachedWarrantyDetail(
+        await _detailCache.load(widget.businessId, widget.documentId) ??
+            <String, dynamic>{},
+      );
       await _detailCache.save(
         widget.businessId,
         widget.documentId,
-        detail,
+        <String, dynamic>{
+          ...detail,
+          if (cachedWarranty.isNotEmpty)
+            'offline_warranty_detail': cachedWarranty,
+        },
       );
+      // After a successful item/notes mutation, avoid re-fetching seven
+      // unrelated metadata endpoints. The authoritative document detail
+      // already includes updated lines, totals, and payment aggregates.
+      // Preserve the previously loaded settings, warranty and signature UI.
+      if (fastAfterMutation) {
+        if (!mounted || generation != _loadGeneration) return;
+        setState(() {
+          _detail = projected;
+          if (!_notesDirty && !_notesFocusNode.hasFocus) {
+            _notesController.text = detail['memo']?.toString() ?? '';
+          }
+          _loading = false;
+          _error = null;
+        });
+        return;
+      }
       // Independent option/metadata RPCs must not serialize screen opening.
       Future<T> safe<T>(Future<T> future, T fallback) async {
         try {
@@ -484,7 +528,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           Future.value(<Map<String, dynamic>>[]),
         if (invoice)
           safe(_api.documentWarrantyDetail(widget.businessId,
-              widget.documentId), <String, dynamic>{})
+              widget.documentId), cachedWarranty)
         else
           Future.value(<String, dynamic>{}),
         if (invoice)
@@ -511,7 +555,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       final taxSettings = Map<String, dynamic>.from(results[0] as Map);
       final invoiceStyles = (results[1] as List)
           .map((value) => Map<String, dynamic>.from(value as Map)).toList();
-      final warrantyDetail = Map<String, dynamic>.from(results[2] as Map);
+      if (!mounted || generation != _loadGeneration) return;
+      final loadedWarranty = Map<String, dynamic>.from(results[2] as Map);
+      final warrantyDetail = loadedWarranty.isNotEmpty
+          ? loadedWarranty : cachedWarranty;
+      // Warranty metadata is fetched separately from document detail. Persist
+      // it with the document so Force Offline reopens the same saved values.
+      if (invoice && warrantyDetail.isNotEmpty) {
+        await _detailCache.save(
+          widget.businessId,
+          widget.documentId,
+          <String, dynamic>{
+            ...detail,
+            'offline_warranty_detail': warrantyDetail,
+          },
+        );
+      }
       final signatureStatus = Map<String, dynamic>.from(results[3] as Map);
       final submissionReadiness = Map<String, dynamic>.from(results[4] as Map);
       final findings = (results[5] as List)
@@ -533,9 +592,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         stage: 'detail_with_metadata',
         milliseconds: openWatch.elapsedMilliseconds,
       ));
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
-        _detail = detail;
+        _detail = projected;
         if (!_notesDirty && !_notesFocusNode.hasFocus) {
           _notesController.text = detail['memo']?.toString() ?? '';
         }
@@ -560,12 +619,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         widget.businessId,
         widget.documentId,
       );
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       if (cached != null) {
-        final datedCached = await _withRecoveredDocumentDate(cached);
-        if (!mounted) return;
+        final datedCached = await _withLocalPayments(
+          await _withRecoveredDocumentDate(cached));
+        if (!mounted || generation != _loadGeneration) return;
         setState(() {
           _detail = datedCached;
+          _warrantyDetail = _cachedWarrantyDetail(datedCached);
           if (!_notesDirty && !_notesFocusNode.hasFocus) {
             _notesController.text = cached['memo']?.toString() ?? '';
           }
@@ -597,7 +658,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   String _money(Object? raw) =>
       NumberFormat.currency(symbol: '\$').format(_number(raw));
 
-  bool _warrantyPaymentProcessed() {
+  bool _warrantyPaymentProcessed({bool pendingOnly = false, bool localOnly = false}) {
     if (_warrantyDetail['extended_warranty'] != true) return false;
 
     final terminalAmount = _number(_warrantyDetail['terminal_amount']);
@@ -617,7 +678,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           ? method == 'check' || method.contains('check')
           : method == 'credit card' ||
               (method.contains('credit') && method.contains('card'));
-      return amountMatches && methodMatches;
+      return amountMatches && methodMatches &&
+          (!pendingOnly || payment['state']?.toString() == 'pending') &&
+          (!localOnly || payment['pending_sync'] == true);
     });
   }
 
@@ -780,17 +843,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     }
   }
 
-  Future<void> _run(Future<void> Function() action) async {
-    if (_busy) return;
+  Future<bool> _run(Future<void> Function() action) async {
+    if (_busy) return false;
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
       await action();
-      await _load();
+      await _load(fastAfterMutation: true);
+      return true;
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
+      return false;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1095,7 +1160,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _showInvoiceExpenses() async {
     if (_estimate || !_canManageInvoiceExpenses) return;
     try {
-      final offline = BriskersConnectionModeController.instance.forceOffline;
+      final offline = BriskersConnectionModeController.instance.forceOffline ||
+          _offlineDocumentDraft.isLocalDraftId(widget.documentId);
       final cached = await LocalFinancialCache().loadLinkedExpenses(
         widget.businessId,
       );
@@ -1882,15 +1948,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           detail['signature_current'] = true;
         }
 
+        final projected = await _withLocalPayments(detail);
         if (mounted) {
           setState(() {
-            _detail = detail;
+            _detail = projected;
             _warrantyDetail = warranty;
             _signatureStatus = signature;
           });
         }
-      } else if (mounted) {
-        setState(() => _detail = detail);
+      } else {
+        final projected = await _withLocalPayments(detail);
+        if (mounted) setState(() => _detail = projected);
       }
       return await _withPdfUnits(detail);
     } catch (error) {
@@ -2444,8 +2512,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   Future<List<Map<String, dynamic>>> _paymentMethods() async {
     final cached = await _paymentMethodsCache.load(widget.businessId);
-    if (BriskersConnectionModeController.instance.forceOffline ||
-        _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+    if (BriskersConnectionModeController.instance.forceOffline) {
       return cached;
     }
     try {
@@ -2453,7 +2520,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       final methods = List<dynamic>.from(options['methods'] ?? const [])
           .map((raw) => Map<String, dynamic>.from(raw as Map))
           .toList();
-      await _paymentMethodsCache.save(widget.businessId, methods);
+      // An empty/transient response must not erase previously synced
+      // real method IDs needed for safe offline payment recording.
+      if (methods.isEmpty && cached.isNotEmpty) return cached;
+      if (methods.isNotEmpty) {
+        await _paymentMethodsCache.save(widget.businessId, methods);
+      }
       return methods;
     } catch (_) {
       if (cached.isNotEmpty) return cached;
@@ -2461,9 +2533,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     }
   }
 
+  bool _paymentNeedsReconciliation() {
+    if (_detail?['_payment_reconciliation_required'] != true) return false;
+    if (mounted) {
+      setState(() => _error =
+          'A saved payment is awaiting server reconciliation. Sync before '
+          'recording another payment; do not enter it again.');
+    }
+    return true;
+  }
+
   Future<void> _enterPayment() async {
     await _collapseWorkspaceHeader();
-    if (_estimate) return;
+    if (_estimate || _busy || _paymentNeedsReconciliation()) return;
 
     List<Map<String, dynamic>> methods;
     try {
@@ -2493,6 +2575,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final remaining = total - finalized - pending;
     if (remaining <= 0.005) return;
 
+    final queuedOperationIds = _queuedPaymentOperationIds;
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (_) => _PaymentEntryDialog(
@@ -2502,7 +2585,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         saveLabel: tr('addPayment'),
       ),
     );
-    if (result == null) return;
+    if (result == null || !mounted || _paymentNeedsReconciliation()) return;
 
     final isOffline = BriskersConnectionModeController.instance.forceOffline ||
         _offlineDocumentDraft.isLocalDraftId(widget.documentId);
@@ -2518,6 +2601,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           remainingBeforePaymentCents: (remaining * 100).round(),
           methodId: result['method_id'].toString(),
           methodName: chosen['name']?.toString() ?? '',
+          expectedQueuedOperationIds: queuedOperationIds,
         );
       });
       return;
@@ -2553,16 +2637,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       final complete = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Invoices paid — job still open'),
+          title: const Text('Mark Job Completed?'),
           content: const Text(
-            'All linked invoices are paid, but this job is still open. '
-            'Is the repair work finished? You can complete the job now '
-            'or keep it open if work remains.',
+            'Payment received in full. Is the repair work finished? '
+            'You can mark the job Completed now or keep it In Progress. '
+            'The invoice will remain paid either way.',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Keep Job Open'),
+              child: const Text('Keep In Progress'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
@@ -2585,10 +2669,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (_estimate || _busy || _number(_detail?['pending_payment']) <= 0.005) {
       return;
     }
-    if (BriskersConnectionModeController.instance.forceOffline) {
+    if (BriskersConnectionModeController.instance.forceOffline ||
+        _queuedPaymentOperationIds.isNotEmpty ||
+        _offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
       if (mounted) {
         setState(() => _error =
-            'Connect to the internet before finalizing a payment.');
+            'Connect and sync recorded payments before finalizing a payment.');
       }
       return;
     }
@@ -2630,7 +2716,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   Future<void> _enterWarrantyPayment() async {
     await _collapseWorkspaceHeader();
-    if (_estimate || _warrantyDetail['extended_warranty'] != true || _busy) {
+    if (_estimate || _warrantyDetail['extended_warranty'] != true || _busy ||
+        _paymentNeedsReconciliation()) {
       return;
     }
 
@@ -2647,6 +2734,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       return;
     }
 
+    if (_paymentNeedsReconciliation()) return;
     final finalized = _number(_detail?['paid_amount']);
     final pending = _number(_detail?['pending_payment']);
     final total = _number(_detail?['total_amount']);
@@ -2678,25 +2766,40 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       return;
     }
 
-    await _run(() async {
-      await _api.addPendingInvoicePayment(
+    final selectedMethod = method;
+    // Persist first even in Auto mode: the network may have disappeared.
+    // Replay uses the same durable operation UUID if its response is lost.
+    final recorded = await _run(() async {
+      await _offlinePayments.recordReceivedPayment(
         widget.businessId,
         widget.documentId,
         amount: amount,
-        methodId: method!['id'].toString(),
+        remainingBeforePaymentCents: (remaining * 100).round(),
+        methodId: selectedMethod['id'].toString(),
+        methodName: selectedMethod['name']?.toString() ?? '',
+        expectedQueuedOperationIds: _queuedPaymentOperationIds,
       );
+      if (!BriskersConnectionModeController.instance.forceOffline &&
+          !_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+        await _offlinePayments.flush(widget.businessId);
+      }
     });
 
-    if (!mounted) return;
+    if (!mounted || !recorded) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(tr('warrantyPaymentApplied'))),
+      SnackBar(content: Text(_detail?['_local_pending_payment'] == true
+          ? 'Warranty payment recorded locally. Pending sync.'
+          : 'Warranty payment recorded. Not yet finalized.')),
     );
   }
 
   Future<void> _showPaymentContextMenu(
     Map<String, dynamic> payment,
   ) async {
-    if (_busy || payment['state']?.toString() != 'pending') return;
+    if (_busy || payment['pending_sync'] == true ||
+        payment['state']?.toString() != 'pending') {
+      return;
+    }
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -4948,6 +5051,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       value: _money(pendingPaid),
                     ),
                   ],
+                  if (_detail?['_local_pending_payment'] == true)
+                    _AmountRow(
+                      label: 'Pending sync',
+                      value: _money(_detail?['_local_pending_payment_amount']),
+                    ),
                   const Divider(height: 18),
                   _AmountRow(
                     label: tr('balance'),
@@ -4958,6 +5066,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
             ),
           ),
+          if (_detail?['_payment_reconciliation_required'] == true)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text(
+                'A saved payment is awaiting server reconciliation. It is '
+                'listed below but is not counted twice in the totals. Sync '
+                'before recording or finalizing payments. Do not enter it again.',
+                style: TextStyle(color: Color(0xFF946200)),
+              ),
+            ),
           if (_warrantyDetail['extended_warranty'] == true &&
               warrantyNet > 0.005 &&
               safeBalance > 0.005 &&
@@ -5064,7 +5182,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       builder: (context) {
                         final payment = payments[index];
                         final editable =
-                            payment['state']?.toString() == 'pending';
+                            payment['state']?.toString() == 'pending' &&
+                            payment['pending_sync'] != true;
                         final methodName =
                             payment['payment_method_name']?.toString() ??
                                 tr('paymentSection');
@@ -5119,9 +5238,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                           subtitle: (() {
                             final paymentDate =
                                 _paymentDate(payment['entered_at']);
-                            if (paymentDate.isEmpty) return null;
+                            final label = payment['pending_sync'] == true
+                                ? 'Pending sync${paymentDate.isEmpty ? '' : ' · $paymentDate'}'
+                                : paymentDate;
+                            if (label.isEmpty) return null;
                             return Text(
-                              paymentDate,
+                              label,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -5483,8 +5605,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<Map<String, dynamic>?> _createStandardNote({
     String? initialBody,
     bool addToInvoice = false,
+    Map<String, dynamic>? template,
   }) async {
-    if (!mounted || _busy || _readOnly) return null;
+    if (!mounted || _busy || _readOnly || !widget.isOwner) return null;
     _notesFocusNode.unfocus();
     final result = await showModalBottomSheet<Map<String, String>>(
       context: context,
@@ -5493,51 +5616,45 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       showDragHandle: true,
       builder: (_) => StandardNoteEditorSheet(
         accent: _documentActionColor,
-        initialBody: initialBody ?? '',
+        initialName: template?['name']?.toString() ?? '',
+        initialBody: template?['body']?.toString() ?? initialBody ?? '',
+        initialColor: standardNoteColorHex(template?['color_hex']),
+        initialCategory: template == null ? 'service' : standardNoteCategory(template),
+        editing: template != null,
         addToInvoice: addToInvoice,
       ),
     );
     if (!mounted || result == null) return null;
-    if (!canSaveStandardNoteText(
-      result['name'] ?? '',
-      result['body'] ?? '',
-    )) {
+    if (!canSaveStandardNoteText(result['name'] ?? '', result['body'] ?? '')) {
       return null;
     }
     try {
-      final offline = BriskersConnectionModeController.instance.forceOffline;
-      final existing = await _standardNotes.available(
-        widget.businessId, offline: offline);
-      final normalizedName = result['name']!.trim().toLowerCase();
-      if (existing.any((note) =>
-          (note['name']?.toString().trim().toLowerCase() ?? '') ==
-          normalizedName)) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(tr('standardNoteDuplicateName'))),
-          );
-        }
-        return null;
-      }
-      if (offline) {
-        await _standardNotes.saveOffline(widget.businessId,
-          name: result['name']!, body: result['body']!);
-      } else {
-        await _api.saveDocumentNoteTemplate(widget.businessId,
-          name: result['name']!, body: result['body']!);
-        await _standardNotes.available(widget.businessId, offline: false);
-      }
+      final offline = BriskersConnectionModeController.instance.forceOffline ||
+          _offlineDocumentDraft.isLocalDraftId(widget.documentId);
+      // Always save locally first, including Auto mode with an unavailable
+      // connection. A failed network request must not discard the editor text.
+      await _standardNotes.available(widget.businessId, offline: offline);
+      final saved = await _standardNotes.saveOffline(widget.businessId,
+        templateId: template?['id']?.toString(), original: template,
+        name: result['name']!, body: result['body']!,
+        colorHex: result['color_hex'] ?? standardNoteDefaultColor,
+        categoryKey: result['category_key'] ?? 'service');
+      final notes = await _standardNotes.available(widget.businessId, offline: offline);
+      final matching = notes.where((note) => note['id'] == saved['id'] ||
+          note['_local_id'] == saved['id']);
+      final stored = matching.isEmpty ? saved : matching.first;
       if (!mounted) return null;
-      if (!addToInvoice) {
+      if (!addToInvoice || stored['pending_sync'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(tr('standardNoteSaved'))),
+          SnackBar(content: Text(tr(stored['pending_sync'] == true
+              ? (stored['sync_error'] == null
+                  ? 'standardNotePending' : 'standardNoteSyncProblem')
+              : 'standardNoteSaved'))),
         );
       }
-      return result;
+      return stored;
     } catch (error) {
       if (mounted) {
-        // An optional template operation must not leave a raw network
-        // exception underneath the invoice totals on a different tab.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not save standard note: $error')),
         );
@@ -5584,7 +5701,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     List<Map<String, dynamic>> templates;
     try {
       templates = await _standardNotes.available(widget.businessId,
-        offline: BriskersConnectionModeController.instance.forceOffline);
+        offline: BriskersConnectionModeController.instance.forceOffline ||
+          _offlineDocumentDraft.isLocalDraftId(widget.documentId));
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -5599,53 +5717,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (sheetContext) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.76,
-          ),
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.only(bottom: 12),
-            children: [
-              ListTile(
-                title: Text(
-                  tr('standardNotes'),
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                subtitle: Text(tr('standardNoteChooseOrCreate')),
-              ),
-              ListTile(
-                key: const ValueKey('add-standard-note-template'),
-                leading: const Icon(Icons.add_circle_outline),
-                title: Text(tr('standardNoteCreate')),
-                onTap: () => Navigator.pop(sheetContext,
-                    <String, dynamic>{'_create_template': true}),
-              ),
-              const Divider(height: 1),
-              if (templates.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(tr('standardNoteEmptyList')),
-                ),
-              ...templates.map(
-                (template) => ListTile(
-                  leading: const Icon(Icons.notes_outlined),
-                  title: Text(template['name']?.toString() ?? ''),
-                  subtitle: Text(
-                    template['body']?.toString() ?? '',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onTap: () => Navigator.pop(sheetContext, template),
-                ),
-              ),
-            ],
-          ),
-        ),
+      builder: (_) => StandardNotePickerSheet(
+        templates: templates,
+        canManage: widget.isOwner,
+        onEdit: (template) async {
+          await _createStandardNote(template: template);
+          return _standardNotes.cached(widget.businessId);
+        },
+        onReorder: (ids) async {
+          if (!widget.isOwner) return _standardNotes.cached(widget.businessId);
+          await _standardNotes.reorderOffline(widget.businessId, ids);
+          return _standardNotes.available(widget.businessId,
+            offline: BriskersConnectionModeController.instance.forceOffline ||
+                _offlineDocumentDraft.isLocalDraftId(widget.documentId));
+        },
       ),
     );
 
@@ -6163,7 +6248,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ),
           ],
           const SizedBox(height: 12),
-          if (!_readOnly &&
+          if (!_readOnly && widget.isOwner &&
               _notesController.text.trim().isNotEmpty)
             OutlinedButton.icon(
               key: const ValueKey('invoice-save-as-standard-note'),
@@ -6484,7 +6569,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           );
     final unsyncedInvoice = widget.documentId.startsWith('local-invoice-') &&
         (_detail?['_server_document_id']?.toString().isEmpty ?? true);
-    final statusLabel = unsyncedInvoice
+    final statusLabel = (unsyncedInvoice ||
+        _detail?['_local_pending_payment'] == true)
         ? 'Pending sync'
         : _statusLabel(
             total: total,
@@ -6612,6 +6698,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       detail: _warrantyDetail,
                       readOnly: _readOnly,
                       paymentProcessed: _warrantyPaymentProcessed(),
+                      paymentPendingLabel: _warrantyPaymentProcessed(pendingOnly: true)
+                          ? (_warrantyPaymentProcessed(localOnly: true)
+                              ? 'Pending sync' : 'Not finalized')
+                          : null,
                       onChanged: _load,
                       onLocalWarrantyChanged:
                           _offlineDocumentDraft.isLocalDraftId(widget.documentId)
@@ -6619,7 +6709,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                 .savePendingInvoiceWarranty(
                                   widget.businessId, widget.documentId, warranty)
                                 .then((_) => _load())
-                            : null,
+                            : BriskersConnectionModeController.instance.forceOffline
+                                ? (warranty) => _offlineDocumentEdit
+                                    .saveWarranty(widget.businessId,
+                                        widget.documentId, warranty)
+                                    .then((_) => _load())
+                                : null,
                     ),
                   _openFindingsBanner(),
                   if (_estimate && _converted) _convertedInvoiceBanner(),
@@ -7140,9 +7235,6 @@ class _EditLineDialogState extends State<_EditLineDialog> {
   late final TextEditingController _taxPercent;
   late String _lineKind;
   String? _error;
-  bool _quantityCleared = false;
-  bool _priceCleared = false;
-  bool _taxCleared = false;
 
   @override
   void initState() {
@@ -7313,13 +7405,9 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                                 decimal: true,
                               ),
                               onTap: () {
-                                if (!widget.clearNumericOnFirstTap ||
-                                    _quantityCleared) {
-                                  return;
-                                }
+                                // Always select the existing value, including historical invoice and estimate lines.
                                 _quantity.selection = TextSelection(baseOffset: 0,
                                   extentOffset: _quantity.text.length);
-                                _quantityCleared = true;
                               },
                               decoration: InputDecoration(
                                 labelText: tr('qtyColumn'),
@@ -7339,13 +7427,9 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                                 decimal: true,
                               ),
                               onTap: () {
-                                if (!widget.clearNumericOnFirstTap ||
-                                    _priceCleared) {
-                                  return;
-                                }
+                                // Always select the existing value, including historical invoice and estimate lines.
                                 _price.selection = TextSelection(baseOffset: 0,
                                   extentOffset: _price.text.length);
-                                _priceCleared = true;
                               },
                               decoration: InputDecoration(
                                 labelText: tr('price'),
@@ -7362,10 +7446,9 @@ class _EditLineDialogState extends State<_EditLineDialog> {
                         scrollPadding: const EdgeInsets.only(bottom: 180),
                           controller: _taxPercent,
                           onTap: () {
-                            if (!widget.clearNumericOnFirstTap || _taxCleared) return;
+                            // Always select the existing value, including historical invoice and estimate lines.
                             _taxPercent.selection = TextSelection(baseOffset: 0,
                               extentOffset: _taxPercent.text.length);
-                            _taxCleared = true;
                           },
                           keyboardType:
                               const TextInputType.numberWithOptions(decimal: true),

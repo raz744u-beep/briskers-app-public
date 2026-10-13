@@ -6,6 +6,7 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_quarantine.dart';
 import 'local_document_detail_cache.dart';
 import 'local_catalog_repository.dart';
 
@@ -252,6 +253,35 @@ class OfflineDocumentEditService {
       documentId,
       'memo',
       {'memo': memo},
+      replaceSameOperation: true,
+    );
+  }
+
+  Future<void> saveWarranty(
+    String businessId,
+    String documentId,
+    Map<String, dynamic> warranty,
+  ) async {
+    final detail = await _requireCached(businessId, documentId);
+    final updatedWarranty = <String, dynamic>{
+      if (detail['offline_warranty_detail'] is Map)
+        ...Map<String, dynamic>.from(detail['offline_warranty_detail'] as Map),
+      ...warranty,
+    };
+    await _cache.save(
+      businessId,
+      documentId,
+      <String, dynamic>{
+        ...detail,
+        'offline_warranty_detail': updatedWarranty,
+        'sync_state': 'pending',
+      },
+    );
+    await _queue(
+      businessId,
+      documentId,
+      'warranty',
+      updatedWarranty,
       replaceSameOperation: true,
     );
   }
@@ -519,6 +549,13 @@ class OfflineDocumentEditService {
     String documentId,
     List<QueryRow> rows,
   ) async {
+    await LocalJobQuarantine.assertReplayAllowed(
+      _database,
+      businessId,
+      outboxId: rows.first.read<int>('id'),
+    );
+    final replayGeneration =
+        await LocalJobQuarantine.captureGeneration(_database, businessId);
     Map<String, dynamic> serverDetail =
         await _api.documentDetail(businessId, documentId);
 
@@ -530,23 +567,33 @@ class OfflineDocumentEditService {
       );
 
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database,
+          businessId,
+          outboxId: outboxId,
+        );
         payload = await _refreshPayload(outboxId, payload);
         final version =
             int.tryParse(serverDetail['row_version']?.toString() ?? '') ?? 1;
 
         if (operation == 'add_line') {
           final beforeIds = _serverLineIds(serverDetail);
-          await _api.addDocumentLine(
+          await LocalJobQuarantine.guardReplay(
+            _database,
             businessId,
-            documentId,
-            expectedVersion: version,
-            name: payload['name']?.toString() ?? 'Item',
-            description: payload['description']?.toString(),
-            itemId: payload['item_id']?.toString(),
-            quantity: _number(payload['quantity']),
-            unitPrice: _number(payload['unit_price']),
-            taxRate: _number(payload['tax_rate']),
-            lineKind: payload['line_kind']?.toString() ?? 'item',
+            () => _api.addDocumentLine(
+              businessId,
+              documentId,
+              expectedVersion: version,
+              name: payload['name']?.toString() ?? 'Item',
+              description: payload['description']?.toString(),
+              itemId: payload['item_id']?.toString(),
+              quantity: _number(payload['quantity']),
+              unitPrice: _number(payload['unit_price']),
+              taxRate: _number(payload['tax_rate']),
+              lineKind: payload['line_kind']?.toString() ?? 'item',
+            ),
+            outboxId: outboxId,
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
           final serverLineId = _findAddedLine(
@@ -556,39 +603,61 @@ class OfflineDocumentEditService {
           );
           final localLineId = payload['local_line_id']?.toString() ?? '';
           if (localLineId.isNotEmpty && serverLineId.isNotEmpty) {
-            await _remapLineId(
-              businessId,
-              documentId,
-              localLineId,
-              serverLineId,
-            );
+            await _database.transaction(() async {
+              await LocalJobQuarantine.assertReplayAllowed(
+                _database,
+                businessId,
+                outboxId: outboxId,
+              );
+              await _remapLineId(
+                businessId,
+                documentId,
+                localLineId,
+                serverLineId,
+              );
+            });
           }
         } else if (operation == 'update_line') {
-          await _api.updateDocumentLineV2(
+          await LocalJobQuarantine.guardReplay(
+            _database,
             businessId,
-            payload['line_id'].toString(),
-            expectedVersion: version,
-            name: payload['name']?.toString() ?? 'Item',
-            quantity: _number(payload['quantity']),
-            unitPrice: _number(payload['unit_price']),
-            taxRate: _number(payload['tax_rate']),
-            description: payload['description']?.toString(),
-            lineKind: payload['line_kind']?.toString() ?? 'item',
+            () => _api.updateDocumentLineV2(
+              businessId,
+              payload['line_id'].toString(),
+              expectedVersion: version,
+              name: payload['name']?.toString() ?? 'Item',
+              quantity: _number(payload['quantity']),
+              unitPrice: _number(payload['unit_price']),
+              taxRate: _number(payload['tax_rate']),
+              description: payload['description']?.toString(),
+              lineKind: payload['line_kind']?.toString() ?? 'item',
+            ),
+            outboxId: outboxId,
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
         } else if (operation == 'delete_line') {
-          await _api.deleteDocumentLine(
+          await LocalJobQuarantine.guardReplay(
+            _database,
             businessId,
-            payload['line_id'].toString(),
-            expectedVersion: version,
+            () => _api.deleteDocumentLine(
+              businessId,
+              payload['line_id'].toString(),
+              expectedVersion: version,
+            ),
+            outboxId: outboxId,
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
         } else if (operation == 'copy_line') {
           final beforeIds = _serverLineIds(serverDetail);
-          var serverLineId = await _api.copyDocumentLine(
+          var serverLineId = await LocalJobQuarantine.guardReplay(
+            _database,
             businessId,
-            payload['source_line_id'].toString(),
-            expectedVersion: version,
+            () => _api.copyDocumentLine(
+              businessId,
+              payload['source_line_id'].toString(),
+              expectedVersion: version,
+            ),
+            outboxId: outboxId,
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
           if (serverLineId.isEmpty) {
@@ -600,35 +669,77 @@ class OfflineDocumentEditService {
           }
           final localLineId = payload['local_line_id']?.toString() ?? '';
           if (localLineId.isNotEmpty && serverLineId.isNotEmpty) {
-            await _remapLineId(
-              businessId,
-              documentId,
-              localLineId,
-              serverLineId,
-            );
+            await _database.transaction(() async {
+              await LocalJobQuarantine.assertReplayAllowed(
+                _database,
+                businessId,
+                outboxId: outboxId,
+              );
+              await _remapLineId(
+                businessId,
+                documentId,
+                localLineId,
+                serverLineId,
+              );
+            });
           }
         } else if (operation == 'move_line') {
-          await _api.moveDocumentLine(
+          await LocalJobQuarantine.guardReplay(
+            _database,
             businessId,
-            payload['line_id'].toString(),
-            expectedVersion: version,
-            direction: payload['direction']?.toString() ?? 'down',
+            () => _api.moveDocumentLine(
+              businessId,
+              payload['line_id'].toString(),
+              expectedVersion: version,
+              direction: payload['direction']?.toString() ?? 'down',
+            ),
+            outboxId: outboxId,
+          );
+          serverDetail = await _api.documentDetail(businessId, documentId);
+        } else if (operation == 'warranty') {
+          await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.updateDocumentWarranty(
+              businessId,
+              documentId,
+              expectedVersion: version,
+              extendedWarranty: payload['extended_warranty'] == true,
+              warrantyCompanyId: payload['warranty_company_id']?.toString(),
+              claimNumber: payload['claim_number']?.toString(),
+              authorizationNumber: payload['authorization_number']?.toString(),
+              approvedAmount: num.tryParse(payload['approved_amount']?.toString() ?? ''),
+              surchargeRate: num.tryParse(payload['surcharge_rate']?.toString() ?? '') ?? 0.03,
+            ),
+            outboxId: outboxId,
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
         } else if (operation == 'memo') {
-          await _api.updateDocumentNotes(
+          await LocalJobQuarantine.guardReplay(
+            _database,
             businessId,
-            documentId,
-            expectedVersion: version,
-            memo: payload['memo']?.toString(),
+            () => _api.updateDocumentNotes(
+              businessId,
+              documentId,
+              expectedVersion: version,
+              memo: payload['memo']?.toString(),
+            ),
+            outboxId: outboxId,
           );
           serverDetail = await _api.documentDetail(businessId, documentId);
         }
 
-        await _database.customStatement(
-          'DELETE FROM sync_outbox WHERE id = ?',
-          [outboxId],
-        );
+        await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database,
+            businessId,
+            outboxId: outboxId,
+          );
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE id = ?',
+            [outboxId],
+          );
+        });
       } catch (error) {
         await _database.customStatement(
           '''
@@ -644,23 +755,48 @@ class OfflineDocumentEditService {
       }
     }
 
-    await _cache.save(businessId, documentId, serverDetail);
-    await _database.customStatement(
-      '''
-      UPDATE local_documents
-      SET status = ?, total = ?, row_version = ?,
-          server_updated_at = ?, sync_state = 'synced'
-      WHERE business_id = ? AND id = ?
-      ''',
-      [
-        serverDetail['status']?.toString(),
-        _number(serverDetail['total_amount']).toDouble(),
-        int.tryParse(serverDetail['row_version']?.toString() ?? ''),
-        _unixNow(),
-        businessId,
-        documentId,
-      ],
-    );
+    // Warranty is invoice-specific and must not make estimate memo/line sync
+    // fail. A metadata fetch failure must also preserve the existing cache.
+    Map<String, dynamic> currentWarranty = const {};
+    if (serverDetail['kind']?.toString() == 'invoice') {
+      try {
+        currentWarranty =
+            await _api.documentWarrantyDetail(businessId, documentId);
+      } catch (_) {}
+    }
+    await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(_database, businessId);
+      // Queue rows have already been acknowledged. The generation prevents
+      // an old final refresh from resurfacing data after revoke/classify.
+      if (await LocalJobQuarantine.captureGeneration(_database, businessId) !=
+          replayGeneration) {
+        throw StateError('Document replay was invalidated by Job revocation.');
+      }
+      final previous = await _cache.load(businessId, documentId);
+      await _cache.save(businessId, documentId, <String, dynamic>{
+        ...serverDetail,
+        if (currentWarranty.isNotEmpty)
+          'offline_warranty_detail': currentWarranty
+        else if (previous?['offline_warranty_detail'] is Map)
+          'offline_warranty_detail': previous!['offline_warranty_detail'],
+      });
+      await _database.customStatement(
+        '''
+        UPDATE local_documents
+        SET status = ?, total = ?, row_version = ?,
+            server_updated_at = ?, sync_state = 'synced'
+        WHERE business_id = ? AND id = ?
+        ''',
+        [
+          serverDetail['status']?.toString(),
+          _number(serverDetail['total_amount']).toDouble(),
+          int.tryParse(serverDetail['row_version']?.toString() ?? ''),
+          _unixNow(),
+          businessId,
+          documentId,
+        ],
+      );
+    });
   }
 
   Future<Map<String, dynamic>> _refreshPayload(

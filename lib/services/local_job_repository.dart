@@ -47,6 +47,7 @@ class LocalJobRepository {
     String? search,
     int limit = 50,
     int offset = 0,
+    String sort = 'newest',
   }) async {
     final where = <String>['j.business_id = ?'];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
@@ -92,6 +93,32 @@ class LocalJobRepository {
         variables.add(Variable<String>(like));
       }
     }
+    // Apply sorting in SQL before LIMIT: sorting a 30-row page would
+    // conceal older records that should appear first for a chosen sort.
+    final sortSql = switch (sort) {
+      'updated' => 'COALESCE(j.server_updated_at, j.created_at) DESC, j.created_at DESC, j.id',
+      'status' => 'COALESCE(s.sort_order, 9999), j.created_at DESC, j.id',
+      'appointment' => """CASE WHEN
+        (SELECT MIN(a.starts_at) FROM local_appointments a
+         WHERE a.business_id=j.business_id AND a.job_id=j.id
+           AND a.status NOT IN ('cancelled')) IS NULL
+         THEN 1 ELSE 0 END,
+         (SELECT MIN(a.starts_at) FROM local_appointments a
+          WHERE a.business_id=j.business_id AND a.job_id=j.id
+            AND a.status NOT IN ('cancelled')) ASC,
+         j.created_at DESC, j.id""",
+      'customer' => "lower(COALESCE(j.customer_name, '')) ASC, j.created_at DESC, j.id",
+      'oldest' => 'j.created_at ASC, j.id ASC',
+      _ => """CASE WHEN j.job_number LIKE 'J-%' THEN 0
+                     WHEN j.job_number LIKE 'MB-%' THEN 1
+                     ELSE 2 END,
+              CASE WHEN substr(j.job_number, instr(j.job_number, '-') + 1)
+                             GLOB '[0-9]*'
+                     THEN CAST(substr(j.job_number,
+                        instr(j.job_number, '-') + 1) AS INTEGER)
+                     ELSE -1 END DESC,
+              j.created_at DESC, j.id""",
+    };
     variables.add(Variable<int>(limit));
     variables.add(Variable<int>(offset));
 
@@ -112,29 +139,131 @@ class LocalJobRepository {
         ON s.business_id = j.business_id AND s.code = j.status
       WHERE ${where.join(' AND ')}
       ORDER BY
-        -- New local-only jobs must be visible immediately before historical jobs.
-        CASE WHEN j.sync_state = 'pending' AND j.job_number = 'Pending sync'
+        CASE WHEN j.job_number = 'Pending sync'
+                   OR upper(j.job_number) LIKE 'TEMP-%'
              THEN 0 ELSE 1 END,
-        CASE WHEN j.sync_state = 'pending' AND j.job_number = 'Pending sync'
+        CASE WHEN j.job_number = 'Pending sync'
+                   OR upper(j.job_number) LIKE 'TEMP-%'
              THEN j.created_at END DESC,
-        CASE WHEN j.status IN ('completed','cancelled') THEN 1 ELSE 0 END,
-        COALESCE(s.sort_order, 9999),
-        -- Imported MobileBiz created_at records when the import ran, not
-        -- when jobs were originally opened. Use the sequential job number.
-        CASE
-          WHEN substr(j.job_number, instr(j.job_number, '-') + 1)
-               GLOB '[0-9]*'
-          THEN CAST(
-            substr(j.job_number, instr(j.job_number, '-') + 1) AS INTEGER
-          )
-          ELSE -1
-        END DESC,
-        j.created_at DESC, j.id
+        $sortSql
       LIMIT ? OFFSET ?
       ''',
       variables: variables,
     ).get();
     return rows.map(_jobListMap).toList();
+  }
+
+  Future<String?> jobNumberForJob(String businessId, String jobId) async {
+    final rows = await _database.customSelect(
+      'SELECT job_number FROM local_jobs WHERE business_id = ? AND id = ?',
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    if (rows.isEmpty) return null;
+    final number = rows.single.readNullable<String>('job_number')?.trim();
+    return number == null || number.isEmpty ? null : number;
+  }
+
+  /// Replace an invoice's provisional Job identity without leaving a hole in
+  /// the Jobs list while the authoritative Job bundle is still downloading.
+  /// A previously cached real Job always takes precedence over the placeholder.
+  Future<String?> remapProvisionalJob(
+    String businessId,
+    String provisionalJobId,
+    String serverJobId, {
+    String? jobNumber,
+  }) async {
+    if (serverJobId.trim().isEmpty || serverJobId.startsWith('local-')) {
+      throw StateError('The synced invoice did not return its linked Job.');
+    }
+    final number = jobNumber?.trim();
+    return _database.transaction(() async {
+      final source = await (_database.select(_database.localJobs)
+            ..where((row) => row.businessId.equals(businessId) &
+                row.id.equals(provisionalJobId)))
+          .getSingleOrNull();
+      if (source != null) {
+        await _database.into(_database.localJobs).insert(
+          source.copyWith(
+            id: serverJobId,
+            jobNumber: Value<String?>(
+              number == null || number.isEmpty ? source.jobNumber : number,
+            ),
+            syncState: 'synced',
+          ),
+          mode: InsertMode.insertOrIgnore,
+        );
+      }
+      final real = await (_database.select(_database.localJobs)
+            ..where((row) => row.businessId.equals(businessId) &
+                row.id.equals(serverJobId)))
+          .getSingleOrNull();
+      if (real == null) {
+        throw StateError('The linked Job is not saved locally yet.');
+      }
+      final currentNumber = real.jobNumber?.trim() ?? '';
+      if (number != null && number.isNotEmpty &&
+          (currentNumber.isEmpty || currentNumber == 'Pending sync' ||
+              currentNumber.toUpperCase().startsWith('TEMP-'))) {
+        await (_database.update(_database.localJobs)
+              ..where((row) => row.businessId.equals(businessId) &
+                  row.id.equals(serverJobId)))
+            .write(LocalJobsCompanion(jobNumber: Value<String?>(number)));
+      }
+      if (provisionalJobId != serverJobId) {
+        // The blank visit made with a Quick Invoice has no server identity.
+        // Preserve actual work and its outbox instead of deleting user edits.
+        await _database.customStatement(
+          "DELETE FROM local_job_visits WHERE business_id = ? AND job_id = ? "
+          "AND id LIKE 'local-visit-%' AND trim(COALESCE(work_summary, '')) = '' "
+          "AND NOT EXISTS (SELECT 1 FROM sync_outbox WHERE business_id = ? "
+          "AND entity_type = 'work_summary' AND entity_id = ?)",
+          [businessId, provisionalJobId, businessId, provisionalJobId],
+        );
+        for (final table in const [
+          'local_documents', 'local_job_visits', 'local_job_assignments',
+          'local_pre_inspections', 'local_appointments',
+        ]) {
+          await _database.customStatement(
+            'UPDATE $table SET job_id = ? WHERE business_id = ? AND job_id = ?',
+            [serverJobId, businessId, provisionalJobId],
+          );
+        }
+        for (final column in const ['found_job_id', 'repair_job_id']) {
+          await _database.customStatement(
+            'UPDATE local_findings SET $column = ? '
+            'WHERE business_id = ? AND $column = ?',
+            [serverJobId, businessId, provisionalJobId],
+          );
+        }
+        final queued = await _database.customSelect(
+          'SELECT id, entity_id, payload_json FROM sync_outbox WHERE business_id = ?',
+          variables: [Variable<String>(businessId)],
+        ).get();
+        for (final row in queued) {
+          final payload = _jsonMap(row.read<String>('payload_json'));
+          var changed = false;
+          for (final key in const ['job_id', 'found_job_id', 'repair_job_id']) {
+            if (payload[key] == provisionalJobId) {
+              payload[key] = serverJobId;
+              changed = true;
+            }
+          }
+          final entityId = row.read<String>('entity_id');
+          if (!changed && entityId != provisionalJobId) continue;
+          await _database.customStatement(
+            'UPDATE sync_outbox SET entity_id = ?, payload_json = ? WHERE id = ?',
+            [entityId == provisionalJobId ? serverJobId : entityId,
+              changed ? jsonEncode(payload) : row.read<String>('payload_json'),
+              row.read<int>('id')],
+          );
+        }
+        await _database.customStatement(
+          'DELETE FROM local_jobs WHERE business_id = ? AND id = ?',
+          [businessId, provisionalJobId],
+        );
+      }
+      return jobNumberForJob(businessId, serverJobId);
+    });
   }
 
   Future<int> jobCount(
