@@ -2,6 +2,16 @@
 \set ON_ERROR_STOP on
 SET statement_timeout='8s';
 SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000001',false);
+-- CI uses en_US.utf8. Verify that the regression actually exercises a native
+-- comparator different from the pinned byte-order signature.
+DO $$ DECLARE native_order text; canonical_order text; BEGIN
+ SELECT string_agg(s,'|' ORDER BY s),string_agg(s,'|' ORDER BY s COLLATE "C")
+ INTO native_order,canonical_order FROM (VALUES
+  ('FOREIGN KEY (business_id) REFERENCES briskers.businesses(id) ON DELETE RESTRICT'),
+  ('FOREIGN KEY (business_id, customer_id) REFERENCES briskers.customers(business_id, id) ON DELETE RESTRICT')
+ ) q(s);
+ PERFORM public.test_cleanup_assert(native_order IS DISTINCT FROM canonical_order,'native en_US comparator differs; canonical schema guard already accepted baseline');
+END $$;
 INSERT INTO briskers.notification_outbox(business_id,recipient_user_id,event_key,event_kind,payload)
 SELECT '10000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001',
  'benchmark-'||n,'synthetic-cleanup-benchmark',jsonb_build_object('filler',repeat('x',1024))

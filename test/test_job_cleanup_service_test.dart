@@ -145,7 +145,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Pending local documents · read-only preview'), findsOneWidget);
     expect(find.textContaining('137.19'), findsOneWidget);
-    final cancel = tester.widget<IconButton>(find.byTooltip('Cancel local document after safety checks'));
+    final cancelButton = find.byWidgetPredicate((widget) =>
+        widget is IconButton &&
+        widget.tooltip == 'Cancel local document after safety checks');
+    expect(cancelButton, findsOneWidget);
+    final cancel = tester.widget<IconButton>(cancelButton);
     expect(cancel.onPressed, isNull);
     expect(gateway.executions, 0);
   });

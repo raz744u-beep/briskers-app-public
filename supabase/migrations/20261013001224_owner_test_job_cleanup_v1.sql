@@ -215,6 +215,9 @@ BEGIN
    AND (source_row_number IS NOT NULL OR imported_unit_price IS NOT NULL)) THEN
    v_reasons:=array_append(v_reasons,'A document line has imported provenance.');
  END IF;
+ -- Fixed signatures use byte order, independent of the database locale.
+ -- In en_US, punctuation sorts differently, changing otherwise identical FK
+ -- signatures. Canonical C ordering preserves the strict equality guard.
  -- A new column in a deletable table needs a new reviewed policy, even if NULL.
  FOR r IN SELECT * FROM (VALUES
    ('jobs','authorization_number:text:false:,business_id:uuid:true:,claim_number:text:false:,completed_at:timestamptz:false:,created_at:timestamptz:true:,created_by:uuid:false:,customer_id:uuid:true:,id:uuid:true:,job_number:text:true:,odometer_in:numeric:false:,planned_hours:numeric:true:,requested_work:text:false:,row_version:int8:true:,status:text:true:,title:text:true:,updated_at:timestamptz:true:,vehicle_id:uuid:false:'),
@@ -225,7 +228,7 @@ BEGIN
    ('job_status_events','business_id:uuid:true:,changed_at:timestamptz:true:,changed_by:uuid:false:,from_status:text:false:,id:uuid:true:,job_id:uuid:true:,note:text:false:,to_status:text:true:')
  ) s(table_name,expected_columns) LOOP
    v_expected:=string_to_array(r.expected_columns,',');
-   SELECT array_agg(a.attname::text||':'||pt.typname||':'||a.attnotnull::text||':'||a.attgenerated::text ORDER BY a.attname) INTO v_actual
+   SELECT array_agg(a.attname::text||':'||pt.typname||':'||a.attnotnull::text||':'||a.attgenerated::text ORDER BY a.attname::text COLLATE "C") INTO v_actual
    FROM pg_attribute a JOIN pg_type pt ON pt.oid=a.atttypid JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
    WHERE n.nspname='briskers' AND c.relname=r.table_name AND a.attnum>0 AND NOT a.attisdropped;
    IF v_actual IS DISTINCT FROM v_expected THEN
@@ -242,7 +245,7 @@ BEGIN
    ('job_visits','FOREIGN KEY (business_id, job_id) REFERENCES briskers.jobs(business_id, id) ON DELETE RESTRICT|PRIMARY KEY (id)|UNIQUE (business_id, id)|UNIQUE (business_id, job_id, visit_number)'),
    ('job_status_events','FOREIGN KEY (business_id, job_id) REFERENCES briskers.jobs(business_id, id) ON DELETE RESTRICT|PRIMARY KEY (id)|UNIQUE (business_id, id)')
  ) q(table_name,expected_constraints) LOOP
-   SELECT string_agg(pg_get_constraintdef(c.oid),'|' ORDER BY pg_get_constraintdef(c.oid)) INTO v_schema
+   SELECT string_agg(pg_get_constraintdef(c.oid),'|' ORDER BY pg_get_constraintdef(c.oid) COLLATE "C") INTO v_schema
    FROM pg_constraint c WHERE c.conrelid=to_regclass('briskers.'||r.table_name) AND c.contype IN ('p','u','f');
    IF v_schema IS DISTINCT FROM r.expected_constraints THEN
      v_reasons:=array_append(v_reasons,'Unreviewed constraints for '||r.table_name||'; cleanup blocked.');
@@ -259,7 +262,7 @@ BEGIN
        'briskers.sales_document_lines'::regclass,'briskers.document_disclaimers'::regclass,
        'briskers.job_visits'::regclass,'briskers.job_status_events'::regclass)))
    ORDER BY n.nspname,c.relname,c.oid LOOP
-   EXECUTE format('SELECT coalesce(jsonb_agg(x ORDER BY x::text),''[]''::jsonb) FROM
+   EXECUTE format('SELECT coalesce(jsonb_agg(x ORDER BY x::text COLLATE "C"),''[]''::jsonb) FROM
      (SELECT to_jsonb(t) x FROM %I.%I t WHERE EXISTS
        (SELECT 1 FROM unnest($1) q(id) WHERE strpos(replace(lower(to_jsonb(t)::text),''-'',''''),replace(q.id::text,''-'',''''))>0)) a',r.nspname,r.relname)
    INTO v_rows USING v_ids;
@@ -279,7 +282,7 @@ BEGIN
      v_reasons:=array_append(v_reasons,'Protected or external dependency: '||r.nspname||'.'||r.relname||' ('||v_bad||').');
    END IF;
  END LOOP;
- SELECT string_agg(x,'|' ORDER BY x) INTO v_schema FROM (
+ SELECT string_agg(x,'|' ORDER BY x COLLATE "C") INTO v_schema FROM (
    SELECT c.conrelid::regclass::text||':'||pg_get_constraintdef(c.oid) x FROM pg_constraint c
    WHERE c.connamespace='briskers'::regnamespace
  ) s;

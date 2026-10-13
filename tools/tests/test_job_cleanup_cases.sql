@@ -24,7 +24,8 @@ SELECT public.test_cleanup_assert((SELECT count(*) FROM briskers_cleanup_private
 INSERT INTO briskers_cleanup_private.rollout(business_id,enabled,devices_verified_at,reviewed_by)
 VALUES('10000000-0000-0000-0000-000000000001',true,clock_timestamp(),'00000000-0000-0000-0000-000000000001');
 SELECT public.test_cleanup_assert((SELECT count(*) FROM briskers_cleanup_private.rollout_audit)=1,'rollout enable is audited');
-SELECT public.test_cleanup_assert(public.test_cleanup_preview()->>'can_delete'='true','eligible synthetic job enabled');
+SELECT public.test_cleanup_preview()->'blocked_reasons' AS eligible_baseline_blocked_reasons;
+SELECT public.test_cleanup_assert(public.test_cleanup_preview()->>'can_delete'='true','eligible synthetic job enabled: '||(public.test_cleanup_preview()->'blocked_reasons')::text);
 SELECT public.test_cleanup_assert(public.test_cleanup_preview()->>'fingerprint'=public.test_cleanup_preview()->>'fingerprint','fingerprint is deterministic');
 SELECT public.test_cleanup_assert(public.test_cleanup_preview()->'dependencies'->>'briskers.sales_document_lines'='1','line count visible');
 -- Unauthenticated, cross-business and non-owner callers must fail on server.

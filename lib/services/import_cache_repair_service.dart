@@ -5,6 +5,7 @@ import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'customer_vehicle_sync_service.dart';
 import 'job_sync_service.dart';
+import 'test_job_cleanup_gateway.dart';
 
 class ImportCacheRepairResult {
   const ImportCacheRepairResult({
@@ -27,6 +28,7 @@ class ImportCacheRepairService {
   ImportCacheRepairService({
     BriskersApi api = const BriskersApi(),
     BriskersLocalDatabase? database,
+    TestJobCleanupGateway cleanupGateway = const TestJobCleanupGateway(),
   })  : _api = api,
         _database = database ?? localDatabase,
         _customers = CustomerVehicleSyncService(
@@ -36,6 +38,7 @@ class ImportCacheRepairService {
         _jobs = JobSyncService(
           api: api,
           database: database ?? localDatabase,
+          cleanupGateway: cleanupGateway,
         );
 
   final BriskersApi _api;
