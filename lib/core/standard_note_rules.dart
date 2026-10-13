@@ -1,4 +1,35 @@
 /// Shared storage/display rules for reusable invoice notes.
+const standardNoteCategoryKeys = <String>[
+  'service', 'warranty', 'inspection', 'advisory', 'general',
+];
+const standardNoteCategoryNames = <String, String>{
+  'service': 'Service notes',
+  'warranty': 'Warranty notes',
+  'inspection': 'Inspection notes',
+  'advisory': 'Customer advisory',
+  'general': 'General notes',
+};
+const standardNoteCategoryColors = <String, String>{
+  'service': '#1565C0',
+  'warranty': '#2E7D32',
+  'inspection': '#EF6C00',
+  'advisory': '#C62828',
+  'general': '#6A1B9A',
+};
+
+String standardNoteCategory(Map<String, dynamic> note) {
+  final name = note['name']?.toString().trim().toLowerCase() ?? '';
+  if (name == 'general') return 'general';
+  final key = note['category_key']?.toString().trim().toLowerCase();
+  if (key != null && standardNoteCategoryKeys.contains(key)) return key;
+  // Older offline caches did not have category metadata.
+  if (name.contains('thank')) return 'general';
+  if (name.contains('warranty')) return 'warranty';
+  if (name.contains('inspect')) return 'inspection';
+  if (name.contains('advis') || name.contains('warning')) return 'advisory';
+  return 'service';
+}
+
 const standardNoteDefaultColor = '#1565C0';
 const standardNotePalette = <String, String>{
   '#1565C0': 'standardNoteBlue',
@@ -18,7 +49,7 @@ String standardNoteColorHex(Object? value) {
 }
 
 bool isGeneralStandardNote(Map<String, dynamic> note) =>
-    note['name']?.toString().trim().toLowerCase() == 'general';
+    standardNoteCategory(note) == 'general';
 
 int standardNoteSortOrder(Map<String, dynamic> note) =>
     int.tryParse(note['sort_order']?.toString() ?? '') ?? 100;
