@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -78,6 +79,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   Map<String, int> _counts = const {};
   List<Map<String, dynamic>> _syncStates = const [];
   List<Map<String, dynamic>> _outbox = const [];
+  List<Map<String, dynamic>> _pendingDetails = const [];
 
   @override
   void initState() {
@@ -151,6 +153,37 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         variables: [Variable<String>(widget.businessId)],
       ).get();
 
+      // Read-only owner-facing inspection: never mutate or retry a queued
+      // operation from the diagnostic panel. Keep raw IDs for safe cleanup.
+      final detailsRows = await localDatabase.customSelect(
+        """SELECT id, entity_type, entity_id, state, attempt_count,
+                  payload_json, last_error
+           FROM sync_outbox
+           WHERE business_id=? AND state IN ('pending','inflight','conflict')
+           ORDER BY id""",
+        variables: [Variable<String>(widget.businessId)],
+      ).get();
+      final pendingDetails = <Map<String, dynamic>>[];
+      for (final row in detailsRows) {
+        final payloadText = row.readNullable<String>('payload_json') ?? '{}';
+        Map<String, dynamic> payload = {};
+        try {
+          payload = Map<String, dynamic>.from(jsonDecode(payloadText) as Map);
+        } catch (_) {}
+        pendingDetails.add({
+          'id': row.read<int>('id'),
+          'type': row.read<String>('entity_type'),
+          'entity': row.read<String>('entity_id'),
+          'state': row.read<String>('state'),
+          'attempts': row.read<int>('attempt_count'),
+          'customer_id': payload['customer_id']?.toString() ?? '',
+          'vehicle_id': payload['vehicle_id']?.toString() ?? '',
+          'job_id': payload['job_id']?.toString() ??
+              payload['provisional_job_id']?.toString() ?? '',
+          'kind': payload['kind']?.toString() ?? '',
+          'error': row.readNullable<String>('last_error') ?? '',
+        });
+      }
       if (!mounted) return;
       setState(() {
         _counts = counts;
@@ -166,6 +199,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
               },
             )
             .toList();
+        _pendingDetails = pendingDetails;
         _outbox = outboxRows
             .map(
               (row) => <String, dynamic>{
@@ -629,6 +663,36 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                           ),
                         ),
                       ),
+                    ),
+                  ],
+                  if (_pendingDetails.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    const Text('Pending operation details (read-only)',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 6),
+                    ..._pendingDetails.map((operation) => Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: SelectableText([
+                          '${operation['type']} #${operation['id']} · ${operation['state']}',
+                          'Record: ${operation['entity']}',
+                          if ((operation['kind'] as String).isNotEmpty)
+                            'Kind: ${operation['kind']}',
+                          if ((operation['customer_id'] as String).isNotEmpty)
+                            'Customer ID: ${operation['customer_id']}',
+                          if ((operation['vehicle_id'] as String).isNotEmpty)
+                            'Vehicle ID: ${operation['vehicle_id']}',
+                          if ((operation['job_id'] as String).isNotEmpty)
+                            'Job ID: ${operation['job_id']}',
+                          'Attempts: ${operation['attempts']}',
+                          if ((operation['error'] as String).isNotEmpty)
+                            'Error: ${operation['error']}',
+                        ].join('\\n')),
+                      ),
+                    )),
+                    const Text(
+                      'Inspection only. No pending data is removed here.',
+                      style: TextStyle(fontSize: 12),
                     ),
                   ],
                   const SizedBox(height: 10),
