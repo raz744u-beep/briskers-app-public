@@ -272,14 +272,14 @@ void main() {
     expect(jobs.single.read<String>('sync_state'), 'pending');
     final queue = await db.customSelect(
       'SELECT id,entity_id FROM sync_outbox WHERE business_id=?',
-      variables: [Variable<String>(_business)],
+      variables: [const Variable<String>(_business)],
     ).get();
     expect(queue.length, 1);
     expect(queue.single.read<String>('entity_id'), first);
     final receipts = await db.customSelect(
       'SELECT response_json FROM local_job_recovery_receipts '
       'WHERE business_id=? AND outbox_id=? ORDER BY id',
-      variables: [Variable<String>(_business), Variable<int>(queue.single.read<int>('id'))],
+      variables: [const Variable<String>(_business), Variable<int>(queue.single.read<int>('id'))],
     ).get();
     expect(receipts.map((row) => jsonDecode(row.read<String>('response_json'))),
       [first, null]);
