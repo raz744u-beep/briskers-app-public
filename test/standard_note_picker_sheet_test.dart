@@ -9,6 +9,41 @@ const _templates = <Map<String, dynamic>>[
 ];
 
 void main() {
+  testWidgets('category reordering moves groups but keeps General last',
+      (tester) async {
+    final templates = <Map<String, dynamic>>[
+      {'id': 'g', 'name': 'General', 'body': 'Thank you', 'sort_order': 0,
+       'category_key': 'general'},
+      {'id': 's', 'name': 'Service A', 'body': 'Service work', 'sort_order': 10,
+       'category_key': 'service'},
+      {'id': 'w', 'name': 'Standard Warranty', 'body': 'Warranty coverage',
+       'sort_order': 20, 'category_key': 'warranty'},
+    ];
+    List<String>? requested;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(
+      body: StandardNotePickerSheet(
+        templates: templates,
+        canManage: true,
+        onEdit: (_) async => templates,
+        onReorder: (ids) async {
+          requested = ids;
+          return [
+            for (var i = 0; i < ids.length; i++)
+              {...templates.firstWhere((note) => note['id'] == ids[i]),
+                'sort_order': (i + 1) * 10},
+          ];
+        },
+      ),
+    )));
+    final groups = tester.widget<ReorderableListView>(
+      find.byKey(const ValueKey('standard-note-categories')));
+    groups.onReorderItem!(0, 1);
+    await tester.pumpAndSettle();
+    expect(requested, ['w', 's', 'g']);
+    expect(find.byKey(const ValueKey('standard-note-group-general')),
+        findsOneWidget);
+  });
+
   testWidgets('General is a footer with no drag handle and colored cards', (tester) async {
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: StandardNotePickerSheet(
       templates: _templates, canManage: true,
