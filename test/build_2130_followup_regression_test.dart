@@ -31,6 +31,12 @@ void main() {
     expect(gateway, contains('verifyOwner'));
   });
 
+  test('sync status names queued expense photo uploads clearly', () {
+    final status = source('lib/screens/settings/local_sync_status_screen.dart');
+    expect(status, contains("case 'financial_photo':"));
+    expect(status, contains('Expense receipt photo upload'));
+  });
+
   test('Standard Notes support persistent category selection and reordering', () {
     final rules = source('lib/core/standard_note_rules.dart');
     for (final key in ['service','warranty','inspection','advisory','general']) {
