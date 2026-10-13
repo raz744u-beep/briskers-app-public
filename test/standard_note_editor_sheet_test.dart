@@ -47,6 +47,7 @@ void main() {
       'name': 'Standard Warranty',
       'body': 'Warranty 12 months / 12000 miles',
       'color_hex': '#1565C0',
+      'category_key': 'service',
     });
   });
 
