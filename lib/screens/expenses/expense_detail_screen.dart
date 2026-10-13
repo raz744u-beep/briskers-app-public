@@ -74,7 +74,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         widget.businessId, widget.transactionId,
       );
       if (!mounted) return;
-      if (saved == null) {
+      final detail = saved ?? widget.cachedDetail;
+      if (detail == null) {
         setState(() {
           _loading = false;
           _error = 'This expense has not been cached on this device. '
@@ -83,11 +84,11 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         return;
       }
       setState(() {
-        _detail = Map<String, dynamic>.from(saved)
-          ..['editable'] = true
+        _detail = Map<String, dynamic>.from(detail)
+          ..['editable'] = saved != null
           ..['deletable'] = false
-          ..['date'] = saved['date'] ?? saved['transaction_date']
-          ..['attachments'] = saved['attachments'] ?? const <dynamic>[];
+          ..['date'] = detail['date'] ?? detail['transaction_date']
+          ..['attachments'] = detail['attachments'] ?? const <dynamic>[];
         _loading = false;
         _error = null;
       });
