@@ -14,6 +14,7 @@ class StandardNoteEditorSheet extends StatefulWidget {
     this.initialName = '',
     this.initialBody = '',
     this.initialColor = standardNoteDefaultColor,
+    this.initialCategory = 'service',
     this.editing = false,
     this.addToInvoice = false,
   });
@@ -22,6 +23,7 @@ class StandardNoteEditorSheet extends StatefulWidget {
   final String initialName;
   final String initialBody;
   final String initialColor;
+  final String initialCategory;
   final bool editing;
   final bool addToInvoice;
 
@@ -34,6 +36,7 @@ class _StandardNoteEditorSheetState extends State<StandardNoteEditorSheet> {
   late final TextEditingController _name;
   late final TextEditingController _body;
   late String _color;
+  late String _category;
 
   bool get _valid => canSaveStandardNoteText(_name.text, _body.text);
 
@@ -42,6 +45,8 @@ class _StandardNoteEditorSheetState extends State<StandardNoteEditorSheet> {
     super.initState();
     _name = TextEditingController(text: widget.initialName);
     _color = standardNoteColorHex(widget.initialColor);
+    _category = standardNoteCategoryKeys.contains(widget.initialCategory)
+        ? widget.initialCategory : 'service';
     _body = TextEditingController(text: widget.initialBody);
   }
 
@@ -58,6 +63,7 @@ class _StandardNoteEditorSheetState extends State<StandardNoteEditorSheet> {
       'name': _name.text.trim(),
       'body': _body.text.trim(),
       'color_hex': _color,
+      'category_key': _category,
     });
   }
 
@@ -130,6 +136,32 @@ class _StandardNoteEditorSheetState extends State<StandardNoteEditorSheet> {
                             borderSide: BorderSide(color: accent, width: 2),
                           ),
                         ),
+                      ),
+                      const SizedBox(height: 14),
+                      DropdownButtonFormField<String>(
+                        key: const ValueKey('standard-note-category'),
+                        initialValue: _category,
+                        decoration: const InputDecoration(
+                          labelText: 'Category',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          for (final key in standardNoteCategoryKeys)
+                            DropdownMenuItem(
+                              value: key,
+                              child: Text(standardNoteCategoryNames[key]!),
+                            ),
+                        ],
+                        onChanged: widget.initialName.trim().toLowerCase() == 'general'
+                            ? null
+                            : (value) {
+                                if (value == null) return;
+                                setState(() {
+                                  _category = value;
+                                  _color = standardNoteCategoryColors[value] ??
+                                      standardNoteDefaultColor;
+                                });
+                              },
                       ),
                       const SizedBox(height: 14),
                       Text(tr('standardNoteColor'),
