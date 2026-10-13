@@ -23,6 +23,7 @@ import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_document_repository.dart';
+import '../../services/local_customer_repository.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_document_draft_service.dart';
@@ -3818,7 +3819,49 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _emailPdf() async {
-    await _sharePdf();
+    final detail = await _preparePdf();
+    if (detail == null) return;
+    final bytes = await DocumentPdfService.build(detail);
+    final customerId = detail['customer_id']?.toString() ??
+        _detail?['customer_id']?.toString() ?? '';
+    var email = detail['customer_email']?.toString().trim() ?? '';
+    if (email.isEmpty && customerId.isNotEmpty) {
+      try {
+        final local = await LocalCustomerRepository().customerDetail(
+          widget.businessId, customerId);
+        final customer = local?['customer'];
+        if (customer is Map) {
+          email = customer['email']?.toString().trim() ?? '';
+        }
+        if (email.isEmpty &&
+            !BriskersConnectionModeController.instance.forceOffline) {
+          final remote = await _api.customerDetail(widget.businessId, customerId);
+          final remoteCustomer = remote['customer'];
+          if (remoteCustomer is Map) {
+            email = remoteCustomer['email']?.toString().trim() ?? '';
+          }
+        }
+      } catch (_) {
+        // Allow the email app to open with an editable empty recipient.
+      }
+    }
+    final number = detail['document_number']?.toString().trim() ?? '';
+    final subject = '${_estimate ? 'Estimate' : 'Invoice'}'
+        '${number.isEmpty ? '' : ' #$number'} - Briskers Foreign Auto Repair';
+    try {
+      await GmailComposeService.composePdf(
+        bytes: bytes,
+        filename: DocumentPdfService.fileName(detail),
+        to: email,
+        subject: subject,
+        body: 'Please find the attached ${_estimate ? 'estimate' : 'invoice'} from Briskers Foreign Auto Repair.',
+      );
+    } catch (_) {
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: DocumentPdfService.fileName(detail),
+      );
+    }
   }
 
   Future<void> _showSendMenu() async {
