@@ -4973,6 +4973,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             tooltip: 'Job menu',
             onSelected: (value) async {
               if (value == 'edit') await _editJob();
+              if (value == 'change_customer') await _changeCustomer();
               if (value == 'assignment') await _changeAssignment();
               if (value == 'refresh') await _load();
               if (value == 'delete_unused') await _deleteUnusedJob();
@@ -4986,6 +4987,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.edit_outlined),
                     title: Text('Edit job'),
+                  ),
+                ),
+              if (_canManage)
+                const PopupMenuItem(
+                  value: 'change_customer',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.person_search_outlined),
+                    title: Text('Change customer on job'),
                   ),
                 ),
               if (_canQuickAdmin)
