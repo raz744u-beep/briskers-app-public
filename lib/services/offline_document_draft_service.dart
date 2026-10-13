@@ -986,6 +986,12 @@ class OfflineDocumentDraftService {
               await _database.customStatement(
                 'UPDATE local_documents SET job_id=? WHERE business_id=? AND job_id=?',
                 [realJobId,businessId,provisionalJobId]);
+              // Preserve queued edits made to the temporary conversion Job.
+              // They must target the real Job ID once conversion succeeds.
+              await _database.customStatement(
+                "UPDATE sync_outbox SET entity_id=? WHERE business_id=? "
+                "AND entity_type='job_admin' AND entity_id=? AND state='pending'",
+                [realJobId,businessId,provisionalJobId]);
               await _database.customStatement(
                 'DELETE FROM local_jobs WHERE business_id=? AND id=? AND sync_state=?',
                 [businessId,provisionalJobId,'pending']);
