@@ -56,12 +56,47 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   void initState() {
     super.initState();
     final cached = widget.cachedDetail;
-    if (cached != null) {
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // The same local detail path must work from Jobs → Job Expenses,
+      // even when the caller has no summary to pass in.
+      _loadOffline();
+    } else if (cached != null) {
       _loadCached(cached);
     } else {
       _load();
     }
     _loadLocalExpenseIqPhoto();
+  }
+
+  Future<void> _loadOffline() async {
+    try {
+      final saved = await _localFinancial.loadTransactionDetail(
+        widget.businessId, widget.transactionId,
+      );
+      if (!mounted) return;
+      if (saved == null) {
+        setState(() {
+          _loading = false;
+          _error = 'This expense has not been cached on this device. '
+              'Open it while online first to make it available offline.';
+        });
+        return;
+      }
+      setState(() {
+        _detail = Map<String, dynamic>.from(saved)
+          ..['editable'] = true
+          ..['deletable'] = false
+          ..['date'] = saved['date'] ?? saved['transaction_date']
+          ..['attachments'] = saved['attachments'] ?? const <dynamic>[];
+        _loading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (mounted) setState(() {
+        _loading = false;
+        _error = 'Offline expense details unavailable: $error';
+      });
+    }
   }
 
   Future<void> _loadCached(Map<String, dynamic> summary) async {
