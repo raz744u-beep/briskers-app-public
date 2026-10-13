@@ -3581,12 +3581,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _openExpense(String transactionId) async {
+    // Job Expenses already displays its cached row while offline.
+    // Pass that row to the same expense-detail fallback as the main list.
+    Map<String, dynamic>? cached;
+    for (final expense in _jobExpenses) {
+      if (expense['id']?.toString() == transactionId) {
+        cached = Map<String, dynamic>.from(expense);
+        break;
+      }
+    }
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => ExpenseDetailScreen(
           businessId: widget.businessId,
           transactionId: transactionId,
+          cachedDetail: cached,
           allowRecurring:
               widget.roleCode == 'owner' || widget.roleCode == 'manager',
           canDeleteTransaction: widget.roleCode == 'owner',
