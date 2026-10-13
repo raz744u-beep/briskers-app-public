@@ -12,9 +12,8 @@ import 'package:briskers_app/services/test_job_cleanup_gateway.dart';
 
 
 class _CleanupGateway extends TestJobCleanupGateway {
-  _CleanupGateway({this.deleted = false, this.fail = false});
-  bool deleted;
-  bool fail;
+  bool deleted = false;
+  bool fail = false;
   @override
   Future<Map<String, dynamic>> tombstones(String businessId) async {
     if (fail) throw StateError('Deletion feed unavailable');

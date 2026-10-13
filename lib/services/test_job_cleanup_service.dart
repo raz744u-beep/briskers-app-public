@@ -39,8 +39,9 @@ class TestJobCleanupService {
   /// Read-only local evidence remains available on a deliberately offline
   /// phone. Cached role gates visibility; it never authorizes deletion.
   Future<List<Map<String, dynamic>>> pendingLocalDocuments(
-    String businessId, {required String roleCode},
-  ) async {
+    String businessId, {
+    required String roleCode,
+  }) async {
     TestJobCleanupPolicy.requireOwner(roleCode);
     final rows = await _database.customSelect(
       """SELECT d.id,d.kind,d.job_id,d.total,d.sync_state,
@@ -69,15 +70,17 @@ class TestJobCleanupService {
   }
 
   Future<List<Map<String, dynamic>>> jobs(
-    String businessId, {required String roleCode},
-  ) async {
+    String businessId, {
+    required String roleCode,
+  }) async {
     await verifyOwner(businessId, roleCode);
     return _gateway.jobs(businessId);
   }
 
   Future<TestJobCleanupPlan> preview(
-    String businessId, String jobId, {required String roleCode},
-  ) async {
+    String businessId, String jobId, {
+    required String roleCode,
+  }) async {
     await verifyOwner(businessId, roleCode);
     final plan = TestJobCleanupPlan.fromJson(
       await _gateway.preview(businessId, jobId),

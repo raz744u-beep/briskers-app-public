@@ -1,6 +1,7 @@
 -- SYNTHETIC ONLY. Load test_job_cleanup_schema.sql, then the migration first.
 -- This file mutates only disposable fixtures; every assertion is a SQL error
 -- on failure. Never connect these tests to the production/dev Supabase project.
+SELECT set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000001',false);
 SET statement_timeout='8s';
 CREATE TABLE public.test_cleanup_assertion_results(description text NOT NULL);
 CREATE FUNCTION public.test_cleanup_assert(ok boolean, description text) RETURNS void LANGUAGE plpgsql AS $$

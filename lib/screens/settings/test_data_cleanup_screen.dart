@@ -102,26 +102,34 @@ class _TestDataCleanupScreenState extends State<TestDataCleanupScreen> {
 
   Future<void> _delete(TestJobCleanupPlan plan) async {
     if (_working || !_authorized || !plan.canDelete ||
-        widget.roleCode != 'owner' || plan.businessId != widget.businessId) return;
+        widget.roleCode != 'owner' || plan.businessId != widget.businessId) {
+      return;
+    }
     final confirmation = await showDialog<String>(
       context: context,
       builder: (_) => _CleanupConfirmationDialog(plan: plan),
     );
     if (confirmation == null || !mounted || widget.roleCode != 'owner' ||
-        plan.businessId != widget.businessId || _working) return;
+        plan.businessId != widget.businessId || _working) {
+      return;
+    }
     setState(() { _working = true; _error = null; _success = null; _plan = null; });
     var succeeded = false;
     try {
       final receipt = await _cleanup.execute(plan,
         roleCode: widget.roleCode, confirmation: confirmation);
       succeeded = true;
-      if (mounted) setState(() => _success =
-        'Deleted test ${plan.jobNumber} and ${plan.documents.length} documents. '
-        'Audit: ${receipt.auditId}'
-        '${receipt.cacheWarning == null ? '' : '\n${receipt.cacheWarning}'}');
+      if (mounted) {
+        setState(() => _success =
+          'Deleted test ${plan.jobNumber} and ${plan.documents.length} documents. '
+          'Audit: ${receipt.auditId}'
+          '${receipt.cacheWarning == null ? '' : '\n${receipt.cacheWarning}'}');
+      }
     } catch (error) {
-      if (mounted) setState(() => _error = '${_message(error)}\n'
-          'The preview has been cleared. Refresh before trying again.');
+      if (mounted) {
+        setState(() => _error = '${_message(error)}\n'
+            'The preview has been cleared. Refresh before trying again.');
+      }
     } finally {
       if (mounted) setState(() => _working = false);
     }
@@ -146,7 +154,9 @@ class _TestDataCleanupScreenState extends State<TestDataCleanupScreen> {
       ),
     );
     if (accepted != true || !mounted || _working || widget.roleCode != 'owner' ||
-        widget.businessId != businessId) return;
+        widget.businessId != businessId) {
+      return;
+    }
     setState(() { _working = true; _error = null; _plan = null; });
     try {
       await _cleanup.verifyOwner(businessId, widget.roleCode);

@@ -131,7 +131,9 @@ class TestJobCleanupPolicy {
     if (snapshot['sync_state'] == 'pending' ||
         snapshot['sync_state'] == 'conflict' ||
         snapshot['_local_pending_payment'] == true ||
-        snapshot['_payment_reconciliation_required'] == true) return true;
+        snapshot['_payment_reconciliation_required'] == true) {
+      return true;
+    }
     for (final key in const ['paid_amount', 'pending_payment']) {
       if (!snapshot.containsKey(key)) continue;
       final amount = num.tryParse('${snapshot[key]}');

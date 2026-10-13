@@ -37,7 +37,7 @@ void main() {
     expect(find.text('First'), findsOneWidget);
   });
 
-  testWidgets('reorder emits all IDs with General last', (tester) async {
+  testWidgets('moves down and up use adjusted indexes with General last', (tester) async {
     List<String>? requested;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: StandardNotePickerSheet(
       templates: _templates, canManage: true,
@@ -51,11 +51,24 @@ void main() {
       },
     ))));
     final list = tester.widget<ReorderableListView>(find.byKey(const ValueKey('standard-note-list')));
-    list.onReorder(0, 2);
+    expect(list.onReorderItem, isNotNull);
+    list.onReorderItem!(0, 1);
     await tester.pumpAndSettle();
     expect(requested, ['b', 'a', 'general']);
     expect(tester.getTopLeft(find.text('Second')).dy,
         lessThan(tester.getTopLeft(find.text('First')).dy));
+    expect(tester.getTopLeft(find.text('General')).dy,
+        greaterThan(tester.getTopLeft(find.text('First')).dy));
+
+    final reorderedList = tester.widget<ReorderableListView>(
+        find.byKey(const ValueKey('standard-note-list')));
+    reorderedList.onReorderItem!(1, 0);
+    await tester.pumpAndSettle();
+    expect(requested, ['a', 'b', 'general']);
+    expect(tester.getTopLeft(find.text('First')).dy,
+        lessThan(tester.getTopLeft(find.text('Second')).dy));
+    expect(tester.getTopLeft(find.text('General')).dy,
+        greaterThan(tester.getTopLeft(find.text('Second')).dy));
   });
 
   testWidgets('editing reloads the picker without inserting the note', (tester) async {

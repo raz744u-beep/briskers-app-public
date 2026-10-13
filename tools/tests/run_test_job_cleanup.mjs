@@ -17,6 +17,9 @@ const files=[
 ];
 try {
   for (const file of files) {
+    // Native CI opens a new psql session for each file. Do not let auth/settings
+    // from the fixture leak into later stages and mask missing test setup.
+    await db.exec('RESET ALL; RESET ROLE;');
     const results=await db.exec(readFileSync(resolve(root,file),'utf8'));
     console.log(`PASS ${file}: ${results.length} SQL statements`);
   }

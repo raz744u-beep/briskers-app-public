@@ -75,7 +75,9 @@ class LocalDocumentDetailCache {
       final raw = prefs.getString(key);
       if (raw == null) return true;
       if (expected == null || raw != jsonEncode(expected) ||
-          TestJobCleanupPolicy.hasPendingSnapshot(expected)) return false;
+          TestJobCleanupPolicy.hasPendingSnapshot(expected)) {
+        return false;
+      }
       return prefs.remove(key);
     });
   }

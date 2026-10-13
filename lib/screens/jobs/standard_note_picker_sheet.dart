@@ -40,8 +40,10 @@ class _StandardNotePickerSheetState extends State<StandardNotePickerSheet> {
       final templates = await widget.onEdit(note);
       if (mounted) setState(() => _templates = orderStandardNotes(templates));
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString())));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -51,7 +53,8 @@ class _StandardNotePickerSheetState extends State<StandardNotePickerSheet> {
     if (_saving || !widget.canManage) return;
     final before = _templates;
     final movable = _templates.where((note) => !isGeneralStandardNote(note)).toList();
-    if (newIndex > oldIndex) newIndex--;
+    // onReorderItem already accounts for removing the old item.
+    // Decrementing a downward destination again would cancel a one-row move.
     final moved = movable.removeAt(oldIndex);
     movable.insert(newIndex.clamp(0, movable.length).toInt(), moved);
     final reordered = [...movable, ..._templates.where(isGeneralStandardNote)];
@@ -170,7 +173,7 @@ class _StandardNotePickerSheetState extends State<StandardNotePickerSheet> {
                   padding: const EdgeInsets.only(bottom: 12),
                   itemCount: movable.length,
                   itemBuilder: (_, index) => _tile(movable[index], dragIndex: index),
-                  onReorder: _reorder,
+                  onReorderItem: _reorder,
                   footer: Column(children: pinned.map((note) => _tile(note)).toList()),
                 )),
         ]),
