@@ -14,6 +14,7 @@ import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
+import '../../core/standard_note_rules.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/document_pdf_service.dart';
@@ -38,6 +39,7 @@ import 'customer_invoice_signature_screen.dart';
 import 'invoice_warranty_panel.dart';
 import 'invoice_note_draft_rules.dart';
 import 'standard_note_editor_sheet.dart';
+import 'standard_note_picker_sheet.dart';
 import 'job_detail_screen.dart';
 import 'invoice_deletion_choice.dart';
 
@@ -5603,8 +5605,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<Map<String, dynamic>?> _createStandardNote({
     String? initialBody,
     bool addToInvoice = false,
+    Map<String, dynamic>? template,
   }) async {
-    if (!mounted || _busy || _readOnly) return null;
+    if (!mounted || _busy || _readOnly || !widget.isOwner) return null;
     _notesFocusNode.unfocus();
     final result = await showModalBottomSheet<Map<String, String>>(
       context: context,
@@ -5613,51 +5616,43 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       showDragHandle: true,
       builder: (_) => StandardNoteEditorSheet(
         accent: _documentActionColor,
-        initialBody: initialBody ?? '',
+        initialName: template?['name']?.toString() ?? '',
+        initialBody: template?['body']?.toString() ?? initialBody ?? '',
+        initialColor: standardNoteColorHex(template?['color_hex']),
+        editing: template != null,
         addToInvoice: addToInvoice,
       ),
     );
     if (!mounted || result == null) return null;
-    if (!canSaveStandardNoteText(
-      result['name'] ?? '',
-      result['body'] ?? '',
-    )) {
+    if (!canSaveStandardNoteText(result['name'] ?? '', result['body'] ?? '')) {
       return null;
     }
     try {
-      final offline = BriskersConnectionModeController.instance.forceOffline;
-      final existing = await _standardNotes.available(
-        widget.businessId, offline: offline);
-      final normalizedName = result['name']!.trim().toLowerCase();
-      if (existing.any((note) =>
-          (note['name']?.toString().trim().toLowerCase() ?? '') ==
-          normalizedName)) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(tr('standardNoteDuplicateName'))),
-          );
-        }
-        return null;
-      }
-      if (offline) {
-        await _standardNotes.saveOffline(widget.businessId,
-          name: result['name']!, body: result['body']!);
-      } else {
-        await _api.saveDocumentNoteTemplate(widget.businessId,
-          name: result['name']!, body: result['body']!);
-        await _standardNotes.available(widget.businessId, offline: false);
-      }
+      final offline = BriskersConnectionModeController.instance.forceOffline ||
+          _offlineDocumentDraft.isLocalDraftId(widget.documentId);
+      // Always save locally first, including Auto mode with an unavailable
+      // connection. A failed network request must not discard the editor text.
+      await _standardNotes.available(widget.businessId, offline: offline);
+      final saved = await _standardNotes.saveOffline(widget.businessId,
+        templateId: template?['id']?.toString(), original: template,
+        name: result['name']!, body: result['body']!,
+        colorHex: result['color_hex'] ?? standardNoteDefaultColor);
+      final notes = await _standardNotes.available(widget.businessId, offline: offline);
+      final matching = notes.where((note) => note['id'] == saved['id'] ||
+          note['_local_id'] == saved['id']);
+      final stored = matching.isEmpty ? saved : matching.first;
       if (!mounted) return null;
-      if (!addToInvoice) {
+      if (!addToInvoice || stored['pending_sync'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(tr('standardNoteSaved'))),
+          SnackBar(content: Text(tr(stored['pending_sync'] == true
+              ? (stored['sync_error'] == null
+                  ? 'standardNotePending' : 'standardNoteSyncProblem')
+              : 'standardNoteSaved'))),
         );
       }
-      return result;
+      return stored;
     } catch (error) {
       if (mounted) {
-        // An optional template operation must not leave a raw network
-        // exception underneath the invoice totals on a different tab.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not save standard note: $error')),
         );
@@ -5720,53 +5715,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (sheetContext) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.76,
-          ),
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.only(bottom: 12),
-            children: [
-              ListTile(
-                title: Text(
-                  tr('standardNotes'),
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                subtitle: Text(tr('standardNoteChooseOrCreate')),
-              ),
-              ListTile(
-                key: const ValueKey('add-standard-note-template'),
-                leading: const Icon(Icons.add_circle_outline),
-                title: Text(tr('standardNoteCreate')),
-                onTap: () => Navigator.pop(sheetContext,
-                    <String, dynamic>{'_create_template': true}),
-              ),
-              const Divider(height: 1),
-              if (templates.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(tr('standardNoteEmptyList')),
-                ),
-              ...templates.map(
-                (template) => ListTile(
-                  leading: const Icon(Icons.notes_outlined),
-                  title: Text(template['name']?.toString() ?? ''),
-                  subtitle: Text(
-                    template['body']?.toString() ?? '',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onTap: () => Navigator.pop(sheetContext, template),
-                ),
-              ),
-            ],
-          ),
-        ),
+      builder: (_) => StandardNotePickerSheet(
+        templates: templates,
+        canManage: widget.isOwner,
+        onEdit: (template) async {
+          await _createStandardNote(template: template);
+          return _standardNotes.cached(widget.businessId);
+        },
+        onReorder: (ids) async {
+          if (!widget.isOwner) return _standardNotes.cached(widget.businessId);
+          await _standardNotes.reorderOffline(widget.businessId, ids);
+          return _standardNotes.available(widget.businessId,
+            offline: BriskersConnectionModeController.instance.forceOffline ||
+                _offlineDocumentDraft.isLocalDraftId(widget.documentId));
+        },
       ),
     );
 
@@ -6284,7 +6246,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             ),
           ],
           const SizedBox(height: 12),
-          if (!_readOnly &&
+          if (!_readOnly && widget.isOwner &&
               _notesController.text.trim().isNotEmpty)
             OutlinedButton.icon(
               key: const ValueKey('invoice-save-as-standard-note'),

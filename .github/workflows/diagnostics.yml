@@ -2,10 +2,20 @@ name: Briskers Diagnostics
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/**'
+      - 'test/**'
+      - 'supabase/migrations/**'
+      - 'tools/tests/**'
+      - '.github/workflows/diagnostics.yml'
   pull_request:
     paths:
       - 'lib/**'
       - 'test/**'
+      - 'supabase/migrations/**'
+      - 'tools/tests/**'
       - '.github/workflows/diagnostics.yml'
 
 permissions:
@@ -56,3 +66,28 @@ jobs:
       - name: Run diagnostic and regression tests
         working-directory: generated
         run: flutter test
+
+  cleanup-postgres:
+    name: Guarded cleanup / native PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    services:
+      postgres:
+        # Official exact-version image; isolated synthetic databases only.
+        image: postgres:17.11-bookworm
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-ci-only
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Test cleanup permissions, registry, rollback and concurrent replay
+        env:
+          CLEANUP_TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: bash tools/tests/run_test_job_cleanup_native.sh

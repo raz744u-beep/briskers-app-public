@@ -15,11 +15,11 @@ void main() {
       throw StateError(report.toText());
     }
 
-    expect(report.checks, hasLength(23));
+    expect(report.checks, hasLength(26));
     final ids = report.checks.map((check) => check.id).toSet();
-    expect(ids, containsAll(<String>['FUNC-013', 'FUNC-014', 'FUNC-015', 'FUNC-016', 'FUNC-017', 'FUNC-018', 'FUNC-019', 'FUNC-020', 'FUNC-021', 'FUNC-JOB-CREATE']));
+    expect(ids, containsAll(<String>['FUNC-013', 'FUNC-014', 'FUNC-015', 'FUNC-016', 'FUNC-017', 'FUNC-018', 'FUNC-019', 'FUNC-020', 'FUNC-021', 'FUNC-JOB-CREATE', 'FUNC-022', 'FUNC-023', 'FUNC-024', 'FUNC-025']));
     expect(ids.length, report.checks.length);
-    expect(report.passed, 23, reason: report.toText());
+    expect(report.passed, 26, reason: report.toText());
     expect(report.warnings, 0);
     expect(report.failed, 0);
   });

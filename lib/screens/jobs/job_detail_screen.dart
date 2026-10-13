@@ -22,6 +22,7 @@ import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../services/offline_work_findings_service.dart';
+import '../../services/work_finding_merge.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import 'identifix_estimate_import_screen.dart';
@@ -531,7 +532,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             widget.businessId,
             vehicleId,
           );
-          findings = _mergeFindingLists(
+          findings = mergeWorkFindings(
             serverFindings,
             localFindings,
           );
@@ -630,53 +631,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
-  List<Map<String, dynamic>> _mergeFindingLists(
-    List<Map<String, dynamic>> server,
-    List<Map<String, dynamic>> local,
-  ) {
-    // The UI can retain a provisional finding after sync replaces its ID.
-    // Only the repository's current local rows may keep that placeholder.
-    final currentLocalIds = local
-        .map((finding) => finding['id']?.toString() ?? '')
-        .toSet();
-    final serverById = <String, Map<String, dynamic>>{
-      for (final finding in server)
-        if ((finding['id']?.toString() ?? '').isNotEmpty &&
-            (!finding['id'].toString().startsWith('local-finding-') ||
-                currentLocalIds.contains(finding['id'].toString())))
-          finding['id'].toString(): finding,
-    };
-
-    final merged = <Map<String, dynamic>>[];
-    final seen = <String>{};
-
-    for (final localFinding in local) {
-      final id = localFinding['id']?.toString() ?? '';
-      if (id.isEmpty) continue;
-      final serverFinding = serverById[id];
-      merged.add(
-        serverFinding == null
-            ? Map<String, dynamic>.from(localFinding)
-            : {
-                ...serverFinding,
-                ...localFinding,
-              },
-      );
-      seen.add(id);
-    }
-
-    for (final serverFinding in server) {
-      final id = serverFinding['id']?.toString() ?? '';
-      if (id.isEmpty || seen.contains(id) ||
-          (id.startsWith('local-finding-') && !currentLocalIds.contains(id))) {
-        continue;
-      }
-      merged.add(Map<String, dynamic>.from(serverFinding));
-    }
-
-    return merged;
-  }
-
   Future<void> _refreshLocalWorkFindings() async {
     final job = _job;
     if (job == null) return;
@@ -726,7 +680,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         );
         if (mounted) {
           setState(() {
-            _findings = _mergeFindingLists(
+            _findings = mergeWorkFindings(
               _findings,
               localFindings,
             );

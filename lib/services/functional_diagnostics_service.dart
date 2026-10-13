@@ -2,6 +2,10 @@
 
 import 'dart:convert';
 
+import '../core/standard_note_rules.dart';
+import 'test_job_cleanup_policy.dart';
+import 'work_finding_merge.dart';
+
 import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -257,6 +261,28 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkJobSorting,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-023',
+      title: 'Standard Note ordering and color defaults',
+      success: 'Saved ranks are stable, General stays last, and legacy colors have a safe default.',
+      action: _checkStandardNotePresentation,
+    );
+    await _scenario(
+      checks,
+      id: 'FUNC-024',
+      title: 'Test Job cleanup permission and preview guards',
+      success: 'Owner confirmation, preview expiry, unknown contracts, and protected real records are enforced without deleting data.',
+      action: _checkTestJobCleanupGuards,
+    );
+    await _scenario(
+      checks,
+      id: 'FUNC-025',
+      title: 'Finding reconciliation preserves pending work',
+      success: 'Stale temporary IDs are removed while pending notes/photos and newer server repair state survive repeated merges.',
+      action: _checkFindingReconciliation,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -307,6 +333,99 @@ class BriskersFunctionalDiagnosticsService {
       await _cleanupPreferences(businessId);
       await database.close();
     }
+  }
+
+  Future<void> _checkStandardNotePresentation(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final ordered = orderStandardNotes([
+      {'id': 'general', 'name': ' General ', 'sort_order': -100},
+      {'id': 'warranty', 'name': 'Warranty', 'sort_order': 20},
+      {'id': 'maintenance', 'name': 'Maintenance', 'sort_order': 10},
+    ]);
+    _require(ordered.first['id'] == 'maintenance', 'Saved note order changed.');
+    _require(ordered.last['id'] == 'general', 'General is not last.');
+    _require(standardNoteColorHex(null) == standardNoteDefaultColor,
+        'Legacy note color does not have a safe default.');
+    _require(standardNoteColorHex('#00796b') == '#00796B',
+        'Saved note color was not retained.');
+  }
+
+  Future<void> _checkTestJobCleanupGuards(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final now = DateTime.now();
+    final fixture = <String, dynamic>{
+      'schema_version': 1, 'business_id': businessId, 'job_id': 'sandbox-job',
+      'job_number': 'J-8', 'can_delete': true, 'rollout_enabled': true,
+      'blocked_reasons': <String>[],
+      'documents': <Map<String, dynamic>>[], 'dependencies': <String, int>{},
+      'fingerprint': 'isolated-sandbox',
+    };
+    final plan = TestJobCleanupPlan.fromJson(fixture,
+        businessId: businessId, jobId: 'sandbox-job', receivedAt: now);
+    TestJobCleanupPolicy.requireExecutable(plan, roleCode: 'owner',
+        confirmation: 'DELETE TEST J-8', now: now);
+    bool rejected(void Function() action) {
+      try { action(); return false; } catch (_) { return true; }
+    }
+    _require(rejected(() => TestJobCleanupPolicy.requireExecutable(plan,
+        roleCode: 'office', confirmation: 'DELETE TEST J-8', now: now)),
+        'A non-owner was allowed to execute cleanup.');
+    _require(rejected(() => TestJobCleanupPolicy.requireExecutable(plan,
+        roleCode: 'owner', confirmation: 'DELETE TEST J-9', now: now)),
+        'Confirmation did not bind to the selected Job.');
+    _require(rejected(() => TestJobCleanupPolicy.requireExecutable(plan,
+        roleCode: 'owner', confirmation: 'DELETE TEST J-8',
+        now: now.add(const Duration(minutes: 3)))), 'Expired preview accepted.');
+    for (final number in ['J-7', 'J11', 'J-12']) {
+      final protected = TestJobCleanupPlan.fromJson(
+          {...fixture, 'job_number': number},
+          businessId: businessId, jobId: 'sandbox-job', receivedAt: now);
+      _require(!protected.canDelete, 'Protected real Job was allowed.');
+    }
+    final rolloutHeld = TestJobCleanupPlan.fromJson(
+        {...fixture, 'rollout_enabled': false}, businessId: businessId,
+        jobId: 'sandbox-job');
+    _require(!rolloutHeld.canDelete, 'Cleanup bypassed safe-device rollout.');
+    _require(rejected(() => TestJobCleanupPlan.fromJson(
+        {...fixture, 'schema_version': 0}, businessId: businessId,
+        jobId: 'sandbox-job')), 'Unknown cleanup contract accepted.');
+  }
+
+  Future<void> _checkFindingReconciliation(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final local = <Map<String, dynamic>>[
+      {'id': 'finding-1', 'row_version': 1, 'body': 'Unsent repair note',
+       'status': 'open', 'sync_state': 'pending',
+       'attachments': [
+         {'id': 'local-finding-photo-pending', 'upload_state': 'pending',
+          'local_file_path': '/sandbox/photo.jpg'},
+       ]},
+    ];
+    final merged = mergeWorkFindings([
+      {'id': 'local-finding-retired', 'body': 'Old provisional row'},
+      {'id': 'finding-1', 'row_version': 2, 'body': 'Server note',
+       'status': 'repaired', 'repair_job_id': 'repair-job',
+       'attachments': [
+         {'id': 'remote-photo', 'upload_state': 'synced'},
+       ]},
+    ], local);
+    _require(merged.length == 1, 'Stale finding identity was resurrected.');
+    final finding = merged.single;
+    _require(finding['body'] == 'Unsent repair note', 'Pending note was lost.');
+    _require(finding['repair_job_id'] == 'repair-job',
+        'Newer server repair state was lost.');
+    _require((finding['attachments'] as List).length == 2,
+        'Server or pending local photo was lost.');
+    final repeated = mergeWorkFindings(merged, local);
+    _require(repeated.length == 1 &&
+        (repeated.single['attachments'] as List).length == 2,
+        'Repeated finding refresh duplicated or lost data.');
   }
 
   Future<void> _checkJobSorting(

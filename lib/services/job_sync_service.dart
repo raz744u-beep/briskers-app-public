@@ -7,12 +7,17 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_cleanup_safety.dart';
+import 'test_job_cleanup_gateway.dart';
+import 'test_job_cleanup_policy.dart';
 
 class JobSyncService {
   JobSyncService({
     BriskersApi api = const BriskersApi(),
     BriskersLocalDatabase? database,
+    TestJobCleanupGateway cleanupGateway = const TestJobCleanupGateway(),
   })  : _api = api,
+        _cleanupGateway = cleanupGateway,
         _database = database ?? localDatabase;
 
   static const _scope = 'jobs';
@@ -21,7 +26,11 @@ class JobSyncService {
 
   static Stream<String> get syncEvents => _syncEvents.stream;
 
+  /// Refresh existing listeners after a verified, server-committed cleanup.
+  static void notifyCleanup(String businessId) => _syncEvents.add(businessId);
+
   final BriskersApi _api;
+  final TestJobCleanupGateway _cleanupGateway;
   final BriskersLocalDatabase _database;
 
   /// Prune only jobs missing from a verified full server snapshot.
@@ -132,6 +141,7 @@ class JobSyncService {
       var pageCursor = cursor;
 
       while (hasMore) {
+        final beforeSnapshot = await _snapshotBaseline(businessId);
         final response = await _api.syncPullJobs(
           businessId,
           afterCursor: pageCursor,
@@ -151,6 +161,30 @@ class JobSyncService {
                 0;
         hasMore = response['has_more'] == true;
 
+        // Classify only AFTER this response: cleanup may commit between RPCs.
+        final cleanup = TestJobCleanupTombstones.fromJson(
+          await _cleanupGateway.tombstones(businessId), businessId,
+        );
+        if (mode == 'bootstrap') {
+          if (response['has_more'] != false) {
+            throw StateError('Server Job reset is not a complete snapshot.');
+          }
+          await _revokeAbsentFromSnapshot(businessId,
+            _verifiedSnapshotIds(bundles, businessId), cleanup.jobIds, beforeSnapshot);
+        }
+        // Permission revocations must commit even if a separate cleanup has
+        // recoverable local work. Do not roll them back with that conflict.
+        await _database.transaction(() async {
+          for (final jobId in revokedIds) {
+            if (jobId.isNotEmpty && !cleanup.jobIds.contains(jobId)) {
+              await _removeJob(businessId, jobId);
+            }
+          }
+        });
+        if (revokedIds.any((id) => id.isNotEmpty && !cleanup.jobIds.contains(id))) {
+          _syncEvents.add(businessId);
+        }
+
         await _database.transaction(() async {
           if (mode == 'bootstrap') {
             await _clearBusinessJobCache(businessId);
@@ -158,6 +192,8 @@ class JobSyncService {
 
           for (final raw in bundles) {
             if (raw is! Map) continue;
+            final rawJob = raw['job'];
+            if (rawJob is Map && cleanup.jobIds.contains(rawJob['id'])) continue;
             await _applyBundle(
               businessId,
               Map<String, dynamic>.from(raw),
@@ -165,8 +201,8 @@ class JobSyncService {
           }
 
           for (final jobId in revokedIds) {
-            if (jobId.isEmpty) continue;
-            await _removeJob(businessId, jobId);
+            if (jobId.isEmpty || !cleanup.jobIds.contains(jobId)) continue;
+            await _removeJob(businessId, jobId, isTestCleanup: true);
           }
 
           await _writeSyncState(
@@ -230,33 +266,13 @@ class JobSyncService {
   Future<void> _bootstrapPaged(String businessId) async {
     String? afterJobId;
     int? initialCursor;
-    var firstPage = true;
+    final completeBundles = <Map<String, dynamic>>[];
+    final completeIds = <String>{};
     var pageCount = 0;
     var hasMore = true;
 
     try {
-      // Do not destroy pending offline work on a device whose initial
-      // bootstrap was interrupted. No rows outside the jobs scope are cleared.
-      final dirty = await _database.customSelect(
-        '''
-        SELECT
-          (SELECT COUNT(*) FROM local_jobs
-           WHERE business_id = ? AND sync_state <> 'synced') +
-          (SELECT COUNT(*) FROM sync_outbox
-           WHERE business_id = ? AND state IN ('pending','conflict')) AS count
-        ''',
-        variables: [
-          Variable<String>(businessId),
-          Variable<String>(businessId),
-        ],
-      ).getSingle();
-      if (dirty.read<int>('count') > 0) {
-        throw StateError(
-          'Job bootstrap blocked because unsynced local work exists. '
-          'Synchronize or resolve it before rebuilding the job cache.',
-        );
-      }
-
+      final beforeSnapshot = await _snapshotBaseline(businessId);
       while (hasMore) {
         if (++pageCount > 10000) {
           throw StateError('Job bootstrap exceeded page safety limit.');
@@ -277,7 +293,8 @@ class JobSyncService {
         initialCursor ??= currentCursor;
 
         final rawBundles = response['bundles'];
-        if (rawBundles is! List || rawBundles.length > 25) {
+        if (rawBundles is! List || rawBundles.length > 25 ||
+            response['has_more'] is! bool) {
           throw StateError('Invalid job bootstrap batch size.');
         }
         final bundles = List<dynamic>.from(rawBundles);
@@ -289,23 +306,29 @@ class JobSyncService {
           throw StateError('Job bootstrap continuation is incomplete.');
         }
 
-        await _database.transaction(() async {
-          if (firstPage) {
-            await _clearBusinessJobCache(businessId);
-          }
-          for (final raw in bundles) {
-            if (raw is! Map) {
-              throw StateError('Invalid job bundle in bootstrap response.');
-            }
-            await _applyBundle(
-              businessId, Map<String, dynamic>.from(raw),
-            );
-          }
-        });
-        firstPage = false;
+        final pageIds = _verifiedSnapshotIds(bundles, businessId);
+        if (pageIds.any(completeIds.contains)) {
+          throw StateError('Job bootstrap repeated a record.');
+        }
+        completeIds.addAll(pageIds);
+        completeBundles.addAll(bundles.map((raw) => Map<String, dynamic>.from(raw as Map)));
         afterJobId = nextJobId.isEmpty ? null : nextJobId;
       }
 
+      // Only the final validated page proves absence. Never revoke a Job
+      // merely because it is missing from page one of a keyset bootstrap.
+      final cleanup = TestJobCleanupTombstones.fromJson(
+        await _cleanupGateway.tombstones(businessId), businessId,
+      );
+      await _revokeAbsentFromSnapshot(businessId, completeIds, cleanup.jobIds, beforeSnapshot);
+      await _database.transaction(() async {
+        await _clearBusinessJobCache(businessId);
+        for (final bundle in completeBundles) {
+          final job = bundle['job'] as Map;
+          if (cleanup.jobIds.contains(job['id'])) continue;
+          await _applyBundle(businessId, bundle);
+        }
+      });
       await _writeSyncState(
         businessId,
         cursor: initialCursor ?? 0,
@@ -326,7 +349,86 @@ class JobSyncService {
     }
   }
 
+  Set<String> _verifiedSnapshotIds(List<dynamic> bundles, String businessId) {
+    final result = <String>{};
+    for (final bundle in bundles) {
+      if (bundle is! Map || bundle['job'] is! Map) {
+        throw StateError('Incomplete Job snapshot cannot revoke local access.');
+      }
+      final job = bundle['job'] as Map;
+      final id = job['id'];
+      if (id is! String || id.isEmpty || !result.add(id) ||
+          (job['business_id'] != null && job['business_id'] != businessId)) {
+        throw StateError('Job snapshot identity or business cannot be verified.');
+      }
+    }
+    return result;
+  }
+
+  Future<Map<String, String>> _snapshotBaseline(String businessId) async {
+    final rows = await _database.customSelect(
+      'SELECT id,row_version,server_updated_at FROM local_jobs WHERE business_id=?',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return {for (final row in rows)
+      row.read<String>('id'): '${row.data['row_version']}|${row.data['server_updated_at']}'};
+  }
+
+  Future<void> _revokeAbsentFromSnapshot(
+    String businessId, Set<String> serverIds, Set<String> cleanupIds,
+    Map<String, String> beforeSnapshot,
+  ) async {
+    var removed = false;
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        """SELECT j.id,j.sync_state,j.row_version,j.server_updated_at,
+             EXISTS(SELECT 1 FROM sync_outbox o WHERE o.business_id=j.business_id
+               AND o.entity_id=j.id AND o.entity_type='job_create') AS local_create
+           FROM local_jobs j WHERE j.business_id=?""",
+        variables: [Variable<String>(businessId)],
+      ).get();
+      for (final row in rows) {
+        final id = row.read<String>('id');
+        if (serverIds.contains(id) || cleanupIds.contains(id)) continue;
+        // Keyset pages are not one transaction. A newly synced identity may
+        // sort before an already-read page; absence cannot revoke its work.
+        final provenance = '${row.data['row_version']}|${row.data['server_updated_at']}';
+        if (!beforeSnapshot.containsKey(id) || beforeSnapshot[id] != provenance) continue;
+        // A never-uploaded creation cannot appear in a server snapshot yet.
+        // Its stable ID and queued work must remain recoverable.
+        if (row.read<int>('local_create') != 0 || id.startsWith('local-') ||
+            (row.read<String>('sync_state') != 'synced' &&
+             row.data['row_version'] == null && row.data['server_updated_at'] == null)) {
+          continue;
+        }
+        await _removeJob(businessId, id);
+        removed = true;
+      }
+    });
+    if (removed) _syncEvents.add(businessId);
+  }
+
   Future<void> _clearBusinessJobCache(String businessId) async {
+    // The first-page bootstrap precheck alone is insufficient: pending work
+    // can arrive while the network request runs, or be missing its queue row.
+    // Check again inside the transaction for every full-cache reset path.
+    final dirty = await _database.customSelect(
+      """SELECT
+        (SELECT COUNT(*) FROM sync_outbox WHERE business_id=?) +
+        (SELECT COUNT(*) FROM local_jobs WHERE business_id=? AND sync_state IS NOT 'synced') +
+        (SELECT COUNT(*) FROM local_job_visits WHERE business_id=? AND sync_state IS NOT 'synced') +
+        (SELECT COUNT(*) FROM local_pre_inspections WHERE business_id=? AND sync_state IS NOT 'synced') +
+        (SELECT COUNT(*) FROM local_findings WHERE business_id=? AND sync_state IS NOT 'synced') +
+        (SELECT COUNT(*) FROM local_pre_inspection_photos WHERE business_id=?
+          AND (upload_state IS NOT 'synced' OR COALESCE(local_file_path,'')<>'')) +
+        (SELECT COUNT(*) FROM local_finding_photos WHERE business_id=?
+          AND (upload_state IS NOT 'synced' OR COALESCE(local_file_path,'')<>'')) AS n""",
+      variables: List.generate(7, (_) => Variable<String>(businessId)),
+    ).getSingle();
+    if (dirty.read<int>('n') != 0) {
+      throw StateError('Job cache rebuild is blocked by local work or photos. '
+          'They have been preserved for reconciliation.');
+    }
     for (final table in const [
       'local_pre_inspection_photos',
       'local_pre_inspections',
@@ -717,8 +819,14 @@ class JobSyncService {
 
   Future<void> _removeJob(
     String businessId,
-    String jobId,
-  ) async {
+    String jobId, {
+    bool isTestCleanup = false,
+  }) async {
+    if (isTestCleanup) {
+      await LocalCleanupSafety.requireJobRemovable(
+        _database, businessId, jobId,
+      );
+    }
     final rows = await _database.customSelect(
       '''
       SELECT vehicle_id
@@ -798,7 +906,8 @@ class JobSyncService {
       keepJob: false,
     );
 
-    if (vehicleId != null && vehicleId.isNotEmpty) {
+    // Cleanup owns this Job only. Vehicle findings can belong to other Jobs.
+    if (!isTestCleanup && vehicleId != null && vehicleId.isNotEmpty) {
       final remaining = await _database.customSelect(
         '''
         SELECT COUNT(*) AS count

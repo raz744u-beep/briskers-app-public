@@ -191,7 +191,8 @@ class SettingsScreen extends StatelessWidget {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => TestDataCleanupScreen(businessId: businessId),
+                  builder: (_) => TestDataCleanupScreen(
+                    businessId: businessId, roleCode: roleCode),
                 ),
               ),
             ),

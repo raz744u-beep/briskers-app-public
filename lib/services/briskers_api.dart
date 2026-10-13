@@ -3782,6 +3782,26 @@ class BriskersApi {
     return result.toString();
   }
 
+  /// Version-checked, field-level update. Older servers leave this queued
+  /// locally until the standard-note styling migration has been deployed.
+  Future<Map<String, dynamic>> patchDocumentNoteTemplate(
+    String businessId, {
+    required String templateId,
+    required int expectedVersion,
+    required Map<String, dynamic> patch,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_patch_document_note_template_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_template_id': templateId,
+        'p_expected_version': expectedVersion,
+        'p_patch': patch,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<List<Map<String, dynamic>>> disclaimerTemplates(
     String businessId, {
     bool includeInactive = false,
