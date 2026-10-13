@@ -35,6 +35,7 @@ import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/local_payment_methods_cache.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
+import '../customers/customer_detail_screen.dart';
 import 'customer_invoice_signature_screen.dart';
 import 'invoice_warranty_panel.dart';
 import 'invoice_note_draft_rules.dart';
@@ -4398,6 +4399,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       ),
     );
   }
+  Future<void> _openInvoiceCustomer() async {
+    final customerId = _detail?['customer_id']?.toString() ?? '';
+    if (customerId.isEmpty) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CustomerDetailScreen(
+          businessId: widget.businessId,
+          customerId: customerId,
+          roleCode: widget.isOwner ? 'owner' : 'office',
+        ),
+      ),
+    );
+    if (mounted) await _load();
+  }
+
   Widget _customerHeader() {
     final customer = _detail?['customer_name']?.toString().trim() ?? '';
     final phone = _detail?['customer_phone']?.toString().trim() ?? '';
@@ -4487,6 +4504,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           customer.isEmpty ? 'Customer' : customer,
           bold: true,
           maxLines: 2,
+          onTap: (_detail?['customer_id']?.toString().isNotEmpty ?? false)
+              ? _openInvoiceCustomer : null,
+          valueColor: BriskersColors.invoices,
+          underline: true,
           problemFlag: _detail?['customer_problem_flag'] == true,
         ),
         if (phone.isNotEmpty) ...[
