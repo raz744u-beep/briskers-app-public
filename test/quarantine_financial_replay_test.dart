@@ -225,7 +225,7 @@ Future<int> _queue(
 Future<void> _seedDocument(BriskersLocalDatabase db, String id) async {
   await db.customStatement('''INSERT INTO local_documents(
     id,business_id,job_id,kind,status,total,sync_state
-  ) VALUES (?,?,?,'invoice','issued',10,'pending')''', [_business, id, _job]);
+  ) VALUES (?,?,?,'invoice','issued',10,'pending')''', [id, _business, _job]);
   await _cache.save(_business, id, _detail(id));
 }
 
@@ -296,6 +296,14 @@ void main() {
         'filename': 'receipt.jpg', 'mime_type': 'image/jpeg',
         'local_file_path': file.path,
       }, operation: 'add_line');
+      if (type == 'financial_photo') {
+        // A photo carries only its transaction ID. Prove this fixture is
+        // unrelated; unknown receipt relationships are correctly archived.
+        await db.customStatement('''INSERT INTO local_financial_cache(
+          business_id,cache_key,payload_json
+        ) VALUES (?,?,?)''', [_business, 'transaction_detail_transaction-test',
+          jsonEncode({'id': 'transaction-test', 'job_id': 'unrelated-job'})]);
+      }
       await LocalJobQuarantine.quarantineJobs(db, _business, [_job]);
       switch (type) {
         case 'document_edit':
