@@ -760,6 +760,38 @@ class DocumentPdfService {
     );
   }
 
+  /// Keep the number centered independently of a left-aligned unit label.
+  /// This affects PDF presentation only, never the stored quantity or math.
+  static pw.Widget _quantityCell(Map<String, dynamic> line) {
+    final value = pdfLineQuantity(line);
+    final split = value.indexOf(' ');
+    final quantity = split < 0 ? value : value.substring(0, split);
+    final unit = split < 0 ? '' : value.substring(split + 1);
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 5),
+      child: pw.Row(
+        children: [
+          pw.Expanded(
+            flex: 3,
+            child: pw.Text(
+              quantity,
+              textAlign: pw.TextAlign.center,
+              style: const pw.TextStyle(fontSize: 9),
+            ),
+          ),
+          pw.Expanded(
+            flex: 2,
+            child: pw.Text(
+              unit,
+              textAlign: pw.TextAlign.left,
+              style: const pw.TextStyle(fontSize: 9),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   static pw.TableRow _lineRow(
     Map<String, dynamic> line,
     int index,
@@ -775,10 +807,7 @@ class DocumentPdfService {
       children: [
         _bodyCell(index.toString(), align: pw.TextAlign.center),
         _bodyCell(display),
-        _bodyCell(
-          pdfLineQuantity(line),
-          align: pw.TextAlign.center,
-        ),
+        _quantityCell(line),
         _bodyCell(_money(line['unit_price']), align: pw.TextAlign.right),
         _bodyCell(_money(line['net_amount']), align: pw.TextAlign.right),
       ],
