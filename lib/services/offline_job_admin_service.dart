@@ -428,6 +428,15 @@ class OfflineJobAdminService {
     for (final row in rows) {
       final outboxId = row.read<int>('id');
       final jobId = row.read<String>('entity_id');
+      // Conversion-created jobs have provisional local identities until the
+      // associated document upload returns its authoritative server Job ID.
+      if (jobId.startsWith('local-')) {
+        await _database.customStatement(
+          "UPDATE sync_outbox SET last_error='Waiting for Job ID reconciliation' WHERE id=?",
+          [outboxId],
+        );
+        continue;
+      }
       try {
         final payload = Map<String, dynamic>.from(
           jsonDecode(row.read<String>('payload_json')) as Map,

@@ -320,13 +320,15 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       }
     }
 
-    await attempt(
-      'Job changes',
-      () => _jobAdmin.flush(widget.businessId),
-    );
+    // Parents must receive their server UUIDs before dependent Job and
+    // document uploads. This screen is also used for manual recovery.
     await attempt(
       'Customer / vehicle changes',
       () => _customerVehicleAdmin.flush(widget.businessId),
+    );
+    await attempt(
+      'Job changes',
+      () => _jobAdmin.flush(widget.businessId),
     );
     await attempt(
       'Customer notes / findings',
