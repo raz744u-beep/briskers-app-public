@@ -73,7 +73,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final existing = (row['display_status']?.toString() ?? '').toLowerCase();
     final code = (row['display_status_code']?.toString() ?? '').toLowerCase();
     if (existing == 'closed' || code == 'closed' ||
-        row['closed_at'] != null) return 'Closed';
+        row['closed_at'] != null) {
+      return 'Closed';
+    }
     final total = num.tryParse(row['total_amount']?.toString() ?? '');
     final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
     final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
