@@ -17,7 +17,7 @@ class _RevocationApi extends BriskersApi {
 
   @override
   Future<Map<String, dynamic>> syncPullJobs(
-    String businessId, {int? afterCursor, int limit = 250},
+    String businessId, {int? afterCursor, int limit = 250}
   ) async => {
     'mode': 'incremental',
     'next_cursor': 11,

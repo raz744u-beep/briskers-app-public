@@ -65,7 +65,7 @@ class JobSummaryVisibility {
   }
 
   Future<List<Map<String, dynamic>>> filterFindings(
-    Iterable<Map<String, dynamic>> rows, {bool cached = false},
+    Iterable<Map<String, dynamic>> rows, {bool cached = false}
   ) async {
     final blockedJobs = await blockedJobIds();
     final blockedFindings = await LocalJobQuarantine.blockedEntityIds(

@@ -10,9 +10,9 @@ void main() {
 
   test('a checkpoint rejection prevents the network mutation', () async {
     var calls = 0;
-    final AttachmentReplayGuard guard = <T>(Future<T> Function() operation) async {
+    Future<T> guard<T>(Future<T> Function() operation) async {
       throw StateError('Quarantined');
-    };
+    }
     await expectLater(runAttachmentMutation(() async {
       calls++;
       return 'must-not-upload';
@@ -26,7 +26,7 @@ void main() {
     final receipts = <Object?>[];
     var quarantined = false;
     var finalized = false;
-    final AttachmentReplayGuard guard = <T>(Future<T> Function() operation) async {
+    Future<T> guard<T>(Future<T> Function() operation) async {
       if (quarantined) throw StateError('Quarantined');
       final result = await operation();
       if (quarantined) {
@@ -34,7 +34,7 @@ void main() {
         throw StateError('Late acknowledgement retained');
       }
       return result;
-    };
+    }
     final sequence = () async {
       await runAttachmentMutation(() {
         started.complete();
@@ -55,10 +55,10 @@ void main() {
 
   test('each successful registration upload and finalize stage is checked', () async {
     var checks = 0;
-    final AttachmentReplayGuard guard = <T>(Future<T> Function() operation) async {
+    Future<T> guard<T>(Future<T> Function() operation) async {
       checks++;
       return operation();
-    };
+    }
     final registration = await runAttachmentMutation(
       () async => {'attachment_id': 'attachment-1'}, replayGuard: guard,
     );

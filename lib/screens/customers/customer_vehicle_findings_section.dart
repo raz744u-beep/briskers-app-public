@@ -450,7 +450,9 @@ class _CustomerVehicleFindingsSectionState
     }
 
     if (images.isEmpty || !context.mounted ||
-        quarantine != _quarantineChanges.value) return;
+        quarantine != _quarantineChanges.value) {
+      return;
+    }
 
     var current = initialIndex.clamp(0, images.length - 1);
     final controller = PageController(initialPage: current);
@@ -762,7 +764,9 @@ class _CustomerVehicleFindingsSectionState
             );
             controller.dispose();
             if (quarantine != _quarantineChanges.value ||
-                updatedBody == null || updatedBody == localBody) return;
+                updatedBody == null || updatedBody == localBody) {
+              return;
+            }
 
             setSheetState(() => actionBusy = true);
             try {
