@@ -2582,6 +2582,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   }
 
   Future<void> _finalizeEnteredPayments() async {
+    if (!widget.isOwner) return;
     await _collapseWorkspaceHeader();
     if (_estimate || _busy || _number(_detail?['pending_payment']) <= 0.005) {
       return;
@@ -5211,12 +5212,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    if (widget.isOwner) ...[
                     const SizedBox(height: 10),
                     FilledButton.icon(
                       onPressed: _busy ? null : _finalizeEnteredPayments,
                       icon: const Icon(Icons.check_circle_outline),
                       label: const Text('Finalize Received Payment'),
                     ),
+                    ],
                   ],
                 ),
               ),
