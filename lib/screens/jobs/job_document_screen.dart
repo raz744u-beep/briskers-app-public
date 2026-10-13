@@ -2531,6 +2531,50 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         methodId: result['method_id'].toString(),
       );
     });
+    if (mounted && _error == null &&
+        (result['amount'] as num) >= remaining - 0.005) {
+      await _offerCompleteJobAfterPaymentEntry();
+    }
+  }
+
+  Future<void> _offerCompleteJobAfterPaymentEntry() async {
+    final jobId = _detail?['job_id']?.toString() ?? '';
+    if (jobId.isEmpty || jobId.startsWith('local-') || !mounted) return;
+    try {
+      final job = await _api.jobDetail(widget.businessId, jobId);
+      final status = (job['status']?.toString() ?? '').toLowerCase();
+      if (const {'completed', 'closed', 'cancelled'}.contains(status)) return;
+      if (!mounted) return;
+      final complete = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Payment entered in full'),
+          content: const Text(
+            'Is the repair work completed? This does not finalize the '
+            'payment or close the invoice. The Owner can do that later.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Keep Job Open'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Complete Job'),
+            ),
+          ],
+        ),
+      );
+      if (complete == true) {
+        await _run(() => _api.changeJobStatus(
+          widget.businessId, jobId, 'completed'));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Payment saved. Job status needs review: $error')));
+      }
+    }
   }
 
   Future<void> _offerCompletePaidJob() async {
