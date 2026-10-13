@@ -60,7 +60,9 @@ void main() {
     final editLine = invoice.substring(invoice.indexOf('class _EditLineDialogState'));
     expect(editLine, isNot(contains('_quantityCleared')));
     expect(editLine, isNot(contains('_priceCleared')));
-    expect(invoice, contains('if (!widget.clearNumericOnFirstTap) return;'));
+    expect(editLine, contains('extentOffset: _quantity.text.length'));
+    expect(editLine, contains('extentOffset: _price.text.length'));
+    expect(editLine, contains('extentOffset: _taxPercent.text.length'));
   });
 
   test('Paid invoice completion remains separate from financial closing', () {
