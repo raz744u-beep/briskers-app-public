@@ -27,6 +27,7 @@ import '../../services/local_customer_repository.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_document_draft_service.dart';
+import '../../services/offline_job_admin_service.dart';
 import '../../services/local_standard_notes_service.dart';
 import '../../services/offline_document_edit_service.dart';
 import '../../services/local_tax_settings_cache.dart';
@@ -83,6 +84,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   final OfflineEstimateInvoiceService _offlineEstimateInvoice =
       OfflineEstimateInvoiceService();
   final LocalStandardNotesService _standardNotes = LocalStandardNotesService();
+  final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
   final OfflineDocumentEditService _offlineDocumentEdit =
@@ -2521,6 +2523,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           methodName: chosen['name']?.toString() ?? '',
         );
       });
+      if (mounted && _error == null &&
+          (result['amount'] as num) >= remaining - 0.005) {
+        await _offerCompleteJobAfterPaymentEntry();
+      }
       return;
     }
     await _run(() async {
@@ -2539,9 +2545,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
   Future<void> _offerCompleteJobAfterPaymentEntry() async {
     final jobId = _detail?['job_id']?.toString() ?? '';
-    if (jobId.isEmpty || jobId.startsWith('local-') || !mounted) return;
+    if (jobId.isEmpty || !mounted) return;
+    final offline = BriskersConnectionModeController.instance.forceOffline ||
+        jobId.startsWith('local-');
     try {
-      final job = await _api.jobDetail(widget.businessId, jobId);
+      final job = offline ? <String, dynamic>{} :
+          await _api.jobDetail(widget.businessId, jobId);
       final status = (job['status']?.toString() ?? '').toLowerCase();
       if (const {'completed', 'closed', 'cancelled'}.contains(status)) return;
       if (!mounted) return;
@@ -2566,8 +2575,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         ),
       );
       if (complete == true) {
-        await _run(() => _api.changeJobStatus(
-          widget.businessId, jobId, 'completed'));
+        if (offline) {
+          await _run(() => _offlineJobAdmin.queueStatus(
+            widget.businessId, jobId, code: 'completed', name: 'Completed'));
+        } else {
+          await _run(() => _api.changeJobStatus(
+            widget.businessId, jobId, 'completed'));
+        }
       }
     } catch (error) {
       if (mounted) {
