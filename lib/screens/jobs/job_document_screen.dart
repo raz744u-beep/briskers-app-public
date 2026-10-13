@@ -27,6 +27,7 @@ import '../../services/local_customer_repository.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_document_draft_service.dart';
+import '../../services/offline_job_admin_service.dart';
 import '../../services/local_standard_notes_service.dart';
 import '../../services/offline_document_edit_service.dart';
 import '../../services/local_tax_settings_cache.dart';
@@ -83,6 +84,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   final OfflineEstimateInvoiceService _offlineEstimateInvoice =
       OfflineEstimateInvoiceService();
   final LocalStandardNotesService _standardNotes = LocalStandardNotesService();
+  final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
   final OfflineDocumentEditService _offlineDocumentEdit =
@@ -2521,6 +2523,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
           methodName: chosen['name']?.toString() ?? '',
         );
       });
+      if (mounted && _error == null &&
+          (result['amount'] as num) >= remaining - 0.005) {
+        await _offerCompleteJobAfterPaymentEntry();
+      }
       return;
     }
     await _run(() async {
@@ -2531,6 +2537,58 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         methodId: result['method_id'].toString(),
       );
     });
+    if (mounted && _error == null &&
+        (result['amount'] as num) >= remaining - 0.005) {
+      await _offerCompleteJobAfterPaymentEntry();
+    }
+  }
+
+  Future<void> _offerCompleteJobAfterPaymentEntry() async {
+    final jobId = _detail?['job_id']?.toString() ?? '';
+    if (jobId.isEmpty || !mounted) return;
+    final offline = BriskersConnectionModeController.instance.forceOffline ||
+        jobId.startsWith('local-');
+    try {
+      final job = offline ? <String, dynamic>{} :
+          await _api.jobDetail(widget.businessId, jobId);
+      final status = (job['status']?.toString() ?? '').toLowerCase();
+      if (const {'completed', 'closed', 'cancelled'}.contains(status)) return;
+      if (!mounted) return;
+      final complete = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Payment entered in full'),
+          content: const Text(
+            'Is the repair work completed? This does not finalize the '
+            'payment or close the invoice. The Owner can do that later.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Keep Job Open'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Complete Job'),
+            ),
+          ],
+        ),
+      );
+      if (complete == true) {
+        if (offline) {
+          await _run(() => _offlineJobAdmin.queueStatus(
+            widget.businessId, jobId, code: 'completed', name: 'Completed'));
+        } else {
+          await _run(() => _api.changeJobStatus(
+            widget.businessId, jobId, 'completed'));
+        }
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Payment saved. Job status needs review: $error')));
+      }
+    }
   }
 
   Future<void> _offerCompletePaidJob() async {
@@ -4039,35 +4097,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       finalizedPaid: finalizedPaid,
       pendingPaid: pendingPaid,
     );
-    if (BriskersLanguageController.instance.isSpanish) {
-      switch (code) {
-        case 'partial':
-          return tr('invoicePartial');
-        case 'pending_close':
-          return tr('invoicePendingClose');
-        case 'paid':
-          return tr('invoicePaid');
-        case 'void':
-          return tr('documentVoid');
-        default:
-          return tr('invoiceOpen');
-      }
+    if (code == 'void') return tr('documentVoid');
+    if (code == 'pending_close' || code == 'paid') {
+      return 'Paid · Pending Close';
     }
-
-    final style = _invoiceStyle(code);
-    if (style != null) return style['name']?.toString() ?? 'Open';
-    switch (code) {
-      case 'partial':
-        return 'Partial';
-      case 'pending_close':
-        return 'Pending Close';
-      case 'paid':
-        return 'Paid';
-      case 'void':
-        return 'Void';
-      default:
-        return 'Open';
-    }
+    return tr('invoiceOpen');
   }
 
   Color _statusColor(String label, {String? code}) {
