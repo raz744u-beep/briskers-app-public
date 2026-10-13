@@ -167,6 +167,9 @@ class LocalStandardNotesService {
     final effectiveName = changes['name']?.toString() ??
         (index >= 0 ? notes[index]['name'].toString() : name.trim());
     final normalized = effectiveName.trim().toLowerCase();
+    // The protected General template must never carry contradictory service
+    // metadata, including while waiting to upload from an older client.
+    if (normalized == 'general') changes['category_key'] = 'general';
     if (notes.any((note) => _name(note) == normalized &&
         (index < 0 || note['id'] != notes[index]['id']))) {
       throw StateError('A standard note already has this name.');
