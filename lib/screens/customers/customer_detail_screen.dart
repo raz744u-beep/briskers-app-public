@@ -13,6 +13,7 @@ import '../../services/customer_detail_cache.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/local_customer_repository.dart';
+import '../../services/job_summary_visibility.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../appointments/appointment_create_screen.dart';
 import '../jobs/job_create_screen.dart';
@@ -57,6 +58,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   final OfflineCustomerVehicleAdminService _offlineAdmin =
       OfflineCustomerVehicleAdminService();
 
+  late JobSummaryVisibility _jobVisibility;
   Map<String, dynamic>? _data;
   String? _error;
   bool _onlineReady = false;
@@ -68,6 +70,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   bool _expandQuickNotes = false;
 
   Future<Map<String, dynamic>> _loadOfflineSections() async {
+    final visibility = _jobVisibility;
+    final generation = visibility.epoch;
     Future<List<Map<String, dynamic>>> listSection(String key) async {
       final raw = await _sectionCache.load(
         widget.businessId,
@@ -82,7 +86,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           : <Map<String, dynamic>>[];
     }
 
-    final appointments = await listSection('appointments');
+    final appointments = await visibility.filter(
+        await listSection('appointments'), jobIdKey: 'job_id');
 
     final historyRaw = await _sectionCache.load(
       widget.businessId,
@@ -93,6 +98,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ? Map<String, dynamic>.from(historyRaw)
         : <String, dynamic>{};
 
+    history['jobs'] = await visibility.filter(
+      List<dynamic>.from(history['jobs'] ?? const [])
+          .whereType<Map>().map((row) => Map<String, dynamic>.from(row)),
+      cached: true,
+    );
+    if (!visibility.isCurrent(generation)) return const {};
     return <String, dynamic>{
       'appointments': appointments,
       'history': history,
@@ -102,17 +113,20 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
 
 
   Future<List<Map<String, dynamic>>> _activeCustomerItems() async {
+    final visibility = _jobVisibility;
+    final generation = visibility.epoch;
     final vars = <Variable<Object>>[
       Variable<String>(widget.businessId),
       Variable<String>(widget.customerId),
     ];
     final rows = <Map<String, dynamic>>[];
     final appointments = await localDatabase.customSelect(
-      "SELECT id,title,status FROM local_appointments WHERE business_id=? AND customer_id=? "
+      "SELECT id,title,status,job_id FROM local_appointments WHERE business_id=? AND customer_id=? "
       "AND lower(status) NOT IN ('cancelled','canceled','no_show','checked_in','completed')",
       variables: vars).get();
     for (final a in appointments) {
       rows.add({'type':'Appointment','id':a.read<String>('id'),
+        'job_id':a.readNullable<String>('job_id'),
         'title':a.read<String>('title'),
         'status':a.read<String>('status')});
     }
@@ -122,6 +136,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       variables: vars).get();
     for (final j in jobs) {
       rows.add({'type':'Job','id':j.read<String>('id'),
+        'job_id':j.read<String>('id'),
         'title':j.read<String>('title'),
         'status':j.readNullable<String>('payment_state') == 'paid'
           ? 'Paid, Still Open' : j.read<String>('status')});
@@ -141,10 +156,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         'total':d.read<double>('total'),
         'paid':num.tryParse(detail?['paid_amount']?.toString() ?? '')});
     }
-    return rows;
+    final visibleRows = await visibility.filter(rows, jobIdKey: 'job_id');
+    return visibility.isCurrent(generation) ? visibleRows : [];
   }
 
   Widget _customerOverviewCard() => FutureBuilder<List<Map<String, dynamic>>>(
+    key: ValueKey(('customer-overview', _jobVisibility.epoch)),
     future: _activeCustomerItems(),
     builder: (context, snapshot) {
       final rows = snapshot.data ?? const <Map<String,dynamic>>[];
@@ -283,6 +300,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
 
   Widget _offlineCustomerSections() {
     return FutureBuilder<Map<String, dynamic>>(
+      key: ValueKey(('offline-customer-sections', _jobVisibility.epoch)),
       future: _loadOfflineSections(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -416,10 +434,44 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _listenForQuarantine();
     _load();
   }
 
+  void _listenForQuarantine() {
+    _jobVisibility = JobSummaryVisibility(
+      businessId: widget.businessId,
+      onQuarantine: (_) {
+        if (!mounted) return;
+        // New FutureBuilder keys discard retained activity/history snapshots.
+        // Customer identity, vehicles, and independently readable invoices stay.
+        setState(() {});
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _jobVisibility.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant CustomerDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.customerId != widget.customerId) {
+      _jobVisibility.dispose();
+      _data = null;
+      _onlineReady = false;
+      _listenForQuarantine();
+      _load();
+    }
+  }
+
   Future<void> _load() async {
+    final visibility = _jobVisibility;
+    final generation = visibility.beginLoad();
     var localShown = false;
     final forceOnline =
         BriskersConnectionModeController.instance.forceOnline;
@@ -434,7 +486,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               widget.businessId,
               widget.customerId,
             );
-        if (local != null && mounted) {
+        if (local != null && mounted && visibility.isCurrent(generation)) {
           localShown = true;
           setState(() {
             _data = local;
@@ -448,8 +500,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       }
     }
 
+    if (!mounted || !visibility.isCurrent(generation)) return;
+
     if (forceOffline) {
-      if (mounted && localShown) {
+      if (mounted && localShown && visibility.isCurrent(generation)) {
         setState(() {
           _onlineReady = false;
           _showingLocal = true;
@@ -476,6 +530,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           widget.businessId,
           widget.customerId,
         );
+        if (!mounted || !visibility.isCurrent(generation)) return;
         await _saveFullDetail(fullDetail);
         await _sync.refreshCustomer(
           widget.businessId,
@@ -493,7 +548,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             widget.customerId,
           );
 
-      if (!mounted) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _data = local;
         _onlineReady = bootstrapped && local != null;
@@ -505,7 +560,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             : null;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _onlineReady = false;
         if (localShown && !forceOnline) {

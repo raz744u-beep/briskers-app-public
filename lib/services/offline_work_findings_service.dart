@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_quarantine.dart';
 
 typedef WorkFindingMediaDirectoryProvider = Future<Directory> Function();
 
@@ -655,6 +656,9 @@ class OfflineWorkFindingsService {
       final row = rows.single;
       final type = row.read<String>('entity_type');
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: row.read<int>('id'),
+        );
         bool handled = true;
         if (type == 'work_summary') {
           if (!await _flushWorkSummary(row)) break;
@@ -670,6 +674,7 @@ class OfflineWorkFindingsService {
 
         if (handled) pushedAny = true;
       } catch (error) {
+        if (error is LocalJobQuarantineException) rethrow;
         await _markOutboxFailure(row.read<int>('id'), error);
         break;
       }
@@ -694,20 +699,33 @@ class OfflineWorkFindingsService {
     final isNewVisit = (payload['visit_id']?.toString() ?? '')
         .startsWith('local-work-visit-');
     final response = isNewVisit
-        ? await _api.createMissingWorkVisit(
+        ? await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => _api.createMissingWorkVisit(
             businessId,jobId,
             operationId:payload['operation_id']?.toString() ?? '',
             workSummary:payload['work_summary']?.toString() ?? '',
-          )
-        : await _api.syncSaveWorkSummary(
+          ),
+          outboxId: row.read<int>('id'),
+        )
+        : await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => _api.syncSaveWorkSummary(
             businessId,jobId,
             operationId:payload['operation_id']?.toString() ?? '',
             expectedRowVersion:row.readNullable<int>('base_row_version'),
             workSummary:payload['work_summary']?.toString() ?? '',
-          );
+          ),
+          outboxId: row.read<int>('id'),
+        );
 
     if (response['status']?.toString() == 'conflict') {
       await _database.transaction(() async {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: row.read<int>('id'),
+        );
         await _database.customStatement(
           '''
           UPDATE local_job_visits
@@ -729,6 +747,9 @@ class OfflineWorkFindingsService {
       throw StateError('Server did not return the saved work visit.');
     }
     await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: row.read<int>('id'),
+      );
       await _reconcileVisit(
         businessId,
         Map<String, dynamic>.from(raw),
@@ -753,12 +774,17 @@ class OfflineWorkFindingsService {
     final jobId = payload['job_id']?.toString() ?? '';
     final localId = payload['local_finding_id']?.toString() ?? '';
 
-    final response = await _api.syncCreateFinding(
+    final response = await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      jobId,
-      operationId: payload['operation_id']?.toString() ?? '',
-      body: payload['body']?.toString() ?? '',
-      includeOnInvoice: payload['include_on_invoice'] == true,
+      () => _api.syncCreateFinding(
+        businessId,
+        jobId,
+        operationId: payload['operation_id']?.toString() ?? '',
+        body: payload['body']?.toString() ?? '',
+        includeOnInvoice: payload['include_on_invoice'] == true,
+      ),
+      outboxId: row.read<int>('id'),
     );
 
     final raw = response['finding'];
@@ -780,6 +806,9 @@ class OfflineWorkFindingsService {
     }
 
     await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: row.read<int>('id'),
+      );
       final current = await _findingRow(businessId, localId);
       if (current == null) {
         throw StateError('Queued Finding is no longer available locally.');
@@ -873,17 +902,25 @@ class OfflineWorkFindingsService {
     final businessId = row.read<String>('business_id');
     final findingId = payload['finding_id']?.toString() ?? '';
 
-    final response = await _api.syncUpdateFinding(
+    final response = await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      findingId,
-      operationId: payload['operation_id']?.toString() ?? '',
-      expectedRowVersion:
-          row.readNullable<int>('base_row_version'),
-      body: payload['body']?.toString() ?? '',
+      () => _api.syncUpdateFinding(
+        businessId,
+        findingId,
+        operationId: payload['operation_id']?.toString() ?? '',
+        expectedRowVersion:
+            row.readNullable<int>('base_row_version'),
+        body: payload['body']?.toString() ?? '',
+      ),
+      outboxId: row.read<int>('id'),
     );
 
     if (response['status']?.toString() == 'conflict') {
       await _database.transaction(() async {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: row.read<int>('id'),
+        );
         await _database.customStatement(
           '''
           UPDATE local_findings
@@ -911,6 +948,9 @@ class OfflineWorkFindingsService {
     }
 
     await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: row.read<int>('id'),
+      );
       final old = await _findingRow(businessId, findingId);
       final vehicleId =
           old?.readNullable<String>('vehicle_id') ??
@@ -994,6 +1034,7 @@ class OfflineWorkFindingsService {
     final payload = _payload(row);
     final businessId = row.read<String>('business_id');
     final findingId = payload['finding_id']?.toString() ?? '';
+    final localPhotoId = payload['local_photo_id']?.toString() ?? '';
     if (findingId.startsWith('local-finding-')) {
       throw StateError(
         'Finding photo dependency has not been synced yet.',
@@ -1006,12 +1047,18 @@ class OfflineWorkFindingsService {
       throw StateError('Queued Finding photo is missing locally.');
     }
 
-    final registration = await _api.syncRegisterFindingPhoto(
+    await _assertPhotoReplayTarget(businessId, findingId, localPhotoId);
+    final registration = await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      findingId,
-      operationId: payload['operation_id']?.toString() ?? '',
-      filename: payload['filename']?.toString() ?? 'finding.jpg',
-      mimeType: payload['mime_type']?.toString() ?? 'image/jpeg',
+      () => _api.syncRegisterFindingPhoto(
+        businessId,
+        findingId,
+        operationId: payload['operation_id']?.toString() ?? '',
+        filename: payload['filename']?.toString() ?? 'finding.jpg',
+        mimeType: payload['mime_type']?.toString() ?? 'image/jpeg',
+      ),
+      outboxId: row.read<int>('id'),
     );
 
     final attachmentId =
@@ -1023,16 +1070,29 @@ class OfflineWorkFindingsService {
     }
 
     final bytes = await file.readAsBytes();
-    await _api.uploadRegisteredAttachment(
+    await _assertPhotoReplayTarget(businessId, findingId, localPhotoId);
+    await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      bucket: bucket,
-      key: key,
-      attachmentId: attachmentId,
-      mimeType: payload['mime_type']?.toString() ?? 'image/jpeg',
-      bytes: bytes,
+      () => _api.uploadRegisteredAttachment(
+        businessId,
+        bucket: bucket,
+        key: key,
+        attachmentId: attachmentId,
+        mimeType: payload['mime_type']?.toString() ?? 'image/jpeg',
+        bytes: bytes,
+        replayGuard: <T>(Future<T> Function() operation) =>
+            LocalJobQuarantine.guardReplay<T>(
+          _database, businessId, operation, outboxId: row.read<int>('id'),
+        ),
+      ),
+      outboxId: row.read<int>('id'),
     );
 
     await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: row.read<int>('id'),
+      );
       // A concurrent refresh may already have cached the registered server
       // attachment. Retain the staged copy and its offline bytes exactly once.
       await _database.customStatement(
@@ -1066,6 +1126,25 @@ class OfflineWorkFindingsService {
         [row.read<int>('id')],
       );
     });
+  }
+
+  Future<void> _assertPhotoReplayTarget(
+    String businessId, String findingId, String localPhotoId,
+  ) async {
+    final photo = await _database.customSelect(
+      '''SELECT p.id FROM local_finding_photos p
+         JOIN local_findings f
+           ON f.business_id = p.business_id AND f.id = p.finding_id
+         WHERE p.business_id = ? AND p.id = ? AND p.finding_id = ?''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(localPhotoId),
+        Variable<String>(findingId),
+      ],
+    ).getSingleOrNull();
+    if (photo == null) {
+      throw StateError('Queued Finding photo is no longer active locally.');
+    }
   }
 
   Future<void> _reconcileVisit(

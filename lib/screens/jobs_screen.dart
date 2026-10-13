@@ -9,6 +9,7 @@ import '../core/connection_mode.dart';
 import '../core/job_status_style.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
+import '../services/job_summary_visibility.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_job_repository.dart';
@@ -55,7 +56,7 @@ class _JobsScreenState extends State<JobsScreen> {
   final TextEditingController _search = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   Timer? _searchDebounce;
-  int _loadGeneration = 0;
+  late JobSummaryVisibility _jobVisibility;
   int _totalCount = 0;
   Map<String, int> _statusCounts = const {};
   List<Map<String, dynamic>> _documentMatches = const [];
@@ -72,8 +73,57 @@ class _JobsScreenState extends State<JobsScreen> {
   @override
   void initState() {
     super.initState();
+    _listenForQuarantine();
     _restoreSort();
     _load();
+  }
+
+  void _listenForQuarantine() {
+    _jobVisibility = JobSummaryVisibility(
+      businessId: widget.businessId,
+      onQuarantine: (jobIds) {
+        if (!mounted) return;
+        setState(() {
+          if (_rows != null) {
+            _rows = JobSummaryVisibility.withoutJobs(_rows!, jobIds);
+          }
+          _documentMatches = _withoutJobLabels(_documentMatches, jobIds);
+          _totalCount = _rows?.length ?? 0;
+          _statusCounts = const {};
+          if (jobIds.contains(_busyJobId)) _busyJobId = null;
+          _onlineReady = false;
+          _showingLocal = _rows != null;
+        });
+        unawaited(_refreshQuarantineCounts());
+      },
+    );
+  }
+
+  // An invoice can remain independently readable after its Job is revoked.
+  List<Map<String, dynamic>> _withoutJobLabels(
+    List<Map<String, dynamic>> rows, Set<String> jobIds,
+  ) => rows.map((row) => jobIds.contains(row['job_id']?.toString())
+      ? <String, dynamic>{...row, 'job_number': null, 'job_title': null}
+      : row).toList();
+
+  Future<void> _refreshQuarantineCounts() async {
+    final visibility = _jobVisibility;
+    final epoch = visibility.epoch;
+    try {
+      final query = _search.text.trim();
+      final counts = await Future.wait<dynamic>([
+        _localJobs.jobCount(widget.businessId,
+          status: _selectedStatus, search: query.isEmpty ? null : query),
+        _localJobs.jobStatusCounts(widget.businessId),
+      ]);
+      if (!mounted || !visibility.isCurrent(epoch)) return;
+      setState(() {
+        _totalCount = counts[0] as int;
+        _statusCounts = Map<String, int>.from(counts[1] as Map);
+      });
+    } catch (_) {
+      // Keep the already-pruned cards when a local count refresh fails.
+    }
   }
 
   Future<void> _restoreSort() async {
@@ -93,6 +143,7 @@ class _JobsScreenState extends State<JobsScreen> {
 
   @override
   void dispose() {
+    _jobVisibility.dispose();
     _searchDebounce?.cancel();
     _search.dispose();
     _scrollController.dispose();
@@ -102,7 +153,17 @@ class _JobsScreenState extends State<JobsScreen> {
   @override
   void didUpdateWidget(covariant JobsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.refreshToken != widget.refreshToken) {
+    if (oldWidget.businessId != widget.businessId) {
+      _jobVisibility.dispose();
+      _rows = null;
+      _documentMatches = const [];
+      _statuses = const [];
+      _statusCounts = const {};
+      _totalCount = 0;
+      _onlineReady = false;
+      _listenForQuarantine();
+      _load();
+    } else if (oldWidget.refreshToken != widget.refreshToken) {
       _load();
     }
   }
@@ -151,7 +212,8 @@ class _JobsScreenState extends State<JobsScreen> {
   }
 
   Future<void> _load({bool navigationRefresh = false}) async {
-    final generation = ++_loadGeneration;
+    final visibility = _jobVisibility;
+    final generation = visibility.beginLoad();
     var localAvailable = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
@@ -176,11 +238,12 @@ class _JobsScreenState extends State<JobsScreen> {
         _localJobs.jobStatusCounts(widget.businessId),
       ]);
 
-      final localRows =
-          List<Map<String, dynamic>>.from(localResults[0] as List);
+      final localRows = await visibility.filter(
+          List<Map<String, dynamic>>.from(localResults[0] as List));
       final documentMatches = query.isEmpty
           ? <Map<String, dynamic>>[]
           : await _localDocuments.search(widget.businessId, query, limit: 30);
+      final blockedJobIds = await visibility.blockedJobIds();
       final localStatuses =
           List<Map<String, dynamic>>.from(localResults[1] as List);
       final bootstrapped = localResults[2] == true;
@@ -189,7 +252,7 @@ class _JobsScreenState extends State<JobsScreen> {
 
       localAvailable = bootstrapped || localRows.isNotEmpty;
 
-      if (mounted && localAvailable && generation == _loadGeneration) {
+      if (mounted && localAvailable && visibility.isCurrent(generation)) {
         setState(() {
           _rows = localRows;
           _statuses = localStatuses;
@@ -197,7 +260,7 @@ class _JobsScreenState extends State<JobsScreen> {
           if (!navigationRefresh) _onlineReady = false;
           _totalCount = localTotal;
           _statusCounts = statusCounts;
-          _documentMatches = documentMatches;
+          _documentMatches = _withoutJobLabels(documentMatches, blockedJobIds);
           _error = null;
         });
       }
@@ -205,6 +268,8 @@ class _JobsScreenState extends State<JobsScreen> {
       // Online loading below can still succeed if the local cache is unavailable.
       }
     }
+
+    if (!mounted || !visibility.isCurrent(generation)) return;
 
     // Navigation back from a job or invoice must not launch a second full
     // network bootstrap on top of the regular background synchronization.
@@ -254,11 +319,14 @@ class _JobsScreenState extends State<JobsScreen> {
           : await _localDocuments.search(
               widget.businessId, query, limit: 30,
             );
-      if (!mounted || generation != _loadGeneration) return;
+      final currentRows = await visibility.filter(
+          List<Map<String, dynamic>>.from(refreshed[0] as List));
+      final blockedJobIds = await visibility.blockedJobIds();
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
-        _rows = List<Map<String, dynamic>>.from(refreshed[0] as List);
+        _rows = currentRows;
         _statuses = onlineStatuses;
-        _documentMatches = onlineDocumentMatches;
+        _documentMatches = _withoutJobLabels(onlineDocumentMatches, blockedJobIds);
         _totalCount = refreshed[1] as int;
         _statusCounts = Map<String, int>.from(refreshed[2] as Map);
         _showingLocal = false;
@@ -266,7 +334,7 @@ class _JobsScreenState extends State<JobsScreen> {
         _error = null;
       });
     } catch (error) {
-      if (!mounted || generation != _loadGeneration) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _onlineReady = false;
         if (localAvailable && !forceOnline) {

@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import '../local/briskers_local_database.dart' show BriskersLocalDatabase;
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_quarantine.dart';
 import 'local_financial_cache.dart';
 
 class OfflineFinancialWriteService {
@@ -390,6 +391,11 @@ class OfflineFinancialWriteService {
       );
 
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database,
+          businessId,
+          outboxId: outboxId,
+        );
         if (type == 'financial_create') {
           await _flushCreate(businessId, outboxId, payload);
         } else if (type == 'financial_update') {
@@ -419,79 +425,91 @@ class OfflineFinancialWriteService {
     Map<String, dynamic> payload,
   ) async {
     final localId = payload['local_transaction_id'].toString();
-    final response = await _api.syncCreateManualTransaction(
+    final response = await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      operationId: payload['operation_id'].toString(),
-      direction: payload['direction'].toString(),
-      accountId: payload['account_id'].toString(),
-      categoryId: payload['category_id'].toString(),
-      amount: num.parse(payload['amount'].toString()),
-      date: DateTime.parse(payload['date'].toString()),
-      jobId: payload['job_id']?.toString(),
-      documentId: payload['document_id']?.toString(),
-      counterpartyId: payload['counterparty_id']?.toString(),
-      counterpartyName: payload['counterparty_name']?.toString(),
-      remarks: payload['remarks']?.toString(),
+      () => _api.syncCreateManualTransaction(
+        businessId,
+        operationId: payload['operation_id'].toString(),
+        direction: payload['direction'].toString(),
+        accountId: payload['account_id'].toString(),
+        categoryId: payload['category_id'].toString(),
+        amount: num.parse(payload['amount'].toString()),
+        date: DateTime.parse(payload['date'].toString()),
+        jobId: payload['job_id']?.toString(),
+        documentId: payload['document_id']?.toString(),
+        counterpartyId: payload['counterparty_id']?.toString(),
+        counterpartyName: payload['counterparty_name']?.toString(),
+        remarks: payload['remarks']?.toString(),
+      ),
+      outboxId: outboxId,
     );
     final serverId = response['transaction_id']?.toString() ?? '';
     if (serverId.isEmpty) {
       throw StateError('Server did not return a transaction ID.');
     }
 
-    final rows = await _allTransactions(businessId);
-    final index = rows.indexWhere(
-      (item) => item['id']?.toString() == localId,
-    );
-    if (index >= 0) {
-      rows[index] = {
-        ...rows[index],
-        'id': serverId,
-        'sync_state': 'pending',
-      };
-      await _cache.saveTransactions(businessId, rows);
-    }
-
-    final detail =
-        await _cache.loadTransactionDetail(businessId, localId);
-    if (detail != null) {
-      await _cache.saveTransactionDetail(
+    await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database,
         businessId,
-        serverId,
-        {
-          ...detail,
+        outboxId: outboxId,
+      );
+      final rows = await _allTransactions(businessId);
+      final index = rows.indexWhere(
+        (item) => item['id']?.toString() == localId,
+      );
+      if (index >= 0) {
+        rows[index] = {
+          ...rows[index],
           'id': serverId,
           'sync_state': 'pending',
-        },
-      );
-    }
+        };
+        await _cache.saveTransactions(businessId, rows);
+      }
 
-    final photos = await _database.customSelect(
-      '''
-      SELECT id, payload_json
-      FROM sync_outbox
-      WHERE business_id = ?
-        AND entity_type = 'financial_photo'
-        AND state = 'pending'
-      ''',
-      variables: [Variable<String>(businessId)],
-    ).get();
+      final detail =
+          await _cache.loadTransactionDetail(businessId, localId);
+      if (detail != null) {
+        await _cache.saveTransactionDetail(
+          businessId,
+          serverId,
+          {
+            ...detail,
+            'id': serverId,
+            'sync_state': 'pending',
+          },
+        );
+      }
 
-    for (final photoRow in photos) {
-      final photoPayload = Map<String, dynamic>.from(
-        jsonDecode(photoRow.read<String>('payload_json')) as Map,
-      );
-      if (photoPayload['transaction_id']?.toString() != localId) continue;
-      photoPayload['transaction_id'] = serverId;
+      final photos = await _database.customSelect(
+        '''
+        SELECT id, payload_json
+        FROM sync_outbox
+        WHERE business_id = ?
+          AND entity_type = 'financial_photo'
+          AND state = 'pending'
+        ''',
+        variables: [Variable<String>(businessId)],
+      ).get();
+
+      for (final photoRow in photos) {
+        final photoPayload = Map<String, dynamic>.from(
+          jsonDecode(photoRow.read<String>('payload_json')) as Map,
+        );
+        if (photoPayload['transaction_id']?.toString() != localId) continue;
+        photoPayload['transaction_id'] = serverId;
+        await _database.customStatement(
+          'UPDATE sync_outbox SET payload_json = ? WHERE id = ?',
+          [jsonEncode(photoPayload), photoRow.read<int>('id')],
+        );
+      }
+
       await _database.customStatement(
-        'UPDATE sync_outbox SET payload_json = ? WHERE id = ?',
-        [jsonEncode(photoPayload), photoRow.read<int>('id')],
+        'DELETE FROM sync_outbox WHERE id = ?',
+        [outboxId],
       );
-    }
-
-    await _database.customStatement(
-      'DELETE FROM sync_outbox WHERE id = ?',
-      [outboxId],
-    );
+    });
   }
 
   Future<void> _flushUpdate(
@@ -500,24 +518,36 @@ class OfflineFinancialWriteService {
     Map<String, dynamic> payload,
   ) async {
     final transactionId = payload['transaction_id'].toString();
-    await _api.updateManualTransaction(
+    await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      transactionId,
-      direction: payload['direction'].toString(),
-      accountId: payload['account_id'].toString(),
-      categoryId: payload['category_id'].toString(),
-      amount: num.parse(payload['amount'].toString()),
-      date: DateTime.parse(payload['date'].toString()),
-      jobId: payload['job_id']?.toString(),
-      documentId: payload['document_id']?.toString(),
-      counterpartyId: payload['counterparty_id']?.toString(),
-      counterpartyName: payload['counterparty_name']?.toString(),
-      remarks: payload['remarks']?.toString(),
+      () => _api.updateManualTransaction(
+        businessId,
+        transactionId,
+        direction: payload['direction'].toString(),
+        accountId: payload['account_id'].toString(),
+        categoryId: payload['category_id'].toString(),
+        amount: num.parse(payload['amount'].toString()),
+        date: DateTime.parse(payload['date'].toString()),
+        jobId: payload['job_id']?.toString(),
+        documentId: payload['document_id']?.toString(),
+        counterpartyId: payload['counterparty_id']?.toString(),
+        counterpartyName: payload['counterparty_name']?.toString(),
+        remarks: payload['remarks']?.toString(),
+      ),
+      outboxId: outboxId,
     );
-    await _database.customStatement(
-      'DELETE FROM sync_outbox WHERE id = ?',
-      [outboxId],
-    );
+    await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database,
+        businessId,
+        outboxId: outboxId,
+      );
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id = ?',
+        [outboxId],
+      );
+    });
   }
 
   Future<void> _flushPhoto(
@@ -532,26 +562,50 @@ class OfflineFinancialWriteService {
 
     final file = File(payload['local_file_path'].toString());
     final bytes = await file.readAsBytes();
-    final registration = await _api.syncRegisterExpensePhoto(
+    final registration = await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      transactionId,
-      operationId: payload['operation_id'].toString(),
-      filename: payload['filename'].toString(),
-      mimeType: payload['mime_type'].toString(),
+      () => _api.syncRegisterExpensePhoto(
+        businessId,
+        transactionId,
+        operationId: payload['operation_id'].toString(),
+        filename: payload['filename'].toString(),
+        mimeType: payload['mime_type'].toString(),
+      ),
+      outboxId: outboxId,
     );
 
-    await _api.uploadRegisteredAttachment(
+    await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      bucket: registration['bucket'].toString(),
-      key: registration['key'].toString(),
-      attachmentId: registration['attachment_id'].toString(),
-      mimeType: payload['mime_type'].toString(),
-      bytes: bytes,
+      () => _api.uploadRegisteredAttachment(
+        businessId,
+        bucket: registration['bucket'].toString(),
+        key: registration['key'].toString(),
+        attachmentId: registration['attachment_id'].toString(),
+        mimeType: payload['mime_type'].toString(),
+        bytes: bytes,
+        replayGuard: <T>(Future<T> Function() operation) =>
+            LocalJobQuarantine.guardReplay<T>(
+          _database,
+          businessId,
+          operation,
+          outboxId: outboxId,
+        ),
+      ),
+      outboxId: outboxId,
     );
 
-    await _database.customStatement(
-      'DELETE FROM sync_outbox WHERE id = ?',
-      [outboxId],
-    );
+    await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database,
+        businessId,
+        outboxId: outboxId,
+      );
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id = ?',
+        [outboxId],
+      );
+    });
   }
 }

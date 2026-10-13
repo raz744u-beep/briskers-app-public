@@ -4,6 +4,7 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'document_index_sync_service.dart';
 import 'job_sync_service.dart';
+import 'local_job_quarantine.dart';
 import 'local_document_detail_cache.dart';
 import 'test_job_cleanup_gateway.dart';
 import 'test_job_cleanup_policy.dart';
@@ -95,6 +96,10 @@ class TestJobCleanupService {
   Future<List<String>> localBlockers(TestJobCleanupPlan plan) async {
     final reasons = <String>[];
     final businessId = plan.businessId;
+    if (await LocalJobQuarantine.hasRecovery(_database, businessId)) {
+      reasons.add('This device has preserved recovery records from revoked Job '
+          'access. Explicit authorized reconciliation is required before cleanup.');
+    }
     Future<int> count(String sql, List<String> values) async {
       final row = await _database.customSelect(sql,
         variables: values.map((value) => Variable<String>(value)).toList(),

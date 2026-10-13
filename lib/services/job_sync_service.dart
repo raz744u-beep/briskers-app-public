@@ -7,7 +7,7 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
-import 'local_cleanup_safety.dart';
+import 'local_job_quarantine.dart';
 import 'test_job_cleanup_gateway.dart';
 import 'test_job_cleanup_policy.dart';
 
@@ -142,6 +142,7 @@ class JobSyncService {
 
       while (hasMore) {
         final beforeSnapshot = await _snapshotBaseline(businessId);
+        final requestGeneration = await LocalJobQuarantine.captureGeneration(_database, businessId);
         final response = await _api.syncPullJobs(
           businessId,
           afterCursor: pageCursor,
@@ -161,29 +162,26 @@ class JobSyncService {
                 0;
         hasMore = response['has_more'] == true;
 
-        // Classify only AFTER this response: cleanup may commit between RPCs.
-        final cleanup = TestJobCleanupTombstones.fromJson(
-          await _cleanupGateway.tombstones(businessId), businessId,
-        );
+        // Positive revocation evidence hides active records BEFORE attempting
+        // the separately fallible cleanup classification request.
+        final quarantined = revokedIds.where((id) => id.isNotEmpty).toSet();
         if (mode == 'bootstrap') {
           if (response['has_more'] != false) {
             throw StateError('Server Job reset is not a complete snapshot.');
           }
-          await _revokeAbsentFromSnapshot(businessId,
-            _verifiedSnapshotIds(bundles, businessId), cleanup.jobIds, beforeSnapshot);
+          quarantined.addAll(await _snapshotAbsentIds(businessId,
+            _verifiedSnapshotIds(bundles, businessId), beforeSnapshot));
         }
-        // Permission revocations must commit even if a separate cleanup has
-        // recoverable local work. Do not roll them back with that conflict.
-        await _database.transaction(() async {
-          for (final jobId in revokedIds) {
-            if (jobId.isNotEmpty && !cleanup.jobIds.contains(jobId)) {
-              await _removeJob(businessId, jobId);
-            }
-          }
-        });
-        if (revokedIds.any((id) => id.isNotEmpty && !cleanup.jobIds.contains(id))) {
-          _syncEvents.add(businessId);
-        }
+        await _quarantineRevoked(businessId, quarantined);
+        final classificationGeneration = await LocalJobQuarantine.captureGeneration(_database, businessId);
+        final cleanup = TestJobCleanupTombstones.fromJson(
+          await _cleanupGateway.tombstones(businessId), businessId,
+        );
+        await _quarantineRevoked(businessId,
+          cleanup.jobIds.intersection(beforeSnapshot.keys.toSet()).difference(quarantined));
+        await LocalJobQuarantine.classifyJobs(_database, businessId,
+          await LocalJobQuarantine.unclassifiedJobIds(_database, businessId),
+          cleanupJobIds: cleanup.jobIds, observedGeneration: classificationGeneration);
 
         await _database.transaction(() async {
           if (mode == 'bootstrap') {
@@ -197,12 +195,8 @@ class JobSyncService {
             await _applyBundle(
               businessId,
               Map<String, dynamic>.from(raw),
+              requestGeneration: requestGeneration,
             );
-          }
-
-          for (final jobId in revokedIds) {
-            if (jobId.isEmpty || !cleanup.jobIds.contains(jobId)) continue;
-            await _removeJob(businessId, jobId, isTestCleanup: true);
           }
 
           await _writeSyncState(
@@ -273,6 +267,7 @@ class JobSyncService {
 
     try {
       final beforeSnapshot = await _snapshotBaseline(businessId);
+      final requestGeneration = await LocalJobQuarantine.captureGeneration(_database, businessId);
       while (hasMore) {
         if (++pageCount > 10000) {
           throw StateError('Job bootstrap exceeded page safety limit.');
@@ -317,16 +312,23 @@ class JobSyncService {
 
       // Only the final validated page proves absence. Never revoke a Job
       // merely because it is missing from page one of a keyset bootstrap.
+      final quarantined = await _snapshotAbsentIds(businessId, completeIds, beforeSnapshot);
+      await _quarantineRevoked(businessId, quarantined);
+      final classificationGeneration = await LocalJobQuarantine.captureGeneration(_database, businessId);
       final cleanup = TestJobCleanupTombstones.fromJson(
         await _cleanupGateway.tombstones(businessId), businessId,
       );
-      await _revokeAbsentFromSnapshot(businessId, completeIds, cleanup.jobIds, beforeSnapshot);
+      await _quarantineRevoked(businessId,
+        cleanup.jobIds.intersection(beforeSnapshot.keys.toSet()).difference(quarantined));
+      await LocalJobQuarantine.classifyJobs(_database, businessId,
+        await LocalJobQuarantine.unclassifiedJobIds(_database, businessId),
+        cleanupJobIds: cleanup.jobIds, observedGeneration: classificationGeneration);
       await _database.transaction(() async {
         await _clearBusinessJobCache(businessId);
         for (final bundle in completeBundles) {
           final job = bundle['job'] as Map;
           if (cleanup.jobIds.contains(job['id'])) continue;
-          await _applyBundle(businessId, bundle);
+          await _applyBundle(businessId, bundle, requestGeneration: requestGeneration);
         }
       });
       await _writeSyncState(
@@ -374,12 +376,16 @@ class JobSyncService {
       row.read<String>('id'): '${row.data['row_version']}|${row.data['server_updated_at']}'};
   }
 
-  Future<void> _revokeAbsentFromSnapshot(
-    String businessId, Set<String> serverIds, Set<String> cleanupIds,
-    Map<String, String> beforeSnapshot,
+  Future<void> _quarantineRevoked(String businessId, Set<String> ids) async {
+    if (ids.isEmpty) return;
+    await LocalJobQuarantine.quarantineJobs(_database, businessId, ids);
+    _syncEvents.add(businessId);
+  }
+
+  Future<Set<String>> _snapshotAbsentIds(
+    String businessId, Set<String> serverIds, Map<String, String> beforeSnapshot,
   ) async {
-    var removed = false;
-    await _database.transaction(() async {
+    final absent = <String>{};
       final rows = await _database.customSelect(
         """SELECT j.id,j.sync_state,j.row_version,j.server_updated_at,
              EXISTS(SELECT 1 FROM sync_outbox o WHERE o.business_id=j.business_id
@@ -389,7 +395,7 @@ class JobSyncService {
       ).get();
       for (final row in rows) {
         final id = row.read<String>('id');
-        if (serverIds.contains(id) || cleanupIds.contains(id)) continue;
+        if (serverIds.contains(id)) continue;
         // Keyset pages are not one transaction. A newly synced identity may
         // sort before an already-read page; absence cannot revoke its work.
         final provenance = '${row.data['row_version']}|${row.data['server_updated_at']}';
@@ -401,11 +407,9 @@ class JobSyncService {
              row.data['row_version'] == null && row.data['server_updated_at'] == null)) {
           continue;
         }
-        await _removeJob(businessId, id);
-        removed = true;
+        absent.add(id);
       }
-    });
-    if (removed) _syncEvents.add(businessId);
+    return absent;
   }
 
   Future<void> _clearBusinessJobCache(String businessId) async {
@@ -447,14 +451,20 @@ class JobSyncService {
 
   Future<void> _applyBundle(
     String businessId,
-    Map<String, dynamic> bundle,
-  ) async {
+    Map<String, dynamic> bundle, {
+    required int requestGeneration,
+  }) async {
     final rawJob = bundle['job'];
     if (rawJob is! Map) return;
 
     final job = Map<String, dynamic>.from(rawJob);
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;
+    if (!await LocalJobQuarantine.authorizeFreshJob(_database, businessId, jobId,
+        requestGeneration: requestGeneration)) {
+      throw const LocalJobQuarantineException('Job authorization changed during this download. Retry a fresh authorized pull.');
+    }
+
 
     final vehicleId = _text(job['vehicle_id']);
 
@@ -744,6 +754,13 @@ class JobSyncService {
         final finding = Map<String, dynamic>.from(raw);
         final findingId = finding['id']?.toString() ?? '';
         if (findingId.isEmpty) continue;
+        // A vehicle-wide bundle can include a finding owned by another Job
+        // whose access was revoked. Do not let that row abort unrelated sync.
+        if (await LocalJobQuarantine.isEntityBlocked(_database, businessId, [
+          findingId, _text(finding['found_job_id']), _text(finding['repair_job_id']),
+        ])) {
+          continue;
+        }
 
         await _database.customStatement(
           '''
@@ -819,14 +836,8 @@ class JobSyncService {
 
   Future<void> _removeJob(
     String businessId,
-    String jobId, {
-    bool isTestCleanup = false,
-  }) async {
-    if (isTestCleanup) {
-      await LocalCleanupSafety.requireJobRemovable(
-        _database, businessId, jobId,
-      );
-    }
+    String jobId,
+  ) async {
     final rows = await _database.customSelect(
       '''
       SELECT vehicle_id
@@ -907,7 +918,7 @@ class JobSyncService {
     );
 
     // Cleanup owns this Job only. Vehicle findings can belong to other Jobs.
-    if (!isTestCleanup && vehicleId != null && vehicleId.isNotEmpty) {
+    if (vehicleId != null && vehicleId.isNotEmpty) {
       final remaining = await _database.customSelect(
         '''
         SELECT COUNT(*) AS count

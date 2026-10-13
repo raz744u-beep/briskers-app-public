@@ -180,7 +180,8 @@ void main() {
     final screen = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
     expect(draft, contains('Future<String> convertEstimateOffline('));
     expect(draft, contains("'kind': 'convert_invoice'"));
-    expect(draft, contains("serverId = await _api.convertEstimate(businessId, estimateServerId)"));
+    expect(draft, contains("() => _api.convertEstimate(businessId, estimateServerId)"));
+    expect(draft, contains('LocalJobQuarantine.guardReplay('));
     expect(draft, contains("estimate['job_id']"));
     expect(screen, contains('_offlineDocumentDraft.convertEstimateOffline('));
     expect(screen, isNot(contains('Creating a new invoice from an estimate still requires a connection.')));
@@ -251,7 +252,8 @@ void main() {
     expect(screen, contains('.saveWarranty(widget.businessId,'));
     expect(edits, contains("'warranty',"));
     expect(edits, contains("operation == 'warranty'"));
-    expect(edits, contains('await _api.updateDocumentWarranty('));
+    expect(edits, contains('() => _api.updateDocumentWarranty('));
+    expect(edits, contains('LocalJobQuarantine.guardReplay('));
     expect(edits, contains("'offline_warranty_detail': updatedWarranty"));
   });
 

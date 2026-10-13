@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/screens/settings/test_data_cleanup_screen.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
+import 'package:briskers_app/services/local_job_quarantine.dart';
 import 'package:briskers_app/services/test_job_cleanup_gateway.dart';
 import 'package:briskers_app/services/test_job_cleanup_service.dart';
 import 'test_job_cleanup_policy_test.dart' show cleanupPreview;
@@ -73,6 +74,20 @@ void main() {
     expect(gateway.ownerChecks, 0);
     gateway.owner = false;
     await expectLater(service.preview('shop', 'job', roleCode: 'owner'), throwsStateError);
+    expect(gateway.executions, 0);
+  });
+
+  test('archived recovery still blocks cleanup after fresh display authorization', () async {
+    await queue();
+    await LocalJobQuarantine.quarantineJobs(db, 'shop', ['job']);
+    final generation = await LocalJobQuarantine.captureGeneration(db, 'shop');
+    await LocalJobQuarantine.authorizeFreshJob(db, 'shop', 'job', requestGeneration: generation);
+    await db.customStatement("INSERT INTO local_jobs (id,business_id,access_scope,title,status) "
+      "VALUES ('job','shop','full','Fresh authorized display','open')");
+    expect(await count('sync_outbox'), 0);
+    final plan = await service.preview('shop', 'job', roleCode: 'owner');
+    expect(plan.canDelete, isFalse);
+    await expectLater(service.execute(plan, roleCode: 'owner', confirmation: plan.confirmationText), throwsStateError);
     expect(gateway.executions, 0);
   });
 

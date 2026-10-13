@@ -6,6 +6,7 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_quarantine.dart';
 import 'local_document_detail_cache.dart';
 
 /// Durable *local* payment capture and idempotent replay. This class records
@@ -305,6 +306,11 @@ class OfflineInvoicePaymentLedger {
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database,
+          businessId,
+          outboxId: id,
+        );
         final amount = (payload['amount_cents'] as num) / 100;
         final methodId = payload['method_id'].toString();
         final operationId = payload['operation_id'].toString();
@@ -315,13 +321,18 @@ class OfflineInvoicePaymentLedger {
           'UPDATE sync_outbox SET payload_json=? WHERE id=?',
           [jsonEncode(payload), id],
         );
-        final paymentId = submitPayment != null
-            ? await submitPayment(
-                businessId, invoiceId, amount, methodId, operationId)
-            : await _api.addPendingInvoicePaymentOnce(
-                businessId, invoiceId,
-                amount: amount, methodId: methodId, operationId: operationId,
-              );
+        final paymentId = await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => submitPayment != null
+              ? submitPayment(
+                  businessId, invoiceId, amount, methodId, operationId)
+              : _api.addPendingInvoicePaymentOnce(
+                  businessId, invoiceId,
+                  amount: amount, methodId: methodId, operationId: operationId,
+                ),
+          outboxId: id,
+        );
         if (paymentId.trim().isEmpty || paymentId == 'null') {
           throw StateError('Server did not acknowledge the payment identity.');
         }
@@ -340,6 +351,11 @@ class OfflineInvoicePaymentLedger {
         final detail = fetchInvoice != null
             ? await fetchInvoice(businessId, invoiceId)
             : await _api.documentDetail(businessId, invoiceId);
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database,
+          businessId,
+          outboxId: id,
+        );
         final present = serverAcknowledgesPayment(detail, paymentId);
         if (!present) {
           // A finalized payment can permanently lose its pending ID. Retain
@@ -350,25 +366,32 @@ class OfflineInvoicePaymentLedger {
             'Server accepted payment but invoice detail has not reconciled yet.',
           );
         }
-        if (cacheInvoice != null) {
-          await cacheInvoice(businessId, invoiceId, detail);
-        } else {
-          const cache = LocalDocumentDetailCache();
-          final cached = await cache.load(businessId, invoiceId);
-          final refreshed = Map<String, dynamic>.from(detail);
-          // Warranty detail has its own endpoint. A payment refresh must not
-          // erase the separately cached warranty needed while disconnected.
-          if (!refreshed.containsKey('offline_warranty_detail') &&
-              cached != null && cached.containsKey('offline_warranty_detail')) {
-            refreshed['offline_warranty_detail'] =
-                cached['offline_warranty_detail'];
+        await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database,
+            businessId,
+            outboxId: id,
+          );
+          if (cacheInvoice != null) {
+            await cacheInvoice(businessId, invoiceId, detail);
+          } else {
+            const cache = LocalDocumentDetailCache();
+            final cached = await cache.load(businessId, invoiceId);
+            final refreshed = Map<String, dynamic>.from(detail);
+            // Warranty detail has its own endpoint. A payment refresh must not
+            // erase the separately cached warranty needed while disconnected.
+            if (!refreshed.containsKey('offline_warranty_detail') &&
+                cached != null && cached.containsKey('offline_warranty_detail')) {
+              refreshed['offline_warranty_detail'] =
+                  cached['offline_warranty_detail'];
+            }
+            await cache.save(businessId, invoiceId, refreshed);
           }
-          await cache.save(businessId, invoiceId, refreshed);
-        }
-        await _database.customStatement(
-          'DELETE FROM sync_outbox WHERE id=?',
-          [id],
-        );
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE id=?',
+            [id],
+          );
+        });
       } catch (error) {
         await _database.customStatement(
           """UPDATE sync_outbox SET state='pending',

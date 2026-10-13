@@ -156,6 +156,7 @@ class _FindingApi extends BriskersApi {
     required String attachmentId,
     required String mimeType,
     required Uint8List bytes,
+    AttachmentReplayGuard? replayGuard,
   }) async {
     expect(bytes, [1, 2, 3, 4]);
     uploads++;

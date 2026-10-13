@@ -9,6 +9,7 @@ import '../../core/job_status_style.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
+import '../../services/job_summary_visibility.dart';
 import '../../services/historical_photo_matcher.dart';
 import '../../widgets/job_compact_card.dart';
 import '../expenses/expense_detail_screen.dart';
@@ -39,6 +40,7 @@ class _CustomerServiceHistorySectionState
   static const _androidFileChannel = MethodChannel('com.briskers/expenseiq');
   static const _historicalMatcher = HistoricalPhotoMatcher();
 
+  late JobSummaryVisibility _jobVisibility;
   List<Map<String, dynamic>> _jobs = const [];
   List<Map<String, dynamic>> _documents = const [];
   List<Map<String, dynamic>> _expenses = const [];
@@ -59,101 +61,125 @@ class _CustomerServiceHistorySectionState
   @override
   void initState() {
     super.initState();
+    _listenForQuarantine();
     _load();
   }
 
-  Future<void> _load() async {
-    final offline = BriskersConnectionModeController.instance.forceOffline;
-
-    if (offline) {
-      final cached = await _cache.load(
-        widget.businessId,
-        widget.customerId,
-        'service_history',
-      );
-      if (cached is Map) {
-        final data = Map<String, dynamic>.from(cached);
+  void _listenForQuarantine() {
+    _jobVisibility = JobSummaryVisibility(
+      businessId: widget.businessId,
+      onQuarantine: (jobIds) {
         if (!mounted) return;
         setState(() {
-          _jobs = List<dynamic>.from(data['jobs'] ?? const [])
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList();
-          _documents = List<dynamic>.from(data['documents'] ?? const [])
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList();
-          _expenses = List<dynamic>.from(data['expenses'] ?? const [])
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList();
-          _roleCode = data['role']?.toString() ?? 'office';
+          _jobs = JobSummaryVisibility.withoutJobs(_jobs, jobIds);
+          _loading = false;
+        });
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _jobVisibility.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant CustomerServiceHistorySection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.customerId != widget.customerId) {
+      _jobVisibility.dispose();
+      _jobs = const [];
+      _documents = const [];
+      _expenses = const [];
+      _loading = true;
+      _listenForQuarantine();
+      _load();
+    }
+  }
+
+  Future<bool> _showCachedHistory(
+    JobSummaryVisibility visibility, int generation,
+    String businessId, String customerId,
+  ) async {
+    final cached = await _cache.load(businessId, customerId, 'service_history');
+    if (cached is! Map) return false;
+    final data = Map<String, dynamic>.from(cached);
+    final jobs = await visibility.filter(
+      List<dynamic>.from(data['jobs'] ?? const [])
+          .whereType<Map>().map((row) => Map<String, dynamic>.from(row)),
+      cached: true,
+    );
+    if (!mounted || !visibility.isCurrent(generation)) return true;
+    setState(() {
+      _jobs = jobs;
+      _documents = List<dynamic>.from(data['documents'] ?? const [])
+          .whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
+      _expenses = List<dynamic>.from(data['expenses'] ?? const [])
+          .whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
+      _roleCode = data['role']?.toString() ?? 'office';
+      _loading = false;
+      _error = null;
+    });
+    return true;
+  }
+
+  Future<void> _load() async {
+    final visibility = _jobVisibility;
+    final generation = visibility.beginLoad();
+    final businessId = widget.businessId;
+    final customerId = widget.customerId;
+    final offline = BriskersConnectionModeController.instance.forceOffline;
+    try {
+      if (offline) {
+        if (await _showCachedHistory(visibility, generation, businessId, customerId)) {
+          return;
+        }
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        setState(() {
           _loading = false;
           _error = null;
         });
         return;
       }
 
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = null;
-      });
-      return;
-    }
-
-    try {
+      final snapshotGeneration = await visibility.captureSnapshotGeneration();
+      if (!mounted || !visibility.isCurrent(generation)) return;
       final results = await Future.wait<dynamic>([
-        _api.customerServiceHistory(
-          widget.businessId,
-          widget.customerId,
-        ),
+        _api.customerServiceHistory(businessId, customerId),
         _api.myBusinesses(),
       ]);
-
-      final rows = List<Map<String, dynamic>>.from(results[0] as List);
-      final businesses =
-          List<Map<String, dynamic>>.from(results[1] as List);
+      final rows = await visibility.filter(
+          List<Map<String, dynamic>>.from(results[0] as List));
+      final businesses = List<Map<String, dynamic>>.from(results[1] as List);
       final current = businesses.where(
-        (business) => business['id']?.toString() == widget.businessId,
+        (business) => business['id']?.toString() == businessId,
       );
       final role = current.isEmpty
-          ? 'office'
-          : current.first['role']?.toString() ?? 'office';
-
+          ? 'office' : current.first['role']?.toString() ?? 'office';
       List<Map<String, dynamic>> documents = const [];
       List<Map<String, dynamic>> expenses = const [];
       if (<String>{'owner', 'manager', 'office'}.contains(role)) {
         try {
-          final financial = await _api.customerFinancialHistory(
-            widget.businessId,
-            widget.customerId,
-          );
-          documents = List<dynamic>.from(
-            financial['documents'] ?? const [],
-          ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-          expenses = List<dynamic>.from(
-            financial['expenses'] ?? const [],
-          ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+          final financial = await _api.customerFinancialHistory(businessId, customerId);
+          documents = List<dynamic>.from(financial['documents'] ?? const [])
+              .map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+          expenses = List<dynamic>.from(financial['expenses'] ?? const [])
+              .map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
         } catch (_) {
           documents = const [];
           expenses = const [];
         }
       }
-
-      await _cache.save(
-        widget.businessId,
-        widget.customerId,
-        'service_history',
-        <String, dynamic>{
-          'jobs': rows,
-          'documents': documents,
-          'expenses': expenses,
-          'role': role,
-        },
-      );
-
-      if (!mounted) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
+      await _cache.save(businessId, customerId, 'service_history', {
+        'jobs': JobSummaryVisibility.stampSnapshot(rows, snapshotGeneration),
+        'documents': documents,
+        'expenses': expenses,
+        'role': role,
+      });
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _jobs = rows;
         _documents = documents;
@@ -163,35 +189,15 @@ class _CustomerServiceHistorySectionState
         _error = null;
       });
     } catch (error) {
-      final cached = await _cache.load(
-        widget.businessId,
-        widget.customerId,
-        'service_history',
-      );
-      if (cached is Map) {
-        final data = Map<String, dynamic>.from(cached);
-        if (!mounted) return;
-        setState(() {
-          _jobs = List<dynamic>.from(data['jobs'] ?? const [])
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList();
-          _documents = List<dynamic>.from(data['documents'] ?? const [])
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList();
-          _expenses = List<dynamic>.from(data['expenses'] ?? const [])
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList();
-          _roleCode = data['role']?.toString() ?? 'office';
-          _loading = false;
-          _error = null;
-        });
-        return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
+      try {
+        if (await _showCachedHistory(visibility, generation, businessId, customerId)) {
+          return;
+        }
+      } catch (_) {
+        // Do not publish a cache whose Job access could not be checked.
       }
-
-      if (!mounted) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _loading = false;
         _error = error.toString();
