@@ -17,8 +17,16 @@ class TestJobCleanupGateway {
     }
   }
 
-  Future<List<Map<String, dynamic>>> jobs(String businessId) =>
-      const BriskersApi().jobs(businessId);
+  /// Bounded Owner-only lightweight discovery. Never fetch the full 5k+
+  /// Jobs RPC merely to populate a deletion preview.
+  Future<List<Map<String, dynamic>>> jobs(String businessId) async {
+    final raw = await networkSupabase.rpc(
+      'briskers_test_job_cleanup_candidates_v1',
+      params: {'p_business_id': businessId},
+    );
+    return List<dynamic>.from(raw as List)
+        .map((item) => Map<String, dynamic>.from(item as Map)).toList();
+  }
 
   Future<Map<String, dynamic>> preview(String businessId, String jobId) async =>
       Map<String, dynamic>.from(await networkSupabase.rpc(
