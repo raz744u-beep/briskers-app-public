@@ -68,20 +68,31 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   bool get _estimate => widget.kind == 'estimate';
 
+  String _invoiceStage(Map<String, dynamic> row) {
+    if (_estimate) return row['display_status']?.toString() ?? '';
+    final existing = (row['display_status']?.toString() ?? '').toLowerCase();
+    final code = (row['display_status_code']?.toString() ?? '').toLowerCase();
+    if (existing == 'closed' || code == 'closed' ||
+        row['closed_at'] != null) return 'Closed';
+    final total = num.tryParse(row['total_amount']?.toString() ?? '');
+    final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
+    final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
+    // Some legacy/list RPCs provide only server-computed status, not amounts.
+    if (total != null && total > 0 && paid + pending >= total - 0.005) {
+      return 'Paid · Pending Close';
+    }
+    if (const {'paid', 'pending close'}.contains(existing) ||
+        const {'paid', 'pending_close'}.contains(code)) {
+      return 'Paid · Pending Close';
+    }
+    return 'Open';
+  }
+
   List<String> get _statuses {
     if (_estimate) {
       return const ['Draft', 'Issued', 'Accepted', 'Declined', 'Expired', 'Void'];
     }
-    final names = _invoiceStyles
-        .map((item) => item['name']?.toString() ?? '')
-        .where((name) => name.isNotEmpty)
-        .toList();
-    if ((_rows ?? const <Map<String, dynamic>>[])
-            .any((row) => row['display_status']?.toString() == 'Closed') &&
-        !names.contains('Closed')) {
-      names.add('Closed');
-    }
-    return names;
+    return const ['Open', 'Paid · Pending Close', 'Closed'];
   }
 
   String get _title => _estimate ? tr('estimates') : tr('invoices');
@@ -91,7 +102,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       case 'Open':
         return tr('invoiceOpen');
       case 'Pending Close':
-        return tr('invoicePendingClose');
+      case 'Paid · Pending Close':
+        return 'Paid · Pending Close';
       case 'Paid':
         return tr('invoicePaid');
       case 'Closed':
@@ -303,7 +315,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         : rows
             .where(
               (row) =>
-                  row['display_status']?.toString() == _selectedStatus,
+                  _invoiceStage(row) == _selectedStatus,
             )
             .toList();
 
@@ -374,7 +386,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   int _statusCount(String status) {
     final rows = _rows ?? const <Map<String, dynamic>>[];
     return rows
-        .where((row) => row['display_status']?.toString() == status)
+        .where((row) => _invoiceStage(row) == status)
         .length;
   }
 
@@ -609,7 +621,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         !_estimate && (widget.isOwner || widget.canManageExpenses);
     final estimateConverted = _estimate && row['converted'] == true;
     final canDelete = widget.isOwner;
-    final status = row['display_status']?.toString() ?? '';
+    final status = _invoiceStage(row);
     final total = num.tryParse(row['total_amount']?.toString() ?? '') ?? 0;
     final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
     final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
