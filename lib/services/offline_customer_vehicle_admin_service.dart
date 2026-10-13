@@ -308,6 +308,25 @@ class OfflineCustomerVehicleAdminService {
                 [jsonEncode(data),pending.read<int>('id')],
               );
             }
+            // Re-key every dependent queued write, including document drafts
+            // and edits against provisional Jobs. Otherwise an offline invoice
+            // can repeatedly submit a local vehicle ID to a UUID RPC field.
+            final dependentWrites = await _database.customSelect(
+              """SELECT id,payload_json FROM sync_outbox WHERE business_id=?
+                 AND state='pending' AND entity_type IN
+                 ('document_draft_create','job_admin','job_create')""",
+              variables:[Variable<String>(businessId)],
+            ).get();
+            for (final pending in dependentWrites) {
+              final data=Map<String,dynamic>.from(
+                jsonDecode(pending.read<String>('payload_json')) as Map);
+              if (data['vehicle_id']?.toString()!=entityId) continue;
+              data['vehicle_id']=serverId;
+              await _database.customStatement(
+                'UPDATE sync_outbox SET payload_json=?,last_error=NULL WHERE id=?',
+                [jsonEncode(data),pending.read<int>('id')],
+              );
+            }
             final dependent = await _database.customSelect(
               """SELECT id,payload_json FROM sync_outbox WHERE business_id=?
                  AND entity_type='appointment_create' AND state='pending'""",
