@@ -24,6 +24,7 @@ import '../../services/offline_job_admin_service.dart';
 import '../../services/offline_work_findings_service.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
+import '../customers/customer_detail_screen.dart';
 import 'identifix_estimate_import_screen.dart';
 import 'job_document_screen.dart';
 import 'job_edit_screen.dart';
@@ -2556,6 +2557,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
+  Future<void> _openJobCustomer() async {
+    final customerId = _job?['customer_id']?.toString() ?? '';
+    if (customerId.isEmpty) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CustomerDetailScreen(
+          businessId: widget.businessId,
+          customerId: customerId,
+          roleCode: widget.roleCode,
+        ),
+      ),
+    );
+    if (mounted) unawaited(_load());
+  }
+
   Widget _summaryCard({
     required String customerName,
     required String vehicle,
@@ -2736,7 +2753,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                   label: 'Customer',
                   value: customerName.isEmpty ? 'Customer' : customerName,
                   problemFlag: _job?['customer_problem_flag'] == true,
-                  onTap: _canManage ? _changeCustomer : null,
+                  onTap: _openJobCustomer,
                 ),
                 Divider(
                   height: 1,
