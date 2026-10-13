@@ -890,9 +890,40 @@ class OfflineDocumentDraftService {
       variables: [Variable<String>(businessId)],
     ).get();
 
-    for (final row in rows) {
+    for (final queued in rows) {
+      // Re-read dependencies, as a preceding customer/vehicle sync may have
+      // replaced temporary IDs after this batch was originally selected.
+      final fresh = await _database.customSelect(
+        "SELECT id, entity_id, payload_json FROM sync_outbox "
+        "WHERE id=? AND business_id=? AND entity_type='document_draft_create' "
+        "AND state IN ('pending','inflight') LIMIT 1",
+        variables: [Variable<int>(queued.read<int>('id')),
+          Variable<String>(businessId)],
+      ).get();
+      if (fresh.isEmpty) continue;
+      final row = fresh.single;
       final outboxId = row.read<int>('id');
       final localId = row.read<String>('entity_id');
+      // A dependent record is not a failed upload: leave it queued until
+      // its customer, vehicle, or job obtains an authoritative server UUID.
+      // In particular, never pass "local-vehicle-..." into UUID RPC fields.
+      final preflight = Map<String, dynamic>.from(
+        jsonDecode(row.read<String>('payload_json')) as Map,
+      );
+      final dependencies = <String>[
+        preflight['customer_id']?.toString() ?? '',
+        preflight['vehicle_id']?.toString() ?? '',
+        preflight['job_id']?.toString() ?? '',
+      ];
+      if (dependencies.any((id) => id.startsWith('local-'))) {
+        await _database.customStatement(
+          "UPDATE sync_outbox SET state='pending', "
+          "last_error='Waiting for local customer / vehicle / job ID reconciliation' "
+          "WHERE id=?",
+          [outboxId],
+        );
+        continue;
+      }
       try {
         // Claim before sending any bytes. A delete can cancel only an
         // untouched operation; reconnect if an upload might have started.
