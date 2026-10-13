@@ -1576,6 +1576,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                 ],
                 const SizedBox(height: 18),
                 FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: BriskersColors.expenses,
+                    foregroundColor: Colors.white,
+                  ),
                   onPressed: _saving ? null : _save,
                   icon: _saving
                       ? const SizedBox.square(
