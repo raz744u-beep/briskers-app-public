@@ -170,12 +170,36 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         try {
           payload = Map<String, dynamic>.from(jsonDecode(payloadText) as Map);
         } catch (_) {}
+        // Diagnostic preflight: count locally linked records before any
+        // proposed cleanup. These checks do not alter SQLite or the outbox.
+        final entityId = row.read<String>('entity_id');
+        final jobId = payload['job_id']?.toString() ??
+            payload['provisional_job_id']?.toString() ?? entityId;
+        final localDocumentLinks = await localDatabase.customSelect(
+          'SELECT COUNT(*) AS n FROM local_documents '
+          'WHERE business_id=? AND (id=? OR job_id=?)',
+          variables: [
+            Variable<String>(widget.businessId),
+            Variable<String>(entityId),
+            Variable<String>(jobId),
+          ],
+        ).getSingle();
+        final localJobLinks = await localDatabase.customSelect(
+          'SELECT COUNT(*) AS n FROM local_jobs '
+          'WHERE business_id=? AND id=?',
+          variables: [
+            Variable<String>(widget.businessId),
+            Variable<String>(jobId),
+          ],
+        ).getSingle();
         pendingDetails.add({
           'id': row.read<int>('id'),
           'type': row.read<String>('entity_type'),
           'entity': row.read<String>('entity_id'),
           'state': row.read<String>('state'),
           'attempts': row.read<int>('attempt_count'),
+          'linked_documents': localDocumentLinks.read<int>('n'),
+          'linked_jobs': localJobLinks.read<int>('n'),
           'customer_id': payload['customer_id']?.toString() ?? '',
           'vehicle_id': payload['vehicle_id']?.toString() ?? '',
           'job_id': payload['job_id']?.toString() ??
@@ -685,6 +709,8 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                           if ((operation['job_id'] as String).isNotEmpty)
                             'Job ID: ${operation['job_id']}',
                           'Attempts: ${operation['attempts']}',
+                          'Linked local documents: ${operation['linked_documents']}',
+                          'Linked local jobs: ${operation['linked_jobs']}',
                           if ((operation['error'] as String).isNotEmpty)
                             'Error: ${operation['error']}',
                         ].join('\\n')),
