@@ -160,7 +160,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       await _localFinancial.saveTransactionDetail(
         widget.businessId,
         widget.transactionId,
-        detail,
+        // Persist the authoritative ledger response only. Reporting projection
+        // is ephemeral and revalidated for every fresh/cached/offline view.
+        rawDetail,
       );
       await _prefetchLocalAttachments(
         List<dynamic>.from(detail['attachments'] ?? const [])

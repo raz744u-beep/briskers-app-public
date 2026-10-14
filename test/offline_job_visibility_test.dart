@@ -87,8 +87,8 @@ void main() {
       "VALUES ('invoice','shop','local-job-1','invoice')",
     );
     await db.customStatement(
-      "INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json) "
-      "VALUES ('shop','job_admin','local-job-1','update','{}')",
+      "INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json,created_at) "
+      "VALUES ('shop','job_admin','local-job-1','update','{}',200)",
     );
     expect(await jobs.remapProvisionalJob('shop', 'local-job-1', 'server-job'),
         'TEMP-ABC12345');
@@ -110,12 +110,23 @@ void main() {
     expect((await jobs.listJobs('shop')).first['id'], 'server-job');
     expect(await jobs.remapProvisionalJob('shop', 'local-job-1', 'server-job',
         jobNumber: 'J-50'), 'J-50');
-    // The remapped pending edit remains meaningful activity after the real
-    // number arrives. All sorts by that activity, not the largest job number.
+    // All now defaults to historical Job date. Both Jobs were created at
+    // 100, so their equal dates use the stable descending-number tie-break.
     final numbered = await jobs.listJobs('shop', view: JobListView.all);
     expect(numbered.map((row) => row['id']).toSet(), {'server-job', 'historical'});
-    expect(numbered.map((row) => row['job_number']), ['J-50', 'J-99']);
+    expect(numbered.map((row) => row['job_number']), ['J-99', 'J-50']);
     expect(numbered.every((row) => row['_temporary'] == false), isTrue);
+    // The remapped pending edit at 200 remains newer meaningful activity;
+    // selecting Last modified must still put J-50 first without duplicating it.
+    final modified = await jobs.listJobs(
+      'shop', view: JobListView.all, sort: JobListSort.lastModified,
+    );
+    expect(modified.map((row) => row['job_number']), ['J-50', 'J-99']);
+    expect(modified.map((row) => row['id']).toSet(), {'server-job', 'historical'});
+    final queue = await db.customSelect('SELECT * FROM sync_outbox').getSingle();
+    expect(queue.read<String>('entity_id'), 'server-job');
+    expect(queue.read<String>('state'), 'pending');
+    expect(queue.read<int>('created_at'), 200);
     expect(await jobs.jobCount('shop'), 2);
   });
 

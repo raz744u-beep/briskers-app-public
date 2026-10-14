@@ -584,7 +584,7 @@ class DocumentPdfService {
             ...disclaimers.expand(
               (item) => [
                 _fullWidthSection(
-                  'Customer Acknowledgment — '
+                  'Customer Acknowledgment - '
                   '${item['title']?.toString().trim() ?? 'Disclaimer'}',
                   item['body']?.toString().trim() ?? '',
                   minHeight: 42,
@@ -1045,7 +1045,7 @@ class DocumentPdfService {
             child: pw.Text(
               company.isEmpty
                   ? 'Extended Warranty Payment Allocation'
-                  : 'Extended Warranty — $company',
+                  : 'Extended Warranty - $company',
               style: const pw.TextStyle(
                 fontSize: 9.5,
                 fontWeight: pw.FontWeight.bold,

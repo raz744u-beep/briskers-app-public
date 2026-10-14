@@ -1446,56 +1446,15 @@ class _QuickDialogState extends State<_QuickDialog> {
   }
 
   Future<void> _pickCounterparty() async {
-    final search = TextEditingController();
     final selected = await showModalBottomSheet<String?>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (sheetContext, update) {
-          final query = search.text.trim().toLowerCase();
-          final results = activeCounterparties.where((item) =>
-              (item['name']?.toString() ?? '').toLowerCase().contains(query)).toList()
-            ..sort((a, b) => (a['name']?.toString() ?? '')
-                .compareTo(b['name']?.toString() ?? ''));
-          return Padding(
-            padding: EdgeInsets.fromLTRB(
-                20, 18, 20, MediaQuery.viewInsetsOf(sheetContext).bottom + 16),
-            child: SizedBox(
-              height: MediaQuery.sizeOf(sheetContext).height * 0.70,
-              child: Column(children: [
-                Text('Search payees and payers',
-                    style: Theme.of(sheetContext).textTheme.titleLarge),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: search,
-                  autofocus: true,
-                  onChanged: (_) => update(() {}),
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search),
-                    labelText: 'Vendor / payee name',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                Expanded(child: ListView(children: [
-                  ListTile(
-                    title: const Text('None'),
-                    onTap: () => Navigator.pop(sheetContext, '__none__'),
-                  ),
-                  ...results.map((item) => ListTile(
-                    title: Text(item['name']?.toString() ?? ''),
-                    onTap: () => Navigator.pop(
-                        sheetContext, item['id']?.toString()),
-                  )),
-                ])),
-              ]),
-            ),
-          );
-        },
+      builder: (_) => _QuickCounterpartyPicker(
+        counterparties: activeCounterparties,
       ),
     );
-    search.dispose();
     if (!mounted || selected == null) return;
     setState(() => vendorId = selected == '__none__' ? null : selected);
   }
@@ -1582,13 +1541,18 @@ class _QuickDialogState extends State<_QuickDialog> {
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue: categoryId,
               decoration: const InputDecoration(labelText: 'Category'),
               items: activeCategories
                   .map(
                     (x) => DropdownMenuItem(
                       value: x['id']?.toString(),
-                      child: Text(x['name']?.toString() ?? ''),
+                      child: Text(
+                        x['name']?.toString() ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   )
                   .toList(),
@@ -1597,14 +1561,19 @@ class _QuickDialogState extends State<_QuickDialog> {
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue: accountId,
-              hint: const Text('Choose account'),
+              hint: const Text('Choose account', maxLines: 1, overflow: TextOverflow.ellipsis),
               decoration: const InputDecoration(labelText: 'Account'),
               items: activeAccounts
                   .map(
                     (x) => DropdownMenuItem(
                       value: x['id']?.toString(),
-                      child: Text(x['name']?.toString() ?? ''),
+                      child: Text(
+                        x['name']?.toString() ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   )
                   .toList(),
@@ -1652,6 +1621,75 @@ class _QuickDialogState extends State<_QuickDialog> {
           child: Text(saving ? 'Saving...' : 'Save'),
         ),
       ],
+    );
+  }
+}
+
+// The sheet owns its controller: showModalBottomSheet resolves when popped,
+// while its TextField can still rebuild during the reverse route animation.
+class _QuickCounterpartyPicker extends StatefulWidget {
+  const _QuickCounterpartyPicker({required this.counterparties});
+
+  final List<Map<String, dynamic>> counterparties;
+
+  @override
+  State<_QuickCounterpartyPicker> createState() => _QuickCounterpartyPickerState();
+}
+
+class _QuickCounterpartyPickerState extends State<_QuickCounterpartyPicker> {
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _search.text.trim().toLowerCase();
+    final results = widget.counterparties.where((item) =>
+        (item['name']?.toString() ?? '').toLowerCase().contains(query)).toList()
+      ..sort((a, b) => (a['name']?.toString() ?? '')
+          .compareTo(b['name']?.toString() ?? ''));
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        20, 18, 20, MediaQuery.viewInsetsOf(context).bottom + 16,
+      ),
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.70,
+        child: Column(
+          children: [
+            Text('Search payees and payers',
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _search,
+              autofocus: true,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                labelText: 'Vendor / payee name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                children: [
+                  ListTile(
+                    title: const Text('None'),
+                    onTap: () => Navigator.pop(context, '__none__'),
+                  ),
+                  ...results.map((item) => ListTile(
+                    title: Text(item['name']?.toString() ?? ''),
+                    onTap: () => Navigator.pop(context, item['id']?.toString()),
+                  )),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

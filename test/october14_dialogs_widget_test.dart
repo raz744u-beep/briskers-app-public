@@ -168,9 +168,46 @@ void main() {
     expect(tester.getBottomRight(payee).dy, lessThanOrEqualTo(360));
     expect(tester.takeException(), isNull);
     await tester.tap(payee);
+    // A real keyboard can change insets before the sheet's reverse animation
+    // finishes. Its search controller must remain alive through these frames.
+    await tester.pump(const Duration(milliseconds: 50));
+    tester.view.viewInsets = const FakeViewPadding(bottom: 180);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
     await tester.pumpAndSettle();
     expect(find.text('Search payees and payers'), findsNothing);
     expect(find.text('FedEx'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('quick dropdowns fit long names with enlarged text', (tester) async {
+    _smallScreen(tester);
+    await _open<bool>(
+      tester,
+      (_) => QuickTransactionsSettingsScreen.dialogForTesting(
+        businessId: 'synthetic-dialog-shop',
+        accounts: const [
+          {'id': 'long-account', 'name': 'Main business operating account'},
+        ],
+        categories: const [
+          {'id': 'long-category', 'name': 'Replacement parts and outside services'},
+        ],
+        counterparties: _payees,
+        template: const {
+          'name': 'Parts purchase',
+          'account_id': 'long-account',
+          'category_id': 'long-category',
+        },
+      ),
+      textScale: 1.3,
+    );
+    final dropdowns = tester.widgetList<DropdownButton<String>>(
+      find.byType(DropdownButton<String>),
+    );
+    expect(dropdowns, hasLength(2));
+    expect(dropdowns.every((dropdown) => dropdown.isExpanded), isTrue);
+    expect(find.text('Main business operating account'), findsOneWidget);
+    expect(find.text('Replacement parts and outside services'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
