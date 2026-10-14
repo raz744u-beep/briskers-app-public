@@ -117,14 +117,18 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         'status':a.read<String>('status')});
     }
     final jobs = await localDatabase.customSelect(
-      "SELECT id,title,status,payment_state FROM local_jobs WHERE business_id=? AND customer_id=? "
+      "SELECT id,title,status,payment_state,job_number FROM local_jobs WHERE business_id=? AND customer_id=? "
       "AND lower(status) NOT IN ('completed','closed','cancelled')",
       variables: vars).get();
     for (final j in jobs) {
+      final rawStatus = j.read<String>('status');
+      final formattedStatus = rawStatus.replaceAll('_', ' ');
+      final jobStatus = formattedStatus.isEmpty ? 'Open' :
+          formattedStatus[0].toUpperCase() + formattedStatus.substring(1);
       rows.add({'type':'Job','id':j.read<String>('id'),
         'title':j.read<String>('title'),
-        'status':j.readNullable<String>('payment_state') == 'paid'
-          ? 'Paid, Still Open' : j.read<String>('status')});
+        'number':j.readNullable<String>('job_number') ?? 'Pending sync',
+        'status':jobStatus});
     }
     final docs = await localDatabase.customSelect(
       "SELECT id,kind,status,document_number,total FROM local_documents "
@@ -196,7 +200,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                   BriskersColors.invoices,
               ),
               title: Text(item['title'].toString()),
-              subtitle: Text("${item['type']} · ${item['status']}"),
+              subtitle: Text(item['type'] == 'Job'
+                ? 'Job ${item['number']} · ${item['status']}'
+                : "${item['type']} · ${item['status']}"),
               trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                 if (item['total'] is num)
                   Text(
