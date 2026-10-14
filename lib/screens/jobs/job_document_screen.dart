@@ -2798,6 +2798,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
+            backgroundColor: Theme.of(dialogContext).colorScheme.surface,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+            actionsPadding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
             title: const Text('Finalize received payment?'),
             content: Text(
               'Confirm that ${_money(amount)} was actually received. '
@@ -2811,6 +2814,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                 child: const Text('Cancel'),
               ),
               FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.green.shade700),
                 onPressed: () => Navigator.pop(dialogContext, true),
                 child: const Text('Finalize Payment'),
               ),
