@@ -1057,11 +1057,16 @@ class DocumentPdfService {
             child: pw.Column(
               children: [
                 row('Approved warranty amount', approved),
-                row('Processor surcharge (not shop revenue)', processorFee),
-                if (retained != null) row('Retained after processor fee', retained),
+                row('Warranty Card Payment Amount', terminal),
+                row('Credit Card Processing Fee', processorFee),
+                row(
+                  'Customer Responsibility',
+                  (customerResponsibility - processorFee)
+                      .clamp(0, double.infinity),
+                ),
                 pw.Divider(height: 8, color: PdfColors.grey500),
                 row(
-                  'Customer responsibility',
+                  'Total Customer Responsibility',
                   customerResponsibility,
                   bold: true,
                 ),
