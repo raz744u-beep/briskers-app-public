@@ -7880,8 +7880,13 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+      contentPadding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
+      actionsPadding: const EdgeInsets.fromLTRB(18, 4, 18, 16),
       title: Text(widget.title),
-      content: Column(
+      content: SizedBox(
+        width: 400,
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           TextField(
@@ -7890,7 +7895,10 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: InputDecoration(
               labelText: tr('paymentAmount'),
+              labelStyle: const TextStyle(color: Color(0xFF26354D)),
+              floatingLabelStyle: const TextStyle(color: Color(0xFF26354D)),
               prefixText: '\$ ',
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               focusedBorder: const OutlineInputBorder(
                 borderSide: BorderSide(
                   color: BriskersColors.invoices,
@@ -7899,11 +7907,14 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 22),
           DropdownButtonFormField<String>(
             initialValue: _methodId,
             decoration: InputDecoration(
               labelText: tr('paymentMethod'),
+              labelStyle: const TextStyle(color: Color(0xFF26354D)),
+              floatingLabelStyle: const TextStyle(color: Color(0xFF26354D)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               focusedBorder: const OutlineInputBorder(
                 borderSide: BorderSide(
                   color: BriskersColors.invoices,
@@ -7931,6 +7942,7 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
             ),
           ],
         ],
+      ),
       ),
       actions: [
         TextButton(
