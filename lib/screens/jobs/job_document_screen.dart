@@ -724,8 +724,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final confirmed = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        backgroundColor: Theme.of(dialogContext).colorScheme.surface,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         title: Text(tr('forceReopenInvoiceTitle')),
-        content: SingleChildScrollView(
+        content: SizedBox(
+          width: MediaQuery.sizeOf(dialogContext).width * 0.92,
+          child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -734,8 +739,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               const SizedBox(height: 14),
               TextField(
                 controller: reason,
-                minLines: 2,
-                maxLines: 4,
+                minLines: 4,
+                maxLines: 6,
                 autofocus: true,
                 decoration: InputDecoration(
                   labelText: tr('forceReopenReason'),
@@ -744,6 +749,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               ),
             ],
           ),
+          ),
         ),
         actions: [
           TextButton(
@@ -751,6 +757,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             child: Text(tr('forceReopenCancel')),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.primary,
+            ),
             onPressed: () {
               final value = reason.text.trim();
               if (value.length < 10) return;
