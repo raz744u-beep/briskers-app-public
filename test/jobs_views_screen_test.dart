@@ -496,21 +496,39 @@ void main() {
         // independently of unrelated cards and header accessibility layouts.
         await tester.pumpWidget(
           MaterialApp(
+            // The popup lives in Navigator's overlay, so scaling must wrap
+            // the Navigator rather than just the launch button's subtree.
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context)
+                  .copyWith(textScaler: const TextScaler.linear(2)),
+              child: child!,
+            ),
             home: Scaffold(
-              body: MediaQuery(
-                data: const MediaQueryData(textScaler: TextScaler.linear(2)),
-                child: Center(child: SizedBox(width: 256, child: entry)),
+              body: Center(
+                child: PopupMenuButton<String>(
+                  key: const ValueKey('enlarged-paid-filter'),
+                  constraints: const BoxConstraints.tightFor(width: 256),
+                  itemBuilder: (_) => [entry],
+                  icon: const Icon(Icons.filter_list),
+                ),
               ),
             ),
           ),
         );
         await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('enlarged-paid-filter')));
+        await tester.pumpAndSettle();
         final label = find.text(
           language == 'en' ? 'Paid, Still Open' : 'Pagado, aún abierto',
         );
         expect(label, findsOneWidget);
+        expect(MediaQuery.textScalerOf(tester.element(label)).scale(10), 20);
         expect(tester.getSize(label).height, greaterThan(24));
         expect(tester.getSize(label).width, lessThanOrEqualTo(222));
+        expect(tester.takeException(), isNull);
+        await tester.tap(label);
+        await tester.pumpAndSettle();
+        expect(label, findsNothing);
         expect(tester.takeException(), isNull);
       },
     );
