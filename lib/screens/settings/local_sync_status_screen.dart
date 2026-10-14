@@ -415,8 +415,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         );
       });
       await _load();
-      if (mounted) setState(() =>
-        _syncMessage = 'Orphaned test operation #81 cancelled. Other data untouched.');
+      if (mounted) {
+        setState(() => _syncMessage =
+            'Orphaned test operation #81 cancelled. Other data untouched.');
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
