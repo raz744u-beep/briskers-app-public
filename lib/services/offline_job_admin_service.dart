@@ -284,6 +284,12 @@ class OfflineJobAdminService {
             status_name = ?,
             status_color = ?,
             status_icon = ?,
+            completed_at = CASE
+              WHEN lower(?) = 'completed' THEN
+                CASE WHEN lower(status) = 'completed' THEN completed_at ELSE ? END
+              WHEN lower(?) NOT IN ('completed', 'cancelled', 'closed') THEN NULL
+              ELSE completed_at
+            END,
             sync_state = 'pending'
         WHERE business_id = ? AND id = ?
         ''',
@@ -292,6 +298,9 @@ class OfflineJobAdminService {
           name,
           colorHex,
           iconKey,
+          code,
+          DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+          code,
           businessId,
           jobId,
         ],
@@ -407,6 +416,8 @@ class OfflineJobAdminService {
       } catch (_) {}
     }
     payload.addAll(changes);
+    // Keep the queue's original identity/time, but order Jobs by the latest edit.
+    payload['_activity_at'] = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
 
     if (existing.isNotEmpty) {
       await _database.customStatement(

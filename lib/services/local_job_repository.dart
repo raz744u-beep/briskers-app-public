@@ -46,7 +46,7 @@ class LocalJobRepository {
   static const _finishedStatuses = "('completed','cancelled','closed')";
 
   // Import time is not business activity. MB jobs with no reliable historical
-  // date fall back to sequential job number; a later edit still counts.
+  // date sort last; a later edit still counts. Job number only breaks ties.
   static const _jobActivitySql = """
     MAX(
       COALESCE(j.completed_at, 0),
@@ -72,14 +72,54 @@ class LocalJobRepository {
                    COALESCE(d.created_at, 0)) END
       )) FROM local_documents d
         WHERE d.business_id = j.business_id AND d.job_id = j.id), 0),
-      COALESCE((SELECT MAX(o.created_at) FROM sync_outbox o
+      COALESCE((SELECT MAX(MAX(
+        COALESCE(i.inspected_at, 0),
+        CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
+          AND i.server_updated_at <= j.created_at THEN 0
+          ELSE COALESCE(i.server_updated_at, 0) END
+      )) FROM local_pre_inspections i
+        WHERE i.business_id = j.business_id AND i.job_id = j.id), 0),
+      COALESCE((SELECT MAX(MAX(
+        COALESCE(f.resolved_at, 0),
+        CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
+          AND f.created_at = j.created_at THEN 0
+          ELSE COALESCE(f.created_at, 0) END,
+        CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
+          AND f.server_updated_at <= j.created_at THEN 0
+          ELSE COALESCE(f.server_updated_at, 0) END
+      )) FROM local_findings f
+        WHERE f.business_id = j.business_id
+          AND (f.found_job_id = j.id OR f.repair_job_id = j.id)), 0),
+      COALESCE((SELECT MAX(p.captured_at)
+        FROM local_pre_inspection_photos p
+        JOIN local_pre_inspections i ON i.business_id = p.business_id
+          AND i.id = p.inspection_id
+        WHERE i.business_id = j.business_id AND i.job_id = j.id), 0),
+      COALESCE((SELECT MAX(p.captured_at)
+        FROM local_finding_photos p
+        JOIN local_findings f ON f.business_id = p.business_id
+          AND f.id = p.finding_id
+        WHERE f.business_id = j.business_id
+          AND (f.found_job_id = j.id OR f.repair_job_id = j.id)), 0),
+      COALESCE((SELECT MAX(MAX(COALESCE(o.created_at, 0),
+        CASE WHEN json_valid(o.payload_json)
+          THEN COALESCE(CAST(json_extract(o.payload_json, '\$._activity_at') AS INTEGER), 0)
+          ELSE 0 END)) FROM sync_outbox o
         WHERE o.business_id = j.business_id AND o.state = 'pending'
           AND ((o.entity_id = j.id AND o.entity_type IN
             ('job_create', 'job_admin', 'work_summary', 'preinspection'))
-          OR (o.entity_type = 'invoice_payment_received' AND EXISTS (
+          OR (o.entity_type IN ('invoice_payment_received', 'document_edit',
+            'document_draft_create', 'estimate_add_to_invoice') AND EXISTS (
             SELECT 1 FROM local_documents pd
             WHERE pd.business_id = j.business_id AND pd.job_id = j.id
               AND pd.id = o.entity_id
+          ))
+          OR (o.entity_type IN ('finding_create', 'finding_update',
+            'finding_action') AND EXISTS (
+            SELECT 1 FROM local_findings pf
+            WHERE pf.business_id = j.business_id
+              AND (pf.found_job_id = j.id OR pf.repair_job_id = j.id)
+              AND pf.id = o.entity_id
           )))), 0)
     )
   """;
@@ -111,7 +151,7 @@ class LocalJobRepository {
     String businessId, {
     String? status,
     String? search,
-    JobListView view = JobListView.recent,
+    JobListView view = JobListView.all,
   }) {
     final where = <String>['j.business_id = ?'];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
@@ -162,8 +202,8 @@ class LocalJobRepository {
     String businessId, {
     String? status,
     String? search,
-    JobListView view = JobListView.recent,
-    JobListSort sort = JobListSort.lastAccessed,
+    JobListView view = JobListView.all,
+    JobListSort sort = JobListSort.lastModified,
     String? userId,
     int limit = 50,
     int offset = 0,
@@ -183,13 +223,27 @@ class LocalJobRepository {
       'CREATE INDEX IF NOT EXISTS '
       'idx_jobs_view_findings ON local_findings (business_id, vehicle_id, status)',
     );
+    for (final index in const [
+      'idx_jobs_view_inspections ON local_pre_inspections (business_id, job_id)',
+      'idx_jobs_view_found_job ON local_findings (business_id, found_job_id)',
+      'idx_jobs_view_repair_job ON local_findings (business_id, repair_job_id)',
+      'idx_jobs_view_inspection_photos ON local_pre_inspection_photos (business_id, inspection_id)',
+      'idx_jobs_view_finding_photos ON local_finding_photos (business_id, finding_id)',
+    ]) {
+      await _database.customStatement('CREATE INDEX IF NOT EXISTS $index');
+    }
     final filters = _filters(
       businessId,
       status: status,
       search: search,
       view: view,
     );
-    final order = view == JobListView.active
+    // Completed means the work was completed, regardless of a later payment,
+    // import correction or note. Missing dates fall back to meaningful activity.
+    final order = status?.toLowerCase() == 'completed'
+        ? 'COALESCE(NULLIF(j.completed_at, 0), j.activity_at) DESC, '
+              'j.activity_at DESC,'
+        : view == JobListView.active
         ? """
           COALESCE(s.sort_order, 9999), lower(j.status),
           CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
@@ -198,14 +252,25 @@ class LocalJobRepository {
               WHERE d.business_id = j.business_id AND d.job_id = j.id), 0)
             ELSE COALESCE(j.created_at, 0) END DESC,
         """
-        : sort == JobListSort.lastModified
+        : view == JobListView.all || sort == JobListSort.lastModified
         ? 'j.activity_at DESC,'
         : view == JobListView.recent && sort == JobListSort.lastAccessed
         // Accesses always precede unopened Jobs, even if a later import/edit
         // has a newer server timestamp. Never borrow another user's history.
         ? 'CASE WHEN a.last_accessed_at IS NULL THEN 1 ELSE 0 END, '
-          'a.last_accessed_at DESC, j.job_date_at DESC,'
+              'a.last_accessed_at DESC, j.job_date_at DESC,'
         : 'j.job_date_at DESC,';
+    // Only legacy callers keep the old provisional pin. The Jobs screen's All
+    // list is strictly newest activity first, including pending local Jobs.
+    final legacyPin =
+        view == JobListView.all || status?.toLowerCase() == 'completed'
+        ? ''
+        : """
+          CASE WHEN (j.job_number = 'Pending sync' OR upper(j.job_number) LIKE 'TEMP-%')
+            THEN 0 ELSE 1 END,
+          CASE WHEN (j.job_number = 'Pending sync' OR upper(j.job_number) LIKE 'TEMP-%')
+            THEN j.created_at END DESC,
+        """;
     final rows = await _database
         .customSelect(
           """
@@ -225,11 +290,7 @@ class LocalJobRepository {
       LEFT JOIN local_job_accesses a
         ON a.business_id = j.business_id AND a.job_id = j.id AND a.user_id = ?
       ORDER BY
-        -- Keep newly created temporary Jobs visible before historical jobs.
-        CASE WHEN (j.job_number = 'Pending sync' OR upper(j.job_number) LIKE 'TEMP-%')
-          THEN 0 ELSE 1 END,
-        CASE WHEN (j.job_number = 'Pending sync' OR upper(j.job_number) LIKE 'TEMP-%')
-          THEN j.created_at END DESC,
+        $legacyPin
         $order
         $_numberOrderSql, j.id
       LIMIT ? OFFSET ?
@@ -359,6 +420,19 @@ class LocalJobRepository {
               changed = true;
             }
           }
+          final patch = payload['patch'];
+          if (patch is Map) {
+            for (final key in const [
+              'job_id',
+              'found_job_id',
+              'repair_job_id',
+            ]) {
+              if (patch[key] == provisionalJobId) {
+                patch[key] = serverJobId;
+                changed = true;
+              }
+            }
+          }
           final entityId = row.read<String>('entity_id');
           if (!changed && entityId != provisionalJobId) continue;
           await _database.customStatement(
@@ -370,8 +444,9 @@ class LocalJobRepository {
             ],
           );
         }
-        await LocalJobAccessHistory(database: _database)
-            .remapJob(businessId, provisionalJobId, serverJobId);
+        await LocalJobAccessHistory(
+          database: _database,
+        ).remapJob(businessId, provisionalJobId, serverJobId);
         await _database.customStatement(
           'DELETE FROM local_jobs WHERE business_id = ? AND id = ?',
           [businessId, provisionalJobId],
@@ -385,7 +460,7 @@ class LocalJobRepository {
     String businessId, {
     String? status,
     String? search,
-    JobListView view = JobListView.recent,
+    JobListView view = JobListView.all,
   }) async {
     final filters = _filters(
       businessId,
@@ -503,7 +578,7 @@ class LocalJobRepository {
 
   Future<Map<String, int>> jobStatusCounts(
     String businessId, {
-    JobListView view = JobListView.recent,
+    JobListView view = JobListView.all,
   }) async {
     final rows = await _database
         .customSelect(
@@ -758,7 +833,8 @@ class LocalJobRepository {
       'payment_state': row.readNullable<String>('payment_state'),
       'updated_at': _isoFromDb(row.data['activity_at']),
       'job_date': row.data['job_date_at'] == 0
-          ? null : _isoFromDb(row.data['job_date_at']),
+          ? null
+          : _isoFromDb(row.data['job_date_at']),
       'last_accessed_at': row.data['last_accessed_at'] == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(

@@ -466,6 +466,23 @@ class JobSyncService {
     }
 
 
+    // A pull may arrive before a queued status change can be uploaded. Keep
+    // that local projection (including its actual completion time), while
+    // still accepting server versions and unrelated authoritative fields.
+    final pendingAdmin = await _database.customSelect(
+      "SELECT payload_json FROM sync_outbox WHERE business_id = ? "
+      "AND entity_id = ? AND entity_type = 'job_admin' AND state = 'pending'",
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    final preserveStatus = pendingAdmin.any((row) {
+      try {
+        final payload = jsonDecode(row.read<String>('payload_json'));
+        return payload is Map && payload['status_changed'] == true;
+      } catch (_) {
+        return false;
+      }
+    });
+
     final vehicleId = _text(job['vehicle_id']);
 
     final preserveInspection =
@@ -526,10 +543,10 @@ class JobSyncService {
         job_number=excluded.job_number,
         title=excluded.title,
         requested_work=excluded.requested_work,
-        status=excluded.status,
-        status_name=excluded.status_name,
-        status_color=excluded.status_color,
-        status_icon=excluded.status_icon,
+        status=${preserveStatus ? 'local_jobs.status' : 'excluded.status'},
+        status_name=${preserveStatus ? 'local_jobs.status_name' : 'excluded.status_name'},
+        status_color=${preserveStatus ? 'local_jobs.status_color' : 'excluded.status_color'},
+        status_icon=${preserveStatus ? 'local_jobs.status_icon' : 'excluded.status_icon'},
         customer_id=excluded.customer_id,
         customer_name=excluded.customer_name,
         customer_problem_flag=excluded.customer_problem_flag,
@@ -548,10 +565,10 @@ class JobSyncService {
         assigned_position=excluded.assigned_position,
         is_unassigned=excluded.is_unassigned,
         created_at=excluded.created_at,
-        completed_at=excluded.completed_at,
+        completed_at=${preserveStatus ? 'local_jobs.completed_at' : 'excluded.completed_at'},
         server_updated_at=excluded.server_updated_at,
         row_version=excluded.row_version,
-        sync_state='synced'
+        sync_state='${preserveStatus ? 'pending' : 'synced'}'
       ''',
       [
         jobId,

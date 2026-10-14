@@ -31,8 +31,8 @@ class _Jobs extends LocalJobRepository {
     String businessId, {
     String? status,
     String? search,
-    JobListView view = JobListView.recent,
-    JobListSort sort = JobListSort.lastAccessed,
+    JobListView view = JobListView.all,
+    JobListSort sort = JobListSort.lastModified,
     String? userId,
     int limit = 50,
     int offset = 0,
@@ -67,7 +67,7 @@ class _Jobs extends LocalJobRepository {
     String businessId, {
     String? status,
     String? search,
-    JobListView view = JobListView.recent,
+    JobListView view = JobListView.all,
   }) async => search == 'new' || status == 'paid_still_open' ? 1 : 65;
 
   @override
@@ -79,7 +79,7 @@ class _Jobs extends LocalJobRepository {
   @override
   Future<Map<String, int>> jobStatusCounts(
     String businessId, {
-    JobListView view = JobListView.recent,
+    JobListView view = JobListView.all,
   }) async => {'open': 65};
 }
 
@@ -145,11 +145,12 @@ void main() {
   Widget screen(
     _Jobs repository, {
     String businessId = 'shop',
+    String roleCode = 'mechanic',
     void Function(_Visibility)? onVisibility,
     _Documents? documents,
   }) => JobsScreen(
     businessId: businessId,
-    roleCode: 'mechanic',
+    roleCode: roleCode,
     userId: 'owner',
     repository: repository,
     documentRepository: documents ?? _Documents(),
@@ -161,39 +162,28 @@ void main() {
   );
 
   testWidgets(
-    'defaults to Recent/accessed and switches Modified, Active, All offline',
+    'Jobs uses latest activity with only the existing status filter',
     (tester) async {
       final repository = _Jobs();
       await tester.pumpWidget(
         MaterialApp(home: Scaffold(body: screen(repository))),
       );
       await tester.pumpAndSettle();
-      expect(repository.calls.last.view, JobListView.recent);
-      expect(repository.calls.last.sort, JobListSort.lastAccessed);
-      expect(repository.calls.last.user, 'owner');
-      await tester.tap(find.byKey(const ValueKey('job-list-sort')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Last modified').last);
-      await tester.pumpAndSettle();
-      expect(repository.calls.last.sort, JobListSort.lastModified);
-      await tester.tap(find.text('Active'));
-      await tester.pumpAndSettle();
-      expect(repository.calls.last.view, JobListView.active);
-      expect(find.text('By status · newest created first'), findsOneWidget);
-      await tester.tap(find.text('All').first);
-      await tester.pumpAndSettle();
       expect(repository.calls.last.view, JobListView.all);
-      expect(repository.calls.last.sort, JobListSort.jobDate);
-      expect(find.text('Complete history · job date'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('job-list-sort')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Last modified').last);
-      await tester.pumpAndSettle();
       expect(repository.calls.last.sort, JobListSort.lastModified);
-      expect(find.text('Complete history · last modified'), findsOneWidget);
-      await tester.tap(find.text('Recent'));
+      expect(repository.calls.last.user, 'owner');
+      expect(find.byType(SegmentedButton<JobListView>), findsNothing);
+      expect(find.byKey(const ValueKey('job-list-sort')), findsNothing);
+      expect(find.text('Recent'), findsNothing);
+      expect(find.text('Active'), findsNothing);
+      expect(find.text('All statuses'), findsOneWidget);
+      await tester.tap(find.byTooltip(tr('filterJobs')));
       await tester.pumpAndSettle();
-      expect(repository.calls.last.sort, JobListSort.lastModified);
+      expect(find.text('Completed'), findsOneWidget);
+      await tester.tap(find.text('Completed'));
+      await tester.pumpAndSettle();
+      expect(repository.calls.last.status, 'completed');
+      expect(repository.calls.last.view, JobListView.all);
       expect(tester.takeException(), isNull);
     },
   );
@@ -205,8 +195,6 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: Scaffold(body: screen(repository))),
     );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('All').first);
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.byKey(const ValueKey('load-more-jobs')),
@@ -225,39 +213,7 @@ void main() {
     expect(repository.calls.last.view, JobListView.all);
   });
 
-  testWidgets('All keeps its independent date sort after navigation and restoration', (tester) async {
-    final repository = _Jobs();
-    final visible = ValueNotifier(true);
-    final bucket = PageStorageBucket();
-    addTearDown(visible.dispose);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PageStorage(
-      bucket: bucket,
-      child: ValueListenableBuilder<bool>(
-        valueListenable: visible,
-        builder: (_, show, _) => show ? screen(repository) : const Text('Other tab'),
-      ),
-    ))));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('All').first);
-    await tester.pumpAndSettle();
-    expect(repository.calls.last.sort, JobListSort.jobDate);
-    await tester.tap(find.byKey(const ValueKey('job-list-sort')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Last modified').last);
-    await tester.pumpAndSettle();
-    visible.value = false;
-    await tester.pumpAndSettle();
-    visible.value = true;
-    await tester.pumpAndSettle();
-    expect(repository.calls.last.view, JobListView.all);
-    expect(repository.calls.last.sort, JobListSort.lastModified);
-    await tester.tap(find.text('Recent'));
-    await tester.pumpAndSettle();
-    expect(repository.calls.last.sort, JobListSort.lastAccessed);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('view and search restore after leaving and returning to Jobs', (
+  testWidgets('old view preferences cannot restore removed Jobs selectors', (
     tester,
   ) async {
     final repository = _Jobs();
@@ -279,7 +235,57 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Active'));
+    bucket.writeState(
+      tester.element(find.byType(JobsScreen)),
+      const JobListPreferences(
+        view: JobListView.active,
+        sort: JobListSort.lastAccessed,
+        allSort: JobListSort.jobDate,
+        status: 'completed',
+        search: 'new',
+        visibleLimit: 60,
+      ),
+      identifier: 'jobs-view:shop:owner',
+    );
+    visible.value = false;
+    await tester.pumpAndSettle();
+    visible.value = true;
+    await tester.pumpAndSettle();
+    expect(repository.calls.last.view, JobListView.all);
+    expect(repository.calls.last.sort, JobListSort.lastModified);
+    expect(repository.calls.last.status, 'completed');
+    expect(repository.calls.last.search, 'new');
+    expect(repository.calls.last.limit, 60);
+    expect(find.byType(SegmentedButton<JobListView>), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('status and search restore after leaving and returning to Jobs', (
+    tester,
+  ) async {
+    final repository = _Jobs();
+    final visible = ValueNotifier(true);
+    final bucket = PageStorageBucket();
+    addTearDown(visible.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PageStorage(
+            bucket: bucket,
+            child: ValueListenableBuilder<bool>(
+              valueListenable: visible,
+              builder: (_, show, _) =>
+                  show ? screen(repository) : const Text('Other tab'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip(tr('filterJobs')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Completed'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).first, 'new');
     await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
@@ -287,7 +293,8 @@ void main() {
     await tester.pumpAndSettle();
     visible.value = true;
     await tester.pumpAndSettle();
-    expect(repository.calls.last.view, JobListView.active);
+    expect(repository.calls.last.view, JobListView.all);
+    expect(repository.calls.last.status, 'completed');
     expect(repository.calls.last.search, 'new');
     expect(find.text('new'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -331,7 +338,7 @@ void main() {
   });
 
   testWidgets(
-    'Spanish controls fit a narrow phone and retain all three views',
+    'Spanish status and search fit a narrow phone without removed selectors',
     (tester) async {
       tester.view.physicalSize = const Size(360, 740);
       tester.view.devicePixelRatio = 1;
@@ -343,17 +350,55 @@ void main() {
         MaterialApp(home: Scaffold(body: screen(repository))),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Recientes'), findsOneWidget);
-      expect(find.text('Activos'), findsOneWidget);
-      expect(find.text('Todos'), findsOneWidget);
-      expect(find.text('Último acceso'), findsOneWidget);
+      expect(find.text('Recientes'), findsNothing);
+      expect(find.text('Activos'), findsNothing);
+      expect(find.text('Todos los estados'), findsOneWidget);
+      expect(find.text('Último acceso'), findsNothing);
       expect(tester.takeException(), isNull);
-      await tester.tap(find.text('Activos'));
+      await tester.tap(find.byTooltip(tr('filterJobs')));
       await tester.pumpAndSettle();
-      expect(repository.calls.last.view, JobListView.active);
+      expect(repository.calls.last.view, JobListView.all);
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'Jobs long-press exposes Add Payment for managers and dismisses safely',
+    (tester) async {
+      final repository = _Jobs();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: screen(repository, roleCode: 'owner')),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.longPress(find.byType(JobCompactCard).first);
+      await tester.pumpAndSettle();
+      // A repeated long-press callback cannot stack another action sheet.
+      tester
+          .widget<JobCompactCard>(find.byType(JobCompactCard).first)
+          .onLongPress!();
+      await tester.pumpAndSettle();
+      expect(find.text('Add Payment'), findsOneWidget);
+      expect(find.text('Add Invoice'), findsOneWidget);
+      Navigator.of(tester.element(find.text('Add Payment'))).pop();
+      await tester.pumpAndSettle();
+      expect(find.text('Add Payment'), findsNothing);
+      expect(find.byType(JobsScreen), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Jobs long-press does not expose payment to mechanics', (
+    tester,
+  ) async {
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: screen(_Jobs()))));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byType(JobCompactCard).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Add Payment'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'quarantine prunes retained Jobs and prevents a late load restoring them',
@@ -541,8 +586,9 @@ void main() {
             // The popup lives in Navigator's overlay, so scaling must wrap
             // the Navigator rather than just the launch button's subtree.
             builder: (context, child) => MediaQuery(
-              data: MediaQuery.of(context)
-                  .copyWith(textScaler: const TextScaler.linear(2)),
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: const TextScaler.linear(2)),
               child: child!,
             ),
             home: Scaffold(

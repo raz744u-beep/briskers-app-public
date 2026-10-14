@@ -83,6 +83,9 @@ String jobStatusLabel(String? code, String fallback) {
 const Map<String, Map<String, String>> _translations = {
   'en': {
     'profitabilitySummary': 'Job financial summary',
+    'profitabilityRevenueCard': 'Revenue',
+    'profitabilityCostsCard': 'Costs',
+    'profitabilityProfitCard': 'Profit',
     'profitabilityNetBeforeOverhead': 'Net job profit (before shop overhead)',
     'profitabilityRevenueExTax': 'Revenue excluding sales tax',
     'profitabilityTaxExcluded': 'Sales tax billed (excluded from revenue)',
@@ -242,6 +245,11 @@ const Map<String, Map<String, String>> _translations = {
     'processorPassThrough': 'Processor fee (not shop income)',
     'retainedReceipt': 'Retained receipts after processor fee',
     'warrantyFeeNoDoubleCharge': 'The fee is informational. Do not charge it again if the customer already paid it.',
+    'customerResponsibilityAllocation': 'Customer responsibility allocation',
+    'approvedCustomerAllocationSummary': 'Approved {approved} • Customer allocation {customer}',
+    'warrantyAllocationBalanceHelp': 'Saved payment allocation. Payments are credited separately; see invoice balance for amount due.',
+    'warrantyAllocationReviewRequired': 'Review required',
+    'warrantyAllocationReviewHelp': 'The saved allocation needs review before use.',
     'warrantyReceiptInvalid': 'Enter a positive amount within the invoice balance and at least the processor fee.',
     'recordReceivedPayment': 'Record received payment',
     'warrantySurchargeExplanation':
@@ -589,6 +597,9 @@ const Map<String, Map<String, String>> _translations = {
   },
   'es': {
     'profitabilitySummary': 'Resumen financiero del trabajo',
+    'profitabilityRevenueCard': 'Ingresos',
+    'profitabilityCostsCard': 'Costos',
+    'profitabilityProfitCard': 'Utilidad',
     'profitabilityNetBeforeOverhead': 'Utilidad neta del trabajo (antes de gastos generales)',
     'profitabilityRevenueExTax': 'Ingresos sin impuesto sobre las ventas',
     'profitabilityTaxExcluded': 'Impuesto facturado (excluido de los ingresos)',
@@ -753,6 +764,11 @@ const Map<String, Map<String, String>> _translations = {
     'processorPassThrough': 'Comisión del procesador (no es ingreso)',
     'retainedReceipt': 'Ingreso retenido después de comisión',
     'warrantyFeeNoDoubleCharge': 'La comisión es informativa. No la cobre otra vez si el cliente ya la pagó.',
+    'customerResponsibilityAllocation': 'Distribución de responsabilidad del cliente',
+    'approvedCustomerAllocationSummary': 'Aprobado {approved} • Distribución del cliente {customer}',
+    'warrantyAllocationBalanceHelp': 'Distribución de pago guardada. Los pagos se acreditan por separado; consulte el saldo de la factura para ver el importe pendiente.',
+    'warrantyAllocationReviewRequired': 'Revisión necesaria',
+    'warrantyAllocationReviewHelp': 'Revise la distribución guardada antes de usarla.',
     'warrantyReceiptInvalid': 'Ingrese un importe positivo dentro del saldo y no menor que la comisión.',
     'recordReceivedPayment': 'Registrar pago recibido',
     'warrantySurchargeExplanation':

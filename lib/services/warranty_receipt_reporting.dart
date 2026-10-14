@@ -46,6 +46,13 @@ class WarrantyReceiptReporting {
         WarrantyPaymentAmounts.cents(receipt['amount'])) {
       return result..['reporting_status'] = 'unverified';
     }
+    final rate = num.tryParse(warranty['surcharge_rate']?.toString() ?? '');
+    // A check has no processor fee. Conflicting/stale metadata must not
+    // silently reduce its income or become a verified fee allocation.
+    if (rate == null || !rate.isFinite || rate < 0 ||
+        (rate <= 0.000001 && WarrantyPaymentAmounts.cents(warranty['processor_fee']) != 0)) {
+      return result..['reporting_status'] = 'unverified';
+    }
     final amounts = WarrantyPaymentAmounts.fromReceipt(
       gross: transaction['amount'], processorFee: warranty['processor_fee']);
     if (amounts == null) return result..['reporting_status'] = 'unverified';

@@ -1209,6 +1209,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     businessId: widget.businessId,
                     customerId: widget.customerId,
                     vehicles: vehicles,
+                    canManage: _canManageQuickActions,
+                    canDelete: widget.roleCode == 'owner',
                   ),
                   const SizedBox(height: 18),
                   Container(

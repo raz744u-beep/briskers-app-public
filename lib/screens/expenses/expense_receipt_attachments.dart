@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+import '../../core/module_modal_theme.dart';
+import '../../core/briskers_colors.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
@@ -25,8 +27,10 @@ class ExpenseReceiptAttachments extends StatefulWidget {
       _ExpenseReceiptAttachmentsState();
 }
 
-class _ExpenseReceiptAttachmentsState
-    extends State<ExpenseReceiptAttachments> {
+class _ExpenseReceiptAttachmentsState extends State<ExpenseReceiptAttachments>
+    with ModuleModalState<ExpenseReceiptAttachments> {
+  @override
+  Color get modalAccent => BriskersColors.expenses;
   bool _confirmingRemoval = false;
 
   Future<void> _remove(int selectedIndex) async {
@@ -68,7 +72,8 @@ class _ExpenseReceiptAttachmentsState
     // Resolve the selected object again in case the parent changed the list
     // while the confirmation was open. Never remove by filename or file path:
     // the same device photo can be selected more than once.
-    final index = selectedIndex < widget.receipts.length &&
+    final index =
+        selectedIndex < widget.receipts.length &&
             identical(widget.receipts[selectedIndex], selected)
         ? selectedIndex
         : widget.receipts.indexWhere((item) => identical(item, selected));
@@ -123,7 +128,10 @@ class _ReceiptPreview {
   final DateTime? modified;
 }
 
-class _ReceiptPhotoCardState extends State<_ReceiptPhotoCard> {
+class _ReceiptPhotoCardState extends State<_ReceiptPhotoCard>
+    with ModuleModalState<_ReceiptPhotoCard> {
+  @override
+  Color get modalAccent => BriskersColors.expenses;
   late Future<_ReceiptPreview> _preview;
   bool _previewOpen = false;
 
@@ -255,15 +263,13 @@ class _ReceiptPhotoCardState extends State<_ReceiptPhotoCard> {
               children: [
                 Semantics(
                   button: previewReady && widget.enabled,
-                  label: tr('viewReceiptPhoto').replaceAll(
-                    '{photo}',
-                    widget.label,
-                  ),
+                  label: tr(
+                    'viewReceiptPhoto',
+                  ).replaceAll('{photo}', widget.label),
                   child: Tooltip(
-                    message: tr('viewReceiptPhoto').replaceAll(
-                      '{photo}',
-                      widget.label,
-                    ),
+                    message: tr(
+                      'viewReceiptPhoto',
+                    ).replaceAll('{photo}', widget.label),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(8),
                       onTap: previewReady && widget.enabled
@@ -279,9 +285,8 @@ class _ReceiptPhotoCardState extends State<_ReceiptPhotoCard> {
                                   fit: BoxFit.cover,
                                   cacheWidth: 160,
                                   excludeFromSemantics: true,
-                                  errorBuilder: (_, _, _) => const Icon(
-                                    Icons.broken_image_outlined,
-                                  ),
+                                  errorBuilder: (_, _, _) =>
+                                      const Icon(Icons.broken_image_outlined),
                                 )
                               : const Icon(Icons.photo_outlined),
                         ),
@@ -340,7 +345,8 @@ class _ReceiptPhotoCardState extends State<_ReceiptPhotoCard> {
               builder: (context, constraints) {
                 // Keep the labeled action fully readable on narrow screens
                 // and at large accessibility text sizes, including Spanish.
-                final stacked = constraints.maxWidth < 300 ||
+                final stacked =
+                    constraints.maxWidth < 300 ||
                     MediaQuery.textScalerOf(context).scale(14) > 18;
                 if (stacked) {
                   return Column(

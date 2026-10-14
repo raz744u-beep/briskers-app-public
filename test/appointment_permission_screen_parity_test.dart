@@ -347,7 +347,7 @@ void main() {
     final docs = await File('lib/screens/documents_screen.dart').readAsString();
     expect(docs, contains('bottomNavigationBar: widget.showAppBar && _estimate'));
     expect(docs, contains('ShellScreen('));
-    expect(docs, contains("child: Text('OWNER'"));
+    expect(docs, matches(RegExp(r"child:\s*Text\(\s*'OWNER'")));
   });
 
   test('Custom item editor protects bottom buttons and selects numeric values', () async {
@@ -364,7 +364,7 @@ void main() {
     final docs = await File('lib/screens/documents_screen.dart').readAsString();
     expect(shell, contains('estimatesNavigationBar: _shellNavigationBar()'));
     expect(home, contains('sharedBottomNavigationBar: widget.estimatesNavigationBar'));
-    expect(docs, contains('widget.sharedBottomNavigationBar ?? NavigationBar('));
+    expect(docs, matches(RegExp(r'widget\.sharedBottomNavigationBar\s*\?\?\s*NavigationBar\(')));
   });
 
   test('Standalone offline conversion keeps new Job open and linked on invoice', () async {

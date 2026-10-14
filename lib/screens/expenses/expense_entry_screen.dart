@@ -1,4 +1,7 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+
+import '../../core/module_modal_theme.dart';
+
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/briskers_colors.dart';
@@ -39,7 +42,10 @@ class ExpenseEntryScreen extends StatefulWidget {
   State<ExpenseEntryScreen> createState() => _ExpenseEntryScreenState();
 }
 
-class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
+class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
+    with ModuleModalState<ExpenseEntryScreen> {
+  @override
+  Color get modalAccent => BriskersColors.expenses;
   static const _api = BriskersApi();
   final _picker = ImagePicker();
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
@@ -112,7 +118,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
   }
 
   DateTime _parseDate(Object? raw, {DateTime? fallback}) {
-    return DateTime.tryParse(raw?.toString() ?? '') ?? fallback ?? DateTime.now();
+    return DateTime.tryParse(raw?.toString() ?? '') ??
+        fallback ??
+        DateTime.now();
   }
 
   String _categoryName(String? categoryId) {
@@ -131,9 +139,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       final ad = a['normal_direction']?.toString() == _direction ? 0 : 1;
       final bd = b['normal_direction']?.toString() == _direction ? 0 : 1;
       if (ad != bd) return ad.compareTo(bd);
-      return (a['name']?.toString() ?? '')
-          .toLowerCase()
-          .compareTo((b['name']?.toString() ?? '').toLowerCase());
+      return (a['name']?.toString() ?? '').toLowerCase().compareTo(
+        (b['name']?.toString() ?? '').toLowerCase(),
+      );
     });
     return rows;
   }
@@ -166,14 +174,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     final categories = List<dynamic>.from(data['categories'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
-    final counterparties =
-        List<dynamic>.from(data['counterparties'] ?? const [])
-            .map((raw) => Map<String, dynamic>.from(raw as Map))
-            .toList();
-    final quickTemplates =
-        List<dynamic>.from(data['quick_templates'] ?? const [])
-            .map((raw) => Map<String, dynamic>.from(raw as Map))
-            .toList();
+    final counterparties = List<dynamic>.from(
+      data['counterparties'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+    final quickTemplates = List<dynamic>.from(
+      data['quick_templates'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
 
     setState(() {
       _accounts = accounts;
@@ -187,8 +193,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             : 'expense';
         _amountController.text = detail['amount']?.toString() ?? '';
         _remarksController.text = detail['remarks']?.toString() ?? '';
-        _counterpartyController.text =
-            detail['counterparty']?.toString() ?? '';
+        _counterpartyController.text = detail['counterparty']?.toString() ?? '';
         final detailAccount = detail['account_id']?.toString();
         final detailCategory = detail['category_id']?.toString();
         final detailCounterparty = detail['counterparty_id']?.toString();
@@ -197,10 +202,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             : null;
         _categoryId =
             categories.any((x) => x['id']?.toString() == detailCategory)
-                ? detailCategory
-                : null;
-        _counterpartyId = counterparties
-                .any((x) => x['id']?.toString() == detailCounterparty)
+            ? detailCategory
+            : null;
+        _counterpartyId =
+            counterparties.any((x) => x['id']?.toString() == detailCounterparty)
             ? detailCounterparty
             : null;
         _jobId = detail['job_id']?.toString();
@@ -220,9 +225,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           _repeat = false;
           _recurringRuleId = null;
         } else {
-          _date = _parseDate(
-            detail['date'] ?? detail['transaction_date'],
-          );
+          _date = _parseDate(detail['date'] ?? detail['transaction_date']);
           final recurring = detail['recurring_rule'];
           if (widget.allowRecurring && recurring is Map) {
             final rule = Map<String, dynamic>.from(recurring);
@@ -279,10 +282,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
 
   Future<void> _load() async {
     var localShown = false;
-    final forceOnline =
-        BriskersConnectionModeController.instance.forceOnline;
-    final forceOffline =
-        BriskersConnectionModeController.instance.forceOffline;
+    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
+    final forceOffline = BriskersConnectionModeController.instance.forceOffline;
     final sourceId = widget.editTransactionId ?? widget.copyTransactionId;
 
     if (!forceOnline) {
@@ -308,8 +309,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       if (!localShown && mounted) {
         setState(() {
           _loading = false;
-          _error =
-              'Expense setup has not been cached yet. Go online once to sync accounts and categories.';
+          _error = 'Expense setup has not been cached yet. Go online once to sync accounts and categories.';
         });
       }
       return;
@@ -351,9 +351,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     }
   }
 
-  String _normalizePayee(String value) => value
-      .toLowerCase()
-      .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  String _normalizePayee(String value) =>
+      value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
 
   Map<String, dynamic>? _matchCounterparty(String vendorName) {
     final normalized = _normalizePayee(vendorName);
@@ -369,7 +368,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       for (final item in _counterparties) {
         final candidate = _normalizePayee(item['name']?.toString() ?? '');
         if (candidate.length >= 4 &&
-            (candidate.contains(normalized) || normalized.contains(candidate))) {
+            (candidate.contains(normalized) ||
+                normalized.contains(candidate))) {
           return item;
         }
       }
@@ -377,8 +377,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     return null;
   }
 
-  num _numValue(Object? value) =>
-      num.tryParse(value?.toString() ?? '') ?? 0;
+  num _numValue(Object? value) => num.tryParse(value?.toString() ?? '') ?? 0;
 
   void _setAmountFromReceipt() {
     final base = _receiptBaseAmount;
@@ -390,10 +389,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     _amountController.text = amount.toStringAsFixed(2);
   }
 
-  String _receiptNote(
-    Map<String, dynamic> extraction, {
-    num? finalAmount,
-  }) {
+  String _receiptNote(Map<String, dynamic> extraction, {num? finalAmount}) {
     final rawItems = extraction['items'];
     final descriptions = <String>[];
     if (rawItems is List) {
@@ -447,8 +443,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     if (BriskersConnectionModeController.instance.forceOffline) {
       if (mounted) {
         setState(() {
-          _receiptReadMessage =
-              'Receipt saved locally. Automatic reading will be available when online.';
+          _receiptReadMessage = 'Receipt saved locally. Automatic reading will be available when online.';
           _error = null;
         });
       }
@@ -474,14 +469,14 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       }
       final extraction = Map<String, dynamic>.from(rawExtraction);
       final vendorName = extraction['vendor_name']?.toString().trim() ?? '';
-      final matched =
-          vendorName.isEmpty ? null : _matchCounterparty(vendorName);
+      final matched = vendorName.isEmpty
+          ? null
+          : _matchCounterparty(vendorName);
 
       final visibleTotal = _numValue(extraction['receipt_total']);
       final visibleSubtotal = _numValue(extraction['subtotal']);
       final visibleSurcharge = _numValue(extraction['surcharge_percent']);
-      final visibleSurchargeAmount =
-          _numValue(extraction['surcharge_amount']);
+      final visibleSurchargeAmount = _numValue(extraction['surcharge_amount']);
 
       num? baseAmount;
       num surchargePercent = 0;
@@ -508,14 +503,14 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             ? visibleTotal
             : (visibleSubtotal > 0 ? visibleSubtotal : null);
         if (matched != null) {
-          surchargePercent =
-              _numValue(matched['default_surcharge_percent']);
+          surchargePercent = _numValue(matched['default_surcharge_percent']);
           applySurcharge = surchargePercent > 0;
         }
       }
 
-      final receiptDate =
-          DateTime.tryParse(extraction['receipt_date']?.toString() ?? '');
+      final receiptDate = DateTime.tryParse(
+        extraction['receipt_date']?.toString() ?? '',
+      );
 
       if (!mounted) return;
       setState(() {
@@ -529,13 +524,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           _counterpartyId = (id ?? '').isEmpty ? null : id;
           _counterpartyController.text =
               matched['name']?.toString() ?? vendorName;
-          final defaultCategoryId =
-              matched['default_category_id']?.toString();
+          final defaultCategoryId = matched['default_category_id']?.toString();
           if (_direction == 'expense' &&
               (defaultCategoryId ?? '').isNotEmpty &&
               _categories.any(
-                (category) =>
-                    category['id']?.toString() == defaultCategoryId,
+                (category) => category['id']?.toString() == defaultCategoryId,
               )) {
             _categoryId = defaultCategoryId;
           }
@@ -549,21 +542,14 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         }
 
         _setAmountFromReceipt();
-        final finalAmount =
-            num.tryParse(_amountController.text.trim());
-        _mergeReceiptNote(
-          _receiptNote(
-            extraction,
-            finalAmount: finalAmount,
-          ),
-        );
+        final finalAmount = num.tryParse(_amountController.text.trim());
+        _mergeReceiptNote(_receiptNote(extraction, finalAmount: finalAmount));
         _receiptReadMessage = tr('receiptReadReview');
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _receiptReadMessage =
-            'Could not read this receipt automatically. You can still enter it manually.';
+        _receiptReadMessage = 'Could not read this receipt automatically. You can still enter it manually.';
         _error = error.toString();
       });
     } finally {
@@ -596,8 +582,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           (x) => x['id']?.toString() == vendor,
         );
         if (_receiptBaseAmount != null) {
-          _receiptSurchargePercent =
-              _numValue(selected['default_surcharge_percent']);
+          _receiptSurchargePercent = _numValue(
+            selected['default_surcharge_percent'],
+          );
           _applyReceiptSurcharge = _receiptSurchargePercent > 0;
           _setAmountFromReceipt();
         }
@@ -636,8 +623,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       }
 
       if (_receiptBaseAmount != null) {
-        _receiptSurchargePercent =
-            _numValue(item['default_surcharge_percent']);
+        _receiptSurchargePercent = _numValue(item['default_surcharge_percent']);
         _applyReceiptSurcharge = _receiptSurchargePercent > 0;
         _setAmountFromReceipt();
         if (_receiptExtraction != null) {
@@ -697,8 +683,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                         autofocus: true,
                         textInputAction: TextInputAction.search,
                         decoration: InputDecoration(
-                          labelText:
-                              _direction == 'income' ? tr('findPayer') : tr('findPayee'),
+                          labelText: _direction == 'income'
+                              ? tr('findPayer')
+                              : tr('findPayee'),
                           hintText: tr('searchByName'),
                           prefixIcon: const Icon(Icons.search),
                           border: const OutlineInputBorder(),
@@ -717,15 +704,13 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                               leading: const Icon(Icons.add_circle_outline),
                               title: Text('Use "$query"'),
                               subtitle: Text(tr('newPayee')),
-                              onTap: () => Navigator.pop(
-                                sheetContext,
-                                <String, dynamic>{
-                                  'id': null,
-                                  'name': query,
-                                  'default_category_id': null,
-                                  'default_surcharge_percent': 0,
-                                },
-                              ),
+                              onTap: () =>
+                                  Navigator.pop(sheetContext, <String, dynamic>{
+                                    'id': null,
+                                    'name': query,
+                                    'default_category_id': null,
+                                    'default_surcharge_percent': 0,
+                                  }),
                             ),
                           ...matches.map(
                             (item) => ListTile(
@@ -776,10 +761,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                         ? const Icon(Icons.check_circle)
                         : const Icon(Icons.circle_outlined),
                     title: Text(item['name']?.toString() ?? ''),
-                    onTap: () => Navigator.pop(
-                      sheetContext,
-                      item['id']?.toString(),
-                    ),
+                    onTap: () =>
+                        Navigator.pop(sheetContext, item['id']?.toString()),
                   ),
                 )
                 .toList(),
@@ -797,7 +780,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     if (_quickTemplates.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No quick transactions are defined yet. Add them in Settings.'),
+          content: Text(
+            'No quick transactions are defined yet. Add them in Settings.',
+          ),
         ),
       );
       return;
@@ -899,12 +884,18 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF167F43)),
+              leading: const Icon(
+                Icons.camera_alt_outlined,
+                color: Color(0xFF167F43),
+              ),
               title: Text(tr('takePhoto')),
               onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
+              leading: const Icon(
+                Icons.photo_library_outlined,
+                color: Color(0xFF2468BB),
+              ),
               title: Text(tr('chooseFromGallery')),
               onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
             ),
@@ -975,8 +966,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
         if (_repeat) {
           setState(() {
             _saving = false;
-            _error =
-                'Recurring scheduling needs a connection. Turn Repeat off to save this transaction offline.';
+            _error = 'Recurring scheduling needs a connection. Turn Repeat off to save this transaction offline.';
           });
           return;
         }
@@ -1004,8 +994,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             jobId: _jobId,
             documentId: _documentId,
             counterpartyId: _counterpartyId,
-            counterpartyName:
-                counterpartyName.isEmpty ? null : counterpartyName,
+            counterpartyName: counterpartyName.isEmpty
+                ? null
+                : counterpartyName,
             remarks: _remarksController.text.trim().isEmpty
                 ? null
                 : _remarksController.text.trim(),
@@ -1025,8 +1016,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
             jobId: _jobId,
             documentId: _documentId,
             counterpartyId: _counterpartyId,
-            counterpartyName:
-                counterpartyName.isEmpty ? null : counterpartyName,
+            counterpartyName: counterpartyName.isEmpty
+                ? null
+                : counterpartyName,
             remarks: _remarksController.text.trim().isEmpty
                 ? null
                 : _remarksController.text.trim(),
@@ -1055,8 +1047,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           jobId: _jobId,
           documentId: _documentId,
           counterpartyId: _counterpartyId,
-          counterpartyName:
-              counterpartyName.isEmpty ? null : counterpartyName,
+          counterpartyName: counterpartyName.isEmpty ? null : counterpartyName,
           remarks: _remarksController.text.trim().isEmpty
               ? null
               : _remarksController.text.trim(),
@@ -1072,8 +1063,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           jobId: _jobId,
           documentId: _documentId,
           counterpartyId: _counterpartyId,
-          counterpartyName:
-              counterpartyName.isEmpty ? null : counterpartyName,
+          counterpartyName: counterpartyName.isEmpty ? null : counterpartyName,
           remarks: _remarksController.text.trim().isEmpty
               ? null
               : _remarksController.text.trim(),
@@ -1149,10 +1139,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     final title = _editing
         ? tr('editTransaction')
         : _copying
-            ? tr('copyTransaction')
-            : _direction == 'income'
-                ? tr('addIncome')
-                : tr('addExpense');
+        ? tr('copyTransaction')
+        : _direction == 'income'
+        ? tr('addIncome')
+        : tr('addExpense');
 
     return Scaffold(
       appBar: AppBar(
@@ -1271,22 +1261,22 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   onSelectionChanged: _saving
                       ? null
                       : (value) => setState(() {
-                            _direction = value.first;
-                            _categoryId = null;
-                            if (_linked && _direction == 'expense') {
-                              for (final item in _categories) {
-                                if ((item['name']
-                                            ?.toString()
-                                            .trim()
-                                            .toLowerCase() ??
-                                        '') ==
-                                    'customer parts') {
-                                  _categoryId = item['id']?.toString();
-                                  break;
-                                }
+                          _direction = value.first;
+                          _categoryId = null;
+                          if (_linked && _direction == 'expense') {
+                            for (final item in _categories) {
+                              if ((item['name']
+                                          ?.toString()
+                                          .trim()
+                                          .toLowerCase() ??
+                                      '') ==
+                                  'customer parts') {
+                                _categoryId = item['id']?.toString();
+                                break;
                               }
                             }
-                          }),
+                          }
+                        }),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -1294,26 +1284,42 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: _saving || _readingReceipt
-                            ? null : () => _addReceipts(),
-                        icon: const Icon(Icons.add_a_photo_outlined,
-                            color: Color(0xFF167F43)),
-                        label: Text(_receipts.isEmpty
-                            ? tr('attachPhoto')
-                            : '${_receipts.length} ${tr('photosAttached')}'),
+                            ? null
+                            : () => _addReceipts(),
+                        icon: const Icon(
+                          Icons.add_a_photo_outlined,
+                          color: Color(0xFF167F43),
+                        ),
+                        label: Text(
+                          _receipts.isEmpty
+                              ? tr('attachPhoto')
+                              : '${_receipts.length} ${tr('photosAttached')}',
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: _saving || _readingReceipt
-                            ? null : () => _addReceipts(scanWithAi: true),
+                            ? null
+                            : () => _addReceipts(scanWithAi: true),
                         icon: _readingReceipt
-                            ? const SizedBox(width: 18, height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Icon(Icons.document_scanner_outlined,
-                                color: Color(0xFF2468BB)),
-                        label: Text(_readingReceipt ? tr('readingReceipt')
-                            : tr('scanWithAi')),
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.document_scanner_outlined,
+                                color: Color(0xFF2468BB),
+                              ),
+                        label: Text(
+                          _readingReceipt
+                              ? tr('readingReceipt')
+                              : tr('scanWithAi'),
+                        ),
                       ),
                     ),
                   ],
@@ -1345,8 +1351,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   controller: _amountController,
                   focusNode: _amountFocusNode,
                   autofocus: false,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   textInputAction: TextInputAction.next,
                   style: const TextStyle(
                     fontSize: 18,
@@ -1364,12 +1371,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(
-                      'Add ${_receiptSurchargePercent.toStringAsFixed(
-                        _receiptSurchargePercent ==
-                                _receiptSurchargePercent.roundToDouble()
-                            ? 0
-                            : 2,
-                      )}% surcharge',
+                      'Add ${_receiptSurchargePercent.toStringAsFixed(_receiptSurchargePercent == _receiptSurchargePercent.roundToDouble() ? 0 : 2)}% surcharge',
                     ),
                     subtitle: Text(
                       'Receipt amount \$${_receiptBaseAmount!.toStringAsFixed(2)}'
@@ -1379,17 +1381,17 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                     onChanged: _saving
                         ? null
                         : (value) => setState(() {
-                              _applyReceiptSurcharge = value;
-                              _setAmountFromReceipt();
-                              if (_receiptExtraction != null) {
-                                _remarksController.text = _receiptNote(
-                                  _receiptExtraction!,
-                                  finalAmount: num.tryParse(
-                                    _amountController.text.trim(),
-                                  ),
-                                );
-                              }
-                            }),
+                            _applyReceiptSurcharge = value;
+                            _setAmountFromReceipt();
+                            if (_receiptExtraction != null) {
+                              _remarksController.text = _receiptNote(
+                                _receiptExtraction!,
+                                finalAmount: num.tryParse(
+                                  _amountController.text.trim(),
+                                ),
+                              );
+                            }
+                          }),
                   ),
                 ],
                 const SizedBox(height: 12),
@@ -1398,7 +1400,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   onTap: _saving ? null : _pickCounterparty,
                   child: InputDecorator(
                     decoration: InputDecoration(
-                      labelText: _direction == 'income' ? tr('payer') : tr('payee'),
+                      labelText: _direction == 'income'
+                          ? tr('payer')
+                          : tr('payee'),
                       hintText: _direction == 'income'
                           ? tr('selectPayer')
                           : tr('selectPayee'),
@@ -1408,8 +1412,8 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                     child: Text(
                       _counterpartyController.text.trim().isEmpty
                           ? (_direction == 'income'
-                              ? 'Select a payer'
-                              : 'Select a payee')
+                                ? 'Select a payer'
+                                : 'Select a payee')
                           : _counterpartyController.text.trim(),
                       style: TextStyle(
                         fontSize: 17,
@@ -1450,7 +1454,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                   initialValue: _accountId,
                   isExpanded: true,
                   decoration: InputDecoration(
-                    labelText: _direction == 'income' ? tr('depositedTo') : tr('paidFrom'),
+                    labelText: _direction == 'income'
+                        ? tr('depositedTo')
+                        : tr('paidFrom'),
                     hintText: _direction == 'income'
                         ? tr('selectDepositAccount')
                         : tr('selectPaymentAccount'),
@@ -1517,8 +1523,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                       'Repeating transactions also appear in the Recurring Transactions list.',
                     ),
                     value: _repeat,
-                    onChanged:
-                        _saving ? null : (value) => setState(() => _repeat = value),
+                    onChanged: _saving
+                        ? null
+                        : (value) => setState(() => _repeat = value),
                   ),
                   if (_repeat) ...[
                     DropdownButtonFormField<String>(
@@ -1529,13 +1536,22 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                       ),
                       items: const [
                         DropdownMenuItem(value: 'daily', child: Text('Daily')),
-                        DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
+                        DropdownMenuItem(
+                          value: 'weekly',
+                          child: Text('Weekly'),
+                        ),
                         DropdownMenuItem(
                           value: 'biweekly',
                           child: Text('Every 2 weeks'),
                         ),
-                        DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
-                        DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
+                        DropdownMenuItem(
+                          value: 'monthly',
+                          child: Text('Monthly'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'yearly',
+                          child: Text('Yearly'),
+                        ),
                       ],
                       onChanged: _saving
                           ? null
@@ -1569,8 +1585,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                           ? const Icon(Icons.chevron_right)
                           : IconButton(
                               tooltip: 'No end date',
-                              onPressed:
-                                  _saving ? null : () => setState(() => _endDate = null),
+                              onPressed: _saving
+                                  ? null
+                                  : () => setState(() => _endDate = null),
                               icon: const Icon(Icons.close),
                             ),
                       onTap: _saving ? null : _pickEndDate,

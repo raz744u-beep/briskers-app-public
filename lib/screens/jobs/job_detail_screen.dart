@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/module_modal_theme.dart';
 import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/employee_role_style.dart';
@@ -22,6 +23,9 @@ import '../../services/local_job_access_history.dart';
 import '../../services/job_performance_metrics.dart';
 import '../../services/job_profitability_summary.dart';
 import '../../widgets/job_profitability_summary_view.dart';
+import '../../widgets/work_performed_editor_sheet.dart';
+import '../../services/invoice_labor_work_summary.dart';
+import 'invoice_payment_navigation.dart';
 import '../../services/local_document_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_financial_cache.dart';
@@ -30,6 +34,8 @@ import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../services/offline_work_findings_service.dart';
 import '../../services/work_finding_merge.dart';
+import '../../services/vehicle_finding_actions_service.dart';
+import '../../widgets/vehicle_findings.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import '../customers/customer_detail_screen.dart';
@@ -57,7 +63,10 @@ class JobDetailScreen extends StatefulWidget {
   State<JobDetailScreen> createState() => _JobDetailScreenState();
 }
 
-class _JobDetailScreenState extends State<JobDetailScreen> {
+class _JobDetailScreenState extends State<JobDetailScreen>
+    with ModuleModalState<JobDetailScreen> {
+  @override
+  Color get modalAccent => BriskersColors.jobs;
   static const _api = BriskersApi();
   final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
   final OfflinePreInspectionService _offlineInspection =
@@ -65,6 +74,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   final OfflineWorkFindingsService _offlineWorkFindings =
       OfflineWorkFindingsService();
   final JobSyncService _jobSync = JobSyncService();
+  final VehicleFindingActionsService _findingActions = VehicleFindingActionsService();
   final LocalJobRepository _localJobs = LocalJobRepository();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
   final LocalFinancialCache _linkedExpensesCache = LocalFinancialCache();
@@ -86,6 +96,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   final ImagePicker _picker = ImagePicker();
 
   final ScrollController _scrollController = ScrollController();
+  StreamSubscription<String>? _findingChanges;
 
   bool _loading = true;
   bool _busy = false;
@@ -163,6 +174,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _findingChanges = VehicleFindingActionsService.changes.listen((businessId) {
+      if (businessId == widget.businessId && mounted && !_contentBlocked) {
+        unawaited(_refreshLocalWorkFindings());
+      }
+    });
     unawaited(LocalJobAccessHistory().recordCurrentUserAccess(
       widget.businessId, widget.jobId,
     ));
@@ -171,6 +187,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 
   @override
   void dispose() {
+    _findingChanges?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -257,6 +274,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           await _createEstimate();
         case 'invoice':
           await _createInvoice();
+        case 'payment':
+          await _addPayment();
         case 'expense':
           await _addJobExpense();
       }
@@ -1569,18 +1588,26 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
   }
 
-  Future<void> _editWorkSummary() async {
+  Future<void> _editWorkSummary({bool fillFromInvoice = false}) async {
     if (!_canEditWork) return;
     final visits = List<dynamic>.from(_job?['visits'] ?? const []);
     if (visits.isEmpty || _busy) return;
     final current = Map<String, dynamic>.from(visits.first as Map);
 
-    final value = await _editTextSheet(
-      title: tr('workPerformed'),
-      initialValue: current['work_summary']?.toString() ?? '',
-      hint: tr('workPerformedHint'),
+    if (current['sync_state'] == 'conflict') return;
+    final value = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (editorContext) => WorkPerformedEditorSheet(
+        initialValue: current['work_summary']?.toString() ?? '',
+        loadInvoiceLabor: _canSeeFinancial
+            ? () => _loadInvoiceLabor(editorContext) : null,
+        fillOnOpen: fillFromInvoice,
+      ),
     );
-    if (value == null) return;
+    if (!mounted || value == null || _contentBlocked || !_canEditWork) return;
 
     setState(() {
       _busy = true;
@@ -1610,6 +1637,60 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<String?> _loadInvoiceLabor(BuildContext editorContext) async {
+    bool editorActive() => mounted && editorContext.mounted &&
+        ModalRoute.of(editorContext)?.isCurrent == true && !_contentBlocked;
+    if (!_canSeeFinancial || _contentBlocked) return null;
+    final mode = BriskersConnectionModeController.instance;
+    final documents = await readInvoiceLaborSource(
+      onlineRead: () => _api.jobDocuments(widget.businessId, widget.jobId),
+      cachedRead: _localDocumentsForJob,
+      forceOffline: mode.forceOffline,
+      forceOnline: mode.forceOnline,
+    );
+    if (!mounted || !editorContext.mounted || !editorActive()) return null;
+    final invoices = documents
+        .where(
+          (row) =>
+              row['kind'] == 'invoice' &&
+              !const {
+                'void',
+                'voided',
+                'cancelled',
+                'canceled',
+              }.contains(row['status']?.toString().toLowerCase()),
+        )
+        .toList();
+    if (invoices.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No invoice is linked to this Job.')),
+      );
+      return null;
+    }
+    final invoice = await chooseJobInvoice(
+      editorContext,
+      invoices: invoices,
+      title: 'Choose invoice labor',
+    );
+    if (invoice == null || !mounted || !editorContext.mounted || !editorActive()) return null;
+    final id = invoice['id']?.toString() ?? '';
+    final detail = await readInvoiceLaborSource<Map<String, dynamic>?>(
+      onlineRead: () => _api.documentDetail(widget.businessId, id),
+      cachedRead: () => _documentDetailCache.load(widget.businessId, id),
+      forceOffline: mode.forceOffline || id.startsWith('local-invoice-'),
+      forceOnline: mode.forceOnline,
+    );
+    if (!mounted || !editorContext.mounted || !editorActive()) return null;
+    if (detail == null || detail['job_id']?.toString() != widget.jobId ||
+        detail['kind'] != 'invoice' ||
+        const {'void', 'voided', 'cancelled', 'canceled'}.contains(detail['status']?.toString().toLowerCase())) {
+      throw StateError(
+        'Connect and open this invoice before copying its labor.',
+      );
+    }
+    return invoiceLaborWorkSummary(detail);
   }
 
   String _imageMime(String name) {
@@ -2362,31 +2443,60 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     });
   }
 
+  Future<void> _changeFindingLocally(
+    Future<Map<String, dynamic>> Function() action,
+  ) async {
+    if (_busy || _contentBlocked) return;
+    setState(() { _busy = true; _error = null; });
+    _modalRefresh?.call();
+    try {
+      await action();
+      await _refreshLocalWorkFindings();
+      unawaited(_flushWorkFindingsQueue());
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error.toString());
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    } finally {
+      if (mounted) { setState(() => _busy = false); _modalRefresh?.call(); }
+    }
+  }
+
   Future<void> _addFindingToJob(Map<String, dynamic> finding) async {
-    await _run(() => _api.addVehicleFindingToJob(
-          widget.businessId,
-          finding['id'].toString(),
-          widget.jobId,
-        ));
+    if (!_canQuickAdmin && !_canManage) return;
+    await _changeFindingLocally(() => _findingActions.addToJob(
+      widget.businessId, finding, widget.jobId));
   }
 
   Future<void> _removeFindingFromJob(Map<String, dynamic> finding) async {
-    await _run(() => _api.removeVehicleFindingFromJob(
-          widget.businessId,
-          finding['id'].toString(),
-          widget.jobId,
-        ));
+    if (!_canQuickAdmin && !_canManage) return;
+    await _changeFindingLocally(() => _findingActions.removeFromJob(
+      widget.businessId, finding, widget.jobId));
+  }
+
+  Future<void> _resolveFinding(Map<String, dynamic> finding) async {
+    if (!_canQuickAdmin && !_canManage) return;
+    await _changeFindingLocally(() => _findingActions.resolve(
+      widget.businessId, finding, widget.jobId));
   }
 
   Future<void> _reopenFinding(Map<String, dynamic> finding) async {
-    await _run(() => _api.reopenVehicleFinding(
-          widget.businessId,
-          finding['id'].toString(),
-        ));
+    if (!_canQuickAdmin && !_canManage) return;
+    await _changeFindingLocally(() => _findingActions.reopen(widget.businessId, finding));
+  }
+
+  Future<void> _setFindingInvoiceFlag(Map<String, dynamic> finding, bool include) async {
+    if (!_canSeeFinancial) return;
+    await _changeFindingLocally(() => _findingActions.setInvoiceFlag(widget.businessId, finding, include));
   }
 
   Future<void> _deleteFinding(Map<String, dynamic> finding) async {
-    if (!_owner) return;
+    if (!_owner || !_onlineReady || _busy ||
+        finding['id'].toString().startsWith('local-finding-') ||
+        finding['row_version'] == null || finding['sync_state'] == 'conflict') {
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -2461,6 +2571,25 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     });
     if (!mounted || id == null) return;
     await _openDocument(id!);
+  }
+
+  Future<void> _addPayment() async {
+    if (_busy || _contentBlocked || !canOpenJobInvoicePayment(widget.roleCode)) {
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final opened = await openJobInvoicePayment(
+        context,
+        businessId: widget.businessId,
+        jobId: widget.jobId,
+        roleCode: widget.roleCode,
+        documents: _onlineReady ? _documents : null,
+      );
+      if (opened && mounted && !_contentBlocked) await _load();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _openDocument(String documentId) async {
@@ -3114,221 +3243,26 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     );
   }
 
-  Widget _findingsDrawer() {
-    final open = _findings
-        .where((finding) => finding['status']?.toString() == 'open')
-        .toList();
-    final inJob = _findings
-        .where((finding) => finding['status']?.toString() == 'in_job')
-        .toList();
-    final resolved = _findings
-        .where((finding) => finding['status']?.toString() == 'resolved')
-        .toList();
-
-    Widget findingRow(Map<String, dynamic> finding) {
-      final status = finding['status']?.toString() ?? 'open';
-      final repairJobId = finding['repair_job_id']?.toString() ?? '';
-      final repairJob = finding['repair_job_number']?.toString() ?? '';
-      final inThisJob = status == 'in_job' && repairJobId == widget.jobId;
-      final attachments =
-          List<dynamic>.from(finding['attachments'] ?? const []);
-      final syncState =
-          finding['sync_state']?.toString() ?? 'synced';
-      final conflict = syncState == 'conflict';
-      final pendingPhotos = attachments.any(
-        (raw) =>
-            raw is Map &&
-            (raw['upload_state']?.toString() ?? 'synced') !=
-                'synced',
-      );
-      final waiting = syncState == 'pending' || pendingPhotos;
-      final findingId = finding['id']?.toString() ?? '';
-      final serverReady = !findingId.startsWith('local-finding-') &&
-          finding['row_version'] != null &&
-          !conflict;
-
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  status == 'resolved'
-                      ? Icons.check_circle_outline
-                      : status == 'in_job'
-                          ? Icons.handyman_outlined
-                          : Icons.warning_amber_rounded,
-                  color: status == 'resolved'
-                      ? Colors.green
-                      : status == 'in_job'
-                          ? BriskersColors.jobs
-                          : Colors.deepOrange,
-                  size: 21,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    finding['body']?.toString() ?? '',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-                if ((_canEditFindings && !conflict) ||
-                    (finding['can_edit'] == true && !conflict) ||
-                    (_owner && _onlineReady && serverReady))
-                  PopupMenuButton<String>(
-                    tooltip: 'Finding actions',
-                    onSelected: (value) {
-                      if (value == 'edit') _editFinding(finding);
-                      if (value == 'photo') _addPhotosToFinding(finding);
-                      if (value == 'delete') _deleteFinding(finding);
-                    },
-                    itemBuilder: (_) => [
-                      if (finding['can_edit'] == true && !conflict)
-                        const PopupMenuItem(
-                          value: 'edit',
-                          child: Text('Edit finding'),
-                        ),
-                      if (_canEditFindings && !conflict)
-                        const PopupMenuItem(
-                          value: 'photo',
-                          child: Text('Add photos'),
-                        ),
-                      if (_owner && _onlineReady && serverReady)
-                        const PopupMenuItem(
-                          value: 'delete',
-                          child: Text('Delete finding'),
-                        ),
-                    ],
-                  ),
-              ],
-            ),
-            if (conflict)
-              const Padding(
-                padding: EdgeInsets.only(top: 5),
-                child: Text(
-                  'Sync conflict • local Finding is preserved',
-                  style: TextStyle(
-                    color: Colors.orange,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                  ),
-                ),
-              )
-            else if (waiting)
-              const Padding(
-                padding: EdgeInsets.only(top: 5),
-                child: Text(
-                  'Saved locally • waiting to sync',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            if (attachments.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 7,
-                runSpacing: 7,
-                children: attachments
-                    .map(
-                      (raw) => _findingPhotoThumbnail(
-                        finding,
-                        Map<String, dynamic>.from(raw as Map),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ],
-            if (status == 'open' && _canManage && serverReady)
-              CheckboxListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: const Text('Repair on this job'),
-                subtitle: const Text(
-                  'Completing the job will mark it resolved.',
-                ),
-                value: false,
-                onChanged: _busy
-                    ? null
-                    : (value) {
-                        if (value == true) _addFindingToJob(finding);
-                      },
-              )
-            else if (inThisJob && _canManage && serverReady)
-              CheckboxListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: const Text('Repair on this job'),
-                subtitle: const Text(
-                  'Assigned to this job • resolves when the job is completed.',
-                ),
-                value: true,
-                onChanged: _busy
-                    ? null
-                    : (value) {
-                        if (value == false) _removeFindingFromJob(finding);
-                      },
-              )
-            else if (status == 'in_job')
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  repairJob.isEmpty ? 'In another job' : 'In $repairJob',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-              )
-            else if (status == 'resolved' &&
-                _canManage &&
-                serverReady)
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: _busy ? null : () => _reopenFinding(finding),
-                  icon: const Icon(Icons.replay_outlined),
-                  label: const Text('Reopen'),
-                ),
-              ),
-            const Divider(height: 1),
-          ],
-        ),
-      );
-    }
-
-    final active = [...open, ...inJob];
-    return _JobDrawerSurface(
-      color: Colors.deepOrange,
-      child: Column(
-        children: [
-          if (active.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('No unresolved findings for this vehicle.'),
-              ),
-            )
-          else
-            ...active.map(findingRow),
-          if (resolved.isNotEmpty)
-            ExpansionTile(
-              title: Text(
-                resolved.length == 1
-                    ? '1 resolved finding'
-                    : '${resolved.length} resolved findings',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              children: resolved.map(findingRow).toList(),
-            ),
-        ],
-      ),
-    );
-  }
+  Widget _findingsDrawer() => _JobDrawerSurface(
+    color: Colors.deepOrange,
+    child: VehicleFindings(
+      findings: _findings,
+      jobId: widget.jobId,
+      busy: _busy,
+      canEdit: _canEditFindings,
+      canManage: _canQuickAdmin || _canManage,
+      canIncludeOnInvoice: _canSeeFinancial,
+      onEdit: _editFinding,
+      onAddPhotos: _addPhotosToFinding,
+      onDelete: _owner && _onlineReady ? _deleteFinding : null,
+      photoBuilder: _findingPhotoThumbnail,
+      onAddToJob: _addFindingToJob,
+      onRemoveFromJob: _removeFindingFromJob,
+      onReopen: _reopenFinding,
+      onResolve: _resolveFinding,
+      onInvoiceChanged: _setFindingInvoiceFlag,
+    ),
+  );
 
   Future<void> _scanJobExpense() async {
     final job = _job;
@@ -3524,8 +3458,20 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               title: Text('New invoice'),
             ),
           ),
-        if (_canSeeFinancial && _canManage)
-          const PopupMenuDivider(),
+        if (canOpenJobInvoicePayment(widget.roleCode))
+          const PopupMenuItem(
+            value: 'payment',
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.payments_outlined,
+                color: BriskersColors.invoices,
+              ),
+              title: Text('Add Payment'),
+            ),
+          ),
+        if (_canSeeFinancial && _canManage) const PopupMenuDivider(),
         if (_canManage)
           const PopupMenuItem(
             value: 'expense',
@@ -3545,21 +3491,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             child: ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                Icons.bolt,
-                color: BriskersColors.expenses,
-              ),
+              leading: Icon(Icons.bolt, color: BriskersColors.expenses),
               title: Text('Quick expense'),
             ),
           ),
       ],
     );
 
-    if (choice == 'inspection') { if (_preInspection == null) await _editPreInspectionDetails(); if (mounted) await _openSectionModal('inspection'); }
+    if (choice == 'inspection') {
+      if (_preInspection == null) await _editPreInspectionDetails();
+      if (mounted) await _openSectionModal('inspection');
+    }
     if (choice == 'finding') await _addFinding();
     if (choice == 'estimate') await _createEstimate();
     if (choice == 'identifix') await _importIdentifixEstimate();
     if (choice == 'invoice') await _createInvoice();
+    if (choice == 'payment') await _addPayment();
     if (choice == 'expense') await _addJobExpense();
     if (choice == 'quick_expense') await _addQuickJobExpense();
   }
@@ -4064,19 +4011,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             ),
             if (currentVisit != null && _canEditWork) ...[
               const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed:
-                      _busy || conflict ? null : _editWorkSummary,
-                  icon: Icon(
-                    workSummary.isEmpty
-                        ? Icons.add_circle_outline
-                        : Icons.edit_outlined,
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                children: [
+                  if (_canSeeFinancial)
+                    TextButton.icon(
+                      onPressed: _busy || conflict ? null : () => _editWorkSummary(fillFromInvoice: true),
+                      icon: const Icon(Icons.receipt_long_outlined),
+                      label: const Text('Fill from Invoice Labor'),
+                    ),
+                  TextButton.icon(
+                    onPressed: _busy || conflict ? null : _editWorkSummary,
+                    icon: Icon(workSummary.isEmpty ? Icons.add_circle_outline : Icons.edit_outlined),
+                    label: Text(workSummary.isEmpty ? 'Add' : 'Edit'),
                   ),
-                  label:
-                      Text(workSummary.isEmpty ? 'Add' : 'Edit'),
-                ),
+                ],
               ),
             ],
           ],

@@ -95,4 +95,47 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+  testWidgets('phone profitability uses four compact summary cards', (
+    tester,
+  ) async {
+    await BriskersLanguageController.instance.setLanguage('en');
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final summary = JobProfitabilitySummary.fromRpc({
+      'revenue': 1000,
+      'sales_tax': 80,
+      'direct_cost': 300,
+      'mechanic_cost': 200,
+    })!;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: JobProfitabilitySummaryView(
+                summary: summary,
+                formatMoney: (value) => '\$${value.toStringAsFixed(2)}',
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Revenue'), findsOneWidget);
+    expect(find.text('Costs'), findsOneWidget);
+    expect(find.text('Profit'), findsOneWidget);
+    expect(find.text('Margin'), findsOneWidget);
+    final revenue = tester.getTopLeft(find.text('Revenue'));
+    final costs = tester.getTopLeft(find.text('Costs'));
+    final profit = tester.getTopLeft(find.text('Profit'));
+    expect(costs.dy, revenue.dy);
+    expect(costs.dx, greaterThan(revenue.dx));
+    expect(profit.dy, greaterThan(revenue.dy));
+    expect(find.text('50.0%'), findsOneWidget);
+    expect(find.text(tr('profitabilityTaxExcluded')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

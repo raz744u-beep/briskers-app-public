@@ -7,6 +7,11 @@ on:
     paths-ignore:
       - '.github/workflows/**'
 
+# Build/test commands never transmit Flutter or Dart analytics.
+env:
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
+
 permissions:
   contents: read
 

@@ -6,8 +6,9 @@ List<Map<String, dynamic>> mergeWorkFindings(
 ) {
   final localById = _byId(local);
   final serverById = _byId(server)
-    ..removeWhere((id, _) =>
-        id.startsWith('local-finding-') && !localById.containsKey(id));
+    ..removeWhere(
+      (id, _) => id.startsWith('local-finding-') && !localById.containsKey(id),
+    );
   final result = <Map<String, dynamic>>[];
 
   for (final entry in localById.entries) {
@@ -24,7 +25,8 @@ List<Map<String, dynamic>> mergeWorkFindings(
     final preferred = serverNewer ? serverFinding : localFinding;
     final other = serverNewer ? localFinding : serverFinding;
     final merged = <String, dynamic>{...other, ...preferred};
-    final dirty = localFinding['sync_state'] == 'pending' ||
+    final dirty =
+        localFinding['sync_state'] == 'pending' ||
         localFinding['sync_state'] == 'conflict';
     if (dirty) {
       // A newer server row may carry repair status, but cannot acknowledge or
@@ -32,6 +34,30 @@ List<Map<String, dynamic>> mergeWorkFindings(
       // base; the display keeps the newer version for repeated refreshes.
       merged['body'] = localFinding['body'];
       merged['sync_state'] = localFinding['sync_state'];
+    }
+    if (localFinding['_pending_finding_action'] == true) {
+      for (final field
+          in (localFinding['_pending_finding_fields'] as List? ??
+              const [
+                'status',
+                'repair_job_id',
+                'include_on_invoice',
+                'resolved_at',
+              ])) {
+        merged[field.toString()] = localFinding[field];
+      }
+      merged['_pending_finding_action'] = true;
+      merged['_pending_finding_fields'] =
+          localFinding['_pending_finding_fields'];
+      merged['sync_state'] = localFinding['sync_state'];
+    } else {
+      merged.remove('_pending_finding_action');
+      merged.remove('_pending_finding_fields');
+    }
+    if (localFinding['_finding_action_error'] != null) {
+      merged['_finding_action_error'] = localFinding['_finding_action_error'];
+    } else {
+      merged.remove('_finding_action_error');
     }
     merged['attachments'] = _mergePhotos(
       preferred['attachments'],
@@ -44,9 +70,7 @@ List<Map<String, dynamic>> mergeWorkFindings(
   return result;
 }
 
-Map<String, Map<String, dynamic>> _byId(
-  List<Map<String, dynamic>> rows,
-) => {
+Map<String, Map<String, dynamic>> _byId(List<Map<String, dynamic>> rows) => {
   for (final row in rows)
     if ((row['id']?.toString() ?? '').isNotEmpty) row['id'].toString(): row,
 };

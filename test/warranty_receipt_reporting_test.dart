@@ -113,9 +113,9 @@ void main() {
     expect(calculator, contains('approvedCents / 1.03'));
     final panel = File('lib/screens/jobs/invoice_warranty_panel.dart').readAsStringSync();
     expect(panel, contains("receipt == null ? _number(widget.detail['terminal_amount'])"));
-    expect(panel, contains("? _number(widget.detail['customer_responsibility'])"));
+    expect(panel, contains('WarrantyPaymentAllocation.fromWarranty('));
     final pdf = File('lib/services/document_pdf_service.dart').readAsStringSync();
-    expect(pdf, contains("detail['customer_responsibility']"));
+    expect(pdf, contains('WarrantyPaymentAllocation.fromWarranty('));
     // Planned103 approval -> base100 + fee3; customer share900 stays the quote.
     const plan = {'extended_warranty': true, 'approved_amount': 103,
       'terminal_amount': 100, 'net_applied': 100, 'processor_fee': 3,

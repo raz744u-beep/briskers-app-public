@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -7,6 +7,7 @@ import '../../core/briskers_colors.dart';
 import '../../core/warranty_payment_amounts.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
+import '../../core/module_modal_theme.dart';
 import '../../services/briskers_api.dart';
 
 Widget _createWarrantyCompanyDialog(
@@ -131,7 +132,11 @@ class InvoiceWarrantyPanel extends StatefulWidget {
   State<InvoiceWarrantyPanel> createState() => _InvoiceWarrantyPanelState();
 }
 
-class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
+class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
+    with ModuleModalState<InvoiceWarrantyPanel> {
+  @override
+  Color get modalAccent => BriskersColors.invoices;
+
   static const _api = BriskersApi();
 
   bool _expanded = false;
@@ -416,12 +421,14 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
       text: widget.detail['approved_amount']?.toString() ?? '');
     var rate = _number(widget.detail['surcharge_rate']);
     if (rate > 0) rate = _cardSurchargeRate;
+    ModalRoute<dynamic>? sheetRoute;
     final result = await showModalBottomSheet<Map<String, dynamic>>(
         context: context,
         isScrollControlled: true,
         showDragHandle: true,
         builder: (sheetContext) => StatefulBuilder(
           builder: (context, setSheetState) {
+            sheetRoute ??= ModalRoute.of(sheetContext);
             final selectedName = selected?['name']?.toString() ?? '';
             final phone = selected?['claims_phone']?.toString() ?? '';
             final email = selected?['submission_email']?.toString() ?? '';
@@ -591,6 +598,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
         ),
       );
 
+      // The sheet still uses its controllers during the exit animation.
+      await sheetRoute?.completed;
       company.dispose();
     phone.dispose();
     email.dispose();
@@ -600,12 +609,16 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
     if (result == null) return;
     final approvedAmount = _number(result['approved_amount']);
     final cardRate = _number(result['surcharge_rate']);
-    final terminal = approvedAmount / (1 + cardRate);
+    final approvedCents = WarrantyPaymentAmounts.cents(approvedAmount) ?? 0;
+    final terminalCents = (approvedCents / (1 + cardRate)).round();
+    final terminal = terminalCents / 100;
+    final processorFee = (approvedCents - terminalCents) / 100;
     await _saveLocalWarranty({
       ...widget.detail,
       ...result,
       'terminal_amount': terminal,
-      'processor_fee': approvedAmount - terminal,
+      'net_applied': terminal,
+      'processor_fee': processorFee,
       'customer_responsibility':
           (widget.invoiceTotal - terminal).clamp(0, double.infinity),
     });
@@ -747,12 +760,14 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
         selectedRate = _cardSurchargeRate;
       }
 
-      final result = await showModalBottomSheet<Map<String, dynamic>>(
+      ModalRoute<dynamic>? sheetRoute;
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
         context: context,
         isScrollControlled: true,
         showDragHandle: true,
         builder: (sheetContext) => StatefulBuilder(
           builder: (context, setSheetState) {
+            sheetRoute ??= ModalRoute.of(sheetContext);
             final selectedName = selected?['name']?.toString() ?? '';
             final phone = selected?['claims_phone']?.toString() ?? '';
             final email = selected?['submission_email']?.toString() ?? '';
@@ -922,6 +937,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
         ),
       );
 
+      // The sheet still uses its controllers during the exit animation.
+      await sheetRoute?.completed;
       claim.dispose();
       authorization.dispose();
       approved.dispose();
@@ -1030,9 +1047,9 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
     final receipt = WarrantyPaymentAmounts.receipt(widget.detail, widget.payments);
     final terminal = receipt == null ? _number(widget.detail['terminal_amount']) : _number(receipt['amount']);
     final fee = _number(widget.detail['processor_fee']);
-    final customer = receipt == null
-      ? _number(widget.detail['customer_responsibility'])
-      : (widget.invoiceTotal - terminal).clamp(0, double.infinity);
+    final allocation = WarrantyPaymentAllocation.fromWarranty(
+      invoiceTotal: widget.invoiceTotal, warranty: widget.detail);
+    final customer = allocation.customerTotal;
     final breakdown = WarrantyPaymentAmounts.fromReceipt(gross: terminal, processorFee: fee);
     final phone = formatWarrantyPhone(
       widget.detail['claims_phone']?.toString(),
@@ -1054,8 +1071,11 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
           color: BriskersColors.invoices.withValues(alpha: 0.25),
         ),
       ),
-      child: Column(
-        children: [
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: Column(
+          children: [
           ListTile(
             leading: const CircleAvatar(
               backgroundColor: Color(0xFFE9F6ED),
@@ -1129,9 +1149,10 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
             ),
             subtitle: Text(
               missing.isEmpty
-                  ? tr('approvedCustomerSummary')
+                  ? tr('approvedCustomerAllocationSummary')
                       .replaceAll('{approved}', _money(approved))
-                      .replaceAll('{customer}', _money(customer))
+                      .replaceAll('{customer}', allocation.requiresReview
+                          ? tr('warrantyAllocationReviewRequired') : _money(customer))
                   : tr('missingSummary').replaceAll(
                       '{items}',
                       missing.join(', '),
@@ -1172,7 +1193,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                   ),
                   _summaryRow(
                     '${(_number(widget.detail['surcharge_rate']) * 100).toStringAsFixed((_number(widget.detail['surcharge_rate']) * 100) % 1 == 0 ? 0 : 2)}% ${tr('threePercentSurcharge').replaceFirst('3% ', '')}',
-                    _money(fee),
+                    allocation.requiresReview
+                        ? tr('warrantyAllocationReviewRequired') : _money(fee),
                   ),
                   _summaryRow(
                     widget.paymentProcessed
@@ -1186,10 +1208,17 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
                     tr('retainedReceipt'), _money(breakdown.retained)),
                   Text(tr('warrantyFeeNoDoubleCharge'), style: const TextStyle(fontSize: 12)),
                   _summaryRow(
-                    tr('customerResponsibility'),
-                    _money(customer),
+                    tr('customerResponsibilityAllocation'),
+                    allocation.requiresReview
+                        ? tr('warrantyAllocationReviewRequired') : _money(customer),
                     strong: true,
                   ),
+                  Text(tr('warrantyAllocationBalanceHelp'),
+                    style: const TextStyle(fontSize: 12)),
+                  if (allocation.requiresReview)
+                    Text(tr('warrantyAllocationReviewHelp'),
+                      style: TextStyle(fontSize: 12,
+                        color: Theme.of(context).colorScheme.error)),
                   if (!widget.readOnly) ...[
                     const SizedBox(height: 10),
                     Row(
@@ -1220,7 +1249,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel> {
               ),
             ),
           ],
-        ],
+          ],
+        ),
       ),
     );
   }

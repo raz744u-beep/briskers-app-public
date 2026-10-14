@@ -1,7 +1,10 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+
+import '../../core/module_modal_theme.dart';
+
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:saf/saf.dart';
@@ -42,7 +45,10 @@ class ExpenseDetailScreen extends StatefulWidget {
   State<ExpenseDetailScreen> createState() => _ExpenseDetailScreenState();
 }
 
-class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
+class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
+    with ModuleModalState<ExpenseDetailScreen> {
+  @override
+  Color get modalAccent => BriskersColors.expenses;
   BriskersApi get _api => widget.api;
   final _picker = ImagePicker();
   final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
@@ -77,11 +83,18 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     _loadLocalExpenseIqPhoto();
   }
 
-  Future<Map<String, dynamic>> _withReceiptReporting(Map<String, dynamic> raw,
-      {bool refresh = false}) async {
+  Future<Map<String, dynamic>> _withReceiptReporting(
+    Map<String, dynamic> raw, {
+    bool refresh = false,
+  }) async {
     try {
-      return (await WarrantyReceiptReporting(api: _api).enrich(widget.businessId,
-        [{...raw, 'id': widget.transactionId}], refresh: refresh)).single;
+      return (await WarrantyReceiptReporting(api: _api).enrich(
+        widget.businessId,
+        [
+          {...raw, 'id': widget.transactionId},
+        ],
+        refresh: refresh,
+      )).single;
     } catch (_) {
       return WarrantyReceiptReporting.unverified(raw);
     }
@@ -90,14 +103,16 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   Future<void> _loadOffline() async {
     try {
       final saved = await _localFinancial.loadTransactionDetail(
-        widget.businessId, widget.transactionId,
+        widget.businessId,
+        widget.transactionId,
       );
       if (!mounted) return;
       final rawDetail = saved ?? widget.cachedDetail;
       if (rawDetail == null) {
         setState(() {
           _loading = false;
-          _error = 'This expense has not been cached on this device. '
+          _error =
+              'This expense has not been cached on this device. '
               'Open it while online first to make it available offline.';
         });
         return;
@@ -132,8 +147,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     detail
       ..['editable'] = true
       ..['deletable'] = false
-      ..['date'] = (saved ?? summary)['date'] ??
-          (saved ?? summary)['transaction_date']
+      ..['date'] =
+          (saved ?? summary)['date'] ?? (saved ?? summary)['transaction_date']
       ..['attachments'] =
           (saved ?? summary)['attachments'] ?? const <dynamic>[];
 
@@ -148,10 +163,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   Future<void> _load() async {
     try {
       final results = await Future.wait<dynamic>([
-        _api.transactionDetail(
-          widget.businessId,
-          widget.transactionId,
-        ),
+        _api.transactionDetail(widget.businessId, widget.transactionId),
         _api.myPermissions(widget.businessId),
       ]);
       final rawDetail = Map<String, dynamic>.from(results[0] as Map);
@@ -189,7 +201,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   Future<void> _loadLocalExpenseIqPhoto() async {
     try {
       final photo = await _localExpenseIq.localForExpense(
-        widget.businessId, widget.transactionId,
+        widget.businessId,
+        widget.transactionId,
       );
       if (mounted) setState(() => _localExpenseIqPhoto = photo);
     } catch (_) {
@@ -230,24 +243,27 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
             ? const Icon(Icons.image_not_supported_outlined)
             : FutureBuilder<Uint8List>(
                 future: Saf().readFileBytes(uri),
-                builder: (context, snapshot) =>
-                    snapshot.hasData
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
-                            child: Image.memory(
-                              snapshot.data!,
-                              width: 50, height: 50,
-                              fit: BoxFit.cover,
-                            ),
-                          )
-                        : const Icon(Icons.image_outlined),
+                builder: (context, snapshot) => snapshot.hasData
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Image.memory(
+                          snapshot.data!,
+                          width: 50,
+                          height: 50,
+                          fit: BoxFit.cover,
+                        ),
+                      )
+                    : const Icon(Icons.image_outlined),
               ),
         title: Text(photo['filename']?.toString() ?? 'ExpenseIQ photo'),
         subtitle: Text(
-          state == 'uploaded' ? 'Synced to cloud' :
-          state == 'missing' ? 'Original file not found' :
-          state == 'failed' ? 'Upload pending retry' :
-          'Available locally · awaiting sync',
+          state == 'uploaded'
+              ? 'Synced to cloud'
+              : state == 'missing'
+              ? 'Original file not found'
+              : state == 'failed'
+              ? 'Upload pending retry'
+              : 'Available locally · awaiting sync',
         ),
         trailing: const Icon(Icons.zoom_in_outlined),
         onTap: uri.isEmpty ? null : () => _openLocalExpenseIqPhoto(uri),
@@ -277,8 +293,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   ) async {
     final pending = <Future<File?>>[];
     for (final attachment in attachments) {
-      final bucket =
-          attachment['bucket']?.toString() ?? 'briskers-private';
+      final bucket = attachment['bucket']?.toString() ?? 'briskers-private';
       final key = attachment['key']?.toString() ?? '';
       if (key.isEmpty) continue;
       pending.add(_attachmentCache.getOrDownload(bucket, key));
@@ -294,9 +309,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     _prefetchLocalAttachments(attachments);
   }
 
-  Future<File?> _localAttachment(
-    Map<String, dynamic> attachment,
-  ) async {
+  Future<File?> _localAttachment(Map<String, dynamic> attachment) async {
     final localPath = attachment['local_file_path']?.toString() ?? '';
     if (localPath.isNotEmpty) {
       final file = File(localPath);
@@ -307,6 +320,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       attachment['key']?.toString() ?? '',
     );
   }
+
   String _money(Object? raw) {
     final value = num.tryParse(raw?.toString() ?? '') ?? 0;
     return NumberFormat.currency(symbol: '\$').format(value);
@@ -329,12 +343,18 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF167F43)),
+              leading: const Icon(
+                Icons.camera_alt_outlined,
+                color: Color(0xFF167F43),
+              ),
               title: const Text('Take photo'),
               onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
+              leading: const Icon(
+                Icons.photo_library_outlined,
+                color: Color(0xFF2468BB),
+              ),
               title: const Text('Choose from gallery'),
               onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
             ),
@@ -379,9 +399,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     }
   }
 
-  Future<void> _replaceReceipt(
-    Map<String, dynamic> attachment,
-  ) async {
+  Future<void> _replaceReceipt(Map<String, dynamic> attachment) async {
     final editable = _detail?['editable'] == true;
     if (!editable || _uploading || _deletingAttachmentId != null) {
       return;
@@ -482,9 +500,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                         fit: BoxFit.contain,
                         errorBuilder: (_, _, _) => const SizedBox(
                           height: 300,
-                          child: Center(
-                            child: Text('Could not load receipt.'),
-                          ),
+                          child: Center(child: Text('Could not load receipt.')),
                         ),
                       ),
               ),
@@ -521,9 +537,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     }
   }
 
-  Future<void> _deleteAttachment(
-    Map<String, dynamic> attachment,
-  ) async {
+  Future<void> _deleteAttachment(Map<String, dynamic> attachment) async {
     final attachmentId = attachment['attachment_id']?.toString() ?? '';
     if (attachmentId.isEmpty || _deletingAttachmentId != null) return;
 
@@ -531,9 +545,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete receipt photo?'),
-        content: const Text(
-          'The photo will be removed from this transaction.',
-        ),
+        content: const Text('The photo will be removed from this transaction.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -613,10 +625,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     final categories = List<dynamic>.from(options['categories'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
-    final counterparties =
-        List<dynamic>.from(options['counterparties'] ?? const [])
-            .map((raw) => Map<String, dynamic>.from(raw as Map))
-            .toList();
+    final counterparties = List<dynamic>.from(
+      options['counterparties'] ?? const [],
+    ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
 
     final amount = TextEditingController(
       text: detail['amount']?.toString() ?? '',
@@ -625,13 +636,14 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       text: detail['remarks']?.toString() ?? '',
     );
 
-    var direction =
-        detail['direction']?.toString() == 'income' ? 'income' : 'expense';
+    var direction = detail['direction']?.toString() == 'income'
+        ? 'income'
+        : 'expense';
     String? accountId = detail['account_id']?.toString();
     String? categoryId = detail['category_id']?.toString();
     String? counterpartyId = detail['counterparty_id']?.toString();
-    var date = DateTime.tryParse(detail['date']?.toString() ?? '') ??
-        DateTime.now();
+    var date =
+        DateTime.tryParse(detail['date']?.toString() ?? '') ?? DateTime.now();
 
     final saved = await showModalBottomSheet<bool>(
       context: context,
@@ -686,19 +698,16 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                               ),
                             ],
                             selected: {direction},
-                            onSelectionChanged: (value) => setSheetState(
-                              () => direction = value.first,
-                            ),
+                            onSelectionChanged: (value) =>
+                                setSheetState(() => direction = value.first),
                           ),
                           const SizedBox(height: 12),
                           TextField(
                             controller: amount,
-                            keyboardType:
-                                const TextInputType.numberWithOptions(
+                            keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
-                            scrollPadding:
-                                const EdgeInsets.only(bottom: 160),
+                            scrollPadding: const EdgeInsets.only(bottom: 160),
                             decoration: const InputDecoration(
                               labelText: 'Amount',
                               prefixText: r'$',
@@ -710,8 +719,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                             initialValue: counterpartyId,
                             isExpanded: true,
                             decoration: InputDecoration(
-                              labelText:
-                                  direction == 'income' ? 'Payer' : 'Payee',
+                              labelText: direction == 'income'
+                                  ? 'Payer'
+                                  : 'Payee',
                               border: const OutlineInputBorder(),
                             ),
                             items: [
@@ -781,8 +791,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                           const SizedBox(height: 8),
                           ListTile(
                             contentPadding: EdgeInsets.zero,
-                            leading:
-                                const Icon(Icons.calendar_today_outlined),
+                            leading: const Icon(Icons.calendar_today_outlined),
                             title: const Text('Transaction date'),
                             subtitle: Text(
                               '${date.month}/${date.day}/${date.year}',
@@ -805,8 +814,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                             controller: remarks,
                             minLines: 2,
                             maxLines: 5,
-                            scrollPadding:
-                                const EdgeInsets.only(bottom: 160),
+                            scrollPadding: const EdgeInsets.only(bottom: 160),
                             decoration: const InputDecoration(
                               labelText: 'Description / notes',
                               border: OutlineInputBorder(),
@@ -821,8 +829,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                     width: double.infinity,
                     child: FilledButton.icon(
                       onPressed: () async {
-                        final parsed =
-                            num.tryParse(amount.text.trim().replaceAll(',', ''));
+                        final parsed = num.tryParse(
+                          amount.text.trim().replaceAll(',', ''),
+                        );
                         if (parsed == null ||
                             parsed <= 0 ||
                             accountId == null ||
@@ -856,8 +865,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                           jobId: detail['job_id']?.toString(),
                           documentId: detail['document_id']?.toString(),
                           counterpartyId: counterpartyId,
-                          counterpartyName:
-                              selectedCounterparty?['name']?.toString(),
+                          counterpartyName: selectedCounterparty?['name']
+                              ?.toString(),
                           remarks: remarks.text.trim(),
                         );
 
@@ -928,10 +937,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       _error = null;
     });
     try {
-      await _api.voidManualTransaction(
-        widget.businessId,
-        widget.transactionId,
-      );
+      await _api.voidManualTransaction(widget.businessId, widget.transactionId);
       if (mounted) Navigator.pop(context);
     } catch (error) {
       if (mounted) {
@@ -948,9 +954,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       return 'Not recurring';
     }
     final frequency = rule['frequency']?.toString() ?? '';
-    final interval = int.tryParse(
-      rule['interval_count']?.toString() ?? '',
-    ) ?? 1;
+    final interval =
+        int.tryParse(rule['interval_count']?.toString() ?? '') ?? 1;
     final label = switch (frequency) {
       'daily' => 'Daily',
       'weekly' when interval == 2 => 'Every 2 weeks',
@@ -1117,23 +1122,23 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
     final income = detail['direction']?.toString() == 'income';
     final editable = detail['editable'] == true;
-    final deletable = widget.canDeleteTransaction && detail['deletable'] == true;
+    final deletable =
+        widget.canDeleteTransaction && detail['deletable'] == true;
     final attachments = List<dynamic>.from(detail['attachments'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _preloadAttachments(attachments);
     });
-    final counterparty = detail['counterparty']?.toString() ??
-        (income ? 'Income' : 'Expense');
+    final counterparty =
+        detail['counterparty']?.toString() ?? (income ? 'Income' : 'Expense');
     final category = detail['category']?.toString() ?? '';
     final account = detail['account']?.toString() ?? '';
     final date = detail['date']?.toString() ?? '';
     final remarks = detail['remarks']?.toString() ?? '';
     final jobNumber = detail['job_number']?.toString().trim() ?? '';
     final jobTitle = detail['job_title']?.toString().trim() ?? '';
-    final customerName =
-        detail['job_customer_name']?.toString().trim() ?? '';
+    final customerName = detail['job_customer_name']?.toString().trim() ?? '';
     final documentNumber = detail['document_number']?.toString().trim() ?? '';
     final contextLine = <String>[
       if (customerName.isNotEmpty) customerName,
@@ -1148,12 +1153,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     final recurringRule = recurring is Map
         ? Map<String, dynamic>.from(recurring)
         : null;
-    final mayManageRecurring = widget.allowRecurring &&
+    final mayManageRecurring =
+        widget.allowRecurring &&
         editable &&
         (detail['job_id']?.toString() ?? '').isEmpty &&
         (detail['document_id']?.toString() ?? '').isEmpty;
-    final color =
-        income ? const Color(0xFF169B62) : BriskersColors.expenses;
+    final color = income ? const Color(0xFF169B62) : BriskersColors.expenses;
 
     return Scaffold(
       appBar: AppBar(
@@ -1261,18 +1266,30 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
             ),
             const SizedBox(height: 12),
           ],
-          if (income && detail['reporting_status'] == 'verified' && detail['reporting_amount'] != null) ...[
-            _DetailRow(label: 'Gross received / invoice credit', value: _money(detail['amount'])),
-            _DetailRow(label: 'Processor fee (not shop income)', value: _money(detail['reporting_processor_fee'])),
-            _DetailRow(label: 'Retained receipts', value: _money(detail['reporting_amount'])),
+          if (income &&
+              detail['reporting_status'] == 'verified' &&
+              detail['reporting_amount'] != null) ...[
+            _DetailRow(
+              label: 'Gross received / invoice credit',
+              value: _money(detail['amount']),
+            ),
+            _DetailRow(
+              label: 'Processor fee (not shop income)',
+              value: _money(detail['reporting_processor_fee']),
+            ),
+            _DetailRow(
+              label: 'Retained receipts',
+              value: _money(detail['reporting_amount']),
+            ),
           ],
           if (income && detail['reporting_status'] != 'verified')
-            const Text('Gross receipt shown. Processor fee could not be verified; sync invoice details and refresh before relying on net receipts.'),
+            const Text(
+              'Gross receipt shown. Processor fee could not be verified; sync invoice details and refresh before relying on net receipts.',
+            ),
           _DetailRow(label: 'Category', value: category),
           _DetailRow(label: 'Account', value: account),
           _DetailRow(label: 'Date', value: date),
-          if (jobNumber.isNotEmpty)
-            _DetailRow(label: 'Job', value: jobNumber),
+          if (jobNumber.isNotEmpty) _DetailRow(label: 'Job', value: jobNumber),
           if (documentNumber.isNotEmpty)
             _DetailRow(label: 'Invoice', value: documentNumber),
           if (mayManageRecurring)
@@ -1284,27 +1301,24 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                 subtitle: Text(_repeatLabel(recurringRule)),
                 trailing: TextButton(
                   onPressed: _manageRecurring,
-                  child: Text(recurringRule?['is_repeating'] == true
-                      ? 'Change' : 'Make recurring'),
+                  child: Text(
+                    recurringRule?['is_repeating'] == true
+                        ? 'Change'
+                        : 'Make recurring',
+                  ),
                 ),
                 onTap: _manageRecurring,
               ),
             )
           else if (widget.allowRecurring && recurringRule != null)
-            _DetailRow(
-              label: 'Repeating',
-              value: _repeatLabel(recurringRule),
-            ),
+            _DetailRow(label: 'Repeating', value: _repeatLabel(recurringRule)),
           const SizedBox(height: 16),
           Row(
             children: [
               const Expanded(
                 child: Text(
                   'Receipts',
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
                 ),
               ),
               if (editable)
@@ -1358,10 +1372,11 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                           tooltip: 'Delete receipt photo',
                           onPressed:
                               _deletingAttachmentId ==
-                                      attachment['attachment_id']?.toString()
-                                  ? null
-                                  : () => _deleteAttachment(attachment),
-                          icon: _deletingAttachmentId ==
+                                  attachment['attachment_id']?.toString()
+                              ? null
+                              : () => _deleteAttachment(attachment),
+                          icon:
+                              _deletingAttachmentId ==
                                   attachment['attachment_id']?.toString()
                               ? const SizedBox.square(
                                   dimension: 18,
@@ -1390,10 +1405,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 }
 
 class _DetailRow extends StatelessWidget {
-  const _DetailRow({
-    required this.label,
-    required this.value,
-  });
+  const _DetailRow({required this.label, required this.value});
 
   final String label;
   final String value;

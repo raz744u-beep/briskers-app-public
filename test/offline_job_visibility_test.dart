@@ -35,112 +35,204 @@ void main() {
     [id, business, number, title, status, createdAt, syncState],
   );
 
-  test('All pins newest TEMP and Pending sync jobs before the 30-row limit', () async {
-    for (var i = 0; i < 40; i++) {
-      await insertJob('historical-$i', 'J-${6000 + i}',
-          createdAt: 10000 + i, syncState: 'synced');
-    }
-    await insertJob('temp-old', 'TEMP-A0000001', createdAt: 200);
-    await insertJob('temp-new', 'TEMP-B0000002', createdAt: 300,
+  test(
+    'All orders TEMP and Pending sync jobs by meaningful activity before paging',
+    () async {
+      for (var i = 0; i < 40; i++) {
+        await insertJob(
+          'historical-$i',
+          'J-${6000 + i}',
+          createdAt: 10000 + i,
+          syncState: 'synced',
+        );
+      }
+      await insertJob('temp-old', 'TEMP-A0000001', createdAt: 20000);
+      await insertJob(
+        'temp-new',
+        'TEMP-B0000002',
+        createdAt: 30000,
         // A finished upload must not hide a job whose number has not arrived.
-        syncState: 'synced', status: 'completed');
-    await insertJob('direct-new', 'Pending sync', createdAt: 400,
-        syncState: 'synced');
-    await insertJob('other-shop', 'TEMP-OTHER', createdAt: 500, business: 'other');
+        syncState: 'synced',
+        status: 'completed',
+      );
+      await insertJob(
+        'direct-new',
+        'Pending sync',
+        createdAt: 40000,
+        syncState: 'synced',
+      );
+      await insertJob(
+        'other-shop',
+        'TEMP-OTHER',
+        createdAt: 500,
+        business: 'other',
+      );
 
-    final firstPage = await jobs.listJobs('shop', view: JobListView.all, limit: 30);
-    expect(firstPage, hasLength(30));
-    expect(firstPage.take(3).map((row) => row['id']),
-        ['direct-new', 'temp-new', 'temp-old']);
-    expect(firstPage[3]['job_number'], 'J-6039');
-    expect(await jobs.jobCount('shop'), 43);
-    final secondPage = await jobs.listJobs('shop', view: JobListView.all, limit: 30, offset: 30);
-    expect(secondPage, hasLength(13));
-    expect({...firstPage, ...secondPage}.map((row) => row['id']).toSet(),
-        hasLength(43));
-  });
+      final firstPage = await jobs.listJobs(
+        'shop',
+        view: JobListView.all,
+        limit: 30,
+      );
+      expect(firstPage, hasLength(30));
+      expect(firstPage.take(3).map((row) => row['id']), [
+        'direct-new',
+        'temp-new',
+        'temp-old',
+      ]);
+      expect(firstPage[3]['job_number'], 'J-6039');
+      expect(await jobs.jobCount('shop'), 43);
+      final secondPage = await jobs.listJobs(
+        'shop',
+        view: JobListView.all,
+        limit: 30,
+        offset: 30,
+      );
+      expect(secondPage, hasLength(13));
+      expect(
+        {...firstPage, ...secondPage}.map((row) => row['id']).toSet(),
+        hasLength(43),
+      );
+    },
+  );
 
   test('provisional pinning still respects status and text filters', () async {
     await insertJob('open', 'TEMP-A1', status: 'open');
     await insertJob('done', 'TEMP-B2', status: 'completed');
     await insertJob('real', 'J-50', syncState: 'synced');
-    expect((await jobs.listJobs('shop', status: 'completed'))
-        .map((row) => row['id']), ['done']);
-    expect((await jobs.listJobs('shop', search: 'temp-a1'))
-        .map((row) => row['id']), ['open']);
+    expect(
+      (await jobs.listJobs(
+        'shop',
+        status: 'completed',
+      )).map((row) => row['id']),
+      ['done'],
+    );
+    expect(
+      (await jobs.listJobs('shop', search: 'temp-a1')).map((row) => row['id']),
+      ['open'],
+    );
     expect(await jobs.jobCount('shop', search: 'temp-a1'), 1);
   });
 
-  test('number lookup is business scoped and ignores blank stored values', () async {
-    await insertJob('job', ' TEMP-ABC12345 ');
-    await insertJob('blank', '   ');
-    expect(await jobs.jobNumberForJob('shop', 'job'), 'TEMP-ABC12345');
-    expect(await jobs.jobNumberForJob('other', 'job'), isNull);
-    expect(await jobs.jobNumberForJob('shop', 'blank'), isNull);
-    expect(await jobs.jobNumberForJob('shop', 'missing'), isNull);
-  });
+  test(
+    'number lookup is business scoped and ignores blank stored values',
+    () async {
+      await insertJob('job', ' TEMP-ABC12345 ');
+      await insertJob('blank', '   ');
+      expect(await jobs.jobNumberForJob('shop', 'job'), 'TEMP-ABC12345');
+      expect(await jobs.jobNumberForJob('other', 'job'), isNull);
+      expect(await jobs.jobNumberForJob('shop', 'blank'), isNull);
+      expect(await jobs.jobNumberForJob('shop', 'missing'), isNull);
+    },
+  );
 
-  test('successful invoice sync keeps exactly one Job before number pull', () async {
-    await insertJob('local-job-1', 'TEMP-ABC12345');
-    await db.customStatement(
-      "INSERT INTO local_documents(id,business_id,job_id,kind) "
-      "VALUES ('invoice','shop','local-job-1','invoice')",
-    );
-    await db.customStatement(
-      "INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json,created_at) "
-      "VALUES ('shop','job_admin','local-job-1','update','{}',200)",
-    );
-    expect(await jobs.remapProvisionalJob('shop', 'local-job-1', 'server-job'),
-        'TEMP-ABC12345');
-    // Replay after a cache/write interruption must not drop or duplicate it.
-    expect(await jobs.remapProvisionalJob('shop', 'local-job-1', 'server-job'),
-        'TEMP-ABC12345');
-    final rows = await jobs.listJobs('shop');
-    expect(rows, hasLength(1));
-    expect(rows.single['id'], 'server-job');
-    expect(rows.single['title'], 'Offline repair');
-    expect(rows.single['customer_name'], 'Customer');
-    expect(rows.single['vehicle'], 'Test car');
-    expect((await db.customSelect('SELECT job_id FROM local_documents').getSingle())
-        .read<String>('job_id'), 'server-job');
-    expect((await db.customSelect('SELECT entity_id FROM sync_outbox').getSingle())
-        .read<String>('entity_id'), 'server-job');
+  test(
+    'successful invoice sync keeps exactly one Job before number pull',
+    () async {
+      await insertJob('local-job-1', 'TEMP-ABC12345');
+      await db.customStatement(
+        "INSERT INTO local_documents(id,business_id,job_id,kind) "
+        "VALUES ('invoice','shop','local-job-1','invoice')",
+      );
+      await db.customStatement(
+        "INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json,created_at) "
+        "VALUES ('shop','job_admin','local-job-1','update','{}',200)",
+      );
+      expect(
+        await jobs.remapProvisionalJob('shop', 'local-job-1', 'server-job'),
+        'TEMP-ABC12345',
+      );
+      // Replay after a cache/write interruption must not drop or duplicate it.
+      expect(
+        await jobs.remapProvisionalJob('shop', 'local-job-1', 'server-job'),
+        'TEMP-ABC12345',
+      );
+      final rows = await jobs.listJobs('shop');
+      expect(rows, hasLength(1));
+      expect(rows.single['id'], 'server-job');
+      expect(rows.single['title'], 'Offline repair');
+      expect(rows.single['customer_name'], 'Customer');
+      expect(rows.single['vehicle'], 'Test car');
+      expect(
+        (await db
+                .customSelect('SELECT job_id FROM local_documents')
+                .getSingle())
+            .read<String>('job_id'),
+        'server-job',
+      );
+      expect(
+        (await db.customSelect('SELECT entity_id FROM sync_outbox').getSingle())
+            .read<String>('entity_id'),
+        'server-job',
+      );
 
-    await insertJob('historical', 'J-99', syncState: 'synced');
-    expect((await jobs.listJobs('shop')).first['id'], 'server-job');
-    expect(await jobs.remapProvisionalJob('shop', 'local-job-1', 'server-job',
-        jobNumber: 'J-50'), 'J-50');
-    // All now defaults to historical Job date. Both Jobs were created at
-    // 100, so their equal dates use the stable descending-number tie-break.
-    final numbered = await jobs.listJobs('shop', view: JobListView.all);
-    expect(numbered.map((row) => row['id']).toSet(), {'server-job', 'historical'});
-    expect(numbered.map((row) => row['job_number']), ['J-99', 'J-50']);
-    expect(numbered.every((row) => row['_temporary'] == false), isTrue);
-    // The remapped pending edit at 200 remains newer meaningful activity;
-    // selecting Last modified must still put J-50 first without duplicating it.
-    final modified = await jobs.listJobs(
-      'shop', view: JobListView.all, sort: JobListSort.lastModified,
-    );
-    expect(modified.map((row) => row['job_number']), ['J-50', 'J-99']);
-    expect(modified.map((row) => row['id']).toSet(), {'server-job', 'historical'});
-    final queue = await db.customSelect('SELECT * FROM sync_outbox').getSingle();
-    expect(queue.read<String>('entity_id'), 'server-job');
-    expect(queue.read<String>('state'), 'pending');
-    expect(queue.read<int>('created_at'), 200);
-    expect(await jobs.jobCount('shop'), 2);
-  });
+      await insertJob('historical', 'J-99', syncState: 'synced');
+      expect((await jobs.listJobs('shop')).first['id'], 'server-job');
+      expect(
+        await jobs.remapProvisionalJob(
+          'shop',
+          'local-job-1',
+          'server-job',
+          jobNumber: 'J-50',
+        ),
+        'J-50',
+      );
+      // All defaults to meaningful activity, so the remapped pending edit wins
+      // over job numbering without duplicating either Job.
+      final numbered = await jobs.listJobs('shop', view: JobListView.all);
+      expect(numbered.map((row) => row['id']).toSet(), {
+        'server-job',
+        'historical',
+      });
+      expect(numbered.map((row) => row['job_number']), ['J-50', 'J-99']);
+      expect(numbered.every((row) => row['_temporary'] == false), isTrue);
+      // The remapped pending edit at 200 remains newer meaningful activity;
+      // the explicit legacy Last modified option gives the same result.
+      final modified = await jobs.listJobs(
+        'shop',
+        view: JobListView.all,
+        sort: JobListSort.lastModified,
+      );
+      expect(modified.map((row) => row['job_number']), ['J-50', 'J-99']);
+      expect(modified.map((row) => row['id']).toSet(), {
+        'server-job',
+        'historical',
+      });
+      final queue = await db
+          .customSelect('SELECT * FROM sync_outbox')
+          .getSingle();
+      expect(queue.read<String>('entity_id'), 'server-job');
+      expect(queue.read<String>('state'), 'pending');
+      expect(queue.read<int>('created_at'), 200);
+      expect(await jobs.jobCount('shop'), 2);
+    },
+  );
 
-  test('remap never replaces a real Job snapshot with a provisional copy', () async {
-    await insertJob('local-job', 'TEMP-NEW');
-    await insertJob('server', 'J-100', syncState: 'synced',
-        status: 'completed', title: 'Authoritative title');
-    expect(await jobs.remapProvisionalJob('shop', 'local-job', 'server',
-        jobNumber: 'TEMP-STALE'), 'J-100');
-    final rows = await jobs.listJobs('shop');
-    expect(rows, hasLength(1));
-    expect(rows.single['title'], 'Authoritative title');
-    expect(rows.single['status'], 'completed');
-  });
+  test(
+    'remap never replaces a real Job snapshot with a provisional copy',
+    () async {
+      await insertJob('local-job', 'TEMP-NEW');
+      await insertJob(
+        'server',
+        'J-100',
+        syncState: 'synced',
+        status: 'completed',
+        title: 'Authoritative title',
+      );
+      expect(
+        await jobs.remapProvisionalJob(
+          'shop',
+          'local-job',
+          'server',
+          jobNumber: 'TEMP-STALE',
+        ),
+        'J-100',
+      );
+      final rows = await jobs.listJobs('shop');
+      expect(rows, hasLength(1));
+      expect(rows.single['title'], 'Authoritative title');
+      expect(rows.single['status'], 'completed');
+    },
+  );
 
   test('Job remap preserves offline work and its stable queued operation', () async {
     await insertJob('local-job', 'TEMP-WORK');
@@ -151,15 +243,25 @@ void main() {
     await db.customStatement(
       "INSERT INTO sync_outbox(business_id,entity_type,entity_id,operation,payload_json) "
       "VALUES ('shop','work_summary','local-job','upsert',?)",
-      [jsonEncode({'job_id': 'local-job', 'operation_id': 'stable-work',
-        'visit_id': 'local-visit-work', 'work_summary': 'Replaced filter'})],
+      [
+        jsonEncode({
+          'job_id': 'local-job',
+          'operation_id': 'stable-work',
+          'visit_id': 'local-visit-work',
+          'work_summary': 'Replaced filter',
+        }),
+      ],
     );
     await jobs.remapProvisionalJob('shop', 'local-job', 'server-job');
-    final visit = await db.customSelect('SELECT * FROM local_job_visits').getSingle();
+    final visit = await db
+        .customSelect('SELECT * FROM local_job_visits')
+        .getSingle();
     expect(visit.read<String>('job_id'), 'server-job');
     expect(visit.read<String>('work_summary'), 'Replaced filter');
     expect(visit.read<String>('sync_state'), 'pending');
-    final queued = await db.customSelect('SELECT * FROM sync_outbox').getSingle();
+    final queued = await db
+        .customSelect('SELECT * FROM sync_outbox')
+        .getSingle();
     final payload = jsonDecode(queued.read<String>('payload_json')) as Map;
     expect(queued.read<String>('entity_id'), 'server-job');
     expect(payload['job_id'], 'server-job');
@@ -167,13 +269,66 @@ void main() {
     expect(payload['visit_id'], 'local-visit-work');
   });
 
-  test('invalid or missing server identity leaves the provisional Job intact', () async {
-    await insertJob('local-job', 'TEMP-KEEP');
-    await expectLater(jobs.remapProvisionalJob('shop', 'local-job', ''),
-        throwsStateError);
-    await expectLater(jobs.remapProvisionalJob('other', 'local-job', 'server'),
-        throwsStateError);
-    expect(await jobs.jobNumberForJob('shop', 'local-job'), 'TEMP-KEEP');
-    expect(await jobs.jobCount('shop'), 1);
-  });
+  test(
+    'Job remap updates nested finding action links without changing finding identity',
+    () async {
+      await insertJob('local-job', 'TEMP-FINDING');
+      await db.customStatement(
+        "INSERT INTO local_findings "
+        "(id,business_id,found_job_id,repair_job_id,body,status) "
+        "VALUES ('finding','shop','local-job','local-job','Synthetic repair','open')",
+      );
+      final payload = jsonEncode({
+        'operation_id': 'stable-finding-action',
+        'finding_id': 'finding',
+        'patch': {'repair_job_id': 'local-job', 'status': 'repaired'},
+        '_activity_at': 500,
+      });
+      await db.customStatement(
+        "INSERT INTO sync_outbox "
+        "(business_id,entity_type,entity_id,operation,payload_json,created_at) "
+        "VALUES ('shop','finding_action','finding','update',?,100),"
+        "('other-shop','finding_action','finding','update',?,100)",
+        [payload, payload],
+      );
+      await jobs.remapProvisionalJob('shop', 'local-job', 'server-job');
+      await jobs.remapProvisionalJob('shop', 'local-job', 'server-job');
+      final row = await db
+          .customSelect("SELECT * FROM sync_outbox WHERE business_id='shop'")
+          .getSingle();
+      final remapped = jsonDecode(row.read<String>('payload_json')) as Map;
+      expect(row.read<String>('entity_id'), 'finding');
+      expect(remapped['operation_id'], 'stable-finding-action');
+      expect(remapped['_activity_at'], 500);
+      expect((remapped['patch'] as Map)['repair_job_id'], 'server-job');
+      final other = await db
+          .customSelect(
+            "SELECT * FROM sync_outbox WHERE business_id='other-shop'",
+          )
+          .getSingle();
+      expect(other.read<String>('payload_json'), payload);
+      final finding = await db
+          .customSelect("SELECT * FROM local_findings WHERE id='finding'")
+          .getSingle();
+      expect(finding.read<String>('found_job_id'), 'server-job');
+      expect(finding.read<String>('repair_job_id'), 'server-job');
+    },
+  );
+
+  test(
+    'invalid or missing server identity leaves the provisional Job intact',
+    () async {
+      await insertJob('local-job', 'TEMP-KEEP');
+      await expectLater(
+        jobs.remapProvisionalJob('shop', 'local-job', ''),
+        throwsStateError,
+      );
+      await expectLater(
+        jobs.remapProvisionalJob('other', 'local-job', 'server'),
+        throwsStateError,
+      );
+      expect(await jobs.jobNumberForJob('shop', 'local-job'), 'TEMP-KEEP');
+      expect(await jobs.jobCount('shop'), 1);
+    },
+  );
 }

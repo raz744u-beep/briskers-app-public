@@ -9,7 +9,6 @@ class JobProfitabilitySummaryView extends StatelessWidget {
     required this.summary,
     required this.formatMoney,
   });
-
   final JobProfitabilitySummary summary;
   final String Function(num) formatMoney;
 
@@ -18,54 +17,87 @@ class JobProfitabilitySummaryView extends StatelessWidget {
     final profitColor = summary.profit < 0
         ? Colors.red.shade700
         : Colors.green.shade700;
+    final scheme = Theme.of(context).colorScheme;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final stacked =
-            constraints.maxWidth < 420 ||
-            MediaQuery.textScalerOf(context).scale(16) > 20;
-
-        Widget amountRow(String key, num amount, {bool emphasized = false}) {
-          final label = Text(
-            tr(key),
-            style: TextStyle(
-              fontSize: emphasized ? 18 : 16,
-              fontWeight: emphasized ? FontWeight.w800 : FontWeight.w500,
+        final largeText = MediaQuery.textScalerOf(context).scale(16) > 22;
+        final columns = largeText || constraints.maxWidth < 280
+            ? 1
+            : constraints.maxWidth >= 640
+            ? 4
+            : 2;
+        final cardWidth = (constraints.maxWidth - (columns - 1) * 8) / columns;
+        Widget card(
+          String label,
+          String value, {
+          String? caption,
+          bool highlight = false,
+        }) => Container(
+          width: cardWidth,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: highlight
+                ? profitColor.withValues(alpha: .08)
+                : scheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: highlight
+                  ? profitColor.withValues(alpha: .25)
+                  : scheme.outlineVariant,
             ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.w900,
+                  color: highlight ? profitColor : scheme.onSurface,
+                ),
+              ),
+              if (caption != null) ...[
+                const SizedBox(height: 3),
+                Text(
+                  caption,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+        Widget breakdown(String label, num value) {
+          final name = Text(tr(label), style: const TextStyle(fontSize: 12));
+          final amount = Text(
+            formatMoney(value),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
           );
-          final value = Text(
-            formatMoney(amount),
-            style: TextStyle(
-              fontSize: emphasized ? 22 : 17,
-              fontWeight: FontWeight.w900,
-              color: emphasized ? profitColor : null,
-            ),
-          );
-          return Container(
-            margin: EdgeInsets.only(bottom: emphasized ? 12 : 2),
-            padding: EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: emphasized ? 16 : 11,
-            ),
-            decoration: emphasized
-                ? BoxDecoration(
-                    color: profitColor.withValues(alpha: 0.11),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: profitColor.withValues(alpha: 0.28),
-                    ),
-                  )
-                : null,
-            child: stacked
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: largeText
                 ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [label, const SizedBox(height: 6), value],
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [name, amount],
                   )
                 : Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(child: label),
-                      const SizedBox(width: 16),
-                      Flexible(child: value),
+                      Expanded(child: name),
+                      const SizedBox(width: 12),
+                      amount,
                     ],
                   ),
           );
@@ -76,57 +108,42 @@ class JobProfitabilitySummaryView extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 12,
+              spacing: 8,
               runSpacing: 8,
               children: [
-                Text(
-                  tr('profitabilitySummary'),
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w700,
-                  ),
+                card(
+                  tr('profitabilityRevenueCard'),
+                  formatMoney(summary.revenue),
+                  caption: tr('profitabilityRevenueExTax'),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: profitColor.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    margin == null
-                        ? tr('profitabilityMarginUnavailable')
-                        : '${tr('profitabilityMargin')}: ${margin.toStringAsFixed(1)}%',
-                    style: TextStyle(
-                      color: profitColor,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
+                card(
+                  tr('profitabilityCostsCard'),
+                  formatMoney(summary.totalCost),
+                  caption: tr('profitabilityDirectCosts'),
+                ),
+                card(
+                  tr('profitabilityProfitCard'),
+                  formatMoney(summary.profit),
+                  caption: tr('profitabilityNetBeforeOverhead'),
+                  highlight: true,
+                ),
+                card(
+                  tr('profitabilityMargin'),
+                  margin == null
+                      ? tr('profitabilityMarginUnavailable')
+                      : '${margin.toStringAsFixed(1)}%',
+                  highlight: true,
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            amountRow('profitabilityRevenueExTax', summary.revenue),
-            amountRow('profitabilityTaxExcluded', summary.salesTax),
-            amountRow('profitabilityPartsCost', summary.directCost),
-            amountRow('profitabilityLaborCost', summary.mechanicCost),
-            amountRow('profitabilityDirectCosts', summary.totalCost),
-            const Divider(height: 18),
-            amountRow(
-              'profitabilityNetBeforeOverhead',
-              summary.profit,
-              emphasized: true,
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                tr('profitabilityBasisNote'),
-                style: const TextStyle(fontSize: 12, color: Color(0xFF667085)),
-              ),
+            const SizedBox(height: 10),
+            breakdown('profitabilityPartsCost', summary.directCost),
+            breakdown('profitabilityLaborCost', summary.mechanicCost),
+            breakdown('profitabilityTaxExcluded', summary.salesTax),
+            const Divider(height: 16),
+            Text(
+              tr('profitabilityBasisNote'),
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
             ),
           ],
         );

@@ -2,7 +2,11 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+import '../../core/module_modal_theme.dart';
+import '../../widgets/estimate_merge_confirmation_dialog.dart';
+import '../../widgets/document_identity_app_bar.dart';
+import '../../services/vehicle_finding_actions_service.dart';
 import 'package:flutter/services.dart' show MethodChannel, MissingPluginException, PlatformException;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -140,6 +144,7 @@ class JobDocumentScreen extends StatefulWidget {
     this.roleCode,
     this.canManageExpenses = false,
     this.initialAction,
+    this.initialTab = 'items',
   });
 
   final String businessId;
@@ -148,6 +153,7 @@ class JobDocumentScreen extends StatefulWidget {
   final String? roleCode;
   final bool canManageExpenses;
   final String? initialAction;
+  final String initialTab;
 
   @visibleForTesting
   static Widget historicalReopenDialogForTesting(
@@ -175,7 +181,10 @@ class JobDocumentScreen extends StatefulWidget {
   State<JobDocumentScreen> createState() => _JobDocumentScreenState();
 }
 
-class _JobDocumentScreenState extends State<JobDocumentScreen> {
+class _JobDocumentScreenState extends State<JobDocumentScreen>
+    with ModuleModalState<JobDocumentScreen> {
+  @override
+  Color get modalAccent => _accent;
   static const _api = BriskersApi();
 
   // Unknown legacy callers get a read-only role rather than Office privileges.
@@ -403,8 +412,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final memoProjected = await _pendingMemo.project(
       widget.businessId, widget.documentId, detail,
     );
+    final findingsProjected = await VehicleFindingActionsService()
+        .projectInvoiceNotes(widget.businessId, memoProjected);
     final projected = OfflineInvoicePaymentLedger.projectPendingPayments(
-      memoProjected,
+      findingsProjected,
       await _offlinePayments.pendingForInvoice(
         widget.businessId, widget.documentId,
       ),
@@ -460,6 +471,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
               isOwner: widget.isOwner,
               canManageExpenses: widget.canManageExpenses,
               initialAction: widget.initialAction,
+              initialTab: widget.initialTab,
             ),
           ),
         );
@@ -2517,49 +2529,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Add Estimate to Invoice'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Estimate total'),
-              trailing: Text(_money(estimateTotal)),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Current invoice total'),
-              trailing: Text(_money(currentTotal)),
-            ),
-            const Divider(),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text(
-                'New invoice total',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              trailing: Text(
-                _money(currentTotal + estimateTotal),
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'The estimate will be closed and become read-only after it is added.',
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Add to Invoice'),
-          ),
-        ],
+      builder: (dialogContext) => EstimateMergeConfirmationDialog(
+        estimateTotal: _money(estimateTotal),
+        invoiceTotal: _money(currentTotal),
+        combinedTotal: _money(currentTotal + estimateTotal),
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -4345,14 +4318,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         children: [
           Icon(_statusIcon(label, code: code), size: 16, color: color),
           const SizedBox(width: 5),
-          Text(
+          Flexible(child: Text(
             label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: color,
               fontSize: 12.5,
               fontWeight: FontWeight.w800,
             ),
-          ),
+          )),
         ],
       ),
     );
@@ -6735,46 +6710,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
 
     return DefaultTabController(
       length: tabCount,
+      initialIndex: !_estimate && widget.initialTab == 'payment' ? 1 : 0,
       child: Scaffold(
         backgroundColor: Colors.white,
-        appBar: AppBar(
-          backgroundColor: _accent,
-          foregroundColor: Colors.white,
-          elevation: 1,
-          titleSpacing: 0,
-          title: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onLongPress: _showDocumentHeaderActions,
-            child: Row(
-              children: [
-              Expanded(
-                child: SizedBox(
-                  width: double.infinity,
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      number.isEmpty
-                          ? (_estimate ? tr('estimate') : tr('invoice'))
-                          : (_estimate
-                              ? '${tr('estimate')} #$number'
-                              : '${tr('invoice')} #$number'),
-                      maxLines: 1,
-                      softWrap: false,
-                      style: const TextStyle(
-                        fontSize: 21,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              _statusPill(statusLabel,
-                  code: unsyncedInvoice ? 'pending' : statusCode),
-              ],
-            ),
-          ),
+        appBar: DocumentIdentityAppBar(
+          label: _estimate ? tr('estimate') : tr('invoice'),
+          number: number,
+          accent: _accent,
+          onLongPress: _showDocumentHeaderActions,
+          statusRowHeight: MediaQuery.textScalerOf(context).scale(30) + 28,
+          status: _statusPill(statusLabel,
+              code: unsyncedInvoice ? 'pending' : statusCode),
           actions: [
             if (!_estimate && _canManageInvoiceExpenses)
               IconButton(

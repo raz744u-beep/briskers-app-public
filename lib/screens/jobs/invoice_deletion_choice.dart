@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../core/module_modal_theme.dart';
+import '../../core/briskers_colors.dart';
 
 import 'owner_job_deletion_gate.dart';
 
@@ -15,14 +17,16 @@ Future<bool?> showInvoiceDeletionChoice(
   final invoiceRows = (jobPlan?['invoices'] as List?) ?? const [];
   final protectedReason = jobPlan?['reason']?.toString() ?? '';
 
-  final choice = await showDialog<String>(
+  final choice = await showModuleDialog<String>(
     context: context,
+    accent: BriskersColors.invoices,
     builder: (dialogContext) => AlertDialog(
       title: const Text('Delete invoice?'),
       content: Text(
         [
           'Delete invoice #$invoiceNumber?',
-          if (!OwnerJobDeletionGate.enabled && jobNumber.isNotEmpty) 'The Job will be kept. Whole-Job deletion is awaiting additional safety checks.',
+          if (!OwnerJobDeletionGate.enabled && jobNumber.isNotEmpty)
+            'The Job will be kept. Whole-Job deletion is awaiting additional safety checks.',
           if (jobNumber.isNotEmpty && allowed)
             'You can also delete Job $jobNumber and its '
                 '${invoiceRows.length} unpaid invoice'
@@ -53,8 +57,9 @@ Future<bool?> showInvoiceDeletionChoice(
   // explicit acknowledgement of exactly what is about to be removed.
   if (!context.mounted) return null;
   final withJob = choice == 'job';
-  final approved = await showDialog<bool>(
+  final approved = await showModuleDialog<bool>(
     context: context,
+    accent: BriskersColors.invoices,
     barrierDismissible: false,
     builder: (dialogContext) => AlertDialog(
       title: Text(

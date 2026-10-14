@@ -1,15 +1,16 @@
-/// Recent uses device-local, per-user opens; All defaults to historical Job date.
+/// Legacy query options retained for callers; Jobs uses All / latest activity.
 enum JobListView { recent, active, all }
 
 enum JobListSort { lastAccessed, lastModified, jobDate }
 
-/// Kept in the route's PageStorage, so returning to Jobs restores the view but
-/// a fresh app session still starts on Recent. Never shared between users.
+/// Kept in route PageStorage to restore status, search and paging per user.
+/// Legacy view/sort fields are ignored by Jobs so saved settings cannot bring
+/// back removed selectors or override latest-activity ordering.
 class JobListPreferences {
   const JobListPreferences({
-    this.view = JobListView.recent,
-    this.sort = JobListSort.lastAccessed,
-    this.allSort = JobListSort.jobDate,
+    this.view = JobListView.all,
+    this.sort = JobListSort.lastModified,
+    this.allSort = JobListSort.lastModified,
     this.status,
     this.search = '',
     this.visibleLimit = 30,

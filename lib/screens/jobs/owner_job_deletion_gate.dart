@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../core/module_modal_theme.dart';
+import '../../core/briskers_colors.dart';
 
 import '../../core/briskers_i18n.dart';
 
@@ -11,8 +13,9 @@ class OwnerJobDeletionGate {
 
 Future<void> showOwnerJobDeletionUnavailable(BuildContext context) {
   final spanish = BriskersLanguageController.instance.isSpanish;
-  return showDialog<void>(
+  return showModuleDialog<void>(
     context: context,
+    accent: BriskersColors.jobs,
     builder: (dialogContext) => AlertDialog(
       title: Text(
         spanish ? 'Eliminar trabajo no disponible' : 'Job deletion unavailable',

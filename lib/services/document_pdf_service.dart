@@ -336,10 +336,8 @@ class DocumentPdfService {
         num.tryParse(detail['processor_fee']?.toString() ?? '') ?? 0;
     final warrantyBreakdown = WarrantyPaymentAmounts.fromReceipt(
       gross: warrantyTerminal, processorFee: warrantyProcessorFee);
-    final customerResponsibility = warrantyReceipt == null
-      ? (num.tryParse(detail['customer_responsibility']?.toString() ?? '') ?? 0)
-      : ((num.tryParse(detail['total_amount']?.toString() ?? '') ?? 0) - warrantyTerminal)
-        .clamp(0, double.infinity);
+    final customerAllocation = WarrantyPaymentAllocation.fromWarranty(
+      invoiceTotal: detail['total_amount'], warranty: detail);
     final disclaimers = List<dynamic>.from(
       detail['disclaimers'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
@@ -565,10 +563,11 @@ class DocumentPdfService {
               company: warrantyCompany,
               approved: warrantyApproved,
               terminal: warrantyTerminal,
-              processorFee: warrantyProcessorFee,
+              processorFee: customerAllocation.requiresReview ? null : warrantyProcessorFee,
               retained: warrantyReceipt == null ? null : warrantyBreakdown?.retained,
               actualReceipt: warrantyReceipt != null,
-              customerResponsibility: customerResponsibility,
+              customerResponsibility: customerAllocation.customerTotal,
+              customerAllocationNeedsReview: customerAllocation.requiresReview,
             ),
           ],
           if (warrantyMessage.isNotEmpty) ...[
@@ -996,12 +995,13 @@ class DocumentPdfService {
     required String company,
     required num approved,
     required num terminal,
-    required num processorFee,
+    required num? processorFee,
     required num? retained,
     required bool actualReceipt,
     required num customerResponsibility,
+    required bool customerAllocationNeedsReview,
   }) {
-    pw.Widget row(String label, num value, {bool bold = false}) {
+    pw.Widget row(String label, num? value, {bool bold = false}) {
       return pw.Padding(
         padding: const pw.EdgeInsets.only(bottom: 3),
         child: pw.Row(
@@ -1017,7 +1017,7 @@ class DocumentPdfService {
               ),
             ),
             pw.Text(
-              _money(value),
+              value == null ? 'Review required' : _money(value),
               style: pw.TextStyle(
                 fontSize: bold ? 10 : 8.8,
                 fontWeight:
@@ -1061,14 +1061,23 @@ class DocumentPdfService {
                 row('Credit Card Processing Fee\n(Customer Responsibility)', processorFee),
                 row(
                   'Customer Responsibility',
-                  (customerResponsibility - processorFee)
+                  customerAllocationNeedsReview ? null : (customerResponsibility - (processorFee ?? 0))
                       .clamp(0, double.infinity),
                 ),
                 pw.Divider(height: 8, color: PdfColors.grey500),
                 row(
                   'Total Customer Responsibility',
-                  customerResponsibility,
+                  customerAllocationNeedsReview ? null : customerResponsibility,
                   bold: true,
+                ),
+                pw.SizedBox(height: 3),
+                pw.Text(
+                  'Saved payment allocation. Payments are credited separately; see invoice balance for amount due.',
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+                ),
+                if (customerAllocationNeedsReview) pw.Text(
+                  'The saved allocation needs review before use.',
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                 ),
               ],
             ),

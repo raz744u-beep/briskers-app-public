@@ -9,6 +9,7 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
+import 'vehicle_finding_actions_service.dart';
 
 typedef WorkFindingMediaDirectoryProvider = Future<Directory> Function();
 
@@ -363,7 +364,8 @@ class OfflineWorkFindingsService {
       });
     }
 
-    return result;
+    return VehicleFindingActionsService(api: _api, database: _database)
+        .project(businessId, result);
   }
 
   Future<Map<String, dynamic>> createLocalFinding(
@@ -428,6 +430,7 @@ class OfflineWorkFindingsService {
     });
 
     final local = await _findingRow(businessId, localId);
+    VehicleFindingActionsService.notifyChanged(businessId);
     return _findingMapFromRow(local!);
   }
 
@@ -469,7 +472,7 @@ class OfflineWorkFindingsService {
           SELECT id, payload_json
           FROM sync_outbox
           WHERE business_id = ?
-            AND entity_type = 'finding_create'
+            AND entity_type IN ('finding_create', 'customer_finding_create')
             AND entity_id = ?
             AND state = 'pending'
           ORDER BY id
@@ -510,6 +513,7 @@ class OfflineWorkFindingsService {
     });
 
     final local = await _findingRow(businessId, findingId);
+    VehicleFindingActionsService.notifyChanged(businessId);
     return _findingMapFromRow(local!);
   }
 
@@ -614,6 +618,7 @@ class OfflineWorkFindingsService {
       rethrow;
     }
 
+    VehicleFindingActionsService.notifyChanged(businessId);
     return {
       'attachment_id': localPhotoId,
       'id': localPhotoId,
@@ -633,6 +638,8 @@ class OfflineWorkFindingsService {
     active[businessId] = work;
     try {
       await work;
+      await VehicleFindingActionsService(api: _api, database: _database).flush(businessId);
+      VehicleFindingActionsService.notifyChanged(businessId);
     } finally {
       if (identical(active[businessId], work)) active.remove(businessId);
     }
@@ -667,6 +674,7 @@ class OfflineWorkFindingsService {
         } else if (type == 'finding_update') {
           if (!await _flushFindingUpdate(row)) break;
         } else if (type == 'finding_photo') {
+          if ((_payload(row)['finding_id']?.toString() ?? '').startsWith('local-finding-')) break;
           await _flushFindingPhoto(row);
         } else {
           handled = false;
@@ -868,6 +876,9 @@ class OfflineWorkFindingsService {
           ],
         );
       }
+
+      await VehicleFindingActionsService(api: _api, database: _database)
+          .remap(businessId, localId, serverId);
 
       final desiredBody = current.read<String>('body');
       await _database.customStatement(
@@ -1193,6 +1204,8 @@ class OfflineWorkFindingsService {
   ) async {
     final findingId = finding['id']?.toString() ?? '';
     if (findingId.isEmpty) return;
+    finding = (await VehicleFindingActionsService(api: _api, database: _database)
+        .project(businessId, [finding])).single;
 
     await _database.customStatement(
       '''
@@ -1201,7 +1214,7 @@ class OfflineWorkFindingsService {
         body, status, include_on_invoice, created_at, resolved_at,
         created_by, can_edit, can_delete, server_updated_at,
         row_version, sync_state
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ''',
       [
         findingId,
@@ -1219,6 +1232,7 @@ class OfflineWorkFindingsService {
         finding['can_delete'] == true ? 1 : 0,
         _unixNullable(_date(finding['updated_at'])),
         _int(finding['row_version']),
+        finding['_pending_finding_action'] == true ? 'pending' : 'synced',
       ],
     );
 

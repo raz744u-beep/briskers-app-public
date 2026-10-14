@@ -11,6 +11,11 @@ on:
       - 'tools/migrations/**'
       - 'supabase/migrations/**'
 
+# Build/test commands never transmit Flutter or Dart analytics.
+env:
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
+
 permissions:
   contents: read
 
@@ -117,3 +122,6 @@ jobs:
         run: npm install --prefix "$RUNNER_TEMP/briskers-sql-tools" --no-audit --no-fund --save-exact @electric-sql/pglite@0.5.9
       - name: Verify note permissions and conflict contracts
         run: PGLITE_MODULE="$RUNNER_TEMP/briskers-sql-tools/node_modules/@electric-sql/pglite/dist/index.js" node tools/tests/standard_note_styles_sql_test.mjs
+
+      - name: Verify gated Owner retirement contract
+        run: PGLITE_MODULE="$RUNNER_TEMP/briskers-sql-tools/node_modules/@electric-sql/pglite/dist/index.js" node tools/tests/owner_job_retirement_v2_test.mjs
