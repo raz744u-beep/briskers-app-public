@@ -795,17 +795,15 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                       style: TextStyle(fontSize: 12),
                     ),
                   ],
-                  if (widget.isOwner &&
-                      _pendingDetails.any((entry) =>
-                        entry['id'] == 81 &&
-                        entry['type'] == 'job_admin' &&
-                        entry['entity'] ==
-                          'local-conversion-job-5b982dcb-6cd7-4aae-8e29-0945d100c04' &&
-                        entry['linked_documents'] == 0 &&
-                        entry['linked_jobs'] == 0)) ...[
+                  // Show the action on Owner's screen even when the cached
+                  // eligibility summary is stale. The transactional handler
+                  // still rechecks all identifiers and linked records.
+                  if (widget.isOwner) ...[
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
-                      onPressed: _syncing ? null : _cancelOrphanedTestJobUpdate,
+                      onPressed: _syncing || !_pendingDetails.any((entry) =>
+                        entry['id'] == 81 && entry['type'] == 'job_admin')
+                          ? null : _cancelOrphanedTestJobUpdate,
                       icon: const Icon(Icons.remove_circle_outline),
                       label: const Text('Cancel orphaned test update #81'),
                     ),
