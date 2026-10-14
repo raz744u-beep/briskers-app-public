@@ -3382,10 +3382,52 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
   Future<void> _deleteUnusedJob() async {
     if (!_owner || _busy) return;
-    // The legacy endpoint recycles numbers and cannot provide the approved
-    // atomic document cascade, tombstones, and protected-record guarantees.
-    // Keep all whole-Job deletion disabled until the audited server rollout.
-    await showOwnerJobDeletionUnavailable(context);
+    // Read-only Owner preflight only. Never expose the legacy destructive
+    // endpoint until tombstone, offline and number-reuse safeguards ship.
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      await showOwnerJobDeletionUnavailable(context);
+      return;
+    }
+    try {
+      final plan = await _api.jobDeletionPlan(widget.businessId, widget.jobId);
+      if (!mounted) return;
+      final invoices = List<dynamic>.from(plan['invoices'] ?? const []);
+      final estimates = List<dynamic>.from(plan['estimates_preserved'] ?? const []);
+      final canDelete = plan['can_delete'] == true;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: Theme.of(dialogContext).colorScheme.surface,
+          title: Text('Delete Job ${plan['job_number'] ?? ''}'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${invoices.length} linked invoice(s)'),
+              for (final invoice in invoices)
+                Text('Invoice ${(invoice as Map)['number'] ?? ''} — ${invoice['status'] ?? ''}'),
+              const SizedBox(height: 8),
+              Text('${estimates.length} linked estimate(s)'),
+              for (final estimate in estimates)
+                Text('Estimate ${(estimate as Map)['number'] ?? ''}'),
+              const SizedBox(height: 12),
+              Text(canDelete
+                ? 'Eligible for review. Deletion remains disabled until offline synchronization and number-reuse safeguards are complete.'
+                : 'Protected: ${plan['reason'] ?? 'This job cannot be deleted safely.'}'),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close')),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to check deletion safety: $error')),
+        );
+      }
+    }
   }
 
   Future<void> _showNewMenu() async {
