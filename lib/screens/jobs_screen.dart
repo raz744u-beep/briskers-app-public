@@ -1054,10 +1054,12 @@ class _JobsScreenState extends State<JobsScreen> {
                               children: [
                                 const Icon(Icons.payments_outlined),
                                 const SizedBox(width: 10),
-                                Text(
-                                  _text(
-                                    'Paid, Still Open',
-                                    'Pagado, aún abierto',
+                                Expanded(
+                                  child: Text(
+                                    _text(
+                                      'Paid, Still Open',
+                                      'Pagado, aún abierto',
+                                    ),
                                   ),
                                 ),
                               ],

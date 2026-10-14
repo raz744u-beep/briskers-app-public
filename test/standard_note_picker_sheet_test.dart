@@ -114,6 +114,44 @@ void main() {
     );
   });
 
+  testWidgets(
+    'colored category headers paint their ink on their own Material',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StandardNotePickerSheet(
+              templates: _templates,
+              canManage: true,
+              onEdit: (_) async => _templates,
+              onReorder: (_, categories) async => _templates,
+            ),
+          ),
+        ),
+      );
+      const colors = {
+        'service': Color(0xFF1565C0),
+        'warranty': Color(0xFF2E7D32),
+        'inspection': Color(0xFFEF6C00),
+        'advisory': Color(0xFFC62828),
+        'general': Color(0xFF6A1B9A),
+      };
+      for (final entry in colors.entries) {
+        final surface = tester.widget<Material>(
+          find.byKey(ValueKey('standard-note-group-surface-${entry.key}')),
+        );
+        final header = tester.element(
+          find.byKey(ValueKey('toggle-standard-note-group-${entry.key}')),
+        );
+        expect(header.findAncestorWidgetOfExactType<Material>(), same(surface));
+        expect(surface.color, entry.value.withValues(alpha: 0.045));
+        expect(surface.borderRadius, BorderRadius.circular(12));
+        expect(surface.clipBehavior, Clip.antiAlias);
+      }
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('non-owners can choose notes but cannot create edit or reorder', (
     tester,
   ) async {
@@ -247,25 +285,29 @@ void main() {
     final toggle = find.byKey(
       const ValueKey('toggle-standard-note-group-service'),
     );
+    final firstNote = find.byKey(const ValueKey('standard-note-a'));
+    final secondNote = find.byKey(const ValueKey('standard-note-b'));
+    expect(firstNote, findsOneWidget);
+    expect(secondNote, findsOneWidget);
     await tester.tap(toggle);
     await tester.pumpAndSettle();
-    expect(find.text('First'), findsNothing);
+    expect(firstNote, findsNothing);
     await tester.enterText(
       find.byKey(const ValueKey('standard-note-search')),
       'First',
     );
     await tester.pumpAndSettle();
-    expect(find.text('First'), findsOneWidget);
-    expect(find.text('Second'), findsNothing);
+    expect(firstNote, findsOneWidget);
+    expect(secondNote, findsNothing);
     await tester.enterText(
       find.byKey(const ValueKey('standard-note-search')),
       '',
     );
     await tester.pumpAndSettle();
-    expect(find.text('First'), findsNothing);
+    expect(firstNote, findsNothing);
     await tester.tap(toggle);
     await tester.pumpAndSettle();
-    expect(find.text('First'), findsOneWidget);
+    expect(firstNote, findsOneWidget);
   });
 
   testWidgets('Secretary selects exact template text from the Spanish picker', (

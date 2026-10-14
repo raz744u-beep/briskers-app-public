@@ -464,4 +464,55 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  for (final language in ['en', 'es']) {
+    testWidgets(
+      'paid filter wraps at 200% text size in a narrow $language popup',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 740);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await BriskersLanguageController.instance.setLanguage(language);
+        await tester.pumpWidget(
+          MaterialApp(home: Scaffold(body: screen(_Jobs()))),
+        );
+        await tester.pumpAndSettle();
+        final button = tester.widget<PopupMenuButton<String>>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is PopupMenuButton<String> &&
+                widget.tooltip == tr('filterJobs'),
+          ),
+        );
+        final entry = button
+            .itemBuilder(tester.element(find.byType(JobsScreen)))
+            .singleWhere(
+              (entry) =>
+                  entry is PopupMenuItem<String> &&
+                  entry.value == 'paid_still_open',
+            );
+        // Exercise the real menu entry within a 256px-wide popup,
+        // independently of unrelated cards and header accessibility layouts.
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: MediaQuery(
+                data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+                child: Center(child: SizedBox(width: 256, child: entry)),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final label = find.text(
+          language == 'en' ? 'Paid, Still Open' : 'Pagado, aún abierto',
+        );
+        expect(label, findsOneWidget);
+        expect(tester.getSize(label).height, greaterThan(24));
+        expect(tester.getSize(label).width, lessThanOrEqualTo(222));
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 }

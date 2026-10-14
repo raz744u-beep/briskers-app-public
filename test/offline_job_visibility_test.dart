@@ -4,6 +4,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/core/job_list_options.dart';
 import 'package:briskers_app/services/local_job_repository.dart';
 
 void main() {
@@ -47,13 +48,13 @@ void main() {
         syncState: 'synced');
     await insertJob('other-shop', 'TEMP-OTHER', createdAt: 500, business: 'other');
 
-    final firstPage = await jobs.listJobs('shop', limit: 30);
+    final firstPage = await jobs.listJobs('shop', view: JobListView.all, limit: 30);
     expect(firstPage, hasLength(30));
     expect(firstPage.take(3).map((row) => row['id']),
         ['direct-new', 'temp-new', 'temp-old']);
     expect(firstPage[3]['job_number'], 'J-6039');
     expect(await jobs.jobCount('shop'), 43);
-    final secondPage = await jobs.listJobs('shop', limit: 30, offset: 30);
+    final secondPage = await jobs.listJobs('shop', view: JobListView.all, limit: 30, offset: 30);
     expect(secondPage, hasLength(13));
     expect({...firstPage, ...secondPage}.map((row) => row['id']).toSet(),
         hasLength(43));
@@ -109,8 +110,12 @@ void main() {
     expect((await jobs.listJobs('shop')).first['id'], 'server-job');
     expect(await jobs.remapProvisionalJob('shop', 'local-job-1', 'server-job',
         jobNumber: 'J-50'), 'J-50');
-    expect((await jobs.listJobs('shop')).map((row) => row['job_number']),
-        ['J-99', 'J-50']);
+    // The remapped pending edit remains meaningful activity after the real
+    // number arrives. All sorts by that activity, not the largest job number.
+    final numbered = await jobs.listJobs('shop', view: JobListView.all);
+    expect(numbered.map((row) => row['id']).toSet(), {'server-job', 'historical'});
+    expect(numbered.map((row) => row['job_number']), ['J-50', 'J-99']);
+    expect(numbered.every((row) => row['_temporary'] == false), isTrue);
     expect(await jobs.jobCount('shop'), 2);
   });
 

@@ -1,7 +1,15 @@
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:drift/native.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:briskers_app/core/job_list_options.dart';
+import 'package:briskers_app/core/document_presentation.dart';
+import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/services/local_job_repository.dart';
+import 'package:briskers_app/services/customer_document_summary_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   test('appointment editor and list share offline owner policy and linked Job guard', () async {
     final form=await File('lib/screens/appointments/appointment_manage_screen.dart').readAsString();
     final list=await File('lib/screens/appointments_screen.dart').readAsString();
@@ -130,32 +138,102 @@ void main() {
     expect(repository, contains('THEN j.created_at END DESC'));
   });
 
-  test('new Job refresh resets filters and Jobs tab passes a current refresh token',
-      () async {
-    final jobs = await File('lib/screens/jobs_screen.dart').readAsString();
-    final shell = await File('lib/screens/shell_screen.dart').readAsString();
-    final created = jobs.substring(jobs.indexOf('if (created == true && mounted)'));
-    expect(created.indexOf('_search.clear();'), lessThan(created.indexOf('await _load();')));
-    expect(created.indexOf('_selectedStatus = null'), lessThan(created.indexOf('await _load();')));
-    expect(created.indexOf('_scrollController.jumpTo(0)'), lessThan(created.indexOf('await _load();')));
-    expect(shell.indexOf('return JobsScreen('),
-        lessThan(shell.indexOf('_lazyPages.putIfAbsent(index')));
-    expect(shell, contains('refreshToken: _jobsRefreshToken'));
-    expect(jobs, contains('oldWidget.refreshToken != widget.refreshToken'));
-  });
+  test(
+    'New Job is saved before detail opens and refreshes the list on return',
+    () async {
+      final jobs = await File('lib/screens/jobs_screen.dart').readAsString();
+      final form = await File('lib/screens/jobs/job_create_screen.dart')
+          .readAsString();
+      final shell = await File('lib/screens/shell_screen.dart').readAsString();
+      final createStart = jobs.indexOf('Future<void> _createNewJob()');
+      final createEnd = jobs.indexOf('Future<void> _load(', createStart);
+      expect(createStart, greaterThanOrEqualTo(0));
+      expect(createEnd, greaterThan(createStart));
+      final createFlow = jobs.substring(createStart, createEnd);
+      expect(createFlow, contains('JobCreateScreen('));
+      final returned = createFlow.substring(
+        createFlow.indexOf('if (created == true && mounted)'),
+      );
+      final refresh = returned.indexOf('await _load();');
+      final notify = returned.indexOf('widget.onJobsChanged?.call();');
+      expect(refresh, greaterThanOrEqualTo(0));
+      expect(notify, greaterThan(refresh));
+
+      // Detail is opened by the durable creation form, before it returns true.
+      final saveStart = form.indexOf('Future<void> _save()');
+      final saveEnd = form.indexOf('Widget build(', saveStart);
+      expect(saveStart, greaterThanOrEqualTo(0));
+      expect(saveEnd, greaterThan(saveStart));
+      final saveFlow = form.substring(saveStart, saveEnd);
+      final queued = saveFlow.indexOf('await _offlineJobs.queueJobCreate(');
+      final stableId = saveFlow.indexOf('_createdJobId = jobId;');
+      final detail = saveFlow.indexOf('JobDetailScreen(');
+      final finish = saveFlow.indexOf('Navigator.pop(context, true)');
+      expect(queued, greaterThanOrEqualTo(0));
+      expect(stableId, greaterThan(queued));
+      expect(detail, greaterThan(stableId));
+      expect(finish, greaterThan(detail));
+      expect(saveFlow, contains('jobId: jobId'));
+      expect(saveFlow, contains('roleCode: widget.roleCode'));
+
+      final jobsTab = shell.indexOf('return JobsScreen(');
+      final lazyPages = shell.indexOf('_lazyPages.putIfAbsent(index');
+      expect(jobsTab, greaterThanOrEqualTo(0));
+      expect(lazyPages, greaterThan(jobsTab));
+      expect(shell, contains('refreshToken: _jobsRefreshToken'));
+      expect(jobs, contains('oldWidget.refreshToken != widget.refreshToken'));
+    },
+  );
 
   test('Jobs cards prefer job title over customer requested work', () async {
     final card = await File('lib/widgets/job_compact_card.dart').readAsString();
     expect(card, contains('final description = title.isNotEmpty ? title : requested;'));
   });
 
-  test('Paid Still Open filter excludes completed and unpaid jobs', () async {
-    final jobs = await File('lib/screens/jobs_screen.dart').readAsString();
-    final repo = await File('lib/services/local_job_repository.dart').readAsString();
-    expect(jobs, contains("value: 'paid_still_open'"));
-    expect(jobs, contains("Text('Paid, Still Open')"));
-    expect(repo, contains("lower(COALESCE(payment_state, '')) = 'paid'"));
-    expect(repo, contains("NOT IN ('completed','cancelled','closed')"));
+  test('Paid Still Open uses translated copy and returns only paid unfinished Jobs', () async {
+    final source = await File('lib/screens/jobs_screen.dart').readAsString();
+    expect(source, contains("value: 'paid_still_open'"));
+    expect(
+      source,
+      matches(RegExp(r"_text\(\s*'Paid, Still Open',\s*'Pagado, aún abierto'")),
+    );
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final repository = LocalJobRepository(database: db);
+    for (final item in [
+      ('paid-open', 'open', 'paid'),
+      ('paid-working', 'in_progress', 'paid'),
+      ('paid-completed', 'completed', 'paid'),
+      ('paid-cancelled', 'cancelled', 'paid'),
+      ('paid-closed', 'closed', 'paid'),
+      ('part-paid', 'open', 'partial'),
+      ('unpaid', 'open', 'unpaid'),
+    ]) {
+      await db.customStatement(
+        'INSERT INTO local_jobs(id,business_id,access_scope,title,status,payment_state) '
+        "VALUES (?,'shop','all','Repair',?,?)",
+        [item.$1, item.$2, item.$3],
+      );
+    }
+    for (final view in JobListView.values) {
+      final rows = await repository.listJobs(
+        'shop',
+        view: view,
+        status: 'paid_still_open',
+      );
+      expect(rows.map((row) => row['id']).toSet(), {
+        'paid-open',
+        'paid-working',
+      });
+      expect(
+        await repository.jobCount(
+          'shop',
+          view: view,
+          status: 'paid_still_open',
+        ),
+        2,
+      );
+    }
   });
 
   test('full payment offers job completion without auto closing work', () async {
@@ -187,13 +265,73 @@ void main() {
     expect(screen, isNot(contains('Creating a new invoice from an estimate still requires a connection.')));
   });
 
-  test('Customer Overview reads active offline records and excludes history', () async {
-    final source = await File('lib/screens/customers/customer_detail_screen.dart').readAsString();
-    expect(source, contains("Widget _customerOverviewCard()"));
-    expect(source, contains('local_appointments'));
-    expect(source, contains('local_jobs'));
-    expect(source, contains('local_documents'));
+  test('Customer Overview delegates saved documents and keeps closed history separate', () async {
+    final source = await File(
+      'lib/screens/customers/customer_detail_screen.dart',
+    ).readAsString();
+    final activeStart = source.indexOf(
+      'Future<List<Map<String, dynamic>>> _activeCustomerItems()',
+    );
+    final activeEnd = source.indexOf(
+      'Widget _customerOverviewCard()',
+      activeStart,
+    );
+    expect(activeStart, greaterThanOrEqualTo(0));
+    expect(activeEnd, greaterThan(activeStart));
+    final activeFlow = source.substring(activeStart, activeEnd);
+    expect(activeFlow, contains('local_appointments'));
+    expect(activeFlow, contains('local_jobs'));
+    expect(
+      activeFlow,
+      contains(
+        "NOT IN ('cancelled','canceled','no_show','checked_in','completed')",
+      ),
+    );
+    expect(activeFlow, contains("NOT IN ('completed','closed','cancelled')"));
+    expect(
+      activeFlow,
+      contains('CustomerDocumentSummaryService().forCustomer('),
+    );
+    expect(activeFlow, contains('widget.businessId, widget.customerId'));
+    expect(activeFlow, contains('visibility.filter(rows, jobIdKey:'));
     expect(source, contains("item['id']?.toString()"));
+
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    for (final item in [
+      ('open', 'shop', 'customer', 'draft', null),
+      ('paid-pending', 'shop', 'customer', 'paid', null),
+      ('closed', 'shop', 'customer', 'paid', 123),
+      ('void', 'shop', 'customer', 'void', null),
+      ('other-customer', 'shop', 'other', 'draft', null),
+      ('other-shop', 'other', 'customer', 'draft', null),
+    ]) {
+      await db.customStatement(
+        'INSERT INTO local_documents(id,business_id,customer_id,kind,status,closed_at,total) '
+        "VALUES (?,?,?,'invoice',?,?,100)",
+        [item.$1, item.$2, item.$3, item.$4, item.$5],
+      );
+    }
+    final summaries = CustomerDocumentSummaryService(database: db);
+    final active = await summaries.forCustomer('shop', 'customer');
+    expect(active.map((row) => row['id']).toSet(), {'open', 'paid-pending'});
+    final history = await summaries.forCustomer(
+      'shop',
+      'customer',
+      includeClosed: true,
+    );
+    expect(history.map((row) => row['id']).toSet(), {
+      'open',
+      'paid-pending',
+      'closed',
+    });
+    expect(
+      DocumentPresentation(history.singleWhere((row) => row['id'] == 'closed'))
+          .isClosed,
+      isTrue,
+    );
+    expect(await db.customSelect('SELECT * FROM sync_outbox').get(), isEmpty);
   });
 
   test('Document cards show a title under the customer name', () async {

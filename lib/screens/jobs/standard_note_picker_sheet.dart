@@ -253,74 +253,78 @@ class _StandardNotePickerSheetState extends State<StandardNotePickerSheet> {
     final general = category == 'general';
     final expanded =
         _search.trim().isNotEmpty || !_collapsed.contains(category);
-    return Container(
+    return Padding(
       key: ValueKey('standard-note-group-$category'),
-      margin: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-      decoration: BoxDecoration(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+      child: Material(
+        key: ValueKey('standard-note-group-surface-$category'),
         color: color.withValues(alpha: 0.045),
         borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          ListTile(
-            key: ValueKey('toggle-standard-note-group-$category'),
-            onTap: () => setState(() {
-              if (!_collapsed.add(category)) _collapsed.remove(category);
-            }),
-            leading: Icon(_icon(category), color: color),
-            title: Text(
-              tr(standardNoteCategoryLabelKeys[category]!),
-              style: TextStyle(color: color, fontWeight: FontWeight.w800),
-            ),
-            subtitle: Text(
-              '${notes.length} ${tr(notes.length == 1 ? 'standardNoteSavedOne' : 'standardNoteSavedCount')}',
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (widget.canManage && !general && index != null)
-                  ReorderableDragStartListener(
-                    key: ValueKey('reorder-standard-note-category-$category'),
-                    index: index,
-                    enabled: !_saving && _search.isEmpty,
-                    child: const Padding(
-                      padding: EdgeInsets.all(10),
-                      child: Icon(Icons.drag_handle),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            ListTile(
+              key: ValueKey('toggle-standard-note-group-$category'),
+              onTap: () => setState(() {
+                if (!_collapsed.add(category)) _collapsed.remove(category);
+              }),
+              leading: Icon(_icon(category), color: color),
+              title: Text(
+                tr(standardNoteCategoryLabelKeys[category]!),
+                style: TextStyle(color: color, fontWeight: FontWeight.w800),
+              ),
+              subtitle: Text(
+                '${notes.length} ${tr(notes.length == 1 ? 'standardNoteSavedOne' : 'standardNoteSavedCount')}',
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (widget.canManage && !general && index != null)
+                    ReorderableDragStartListener(
+                      key: ValueKey('reorder-standard-note-category-$category'),
+                      index: index,
+                      enabled: !_saving && _search.isEmpty,
+                      child: const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: Icon(Icons.drag_handle),
+                      ),
+                    ),
+                  if (general) const Icon(Icons.push_pin_outlined, size: 20),
+                  Tooltip(
+                    message: tr(
+                      expanded ? 'standardNoteCollapse' : 'standardNoteExpand',
+                    ),
+                    child: Icon(
+                      expanded ? Icons.expand_less : Icons.expand_more,
                     ),
                   ),
-                if (general) const Icon(Icons.push_pin_outlined, size: 20),
-                Tooltip(
-                  message: tr(
-                    expanded ? 'standardNoteCollapse' : 'standardNoteExpand',
-                  ),
-                  child: Icon(expanded ? Icons.expand_less : Icons.expand_more),
+                ],
+              ),
+            ),
+            if (expanded && notes.isNotEmpty)
+              ReorderableListView.builder(
+                key: ValueKey(
+                  category == 'service'
+                      ? 'standard-note-list'
+                      : 'standard-note-list-$category',
                 ),
-              ],
-            ),
-          ),
-          if (expanded && notes.isNotEmpty)
-            ReorderableListView.builder(
-              key: ValueKey(
-                category == 'service'
-                    ? 'standard-note-list'
-                    : 'standard-note-list-$category',
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                buildDefaultDragHandles: false,
+                itemCount: notes.length,
+                itemBuilder: (_, noteIndex) => _tile(
+                  notes[noteIndex],
+                  dragIndex: widget.canManage ? noteIndex : null,
+                ),
+                onReorderItem: (from, to) => _reorderNotes(category, from, to),
+              )
+            else if (expanded)
+              Padding(
+                padding: const EdgeInsets.only(left: 16, right: 16, bottom: 10),
+                child: Text(tr('standardNoteCategoryEmpty')),
               ),
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              buildDefaultDragHandles: false,
-              itemCount: notes.length,
-              itemBuilder: (_, noteIndex) => _tile(
-                notes[noteIndex],
-                dragIndex: widget.canManage ? noteIndex : null,
-              ),
-              onReorderItem: (from, to) => _reorderNotes(category, from, to),
-            )
-          else if (expanded)
-            Padding(
-              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 10),
-              child: Text(tr('standardNoteCategoryEmpty')),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
