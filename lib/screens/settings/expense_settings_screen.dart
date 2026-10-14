@@ -1430,6 +1430,61 @@ class _QuickDialogState extends State<_QuickDialog> {
     super.dispose();
   }
 
+  Future<void> _pickCounterparty() async {
+    final search = TextEditingController();
+    final selected = await showModalBottomSheet<String?>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, update) {
+          final query = search.text.trim().toLowerCase();
+          final results = activeCounterparties.where((item) =>
+              (item['name']?.toString() ?? '').toLowerCase().contains(query)).toList()
+            ..sort((a, b) => (a['name']?.toString() ?? '')
+                .compareTo(b['name']?.toString() ?? ''));
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+                20, 18, 20, MediaQuery.viewInsetsOf(sheetContext).bottom + 16),
+            child: SizedBox(
+              height: MediaQuery.sizeOf(sheetContext).height * 0.70,
+              child: Column(children: [
+                Text('Search payees and payers',
+                    style: Theme.of(sheetContext).textTheme.titleLarge),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: search,
+                  autofocus: true,
+                  onChanged: (_) => update(() {}),
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    labelText: 'Vendor / payee name',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                Expanded(child: ListView(children: [
+                  ListTile(
+                    title: const Text('None'),
+                    onTap: () => Navigator.pop(sheetContext, '__none__'),
+                  ),
+                  ...results.map((item) => ListTile(
+                    title: Text(item['name']?.toString() ?? ''),
+                    onTap: () => Navigator.pop(
+                        sheetContext, item['id']?.toString()),
+                  )),
+                ])),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+    search.dispose();
+    if (!mounted || selected == null) return;
+    setState(() => vendorId = selected == '__none__' ? null : selected);
+  }
+
   Future<void> _save() async {
     if (name.text.trim().isEmpty || accountId == null || categoryId == null) {
       setState(() => error = 'Name, account and category are required.');
@@ -1465,11 +1520,17 @@ class _QuickDialogState extends State<_QuickDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final accent = direction == 'expense' ? Colors.red.shade700 : Colors.green.shade700;
     return AlertDialog(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       title: Text(
         widget.template == null ? 'Add quick transaction' : 'Edit quick transaction',
       ),
-      content: SingleChildScrollView(
+      content: SizedBox(
+        width: MediaQuery.sizeOf(context).width * 0.92,
+        height: MediaQuery.sizeOf(context).height * 0.64,
+        child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1490,23 +1551,19 @@ class _QuickDialogState extends State<_QuickDialog> {
                   : (value) => setState(() => direction = value.first),
             ),
             const SizedBox(height: 10),
-            DropdownButtonFormField<String?>(
-              initialValue: vendorId,
-              decoration: const InputDecoration(labelText: 'Payee / payer'),
-              items: [
-                const DropdownMenuItem<String?>(
-                  value: null,
-                  child: Text('None'),
+            OutlinedButton.icon(
+              onPressed: saving ? null : _pickCounterparty,
+              icon: const Icon(Icons.search),
+              label: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  vendorId == null ? 'Search vendor / payee' :
+                  activeCounterparties
+                    .where((x) => x['id']?.toString() == vendorId)
+                    .map((x) => x['name']?.toString() ?? '')
+                    .firstOrNull ?? 'Search vendor / payee',
                 ),
-                ...activeCounterparties.map(
-                  (x) => DropdownMenuItem<String?>(
-                    value: x['id']?.toString(),
-                    child: Text(x['name']?.toString() ?? ''),
-                  ),
-                ),
-              ],
-              onChanged:
-                  saving ? null : (value) => setState(() => vendorId = value),
+              ),
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
@@ -1567,6 +1624,7 @@ class _QuickDialogState extends State<_QuickDialog> {
               ),
           ],
         ),
+        ),
       ),
       actions: [
         TextButton(
@@ -1574,6 +1632,7 @@ class _QuickDialogState extends State<_QuickDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: accent),
           onPressed: saving ? null : _save,
           child: Text(saving ? 'Saving...' : 'Save'),
         ),
