@@ -358,7 +358,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   /// targets a local-only ID that cannot be used by UUID server RPCs.
   Future<void> _cancelOrphanedTestJobUpdate() async {
     if (!widget.isOwner || _syncing) return;
-    const orphanId = 'local-conversion-job-5b982dcb-6cd7-4aae-8e29-0945d100c04';
+    const orphanId = 'local-conversion-job-5b982dcb-6cd7-4aae-8e29-0945d1000c04';
     final accepted = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
