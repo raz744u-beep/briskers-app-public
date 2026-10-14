@@ -390,10 +390,22 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
              LIMIT 1""",
           variables: [Variable<String>(widget.businessId)],
         ).get();
-        if (rows.length != 1 ||
-            rows.single.read<String>('entity_id') != orphanId ||
-            rows.single.read<String>('state') != 'pending') {
-          throw StateError('Test operation #81 no longer matches. Nothing removed.');
+        if (rows.length != 1) {
+          throw StateError('Operation #81 is not present in this shop queue. Nothing removed.');
+        }
+        final actualId = rows.single.read<String>('entity_id');
+        final actualState = rows.single.read<String>('state');
+        if (actualId != orphanId) {
+          throw StateError(
+            'Operation #81 record ID differs from the expected orphan '
+            '(actual length ${actualId.length}, expected ${orphanId.length}). '
+            'Nothing removed.',
+          );
+        }
+        if (actualState != 'pending') {
+          throw StateError(
+            'Operation #81 is in state $actualState, not pending. Nothing removed.',
+          );
         }
         final jobs = await localDatabase.customSelect(
           'SELECT COUNT(*) AS n FROM local_jobs WHERE business_id=? AND id=?',
