@@ -256,18 +256,20 @@ class _CustomerVehicleFindingsSectionState
     final save = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
+      useSafeArea: true,
       isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            16,
-            0,
-            16,
-            MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
-          ),
-          child: SafeArea(
-            top: false,
+        builder: (context, setSheetState) => SafeArea(
+          top: false,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: MediaQuery.sizeOf(sheetContext).height * 0.48,
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.84,
+            ),
             child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(20, 12, 20,
+                MediaQuery.viewInsetsOf(sheetContext).bottom + 28),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -353,6 +355,7 @@ class _CustomerVehicleFindingsSectionState
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
+                      style: FilledButton.styleFrom(backgroundColor: Colors.teal.shade700),
                       onPressed: () {
                         if (controller.text.trim().isEmpty) return;
                         Navigator.pop(sheetContext, true);
