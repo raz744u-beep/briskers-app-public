@@ -233,8 +233,13 @@ class _ReceiptPhotoCardState extends State<_ReceiptPhotoCard> {
         child: FutureBuilder<_ReceiptPreview>(
           future: _preview,
           builder: (context, snapshot) {
-            final bytes = snapshot.data?.bytes;
-            final modified = snapshot.data?.modified;
+            // FutureBuilder retains old data while a reused card loads its
+            // next file. Never display that previous photo under a new label.
+            final preview = snapshot.connectionState == ConnectionState.done
+                ? snapshot.data
+                : null;
+            final bytes = preview?.bytes;
+            final modified = preview?.modified;
             final previewReady = bytes != null && bytes.isNotEmpty;
             final metadata = <String>[
               if (modified != null)

@@ -67,7 +67,9 @@ class WarrantyPaymentAmounts {
     final terminalIsActualGross = fee != null && terminal != null &&
       net != null && terminal - net == fee;
     if (amount != cents(warranty['approved_amount']) &&
-        !(terminalIsActualGross && amount == terminal)) return null;
+        !(terminalIsActualGross && amount == terminal)) {
+      return null;
+    }
     return selected;
   }
 }

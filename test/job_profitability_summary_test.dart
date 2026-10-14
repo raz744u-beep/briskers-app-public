@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import '../lib/services/job_profitability_summary.dart';
+import 'package:briskers_app/services/job_profitability_summary.dart';
 
 void main() {
   Map<String, dynamic> totals({

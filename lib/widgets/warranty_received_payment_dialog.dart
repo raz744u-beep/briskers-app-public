@@ -62,7 +62,7 @@ class _WarrantyReceivedPaymentDialogState extends State<WarrantyReceivedPaymentD
         TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('cancel'))),
         FilledButton(style: FilledButton.styleFrom(backgroundColor: BriskersColors.invoices),
           onPressed: valid ? () {
-            if (breakdown != null) Navigator.pop(context, breakdown.gross);
+            Navigator.pop(context, breakdown.gross);
           } : null,
           child: Text(tr('recordReceivedPayment'))),
       ],

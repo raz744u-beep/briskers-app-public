@@ -190,7 +190,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(key.currentState!.photos, orderedEquals([selected[0], selected[2]]));
     expect(key.currentState!.changeCount, 1);
-    expect(await localPhoto.exists(), isTrue);
+    expect(localPhoto.existsSync(), isTrue);
     expect(find.text('Receipt photo 3'), findsNothing);
     expect(tester.takeException(), isNull);
   });
