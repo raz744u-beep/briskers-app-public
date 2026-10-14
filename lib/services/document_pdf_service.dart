@@ -1058,7 +1058,7 @@ class DocumentPdfService {
               children: [
                 row('Approved warranty amount', approved),
                 row('Warranty Card Payment Amount', terminal),
-                row('Credit Card Processing Fee', processorFee),
+                row('Credit Card Processing Fee\n(Customer Responsibility)', processorFee),
                 row(
                   'Customer Responsibility',
                   (customerResponsibility - processorFee)
