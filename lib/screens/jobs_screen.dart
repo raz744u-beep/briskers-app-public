@@ -109,6 +109,7 @@ class _JobsScreenState extends State<JobsScreen> {
           businessId: widget.businessId,
           customerId: id,
           customerName: selected['display_name']?.toString() ?? 'Customer',
+          roleCode: widget.roleCode,
           vehicles: List<dynamic>.from(detail['vehicles'] ?? const []),
         )),
       );

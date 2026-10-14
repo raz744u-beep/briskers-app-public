@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../core/connection_mode.dart';
+import 'job_detail_screen.dart';
 
 class JobCreateScreen extends StatefulWidget {
   const JobCreateScreen({
@@ -11,12 +12,14 @@ class JobCreateScreen extends StatefulWidget {
     required this.customerId,
     required this.customerName,
     required this.vehicles,
+    required this.roleCode,
   });
 
   final String businessId;
   final String customerId;
   final String customerName;
   final List<dynamic> vehicles;
+  final String roleCode;
 
   @override
   State<JobCreateScreen> createState() => _JobCreateScreenState();
@@ -137,6 +140,17 @@ class _JobCreateScreenState extends State<JobCreateScreen> {
           // Creation is durable locally; syncing will retry.
         }
       }
+      if (!mounted) return;
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => JobDetailScreen(
+            businessId: widget.businessId,
+            jobId: jobId,
+            roleCode: widget.roleCode,
+          ),
+        ),
+      );
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (!mounted) return;
