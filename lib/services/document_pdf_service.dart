@@ -1057,7 +1057,6 @@ class DocumentPdfService {
             child: pw.Column(
               children: [
                 row('Approved warranty amount', approved),
-                row(actualReceipt ? 'Gross warranty receipt / invoice credit' : 'Planned terminal base', terminal, bold: true),
                 row('Processor surcharge (not shop revenue)', processorFee),
                 if (retained != null) row('Retained after processor fee', retained),
                 pw.Divider(height: 8, color: PdfColors.grey500),
