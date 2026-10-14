@@ -3,6 +3,8 @@
 import 'dart:convert';
 
 import '../core/standard_note_rules.dart';
+import '../core/job_list_options.dart';
+import 'local_job_access_history.dart';
 import 'test_job_cleanup_policy.dart';
 import 'work_finding_merge.dart';
 
@@ -257,7 +259,7 @@ class BriskersFunctionalDiagnosticsService {
       checks,
       id: 'FUNC-022',
       title: 'Jobs sorting and pagination',
-      success: 'Newest, oldest, customer, status and recently-updated ordering checked in local database.',
+      success: 'Recent access, separate modification order, Active status groups, completed visibility and paging checked in local database.',
       action: _checkJobSorting,
     );
 
@@ -440,25 +442,74 @@ class BriskersFunctionalDiagnosticsService {
     );
     for (final item in [
       ['j8', 'J-8', 'Zoe', 'open', 100, 100],
-      ['j11', 'J-11', 'Alice', 'in_progress', 200, 300],
+      ['j11', 'J-11', 'Alice', 'in_progress', 200, 400],
       ['j12', 'J-12', 'Bob', 'open', 300, 200],
     ]) {
       await database.customStatement(
         'INSERT INTO local_jobs '
         '(id,business_id,access_scope,job_number,title,status,customer_name,'
         'created_at,server_updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [item[0], businessId, 'full', item[1], 'Test', item[3],
-         item[2], item[4], item[5]],
+        [
+          item[0],
+          businessId,
+          'full',
+          item[1],
+          'Test',
+          item[3],
+          item[2],
+          item[4],
+          item[5],
+        ],
       );
     }
-    Future<String> first(String sort) async =>
-        (await jobs.listJobs(businessId, sort: sort, limit: 1))
-            .single['job_number'].toString();
-    _require(await first('newest') == 'J-12', 'Newest-first not global.');
-    _require(await first('oldest') == 'J-8', 'Oldest-first not global.');
-    _require(await first('customer') == 'J-11', 'Customer A-Z incorrect.');
-    _require(await first('status') == 'J-11', 'Status order incorrect.');
-    _require(await first('updated') == 'J-11', 'Recently updated incorrect.');
+    Future<String> first({
+      JobListView view = JobListView.recent,
+      JobListSort sort = JobListSort.lastAccessed,
+      int offset = 0,
+    }) async => (await jobs.listJobs(
+      businessId,
+      view: view,
+      sort: sort,
+      userId: 'diagnostic-user',
+      offset: offset,
+      limit: 1,
+    )).single['job_number'].toString();
+    _require(
+      await first(sort: JobListSort.lastModified) == 'J-11',
+      'Modified order must be global before paging.',
+    );
+    _require(
+      await first(view: JobListView.all, offset: 1) == 'J-12',
+      'All history pagination is inconsistent.',
+    );
+    await LocalJobAccessHistory(database: database).recordAccess(
+      businessId,
+      'j8',
+      userId: 'diagnostic-user',
+      at: DateTime.fromMillisecondsSinceEpoch(500000, isUtc: true),
+    );
+    _require(await first() == 'J-8', 'Recent must prefer user access history.');
+    _require(
+      await first(sort: JobListSort.lastModified) == 'J-11',
+      'Access must not change modification order.',
+    );
+    _require(
+      await first(view: JobListView.active) == 'J-11',
+      'Active must use status groups.',
+    );
+    await database.customStatement(
+      "UPDATE local_jobs SET status='completed' WHERE business_id=? AND id='j8'",
+      [businessId],
+    );
+    _require(
+      await first() == 'J-8',
+      'Completed accessed Job disappeared from Recent.',
+    );
+    final active = await jobs.listJobs(businessId, view: JobListView.active);
+    _require(
+      active.every((row) => row['id'] != 'j8'),
+      'Completed Job must leave Active.',
+    );
   }
 
   Future<void> _checkAppointmentActionPolicy(
@@ -1126,7 +1177,7 @@ class BriskersFunctionalDiagnosticsService {
       '''
       INSERT INTO local_customers (
         id, business_id, display_name, sync_state
-      ) VALUES ('customer-1', ?, 'Richard Goff', 'synced')
+      ) VALUES ('customer-1', ?, 'Synthetic Diagnostic Customer', 'synced')
       ''',
       [businessId],
     );
@@ -1154,7 +1205,7 @@ class BriskersFunctionalDiagnosticsService {
         vehicle_id, vehicle_label, planned_hours, is_unassigned, sync_state
       ) VALUES (
         'job-1', ?, 'all', 'J-5', 'Oil leak', 'Oil leak',
-        'in_progress', 'In progress', 'customer-1', 'Richard Goff',
+        'in_progress', 'In progress', 'customer-1', 'Synthetic Diagnostic Customer',
         'vehicle-1', '2012 Hyundai Equus', 1.0, 1, 'synced'
       )
       ''',
@@ -1278,7 +1329,7 @@ class BriskersFunctionalDiagnosticsService {
       'kind': 'estimate',
       'status': 'draft',
       'customer_id': 'customer-1',
-      'customer_name': 'Richard Goff',
+      'customer_name': 'Synthetic Diagnostic Customer',
       'job_id': 'job-1',
       'job_number': 'J-5',
       'job_title': 'Oil leak',
@@ -1306,7 +1357,7 @@ class BriskersFunctionalDiagnosticsService {
       'document_number': '4',
       'status': 'issued',
       'customer_id': 'customer-1',
-      'customer_name': 'Richard Goff',
+      'customer_name': 'Synthetic Diagnostic Customer',
       'job_id': 'job-1',
       'job_number': 'J-5',
       'job_title': 'Oil leak',
@@ -1340,7 +1391,7 @@ class BriskersFunctionalDiagnosticsService {
     _require(
       eligible.single['same_job'] == true &&
           eligible.single['same_vehicle'] == true &&
-          eligible.single['customer_name'] == 'Richard Goff',
+          eligible.single['customer_name'] == 'Synthetic Diagnostic Customer',
       'Invoice eligibility context is incorrect.',
     );
 
@@ -1390,9 +1441,9 @@ class BriskersFunctionalDiagnosticsService {
     await service.queueCustomerProfile(
       businessId,
       'customer-1',
-      name: 'Richard Goff Updated',
-      phone: '5045551212',
-      email: 'richard@example.com',
+      name: 'Synthetic Diagnostic Customer Updated',
+      phone: '2025550100',
+      email: 'qa-customer@example.invalid',
       billingAddress: const {'city': 'Gretna'},
     );
     await service.queueProblemFlag(
@@ -1423,7 +1474,7 @@ class BriskersFunctionalDiagnosticsService {
       variables: [Variable<String>(businessId)],
     ).getSingle();
     _require(
-      customer.read<String>('display_name') == 'Richard Goff Updated' &&
+      customer.read<String>('display_name') == 'Synthetic Diagnostic Customer Updated' &&
           customer.read<int>('problem_flag') == 1 &&
           customer.read<String>('sync_state') == 'pending',
       'Customer offline update was not retained.',
@@ -1646,7 +1697,7 @@ class BriskersFunctionalDiagnosticsService {
       forceOffline: () => false,
       businessSettingsLoader: (_) async => {
         'address': {
-          'formatted': '1400 Stumpf Blvd, Gretna, LA, 70053',
+          'formatted': '100 Example Street, Gretna, LA, 70053',
         },
         'latitude': null,
         'longitude': null,

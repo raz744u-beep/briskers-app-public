@@ -17,7 +17,9 @@ class DocumentPresentation {
   bool get isClosed =>
       isInvoice &&
       ((_document['closed_at']?.toString().trim().isNotEmpty ?? false) ||
-          rawStatus == 'closed');
+          rawStatus == 'closed' ||
+          _document['display_status_code']?.toString().toLowerCase() ==
+              'closed');
   bool get requiresReconciliation =>
       _document['_payment_reconciliation_required'] == true;
 

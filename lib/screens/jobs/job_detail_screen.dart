@@ -3576,7 +3576,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         builder: (_) => ExpenseDetailScreen(
           businessId: widget.businessId,
           transactionId: transactionId,
-          cachedDetail: cached,
+          cachedDetail: _showingLocal ? cached : null,
           allowRecurring:
               widget.roleCode == 'owner' || widget.roleCode == 'manager',
           canDeleteTransaction: widget.roleCode == 'owner',

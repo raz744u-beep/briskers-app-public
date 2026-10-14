@@ -461,7 +461,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   void _reportReview() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _reportedReview || _data == null ||
-          ModalRoute.of(context)?.isCurrent != true) return;
+          ModalRoute.of(context)?.isCurrent != true) {
+        return;
+      }
       _reportedReview = true;
       widget.onReviewed?.call();
     });

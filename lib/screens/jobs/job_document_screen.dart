@@ -36,6 +36,7 @@ import '../../services/local_standard_notes_service.dart';
 import '../../services/offline_document_edit_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
+import '../../services/invoice_finalization_guard.dart';
 import '../../services/pending_document_memo_projection.dart';
 import '../../services/local_payment_methods_cache.dart';
 import '../expenses/expense_detail_screen.dart';
@@ -1334,6 +1335,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                       builder: (_) => ExpenseDetailScreen(
                                         businessId: widget.businessId,
                                         transactionId: id,
+                                        cachedDetail: offline
+                                            ? Map<String, dynamic>.from(expense)
+                                            : null,
                                       ),
                                     ),
                                   );
@@ -2806,13 +2810,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         ) ??
         false;
     if (!confirmed || !mounted) return;
-    await _run(() async {
-      await _api.finalizePendingInvoicePayment(
-        widget.businessId,
-        widget.documentId,
+    final succeeded = await _run(() async {
+      // The confirmation can remain open while sync or connection mode changes.
+      // Re-read durable receipt evidence at the action boundary, not the dialog.
+      await InvoiceFinalizationGuard().run<void>(
+        businessId: widget.businessId,
+        invoiceIds: [widget.documentId],
+        isOwner: widget.isOwner,
+        action: () async {
+          await _api.finalizePendingInvoicePayment(
+            widget.businessId,
+            widget.documentId,
+          );
+        },
       );
     });
-    if (mounted && _error == null) await _offerCompletePaidJob();
+    if (mounted && succeeded) await _offerCompletePaidJob();
   }
 
   Future<void> _enterWarrantyPayment() async {

@@ -82,6 +82,11 @@ String jobStatusLabel(String? code, String fallback) {
 
 const Map<String, Map<String, String>> _translations = {
   'en': {
+    'invoiceFinalizationOwnerOnly': 'Only the owner can finalize payments or close invoices.',
+    'invoiceFinalizationOnlineOnly': 'Reconnect before finalizing payments or closing invoices.',
+    'invoiceFinalizationSyncFirst': 'Sync this invoice before finalizing payments or closing it.',
+    'invoiceFinalizationReceiptsPending': 'A selected invoice still has a saved payment awaiting sync or reconciliation. Resolve it before finalizing payments or closing invoices.',
+
     'standardNoteCategory': 'Category',
     'standardNoteCategoryService': 'Service notes',
     'standardNoteCategoryWarranty': 'Warranty notes',
@@ -556,6 +561,11 @@ const Map<String, Map<String, String>> _translations = {
         'No AI receipt samples yet. Add a vendor receipt or invoice to teach Briskers that layout.',
   },
   'es': {
+    'invoiceFinalizationOwnerOnly': 'Solo el propietario puede finalizar pagos o cerrar facturas.',
+    'invoiceFinalizationOnlineOnly': 'Conéctese antes de finalizar pagos o cerrar facturas.',
+    'invoiceFinalizationSyncFirst': 'Sincronice esta factura antes de finalizar pagos o cerrarla.',
+    'invoiceFinalizationReceiptsPending': 'Una factura seleccionada aún tiene un pago guardado pendiente de sincronización o conciliación. Resuélvalo antes de finalizar pagos o cerrar facturas.',
+
     'standardNoteCategory': 'Categoría',
     'standardNoteCategoryService': 'Notas de servicio',
     'standardNoteCategoryWarranty': 'Notas de garantía',

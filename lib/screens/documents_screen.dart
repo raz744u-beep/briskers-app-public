@@ -9,11 +9,13 @@ import '../core/invoice_status_style.dart';
 import '../core/briskers_i18n.dart';
 import '../core/document_search.dart';
 import '../core/document_future_date.dart';
+import '../core/document_presentation.dart';
 import '../services/briskers_api.dart';
 import '../services/local_financial_cache.dart';
 import '../services/local_document_repository.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
+import '../services/invoice_finalization_guard.dart';
 import '../widgets/briskers_page_header.dart';
 import '../widgets/connection_header_toggle.dart';
 import 'jobs/blank_invoice_setup_screen.dart';
@@ -21,6 +23,34 @@ import 'shell_screen.dart';
 import 'jobs/job_document_screen.dart';
 import 'jobs/invoice_deletion_choice.dart';
 import 'expenses/expense_detail_screen.dart';
+
+/// Stable, language-independent values shared by filters, counts and cards.
+/// Estimate statuses retain their independent workflow and display names.
+String documentListStage(Map<String, dynamic> row, {required bool estimate}) {
+  if (estimate) return row['display_status']?.toString() ?? '';
+  final presentation = DocumentPresentation({...row, 'kind': 'invoice'});
+  switch (presentation.statusCode) {
+    case 'closed': return 'Closed';
+    case 'pending_close': return 'Paid · Pending Close';
+    case 'void': return 'Void';
+    default: return 'Open';
+  }
+}
+
+const invoiceListStatusFilters = ['Open', 'Paid · Pending Close', 'Closed', 'Void'];
+const estimateListStatusFilters = ['Draft', 'Issued', 'Accepted', 'Declined', 'Expired', 'Void'];
+
+/// The local index supplies placeholder zeroes, not payment aggregates. Keep
+/// unavailable financial details unknown so they cannot contradict a server
+/// display hint or be mistaken for a verified outstanding balance.
+Map<String, dynamic> documentListIndexPresentation(Map<String, dynamic> row) {
+  final result = Map<String, dynamic>.from(row);
+  if (row['_local_snapshot'] == true) {
+    result.remove('paid_amount');
+    result.remove('pending_payment');
+  }
+  return result;
+}
 
 class DocumentsScreen extends StatefulWidget {
   const DocumentsScreen({
@@ -57,6 +87,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   final LocalInvoiceStatusStylesCache _localInvoiceStyles =
       LocalInvoiceStatusStylesCache();
   static final Map<String, List<Map<String, dynamic>>> _styleCache = {};
+  final InvoiceFinalizationGuard _finalizationGuard = InvoiceFinalizationGuard();
 
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _invoiceStyles = const [];
@@ -68,34 +99,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   bool get _estimate => widget.kind == 'estimate';
 
-  String _invoiceStage(Map<String, dynamic> row) {
-    if (_estimate) return row['display_status']?.toString() ?? '';
-    final existing = (row['display_status']?.toString() ?? '').toLowerCase();
-    final code = (row['display_status_code']?.toString() ?? '').toLowerCase();
-    if (existing == 'closed' || code == 'closed' ||
-        row['closed_at'] != null) {
-      return 'Closed';
-    }
-    final total = num.tryParse(row['total_amount']?.toString() ?? '');
-    final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
-    final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
-    // Some legacy/list RPCs provide only server-computed status, not amounts.
-    if (total != null && total > 0 && paid + pending >= total - 0.005) {
-      return 'Paid · Pending Close';
-    }
-    if (const {'paid', 'pending close'}.contains(existing) ||
-        const {'paid', 'pending_close'}.contains(code)) {
-      return 'Paid · Pending Close';
-    }
-    return 'Open';
-  }
+  String _invoiceStage(Map<String, dynamic> row) =>
+      documentListStage(row, estimate: _estimate);
 
-  List<String> get _statuses {
-    if (_estimate) {
-      return const ['Draft', 'Issued', 'Accepted', 'Declined', 'Expired', 'Void'];
-    }
-    return const ['Open', 'Paid · Pending Close', 'Closed'];
-  }
+  List<String> get _statuses =>
+      _estimate ? estimateListStatusFilters : invoiceListStatusFilters;
 
   String get _title => _estimate ? tr('estimates') : tr('invoices');
 
@@ -218,7 +226,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         if (mounted) {
           localShown = true;
           setState(() {
-            _rows = local;
+            _rows = local.map(documentListIndexPresentation).toList();
             _error = null;
           });
         }
@@ -628,7 +636,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final total = num.tryParse(row['total_amount']?.toString() ?? '') ?? 0;
     final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
     final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
-    final canPayment = !_estimate && status != 'Paid' && total - paid - pending > 0.005;
+    final canPayment = !_estimate && status == 'Open' &&
+        !DocumentPresentation(row).requiresReconciliation &&
+        total - paid - pending > 0.005;
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -739,8 +749,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     if (_estimate || !widget.isOwner) return;
 
     final eligible = (_rows ?? const <Map<String, dynamic>>[])
-        .where((row) => <String>{'Pending Close', 'Paid'}
-            .contains(row['display_status']?.toString() ?? ''))
+        .where((row) => _invoiceStage(row) == 'Paid · Pending Close')
         .toList();
 
     if (eligible.isEmpty) {
@@ -948,11 +957,19 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           ),
         ) ??
         false;
-    if (!ok) return;
+    if (!ok || !mounted) return;
 
     try {
+      // Check the entire selection before closing any invoice, then recheck
+      // each RPC so a later receipt or connection-mode change cannot bypass it.
+      await _finalizationGuard.check(
+        businessId: widget.businessId, invoiceIds: selected, isOwner: widget.isOwner);
       for (final id in selected) {
-        await _api.closeInvoice(widget.businessId, id);
+        if (!mounted) return;
+        await _finalizationGuard.run(
+          businessId: widget.businessId, invoiceIds: [id], isOwner: widget.isOwner,
+          action: () => _api.closeInvoice(widget.businessId, id),
+        );
       }
       await _load();
       if (!mounted) return;
@@ -1148,6 +1165,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                     builder: (_) => ExpenseDetailScreen(
                                       businessId: widget.businessId,
                                       transactionId: id,
+                                      cachedDetail: offline
+                                          ? Map<String, dynamic>.from(expense)
+                                          : null,
                                     ),
                                   ),
                                 );
@@ -1526,7 +1546,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               )
             else
               ...visible.map((row) {
-                final status = row['display_status']?.toString() ?? '';
+                final status = _invoiceStage(row);
                 final statusLabel = _localizedStatusLabel(status);
                 final color = _statusColor(status);
                 final number = row['document_number']?.toString() ?? '';

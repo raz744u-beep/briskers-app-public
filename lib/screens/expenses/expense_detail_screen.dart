@@ -23,6 +23,9 @@ class ExpenseDetailScreen extends StatefulWidget {
     this.allowRecurring = true,
     this.canDeleteTransaction = false,
     this.cachedDetail,
+    this.api = const BriskersApi(),
+    this.financialCache,
+    this.localPhotoSync,
   });
 
   final String businessId;
@@ -30,17 +33,20 @@ class ExpenseDetailScreen extends StatefulWidget {
   final bool allowRecurring;
   final bool canDeleteTransaction;
   final Map<String, dynamic>? cachedDetail;
+  final BriskersApi api;
+  final LocalFinancialCache? financialCache;
+  final ExpenseIqLocalPhotoSync? localPhotoSync;
 
   @override
   State<ExpenseDetailScreen> createState() => _ExpenseDetailScreenState();
 }
 
 class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
-  static const _api = BriskersApi();
+  BriskersApi get _api => widget.api;
   final _picker = ImagePicker();
   final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
-  final LocalFinancialCache _localFinancial = LocalFinancialCache();
-  final ExpenseIqLocalPhotoSync _localExpenseIq = ExpenseIqLocalPhotoSync();
+  late final LocalFinancialCache _localFinancial;
+  late final ExpenseIqLocalPhotoSync _localExpenseIq;
   Map<String, dynamic>? _localExpenseIqPhoto;
 
   Map<String, dynamic>? _detail;
@@ -55,6 +61,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _localFinancial = widget.financialCache ?? LocalFinancialCache();
+    _localExpenseIq = widget.localPhotoSync ?? ExpenseIqLocalPhotoSync();
     final cached = widget.cachedDetail;
     if (BriskersConnectionModeController.instance.forceOffline) {
       // The same local detail path must work from Jobs → Job Expenses,

@@ -33,7 +33,7 @@ class CustomerNotificationService {
   // read/modify/write so one operation cannot resurrect a reviewed event.
   Future<T> _serialized<T>(Future<T> Function() work) {
     final result = _writes.then((_) => work());
-    _writes = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    _writes = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;
   }
 

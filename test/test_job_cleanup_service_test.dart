@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'package:drift/native.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
-import 'package:briskers_app/screens/settings/test_data_cleanup_screen.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_job_quarantine.dart';
 import 'package:briskers_app/services/test_job_cleanup_gateway.dart';
@@ -152,28 +150,33 @@ void main() {
     expect(gateway.executions, 1);
   });
 
-  testWidgets('offline Owner can inspect pending records with deletion disabled', (tester) async {
-    gateway.owner = false; // Represents unavailable current Owner verification.
-    await db.customStatement("UPDATE local_documents SET sync_state='pending'");
-    await tester.pumpWidget(MaterialApp(home: TestDataCleanupScreen(
-      businessId: 'shop', roleCode: 'owner', cleanupService: service)));
-    await tester.pumpAndSettle();
-    expect(find.text('Pending local documents · read-only preview'), findsOneWidget);
-    expect(find.textContaining('137.19'), findsOneWidget);
-    final cancelButton = find.byWidgetPredicate((widget) =>
-        widget is IconButton &&
-        widget.tooltip == 'Cancel local document after safety checks');
-    expect(cancelButton, findsOneWidget);
-    final cancel = tester.widget<IconButton>(cancelButton);
-    expect(cancel.onPressed, isNull);
-    expect(gateway.executions, 0);
-  });
+  test(
+    'offline Owner can inspect pending evidence without authorizing deletion',
+    () async {
+      gateway.owner = false;
+      await db.customStatement(
+        "UPDATE local_documents SET sync_state='pending'",
+      );
+      final records = await service.pendingLocalDocuments(
+        'shop',
+        roleCode: 'owner',
+      );
+      expect(records.single['total'], 137.19);
+      expect(records.single['sync_state'], 'pending');
+      await expectLater(
+        service.preview('shop', 'job', roleCode: 'owner'),
+        throwsStateError,
+      );
+      expect(gateway.executions, 0);
+    },
+  );
 
-  testWidgets('screen itself blocks non-owner without querying local or server data', (tester) async {
-    await tester.pumpWidget(MaterialApp(home: TestDataCleanupScreen(
-      businessId: 'shop', roleCode: 'office', cleanupService: service)));
-    expect(find.text('Owner access required.'), findsOneWidget);
-    expect(find.text('Preview'), findsNothing);
+  test('non-owner cannot inspect local pending cleanup evidence', () async {
+    await expectLater(
+      service.pendingLocalDocuments('shop', roleCode: 'office'),
+      throwsStateError,
+    );
     expect(gateway.ownerChecks, 0);
+    expect(gateway.executions, 0);
   });
 }

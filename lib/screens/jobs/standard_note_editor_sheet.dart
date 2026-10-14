@@ -144,7 +144,7 @@ class _StandardNoteEditorSheetState extends State<StandardNoteEditorSheet> {
                         initialValue: _category,
                         decoration: InputDecoration(
                           labelText: tr('standardNoteCategory'),
-                          border: OutlineInputBorder(),
+                          border: const OutlineInputBorder(),
                         ),
                         items: [
                           for (final key in standardNoteCategoryKeys)
