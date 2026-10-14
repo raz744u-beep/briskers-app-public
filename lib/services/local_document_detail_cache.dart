@@ -61,6 +61,19 @@ class LocalDocumentDetailCache {
     });
   }
 
+  /// Read existing local snapshots for exact payment-ID reporting links.
+  /// Missing snapshots remain unknown; this never deletes or changes data.
+  Future<List<Map<String, dynamic>>> loadAll(String businessId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final prefix = 'briskers_document_detail_${businessId}_';
+    final result = <Map<String, dynamic>>[];
+    for (final key in prefs.getKeys().where((key) => key.startsWith(prefix))) {
+      final snapshot = await load(businessId, key.substring(prefix.length));
+      if (snapshot != null) result.add(snapshot);
+    }
+    return result;
+  }
+
   /// Conditional cleanup invalidation. Snapshot comparison and removal share
   /// the same per-document queue with all writes. Unknown/dirty state is kept.
   Future<bool> removeIfUnchanged(

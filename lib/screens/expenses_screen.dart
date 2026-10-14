@@ -9,6 +9,7 @@ import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
+import '../services/warranty_receipt_reporting.dart';
 import '../services/local_attachment_cache.dart';
 import '../services/local_financial_cache.dart';
 import '../services/expenseiq_local_photo_sync.dart';
@@ -171,8 +172,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
   Future<List<Map<String, dynamic>>> _fetchTransactions({
     required int offset,
-  }) {
-    return _api.transactionsPaged(
+  }) async {
+    final rows = await _api.transactionsPaged(
       widget.businessId,
       limit: _pageSize,
       offset: offset,
@@ -186,6 +187,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       categoryId: _categoryFilterId,
       counterpartyId: _counterpartyFilterId,
     );
+    try {
+      return await const WarrantyReceiptReporting().enrich(widget.businessId, rows);
+    } catch (_) {
+      return rows.map(WarrantyReceiptReporting.unverified).toList();
+    }
   }
 
   Future<void> _prefetchReceiptDetails(
@@ -246,7 +252,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
     if (!forceOnline) {
       try {
-        final localRows = await _localFinancial.loadTransactions(
+        var localRows = await _localFinancial.loadTransactions(
           widget.businessId,
           startDate: _rangeStartDate,
           endDate: _rangeEndDate,
@@ -258,6 +264,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           categoryId: _categoryFilterId,
           counterpartyId: _counterpartyFilterId,
         );
+        localRows = await const WarrantyReceiptReporting().enrich(
+          widget.businessId, localRows, refresh: false);
         final localOptions =
             await _localFinancial.loadOptions(widget.businessId);
 
@@ -308,8 +316,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       ]);
       final rows = List<Map<String, dynamic>>.from(results[0] as List);
       final options = Map<String, dynamic>.from(results[1] as Map);
-      final snapshot =
-          List<Map<String, dynamic>>.from(results[2] as List);
+      final verifiedRows = {for (final row in rows) row['id']?.toString(): row};
+      final snapshot = List<Map<String, dynamic>>.from(results[2] as List)
+        .map((row) => verifiedRows[row['id']?.toString()] ?? row).toList();
 
       await _localFinancial.saveTransactions(
         widget.businessId,
@@ -1106,7 +1115,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         .fold<num>(
           0,
           (sum, item) =>
-              sum + (num.tryParse(item['amount']?.toString() ?? '') ?? 0),
+              sum + WarrantyReceiptReporting.amount(item),
         );
     final expenses = _transactions
         .where((x) => x['direction']?.toString() != 'income')
@@ -1117,6 +1126,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         );
 
     final visible = _transactions;
+    final feesUnverified = _transactions.any((row) => row['direction'] == 'income' && row['reporting_status'] != 'verified');
 
     return Scaffold(
       appBar: AppBar(
@@ -1476,6 +1486,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     ),
                   ],
                   const SizedBox(height: 12),
+                  if (feesUnverified)
+                    const Padding(padding: EdgeInsets.all(8), child: Text('Processor fees are unverified for some receipts. Gross amounts remain shown for those rows; sync invoice details and refresh before relying on this income total.')),
                   if (visible.isEmpty)
                     const Card(
                       child: Padding(
@@ -1594,13 +1606,18 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
                                     Text(
-                                      '${incomeRow ? '+' : '-'}${_money(transaction['amount'])}',
+                                      '${incomeRow ? '+' : '-'}${_money(WarrantyReceiptReporting.amount(transaction))}',
                                       style: TextStyle(
                                         fontSize: 17.5,
                                         fontWeight: FontWeight.w900,
                                         color: directionColor,
                                       ),
                                     ),
+                                    if ((num.tryParse(transaction['reporting_processor_fee']?.toString() ?? '') ?? 0) > 0)
+                                      Text('Net · fee ${_money(transaction['reporting_processor_fee'])}',
+                                        style: const TextStyle(fontSize: 11)),
+                                    if (incomeRow && transaction['reporting_status'] != 'verified')
+                                      const Text('Gross · fee unverified', style: TextStyle(fontSize: 11)),
                                     const SizedBox(height: 8),
                                     Row(
                                       mainAxisSize: MainAxisSize.min,

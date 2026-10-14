@@ -69,6 +69,7 @@ class _JobsScreenState extends State<JobsScreen> {
   String? _selectedStatus;
   JobListView _view = JobListView.recent;
   JobListSort _sort = JobListSort.lastAccessed;
+  JobListSort _allSort = JobListSort.jobDate;
   static const _pageSize = 30;
   int _visibleLimit = _pageSize;
   bool _restoredView = false;
@@ -85,6 +86,7 @@ class _JobsScreenState extends State<JobsScreen> {
       JobListPreferences(
         view: _view,
         sort: _sort,
+        allSort: _allSort,
         status: _selectedStatus,
         search: _search.text,
         visibleLimit: _visibleLimit,
@@ -220,6 +222,7 @@ class _JobsScreenState extends State<JobsScreen> {
     if (saved is JobListPreferences) {
       _view = saved.view;
       _sort = saved.sort;
+      _allSort = saved.allSort;
       _selectedStatus = saved.status;
       _search.text = saved.search;
       _visibleLimit = saved.visibleLimit;
@@ -254,6 +257,7 @@ class _JobsScreenState extends State<JobsScreen> {
       _loadingMore = false;
       _view = JobListView.recent;
       _sort = JobListSort.lastAccessed;
+      _allSort = JobListSort.jobDate;
       _selectedStatus = null;
       _visibleLimit = _pageSize;
       _restoredView = false;
@@ -314,7 +318,7 @@ class _JobsScreenState extends State<JobsScreen> {
     final businessId = widget.businessId;
     final query = _search.text.trim();
     final view = _view;
-    final sort = _sort;
+    final sort = view == JobListView.all ? _allSort : _sort;
     final status = _selectedStatus;
     final limit = _visibleLimit;
     final userId = _userId;
@@ -769,7 +773,7 @@ class _JobsScreenState extends State<JobsScreen> {
         selected: {_view},
         onSelectionChanged: (values) => _changeView(values.single),
       ),
-      if (_view == JobListView.recent)
+      if (_view != JobListView.active)
         Row(
           children: [
             const Icon(Icons.sort, size: 18),
@@ -778,12 +782,17 @@ class _JobsScreenState extends State<JobsScreen> {
               child: DropdownButton<JobListSort>(
                 key: const ValueKey('job-list-sort'),
                 isExpanded: true,
-                value: _sort,
+                value: _view == JobListView.all ? _allSort : _sort,
                 underline: const SizedBox.shrink(),
                 items: [
+                  if (_view == JobListView.recent)
+                    DropdownMenuItem(
+                      value: JobListSort.lastAccessed,
+                      child: Text(_text('Last accessed', 'Último acceso')),
+                    ),
                   DropdownMenuItem(
-                    value: JobListSort.lastAccessed,
-                    child: Text(_text('Last accessed', 'Último acceso')),
+                    value: JobListSort.jobDate,
+                    child: Text(_text('Job date', 'Fecha del trabajo')),
                   ),
                   DropdownMenuItem(
                     value: JobListSort.lastModified,
@@ -793,7 +802,11 @@ class _JobsScreenState extends State<JobsScreen> {
                 onChanged: (value) {
                   if (value == null) return;
                   setState(() {
-                    _sort = value;
+                    if (_view == JobListView.all) {
+                      _allSort = value;
+                    } else {
+                      _sort = value;
+                    }
                     _visibleLimit = _pageSize;
                   });
                   _rememberView();
@@ -802,8 +815,8 @@ class _JobsScreenState extends State<JobsScreen> {
               ),
             ),
           ],
-        )
-      else
+        ),
+      if (_view == JobListView.active || _view == JobListView.all)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text(
@@ -812,9 +825,14 @@ class _JobsScreenState extends State<JobsScreen> {
                     'By status · newest created first',
                     'Por estado · más recientes primero',
                   )
-                : _text(
+                : _allSort == JobListSort.lastModified
+                ? _text(
                     'Complete history · last modified',
                     'Historial completo · última modificación',
+                  )
+                : _text(
+                    'Complete history · job date',
+                    'Historial completo · fecha del trabajo',
                   ),
             style: Theme.of(context).textTheme.bodySmall,
           ),
@@ -824,8 +842,22 @@ class _JobsScreenState extends State<JobsScreen> {
           padding: const EdgeInsets.only(bottom: 8),
           child: Text(
             _text(
-              'Your opens on this device. Unopened jobs use last activity.',
-              'Tus accesos en este dispositivo. Sin accesos, se usa la última actividad.',
+              'Your opens on this device first. Unopened jobs use Job date.',
+              'Tus accesos en este dispositivo primero. Los demás usan la fecha del trabajo.',
+            ),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      if ((_view == JobListView.all && _allSort == JobListSort.jobDate) ||
+          (_view == JobListView.recent && _sort == JobListSort.jobDate))
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            _text(
+              'Completion, document or visit date; otherwise creation date. '
+              'Undated imports appear last.',
+              'Fecha de cierre, documento o visita; si no, fecha de creación. '
+              'Importaciones sin fecha al final.',
             ),
             style: Theme.of(context).textTheme.bodySmall,
           ),

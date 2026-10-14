@@ -9,6 +9,7 @@ import 'package:saf/saf.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
+import '../../services/warranty_receipt_reporting.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/expenseiq_local_photo_sync.dart';
@@ -76,14 +77,24 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
     _loadLocalExpenseIqPhoto();
   }
 
+  Future<Map<String, dynamic>> _withReceiptReporting(Map<String, dynamic> raw,
+      {bool refresh = false}) async {
+    try {
+      return (await WarrantyReceiptReporting(api: _api).enrich(widget.businessId,
+        [{...raw, 'id': widget.transactionId}], refresh: refresh)).single;
+    } catch (_) {
+      return WarrantyReceiptReporting.unverified(raw);
+    }
+  }
+
   Future<void> _loadOffline() async {
     try {
       final saved = await _localFinancial.loadTransactionDetail(
         widget.businessId, widget.transactionId,
       );
       if (!mounted) return;
-      final detail = saved ?? widget.cachedDetail;
-      if (detail == null) {
+      final rawDetail = saved ?? widget.cachedDetail;
+      if (rawDetail == null) {
         setState(() {
           _loading = false;
           _error = 'This expense has not been cached on this device. '
@@ -91,6 +102,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         });
         return;
       }
+      final detail = await _withReceiptReporting(rawDetail);
+      if (!mounted) return;
       setState(() {
         _detail = Map<String, dynamic>.from(detail)
           ..['editable'] = saved != null
@@ -115,7 +128,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
       widget.businessId,
       widget.transactionId,
     );
-    final detail = Map<String, dynamic>.from(saved ?? summary)
+    final detail = await _withReceiptReporting(saved ?? summary);
+    detail
       ..['editable'] = true
       ..['deletable'] = false
       ..['date'] = (saved ?? summary)['date'] ??
@@ -140,7 +154,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
         ),
         _api.myPermissions(widget.businessId),
       ]);
-      final detail = Map<String, dynamic>.from(results[0] as Map);
+      final rawDetail = Map<String, dynamic>.from(results[0] as Map);
+      final detail = await _withReceiptReporting(rawDetail, refresh: true);
       final permissions = List<String>.from(results[1] as List);
       await _localFinancial.saveTransactionDetail(
         widget.businessId,
@@ -1203,7 +1218,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
                     ),
                   ),
                   Text(
-                    '${income ? '+' : '-'}${_money(detail['amount'])}',
+                    '${income ? '+' : '-'}${_money(WarrantyReceiptReporting.amount(detail))}',
                     style: TextStyle(
                       color: color,
                       fontSize: 20,
@@ -1244,6 +1259,13 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
             ),
             const SizedBox(height: 12),
           ],
+          if (income && detail['reporting_status'] == 'verified' && detail['reporting_amount'] != null) ...[
+            _DetailRow(label: 'Gross received / invoice credit', value: _money(detail['amount'])),
+            _DetailRow(label: 'Processor fee (not shop income)', value: _money(detail['reporting_processor_fee'])),
+            _DetailRow(label: 'Retained receipts', value: _money(detail['reporting_amount'])),
+          ],
+          if (income && detail['reporting_status'] != 'verified')
+            const Text('Gross receipt shown. Processor fee could not be verified; sync invoice details and refresh before relying on net receipts.'),
           _DetailRow(label: 'Category', value: category),
           _DetailRow(label: 'Account', value: account),
           _DetailRow(label: 'Date', value: date),

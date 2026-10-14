@@ -33,9 +33,23 @@ void main() {
         'net_amount': 2525,
         'tax_amount': 0,
         'total_amount': 2525,
-        'paid_amount': 0,
+        'paid_amount': kind == 'invoice' ? 2525 : 0,
         'pending_payment': 0,
         'lines': lines,
+        if (kind == 'invoice') ...{
+          'extended_warranty': true,
+          'warranty_company_name': 'Synthetic Warranty Co',
+          'approved_amount': 515,
+          'terminal_amount': 515,
+          'net_applied': 500,
+          'processor_fee': 15,
+          'surcharge_rate': 0.03,
+          'customer_responsibility': 2025,
+          'payments': [
+            {'id': 'qa-cash', 'state': 'posted', 'payment_method_name': 'Cash', 'amount': 2010},
+            {'id': 'qa-card', 'state': 'posted', 'payment_method_name': 'Credit card', 'amount': 515},
+          ],
+        },
       });
       expect(utf8.decode(bytes.sublist(0, 5)), '%PDF-');
       expect(bytes.length, greaterThan(1000));

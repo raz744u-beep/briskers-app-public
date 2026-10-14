@@ -10,7 +10,7 @@ void main() {
     final action = screen.substring(start, end);
     expect(action, contains('final recorded = await _run('));
     expect(action, contains('await _offlinePayments.recordReceivedPayment('));
-    expect(action, contains('expectedQueuedOperationIds: _queuedPaymentOperationIds'));
+    expect(action, contains('expectedQueuedOperationIds: queuedOperationIds'));
     expect(action, contains('await _offlinePayments.flush(widget.businessId)'));
     expect(action, isNot(contains('_api.addPendingInvoicePayment(')));
     expect(action, contains('if (!mounted || !recorded) return;'));

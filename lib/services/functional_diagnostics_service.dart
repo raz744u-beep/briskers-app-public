@@ -479,7 +479,7 @@ class BriskersFunctionalDiagnosticsService {
       'Modified order must be global before paging.',
     );
     _require(
-      await first(view: JobListView.all, offset: 1) == 'J-12',
+      await first(view: JobListView.all, offset: 1) == 'J-11',
       'All history pagination is inconsistent.',
     );
     await LocalJobAccessHistory(database: database).recordAccess(

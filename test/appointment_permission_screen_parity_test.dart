@@ -115,7 +115,9 @@ void main() {
     expect(header, contains('BriskersConnectionMode.online'));
     expect(header, contains('BriskersConnectionMode.auto'));
     expect(header, contains('await _controller.setMode(next)'));
-    expect(header, contains('MAX(last_pull_at)'));
+    expect(header, contains('LocalSyncStatusRepository'));
+    expect(header, contains('didChangeAppLifecycleState'));
+    expect(header, contains('Sync needs attention'));
     expect(header, contains('Not yet synced'));
   });
 

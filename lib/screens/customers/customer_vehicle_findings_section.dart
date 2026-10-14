@@ -327,7 +327,7 @@ class _CustomerVehicleFindingsSectionState
                               setSheetState(() => photos.addAll(picked));
                             }
                           },
-                          icon: const Icon(Icons.photo_library_outlined),
+                          icon: const Icon(Icons.photo_library_outlined, color: Colors.teal),
                           label: const Text('Gallery'),
                         ),
                       ),
@@ -345,7 +345,7 @@ class _CustomerVehicleFindingsSectionState
                               setSheetState(() => photos.add(photo));
                             }
                           },
-                          icon: const Icon(Icons.photo_camera_outlined),
+                          icon: const Icon(Icons.photo_camera_outlined, color: Colors.teal),
                           label: const Text('Camera'),
                         ),
                       ),

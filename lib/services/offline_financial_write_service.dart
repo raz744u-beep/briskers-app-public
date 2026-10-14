@@ -11,18 +11,24 @@ import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
 import 'local_financial_cache.dart';
 
+typedef FinancialMediaDirectoryProvider = Future<Directory> Function();
+
 class OfflineFinancialWriteService {
   OfflineFinancialWriteService({
     BriskersApi api = const BriskersApi(),
     LocalFinancialCache? cache,
     BriskersLocalDatabase? database,
+    FinancialMediaDirectoryProvider? mediaDirectoryProvider,
   })  : _api = api,
         _database = database ?? localDatabase,
-        _cache = cache ?? LocalFinancialCache(database: database);
+        _cache = cache ?? LocalFinancialCache(database: database),
+        _mediaDirectoryProvider =
+            mediaDirectoryProvider ?? getApplicationSupportDirectory;
 
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
   final LocalFinancialCache _cache;
+  final FinancialMediaDirectoryProvider _mediaDirectoryProvider;
   final Random _random = Random.secure();
 
   String _operationId(String prefix) {
@@ -66,7 +72,7 @@ class OfflineFinancialWriteService {
     String filename,
     Uint8List bytes,
   ) async {
-    final root = await getApplicationSupportDirectory();
+    final root = await _mediaDirectoryProvider();
     final op = _operationId('receipt');
     final dot = filename.lastIndexOf('.');
     final ext = dot >= 0 && filename.length - dot <= 8
@@ -79,6 +85,54 @@ class OfflineFinancialWriteService {
     final file = File('${dir.path}/$op$ext');
     await file.writeAsBytes(bytes, flush: true);
     return file;
+  }
+
+  Future<List<Map<String, dynamic>>> _queueReceipts(
+    String businessId,
+    String transactionId,
+    List<Map<String, dynamic>> receipts,
+  ) async {
+    final attachments = <Map<String, dynamic>>[];
+    for (final receipt in receipts) {
+      final filename =
+          receipt['filename']?.toString() ?? 'receipt.jpg';
+      final mimeType =
+          receipt['mime_type']?.toString() ?? 'image/jpeg';
+      final bytes = receipt['bytes'] as Uint8List;
+      final file = await _stageReceipt(
+        businessId,
+        transactionId,
+        filename,
+        bytes,
+      );
+      final photoOperationId = _operationId('financial-photo');
+      final localPhotoId = 'local-receipt-$photoOperationId';
+
+      attachments.add({
+        'attachment_id': localPhotoId,
+        'id': localPhotoId,
+        'filename': filename,
+        'mime_type': mimeType,
+        'byte_size': bytes.length,
+        'local_file_path': file.path,
+        'upload_state': 'pending',
+      });
+
+      await _enqueue(
+        businessId,
+        'financial_photo',
+        localPhotoId,
+        'upload',
+        {
+          'operation_id': photoOperationId,
+          'transaction_id': transactionId,
+          'filename': filename,
+          'mime_type': mimeType,
+          'local_file_path': file.path,
+        },
+      );
+    }
+    return attachments;
   }
 
   Future<List<Map<String, dynamic>>> _allTransactions(
@@ -153,45 +207,9 @@ class OfflineFinancialWriteService {
         },
       );
 
-      for (final receipt in receipts) {
-        final filename =
-            receipt['filename']?.toString() ?? 'receipt.jpg';
-        final mimeType =
-            receipt['mime_type']?.toString() ?? 'image/jpeg';
-        final bytes = receipt['bytes'] as Uint8List;
-        final file = await _stageReceipt(
-          businessId,
-          localId,
-          filename,
-          bytes,
-        );
-        final photoOperationId = _operationId('financial-photo');
-        final localPhotoId = 'local-receipt-$photoOperationId';
-
-        attachments.add({
-          'attachment_id': localPhotoId,
-          'id': localPhotoId,
-          'filename': filename,
-          'mime_type': mimeType,
-          'byte_size': bytes.length,
-          'local_file_path': file.path,
-          'upload_state': 'pending',
-        });
-
-        await _enqueue(
-          businessId,
-          'financial_photo',
-          localPhotoId,
-          'upload',
-          {
-            'operation_id': photoOperationId,
-            'transaction_id': localId,
-            'filename': filename,
-            'mime_type': mimeType,
-            'local_file_path': file.path,
-          },
-        );
-      }
+      attachments.addAll(
+        await _queueReceipts(businessId, localId, receipts),
+      );
     });
 
     final cleanCounterparty =
@@ -263,107 +281,120 @@ class OfflineFinancialWriteService {
     String? counterpartyName,
     String? remarks,
     String? contextLabel,
+    List<Map<String, dynamic>> receipts = const [],
   }) async {
-    final dateText = date.toIso8601String().split('T').first;
-    final cleanCounterparty =
-        (counterpartyName ?? '').trim().isEmpty
-            ? (direction == 'income' ? 'Income' : 'Expense')
-            : counterpartyName!.trim();
+    // Keep the edit, all prior attachments, and new upload operations atomic.
+    // A retry after a failed local write cannot append a second copy.
+    return _database.transaction(() async {
+      final dateText = date.toIso8601String().split('T').first;
+      final cleanCounterparty =
+          (counterpartyName ?? '').trim().isEmpty
+              ? (direction == 'income' ? 'Income' : 'Expense')
+              : counterpartyName!.trim();
 
-    final existing =
-        await _cache.loadTransactionDetail(businessId, transactionId) ??
-            <String, dynamic>{};
+      final existing =
+          await _cache.loadTransactionDetail(businessId, transactionId) ??
+              <String, dynamic>{};
 
-    final summary = <String, dynamic>{
-      'id': transactionId,
-      'direction': direction,
-      'amount': amount,
-      'signed_amount': direction == 'expense' ? -amount : amount,
-      'transaction_date': dateText,
-      'counterparty': cleanCounterparty,
-      'counterparty_id': counterpartyId,
-      'category': categoryName,
-      'category_id': categoryId,
-      'account': accountName,
-      'account_id': accountId,
-      'remarks': remarks ?? '',
-      'job_id': jobId,
-      'document_id': documentId,
-      'receipt_count': List<dynamic>.from(
-        existing['attachments'] ?? const [],
-      ).length,
-      'recurring': false,
-      'sync_state': 'pending',
-    };
-    await _upsertSummary(businessId, summary);
+      final pendingCreate = await _database.customSelect(
+        '''
+        SELECT id, payload_json
+        FROM sync_outbox
+        WHERE business_id = ?
+          AND entity_type = 'financial_create'
+          AND entity_id = ?
+          AND state = 'pending'
+        ORDER BY id
+        LIMIT 1
+        ''',
+        variables: [
+          Variable<String>(businessId),
+          Variable<String>(transactionId),
+        ],
+      ).get();
 
-    final detail = <String, dynamic>{
-      ...existing,
-      ...summary,
-      'date': dateText,
-      'editable': true,
-      'deletable': false,
-    };
-    await _cache.saveTransactionDetail(
-      businessId,
-      transactionId,
-      detail,
-    );
+      final payload = <String, dynamic>{
+        'direction': direction,
+        'account_id': accountId,
+        'category_id': categoryId,
+        'amount': amount,
+        'date': date.toIso8601String(),
+        'job_id': jobId,
+        'document_id': documentId,
+        'counterparty_id': counterpartyId,
+        'counterparty_name': counterpartyName,
+        'remarks': remarks,
+      };
 
-    final pendingCreate = await _database.customSelect(
-      '''
-      SELECT id, payload_json
-      FROM sync_outbox
-      WHERE business_id = ?
-        AND entity_type = 'financial_create'
-        AND entity_id = ?
-        AND state = 'pending'
-      ORDER BY id
-      LIMIT 1
-      ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(transactionId),
-      ],
-    ).get();
+      if (pendingCreate.isNotEmpty) {
+        final row = pendingCreate.first;
+        final existingPayload = Map<String, dynamic>.from(
+          jsonDecode(row.read<String>('payload_json')) as Map,
+        );
+        existingPayload.addAll(payload);
+        await _database.customStatement(
+          'UPDATE sync_outbox SET payload_json = ?, last_error = NULL WHERE id = ?',
+          [jsonEncode(existingPayload), row.read<int>('id')],
+        );
+      } else {
+        await _enqueue(
+          businessId,
+          'financial_update',
+          transactionId,
+          'update',
+          {
+            'transaction_id': transactionId,
+            ...payload,
+          },
+        );
+      }
 
-    final payload = <String, dynamic>{
-      'direction': direction,
-      'account_id': accountId,
-      'category_id': categoryId,
-      'amount': amount,
-      'date': date.toIso8601String(),
-      'job_id': jobId,
-      'document_id': documentId,
-      'counterparty_id': counterpartyId,
-      'counterparty_name': counterpartyName,
-      'remarks': remarks,
-    };
-
-    if (pendingCreate.isNotEmpty) {
-      final row = pendingCreate.first;
-      final existingPayload = Map<String, dynamic>.from(
-        jsonDecode(row.read<String>('payload_json')) as Map,
+      final attachments = List<Map<String, dynamic>>.from(
+        List<dynamic>.from(existing['attachments'] ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item)),
       );
-      existingPayload.addAll(payload);
-      await _database.customStatement(
-        'UPDATE sync_outbox SET payload_json = ?, last_error = NULL WHERE id = ?',
-        [jsonEncode(existingPayload), row.read<int>('id')],
+      attachments.addAll(
+        await _queueReceipts(businessId, transactionId, receipts),
       );
-    } else {
-      await _enqueue(
+
+      final summary = <String, dynamic>{
+        'id': transactionId,
+        'direction': direction,
+        'amount': amount,
+        'signed_amount': direction == 'expense' ? -amount : amount,
+        'transaction_date': dateText,
+        'counterparty': cleanCounterparty,
+        'counterparty_id': counterpartyId,
+        'category': categoryName,
+        'category_id': categoryId,
+        'account': accountName,
+        'account_id': accountId,
+        'remarks': remarks ?? '',
+        'job_id': jobId,
+        'document_id': documentId,
+        'receipt_count': attachments.length,
+        'recurring': false,
+        'sync_state': 'pending',
+      };
+      await _upsertSummary(businessId, summary);
+
+      final detail = <String, dynamic>{
+        ...existing,
+        ...summary,
+        'date': dateText,
+        'editable': true,
+        'deletable': false,
+        'attachments': attachments,
+      };
+      await _cache.saveTransactionDetail(
         businessId,
-        'financial_update',
         transactionId,
-        'update',
-        {
-          'transaction_id': transactionId,
-          ...payload,
-        },
+        detail,
       );
-    }
 
-    return detail;
+      return detail;
+    });
   }
 
   Future<void> flush(String businessId) async {
@@ -385,9 +416,20 @@ class OfflineFinancialWriteService {
 
     for (final row in rows) {
       final outboxId = row.read<int>('id');
-      final type = row.read<String>('entity_type');
+      // A preceding create can remap queued photos to the server transaction.
+      // Reload instead of replaying the original, stale snapshot payload.
+      final current = await _database.customSelect(
+        "SELECT entity_type, payload_json FROM sync_outbox "
+        "WHERE business_id = ? AND id = ? AND state = 'pending'",
+        variables: [
+          Variable<String>(businessId),
+          Variable<int>(outboxId),
+        ],
+      ).getSingleOrNull();
+      if (current == null) continue;
+      final type = current.read<String>('entity_type');
       final payload = Map<String, dynamic>.from(
-        jsonDecode(row.read<String>('payload_json')) as Map,
+        jsonDecode(current.read<String>('payload_json')) as Map,
       );
 
       try {
@@ -602,6 +644,34 @@ class OfflineFinancialWriteService {
         businessId,
         outboxId: outboxId,
       );
+      final detail = await _cache.loadTransactionDetail(
+        businessId,
+        transactionId,
+      );
+      if (detail != null) {
+        final localPhotoId = 'local-receipt-${payload['operation_id']}';
+        final attachments = List<dynamic>.from(
+          detail['attachments'] ?? const [],
+        ).whereType<Map>().map((raw) {
+          final attachment = Map<String, dynamic>.from(raw);
+          if (attachment['attachment_id']?.toString() != localPhotoId) {
+            return attachment;
+          }
+          return <String, dynamic>{
+            ...attachment,
+            'id': registration['attachment_id'],
+            'attachment_id': registration['attachment_id'],
+            'bucket': registration['bucket'],
+            'key': registration['key'],
+            'upload_state': 'synced',
+          };
+        }).toList();
+        await _cache.saveTransactionDetail(businessId, transactionId, {
+          ...detail,
+          'attachments': attachments,
+          'receipt_count': attachments.length,
+        });
+      }
       await _database.customStatement(
         'DELETE FROM sync_outbox WHERE id = ?',
         [outboxId],

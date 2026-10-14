@@ -84,6 +84,22 @@ class LocalJobRepository {
     )
   """;
 
+  // A historical date is a separate presentation choice, never a rewrite of
+  // server modification history. Completion/document/visit dates are evidence
+  // of the work itself. Invoice settlement and visit container creation may be
+  // later administrative activity. An undated MB import must not use its import
+  // timestamp.
+  static const _jobDateSql = """
+    COALESCE(NULLIF(j.completed_at, 0),
+      (SELECT MIN(CAST(strftime('%s', d.document_date) AS INTEGER))
+        FROM local_documents d
+        WHERE d.business_id = j.business_id AND d.job_id = j.id),
+      (SELECT MIN(NULLIF(v.closed_at, 0)) FROM local_job_visits v
+        WHERE v.business_id = j.business_id AND v.job_id = j.id),
+      CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
+        THEN 0 ELSE COALESCE(j.created_at, 0) END)
+  """;
+
   static const _numberOrderSql = """
     CASE WHEN substr(j.job_number, instr(j.job_number, '-') + 1)
       GLOB '[0-9]*'
@@ -129,12 +145,13 @@ class LocalJobRepository {
          OR EXISTS (
            SELECT 1 FROM local_customers c
            WHERE c.business_id = j.business_id AND c.id = j.customer_id
-             AND (lower(COALESCE(c.email, '')) LIKE ?
+             AND (lower(COALESCE(c.display_name, '')) LIKE ?
+               OR lower(COALESCE(c.email, '')) LIKE ?
                OR lower(COALESCE(c.phone, '')) LIKE ?
                OR lower(COALESCE(c.list_email, '')) LIKE ?
                OR lower(COALESCE(c.list_phone, '')) LIKE ?)))
       """);
-      for (var i = 0; i < 10; i++) {
+      for (var i = 0; i < 11; i++) {
         variables.add(Variable<String>('%$query%'));
       }
     }
@@ -181,14 +198,20 @@ class LocalJobRepository {
               WHERE d.business_id = j.business_id AND d.job_id = j.id), 0)
             ELSE COALESCE(j.created_at, 0) END DESC,
         """
+        : sort == JobListSort.lastModified
+        ? 'j.activity_at DESC,'
         : view == JobListView.recent && sort == JobListSort.lastAccessed
-        ? 'COALESCE(a.last_accessed_at / 1000.0, j.activity_at) DESC,'
-        : 'j.activity_at DESC,';
+        // Accesses always precede unopened Jobs, even if a later import/edit
+        // has a newer server timestamp. Never borrow another user's history.
+        ? 'CASE WHEN a.last_accessed_at IS NULL THEN 1 ELSE 0 END, '
+          'a.last_accessed_at DESC, j.job_date_at DESC,'
+        : 'j.job_date_at DESC,';
     final rows = await _database
         .customSelect(
           """
       WITH job_activity AS (
-        SELECT j.*, $_jobActivitySql AS activity_at FROM local_jobs j
+        SELECT j.*, $_jobActivitySql AS activity_at,
+          $_jobDateSql AS job_date_at FROM local_jobs j
         WHERE ${filters.sql}
       )
       SELECT j.*, a.last_accessed_at,
@@ -734,6 +757,8 @@ class LocalJobRepository {
       'completed_at': _isoFromDb(row.data['completed_at']),
       'payment_state': row.readNullable<String>('payment_state'),
       'updated_at': _isoFromDb(row.data['activity_at']),
+      'job_date': row.data['job_date_at'] == 0
+          ? null : _isoFromDb(row.data['job_date_at']),
       'last_accessed_at': row.data['last_accessed_at'] == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(

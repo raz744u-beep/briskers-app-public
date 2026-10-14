@@ -7,6 +7,7 @@ import '../../core/briskers_i18n.dart';
 import '../../services/briskers_api.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/offline_financial_write_service.dart';
+import 'expense_receipt_attachments.dart';
 
 class ExpenseEntryScreen extends StatefulWidget {
   const ExpenseEntryScreen({
@@ -1009,6 +1010,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                 ? null
                 : _remarksController.text.trim(),
             contextLabel: _contextLabel,
+            receipts: stagedReceipts,
           );
         } else {
           await _offlineFinancial.createLocalTransaction(
@@ -1330,26 +1332,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                 if (_receipts.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: _receipts
-                          .map(
-                            (file) => Chip(
-                              label: Text(
-                                file.name,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              onDeleted: _saving
-                                  ? null
-                                  : () => setState(
-                                        () => _receipts = _receipts
-                                            .where((item) => item.path != file.path)
-                                            .toList(),
-                                      ),
-                            ),
-                          )
-                          .toList(),
+                    child: ExpenseReceiptAttachments(
+                      receipts: _receipts,
+                      enabled: !_saving && !_readingReceipt,
+                      onChanged: (receipts) => setState(() {
+                        _receipts = receipts;
+                      }),
                     ),
                   ),
                 const SizedBox(height: 12),
@@ -1491,8 +1479,20 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                 ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 4),
                   leading: const Icon(Icons.calendar_today_outlined),
-                  title: Text(tr('transactionDate')),
-                  subtitle: Text('${_date.month}/${_date.day}/${_date.year}'),
+                  title: Text(
+                    tr('transactionDate'),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '${_date.month}/${_date.day}/${_date.year}',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: _saving ? null : _pickDate,
                 ),

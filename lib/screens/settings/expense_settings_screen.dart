@@ -1208,6 +1208,21 @@ class QuickTransactionsSettingsScreen extends StatefulWidget {
 
   final String businessId;
 
+  @visibleForTesting
+  static Widget dialogForTesting({
+    required String businessId,
+    required List<Map<String, dynamic>> accounts,
+    required List<Map<String, dynamic>> categories,
+    required List<Map<String, dynamic>> counterparties,
+    Map<String, dynamic>? template,
+  }) => _QuickDialog(
+    businessId: businessId,
+    accounts: accounts,
+    categories: categories,
+    counterparties: counterparties,
+    template: template,
+  );
+
   @override
   State<QuickTransactionsSettingsScreen> createState() =>
       _QuickTransactionsSettingsScreenState();

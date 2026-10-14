@@ -142,8 +142,8 @@ void main() {
   );
 
   test('opens and modification sort remain independent and per-user', () async {
-    await addJob('a', updated: 200);
-    await addJob('b', updated: 300);
+    await addJob('a', created: 100, updated: 200);
+    await addJob('b', created: 200, updated: 300);
     await history.recordAccess('shop', 'a', userId: 'alice', at: today);
     await history.recordAccess('shop', 'b', userId: 'bob', at: today);
     expect(ids(await repository.listJobs('shop', userId: 'alice')), ['a', 'b']);
@@ -177,9 +177,115 @@ void main() {
     expect(await db.customSelect('SELECT * FROM sync_outbox').get(), isEmpty);
   });
 
+  test('historical dates ignore later import corrections but Modified retains them', () async {
+    final imported = todaySeconds - 6 * 86400;
+    await addJob('current', number: 'J-6', created: todaySeconds - 86400);
+    await addJob('historical-2024', number: 'MB-5180',
+      created: imported, updated: todaySeconds,
+      completed: DateTime.utc(2024, 10, 15).millisecondsSinceEpoch ~/ 1000);
+    await addJob('historical-2022', number: 'MB-3957',
+      created: imported, updated: todaySeconds + 1,
+      completed: DateTime.utc(2022, 4, 27).millisecondsSinceEpoch ~/ 1000);
+    await addJob('historical-2023', number: 'MB-4199',
+      created: imported, updated: todaySeconds + 2,
+      completed: DateTime.utc(2023, 1, 24).millisecondsSinceEpoch ~/ 1000);
+    await addJob('undated', number: 'MB-9999',
+      created: imported, updated: todaySeconds + 3);
+    final before = await db.customSelect('SELECT * FROM local_jobs ORDER BY id').get();
+    final expected = ['current', 'historical-2024', 'historical-2023', 'historical-2022', 'undated'];
+    expect(ids(await repository.listJobs('shop', view: JobListView.all)), expected);
+    expect(ids(await repository.listJobs('shop', userId: 'alice')), expected);
+    expect(ids(await repository.listJobs('shop', sort: JobListSort.jobDate)), expected);
+    expect((await repository.listJobs('shop', view: JobListView.all,
+      sort: JobListSort.lastModified)).first['id'], 'undated');
+    // A local open must win even when it predates the bulk correction.
+    await history.recordAccess('shop', 'historical-2022', userId: 'alice',
+      at: today.subtract(const Duration(days: 2)));
+    expect((await repository.listJobs('shop', userId: 'alice')).first['id'], 'historical-2022');
+    expect(ids(await repository.listJobs('shop', userId: 'bob')), expected);
+    final after = await db.customSelect('SELECT * FROM local_jobs ORDER BY id').get();
+    expect(after.map((row) => row.data).toList(), before.map((row) => row.data).toList());
+    expect(await db.customSelect('SELECT * FROM sync_outbox').get(), isEmpty);
+  });
+
+  test('Job date has explicit evidence precedence and safe missing-date fallback', () async {
+    int epoch(int year) => DateTime.utc(year).millisecondsSinceEpoch ~/ 1000;
+    await addJob('completion', number: 'MB-10', created: todaySeconds,
+      updated: todaySeconds + 10, completed: epoch(2020));
+    await addJob('document', number: 'MB-20', created: todaySeconds,
+      updated: todaySeconds + 20);
+    await addJob('visit', number: 'MB-30', created: todaySeconds,
+      updated: todaySeconds + 30);
+    await addJob('unknown', number: 'MB-999', created: todaySeconds,
+      updated: todaySeconds + 40);
+    await addJob('native', number: 'J-1', created: epoch(2025));
+    await db.customStatement(
+      "INSERT INTO local_documents (id,business_id,job_id,kind,document_date) VALUES "
+      "('completion-doc','shop','completion','invoice','2024-01-01'),"
+      "('document-doc','shop','document','invoice','2022-01-01'),"
+      "('invalid-doc','shop','visit','invoice','not-a-date'),"
+      "('other-shop-doc','other-shop','unknown','invoice','2025-01-01')",
+    );
+    await db.customStatement(
+      "INSERT INTO local_job_visits (id,business_id,job_id,visit_number,closed_at) "
+      "VALUES ('document-visit','shop','document',1,?),"
+      "('visit-visit','shop','visit',1,?)",
+      [epoch(2023), epoch(2021)],
+    );
+    final rows = await repository.listJobs('shop', sort: JobListSort.jobDate);
+    expect(ids(rows), ['native', 'document', 'visit', 'completion', 'unknown']);
+    expect(rows.last['job_date'], isNull);
+    expect(rows[2]['job_date'], DateTime.utc(2021).toIso8601String());
+    expect(rows[3]['job_date'], DateTime.utc(2020).toIso8601String());
+  });
+
+  test('opened-first ordering is global before paging, not just a visible-page sort', () async {
+    for (var i = 0; i < 65; i++) {
+      await addJob('unopened-$i', number: 'J-${100 + i}',
+        created: todaySeconds + i, updated: todaySeconds + i);
+    }
+    await addJob('opened', number: 'J-1', created: 100);
+    await history.recordAccess('shop', 'opened', userId: 'owner',
+      at: today.subtract(const Duration(days: 3)));
+    expect((await repository.listJobs('shop', userId: 'owner', limit: 30)).first['id'], 'opened');
+    final pages = <String>[];
+    for (var offset = 0; offset < 66; offset += 30) {
+      pages.addAll(ids(await repository.listJobs('shop', userId: 'owner', limit: 30, offset: offset)));
+    }
+    expect(pages.toSet(), hasLength(66));
+    expect(pages, ids(await repository.listJobs('shop', userId: 'owner', limit: 100)));
+  });
+
+  test('historical linked customer name finds stale Job snapshots in all offline views', () async {
+    await db.customStatement(
+      "INSERT INTO local_customers (id,business_id,display_name) VALUES "
+      "('linked','shop','Synthetic Cedar Workshop'),"
+      "('wrong-shop','other-shop','Synthetic Cedar Workshop')",
+    );
+    await addJob('historical', number: 'MB-5180', status: 'completed');
+    await addJob('active', number: 'J-7', status: 'open');
+    await addJob('isolated', number: 'MB-8', status: 'open');
+    await db.customStatement(
+      "UPDATE local_jobs SET customer_id = 'linked', customer_name = 'Old snapshot' "
+      "WHERE id IN ('historical','active')",
+    );
+    await db.customStatement("UPDATE local_jobs SET customer_id = 'wrong-shop', "
+      "customer_name = 'Old snapshot' WHERE id = 'isolated'");
+    for (final view in JobListView.values) {
+      final matches = ids(await repository.listJobs('shop', view: view, search: 'cEdAr'));
+      expect(matches.toSet(), view == JobListView.active ? {'active'} : {'historical', 'active'});
+      expect(await repository.jobCount('shop', view: view, search: 'cedar'), matches.length);
+      expect(ids(await repository.listJobs('shop', view: view, search: 'cedar', status: 'open')), ['active']);
+    }
+    expect(ids(await repository.listJobs('shop', view: JobListView.all, search: '5180')), ['historical']);
+    expect(await repository.listJobs('shop', search: '518'), isEmpty);
+    expect(await repository.listJobs('shop', search: 'cedar', status: 'cancelled'), isEmpty);
+    expect(await db.customSelect('SELECT * FROM sync_outbox').get(), isEmpty);
+  });
+
   test('background detail reads never create an access', () async {
-    await addJob('a', updated: 100);
-    await addJob('b', updated: 200);
+    await addJob('a', created: 100, updated: 100);
+    await addJob('b', created: 200, updated: 200);
     await repository.jobDetail('shop', 'a');
     final rows = await repository.listJobs('shop', userId: 'owner');
     expect(ids(rows), ['b', 'a']);
@@ -212,8 +318,8 @@ void main() {
   test(
     'accesses do not cross businesses, even with identical incoming ID',
     () async {
-      await addJob('a', updated: 100);
-      await addJob('b', updated: 200);
+      await addJob('a', created: 100, updated: 100);
+      await addJob('b', created: 200, updated: 200);
       await history.recordAccess('other-shop', 'a', userId: 'owner', at: today);
       expect(ids(await repository.listJobs('shop', userId: 'owner')), [
         'b',
@@ -276,11 +382,13 @@ void main() {
       syncState: 'pending',
     );
     for (final view in JobListView.values) {
-      expect(ids(await repository.listJobs('shop', view: view)), [
-        'pending',
-        'temp',
-        'newer',
-      ]);
+      for (final sort in JobListSort.values) {
+        expect(ids(await repository.listJobs('shop', view: view, sort: sort)), [
+          'pending',
+          'temp',
+          'newer',
+        ]);
+      }
     }
   });
 

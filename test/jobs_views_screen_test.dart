@@ -183,7 +183,17 @@ void main() {
       await tester.tap(find.text('All').first);
       await tester.pumpAndSettle();
       expect(repository.calls.last.view, JobListView.all);
+      expect(repository.calls.last.sort, JobListSort.jobDate);
+      expect(find.text('Complete history · job date'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('job-list-sort')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Last modified').last);
+      await tester.pumpAndSettle();
+      expect(repository.calls.last.sort, JobListSort.lastModified);
       expect(find.text('Complete history · last modified'), findsOneWidget);
+      await tester.tap(find.text('Recent'));
+      await tester.pumpAndSettle();
+      expect(repository.calls.last.sort, JobListSort.lastModified);
       expect(tester.takeException(), isNull);
     },
   );
@@ -213,6 +223,38 @@ void main() {
     await tester.pumpAndSettle();
     expect(repository.calls.last.limit, 60);
     expect(repository.calls.last.view, JobListView.all);
+  });
+
+  testWidgets('All keeps its independent date sort after navigation and restoration', (tester) async {
+    final repository = _Jobs();
+    final visible = ValueNotifier(true);
+    final bucket = PageStorageBucket();
+    addTearDown(visible.dispose);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PageStorage(
+      bucket: bucket,
+      child: ValueListenableBuilder<bool>(
+        valueListenable: visible,
+        builder: (_, show, _) => show ? screen(repository) : const Text('Other tab'),
+      ),
+    ))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('All').first);
+    await tester.pumpAndSettle();
+    expect(repository.calls.last.sort, JobListSort.jobDate);
+    await tester.tap(find.byKey(const ValueKey('job-list-sort')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Last modified').last);
+    await tester.pumpAndSettle();
+    visible.value = false;
+    await tester.pumpAndSettle();
+    visible.value = true;
+    await tester.pumpAndSettle();
+    expect(repository.calls.last.view, JobListView.all);
+    expect(repository.calls.last.sort, JobListSort.lastModified);
+    await tester.tap(find.text('Recent'));
+    await tester.pumpAndSettle();
+    expect(repository.calls.last.sort, JobListSort.lastAccessed);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('view and search restore after leaving and returning to Jobs', (

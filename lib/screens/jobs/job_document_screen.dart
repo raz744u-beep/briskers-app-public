@@ -10,6 +10,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/warranty_payment_amounts.dart';
+import '../../widgets/warranty_received_payment_dialog.dart';
 import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
@@ -50,6 +52,85 @@ import 'standard_note_picker_sheet.dart';
 import 'job_detail_screen.dart';
 import 'invoice_deletion_choice.dart';
 
+Widget _historicalInvoiceReopenDialog(
+  BuildContext context,
+  TextEditingController reason,
+) => AlertDialog(
+  backgroundColor: Theme.of(context).colorScheme.surface,
+  insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+  actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+  scrollable: true,
+  title: Text(tr('forceReopenInvoiceTitle')),
+  content: SizedBox(
+    width: MediaQuery.sizeOf(context).width * 0.92,
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(tr('forceReopenInvoiceHelp')),
+        const SizedBox(height: 14),
+        TextField(
+          controller: reason,
+          minLines: 4,
+          maxLines: 6,
+          autofocus: true,
+          decoration: InputDecoration(
+            labelText: tr('forceReopenReason'),
+            hintText: tr('forceReopenReasonHint'),
+          ),
+        ),
+      ],
+    ),
+  ),
+  actions: [
+    TextButton(
+      onPressed: () => Navigator.pop(context),
+      child: Text(tr('forceReopenCancel')),
+    ),
+    FilledButton(
+      style: FilledButton.styleFrom(
+        backgroundColor: Theme.of(context).colorScheme.primary,
+      ),
+      onPressed: () {
+        final value = reason.text.trim();
+        if (value.length < 10) return;
+        Navigator.pop(context, value);
+      },
+      child: Text(tr('forceReopenConfirm')),
+    ),
+  ],
+);
+
+Widget _finalizeReceivedPaymentDialog(BuildContext context, String amount) =>
+    AlertDialog(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+      scrollable: true,
+      title: const Text('Finalize received payment?'),
+      content: SizedBox(
+        width: MediaQuery.sizeOf(context).width * 0.92,
+        child: Text(
+          'Confirm that $amount was actually received. '
+          'Finalizing records the payment as income, replaces the '
+          'pending entry, and updates the invoice PDF to show it as paid. '
+          'Do not finalize an authorization or unpaid promise.',
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Colors.green.shade700),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Finalize Payment'),
+        ),
+      ],
+    );
+
 class JobDocumentScreen extends StatefulWidget {
   const JobDocumentScreen({
     super.key,
@@ -67,6 +148,18 @@ class JobDocumentScreen extends StatefulWidget {
   final String? roleCode;
   final bool canManageExpenses;
   final String? initialAction;
+
+  @visibleForTesting
+  static Widget historicalReopenDialogForTesting(
+    BuildContext context,
+    TextEditingController reason,
+  ) => _historicalInvoiceReopenDialog(context, reason);
+
+  @visibleForTesting
+  static Widget finalizePaymentDialogForTesting(
+    BuildContext context,
+    String formattedAmount,
+  ) => _finalizeReceivedPaymentDialog(context, formattedAmount);
 
   @visibleForTesting
   static Widget lineEditorForTesting({
@@ -681,30 +774,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
       NumberFormat.currency(symbol: '\$').format(_number(raw));
 
   bool _warrantyPaymentProcessed({bool pendingOnly = false, bool localOnly = false}) {
-    if (_warrantyDetail['extended_warranty'] != true) return false;
-
-    final terminalAmount = _number(_warrantyDetail['terminal_amount']);
-    if (terminalAmount <= 0.005) return false;
-
-    final surchargeRate = _number(_warrantyDetail['surcharge_rate']);
-    final usesCheck = surchargeRate <= 0.000001;
-    final payments = List<dynamic>.from(_detail?['payments'] ?? const [])
-        .map((raw) => Map<String, dynamic>.from(raw as Map));
-
-    return payments.any((payment) {
-      final amount = _number(payment['amount']);
-      final method =
-          payment['payment_method_name']?.toString().trim().toLowerCase() ?? '';
-      final amountMatches = (amount - terminalAmount).abs() < 0.005;
-      final methodMatches = usesCheck
-          ? method == 'check' || method.contains('check')
-          : method == 'credit card' ||
-              (method.contains('credit') && method.contains('card'));
-      return amountMatches && methodMatches &&
-          (!pendingOnly || payment['state']?.toString() == 'pending') &&
-          (!localOnly || payment['pending_sync'] == true);
-    });
+    final receipt = WarrantyPaymentAmounts.receipt(_warrantyDetail,
+      List<dynamic>.from(_detail?['payments'] ?? const []).whereType<Map>()
+        .map((raw) => Map<String, dynamic>.from(raw)));
+    return receipt != null &&
+      (!pendingOnly || receipt['state']?.toString() == 'pending') &&
+      (!localOnly || receipt['pending_sync'] == true);
   }
+
+  bool get _hasWarrantyReceipt => WarrantyPaymentAmounts.hasCandidateReceipt(
+    _warrantyDetail, List<dynamic>.from(_detail?['payments'] ?? const [])
+      .whereType<Map>().map((raw) => Map<String, dynamic>.from(raw)));
 
   String _paymentDate(Object? raw) {
     final value = raw?.toString().trim() ?? '';
@@ -723,52 +803,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final reason = TextEditingController();
     final confirmed = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: Theme.of(dialogContext).colorScheme.surface,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        title: Text(tr('forceReopenInvoiceTitle')),
-        content: SizedBox(
-          width: MediaQuery.sizeOf(dialogContext).width * 0.92,
-          child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(tr('forceReopenInvoiceHelp')),
-              const SizedBox(height: 14),
-              TextField(
-                controller: reason,
-                minLines: 4,
-                maxLines: 6,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: tr('forceReopenReason'),
-                  hintText: tr('forceReopenReasonHint'),
-                ),
-              ),
-            ],
-          ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text(tr('forceReopenCancel')),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(dialogContext).colorScheme.primary,
-            ),
-            onPressed: () {
-              final value = reason.text.trim();
-              if (value.length < 10) return;
-              Navigator.pop(dialogContext, value);
-            },
-            child: Text(tr('forceReopenConfirm')),
-          ),
-        ],
-      ),
+      builder: (dialogContext) =>
+          _historicalInvoiceReopenDialog(dialogContext, reason),
     );
     reason.dispose();
     if (!mounted || confirmed == null) return;
@@ -2797,29 +2833,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     if (!mounted) return;
     final confirmed = await showDialog<bool>(
           context: context,
-          builder: (dialogContext) => AlertDialog(
-            backgroundColor: Theme.of(dialogContext).colorScheme.surface,
-            insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-            actionsPadding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-            title: const Text('Finalize received payment?'),
-            content: Text(
-              'Confirm that ${_money(amount)} was actually received. '
-              'Finalizing records the payment as income, replaces the '
-              'pending entry, and updates the invoice PDF to show it as paid. '
-              'Do not finalize an authorization or unpaid promise.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: Colors.green.shade700),
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Finalize Payment'),
-              ),
-            ],
-          ),
+          builder: (dialogContext) =>
+              _finalizeReceivedPaymentDialog(dialogContext, _money(amount)),
         ) ??
         false;
     if (!confirmed || !mounted) return;
@@ -2844,7 +2859,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   Future<void> _enterWarrantyPayment() async {
     await _collapseWorkspaceHeader();
     if (_estimate || _warrantyDetail['extended_warranty'] != true || _busy ||
-        _paymentNeedsReconciliation()) {
+        _paymentNeedsReconciliation() || _hasWarrantyReceipt) {
       return;
     }
 
@@ -2868,10 +2883,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     final remaining = total - finalized - pending;
     if (remaining <= 0.005) return;
 
-    final warrantyNet = _number(_warrantyDetail['terminal_amount']);
-    if (warrantyNet <= 0.005) return;
-
-    final amount = warrantyNet > remaining ? remaining : warrantyNet;
+    final approvedGross = _number(_warrantyDetail['approved_amount']);
+    if (approvedGross <= 0.005) return;
     final surchargeRate = _number(_warrantyDetail['surcharge_rate']);
     final wantsCheck = surchargeRate <= 0.000001;
 
@@ -2894,6 +2907,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     }
 
     final selectedMethod = method;
+    final queuedOperationIds = _queuedPaymentOperationIds;
+    final amount = await showDialog<num>(context: context,
+      builder: (_) => WarrantyReceivedPaymentDialog(
+        initialGross: wantsCheck ? (approvedGross > remaining ? remaining : approvedGross) : null,
+        processorFee: _number(_warrantyDetail['processor_fee']),
+        remaining: remaining, check: wantsCheck));
+    if (amount == null || !mounted || _paymentNeedsReconciliation() || _hasWarrantyReceipt) return;
     // Persist first even in Auto mode: the network may have disappeared.
     // Replay uses the same durable operation UUID if its response is lost.
     final recorded = await _run(() async {
@@ -2904,7 +2924,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         remainingBeforePaymentCents: (remaining * 100).round(),
         methodId: selectedMethod['id'].toString(),
         methodName: selectedMethod['name']?.toString() ?? '',
-        expectedQueuedOperationIds: _queuedPaymentOperationIds,
+        expectedQueuedOperationIds: queuedOperationIds,
       );
       if (!BriskersConnectionModeController.instance.forceOffline &&
           !_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
@@ -5148,20 +5168,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         .toList();
     final shownPaid = finalizedPaid + pendingPaid;
     final safeBalance = balance < 0 ? 0 : balance;
-    final warrantyNet = _number(_warrantyDetail['terminal_amount']);
-    final warrantyRate = _number(_warrantyDetail['surcharge_rate']);
-    final warrantyUsesCheck = warrantyRate <= 0.000001;
-    final warrantyPaymentAlreadyPresent = payments.any((payment) {
-      final amount = _number(payment['amount']);
-      final method =
-          payment['payment_method_name']?.toString().trim().toLowerCase() ?? '';
-      final amountMatches = (amount - warrantyNet).abs() < 0.005;
-      final methodMatches = warrantyUsesCheck
-          ? method == 'check' || method.contains('check')
-          : method == 'credit card' ||
-              (method.contains('credit') && method.contains('card'));
-      return amountMatches && methodMatches;
-    });
+    final warrantyNet = _number(_warrantyDetail['approved_amount']);
+    final warrantyPaymentAlreadyPresent = _hasWarrantyReceipt;
+    final attributedWarrantyReceipt = WarrantyPaymentAmounts.receipt(_warrantyDetail, payments);
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -5340,19 +5349,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                             payment['payment_method_name']?.toString() ??
                                 tr('paymentSection');
                         final paymentAmount = _number(payment['amount']);
-                        final methodLower = methodName.trim().toLowerCase();
-                        final warrantyMethodMatches = warrantyUsesCheck
-                            ? methodLower == 'check' ||
-                                methodLower.contains('check')
-                            : methodLower == 'credit card' ||
-                                (methodLower.contains('credit') &&
-                                    methodLower.contains('card'));
-                        final warrantyAmountMatches =
-                            (paymentAmount - warrantyNet).abs() < 0.005;
-                        final isWarrantyPayment =
-                            _warrantyDetail['extended_warranty'] == true &&
-                                warrantyMethodMatches &&
-                                warrantyAmountMatches;
+                        final isWarrantyPayment = attributedWarrantyReceipt != null &&
+                          attributedWarrantyReceipt['id']?.toString() == payment['id']?.toString();
                         final warrantyCompany = _warrantyDetail[
                                     'warranty_company_name']
                                 ?.toString()
@@ -6852,6 +6850,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                       expectedVersion: _version,
                       invoiceTotal: total,
                       detail: _warrantyDetail,
+                      payments: List<dynamic>.from(_detail?['payments'] ?? const [])
+                        .whereType<Map>().map((raw) => Map<String, dynamic>.from(raw)).toList(),
                       readOnly: _readOnly,
                       paymentProcessed: _warrantyPaymentProcessed(),
                       paymentPendingLabel: _warrantyPaymentProcessed(pendingOnly: true)

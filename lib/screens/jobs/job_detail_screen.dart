@@ -20,6 +20,8 @@ import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/local_job_access_history.dart';
 import '../../services/job_performance_metrics.dart';
+import '../../services/job_profitability_summary.dart';
+import '../../widgets/job_profitability_summary_view.dart';
 import '../../services/local_document_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_financial_cache.dart';
@@ -3859,67 +3861,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       );
     }
 
-    num value(String key) =>
-        num.tryParse(data[key]?.toString() ?? '') ?? 0;
-
-    final revenue = value('revenue');
-    final salesTax = value('sales_tax');
-    final directCost = value('direct_cost');
-    final mechanicCost = value('mechanic_cost');
-    final profit = value('profit');
-    final margin =
-        num.tryParse(data['margin_percent']?.toString() ?? '') ?? 0;
+    final summary = JobProfitabilitySummary.fromRpc(data);
+    if (summary == null) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(tr('profitabilityIncomplete')),
+      );
+    }
     final expenses = List<dynamic>.from(data['expenses'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
-
-    Widget amountRow(
-      String label,
-      num amount, {
-      bool emphasized = false,
-    }) {
-      final emphasizedColor =
-          amount < 0 ? Colors.red.shade700 : Colors.green.shade700;
-
-      return Container(
-        margin: EdgeInsets.only(bottom: emphasized ? 12 : 2),
-        padding: EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: emphasized ? 16 : 11,
-        ),
-        decoration: emphasized
-            ? BoxDecoration(
-                color: emphasizedColor.withValues(alpha: 0.11),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: emphasizedColor.withValues(alpha: 0.28),
-                ),
-              )
-            : null,
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: emphasized ? 18 : 16,
-                  fontWeight:
-                      emphasized ? FontWeight.w800 : FontWeight.w500,
-                ),
-              ),
-            ),
-            Text(
-              _money(amount),
-              style: TextStyle(
-                fontSize: emphasized ? 22 : 17,
-                fontWeight: FontWeight.w900,
-                color: emphasized ? emphasizedColor : null,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
 
     return Card(
       margin: EdgeInsets.zero,
@@ -3931,50 +3882,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Job financial summary',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                Builder(
-                  builder: (context) {
-                    final marginColor = profit < 0
-                        ? Colors.red.shade700
-                        : Colors.green.shade700;
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: marginColor.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        '${margin.toStringAsFixed(1)}%',
-                        style: TextStyle(
-                          color: marginColor,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
+            JobProfitabilitySummaryView(
+              summary: summary,
+              formatMoney: _money,
             ),
-            const SizedBox(height: 8),
-            amountRow('Revenue before sales tax', revenue),
-            amountRow('Parts / direct expenses', directCost),
-            amountRow('Mechanic labor', mechanicCost),
-            const Divider(height: 18),
-            amountRow('Gross profit', profit, emphasized: true),
-            amountRow('Sales tax collected', salesTax),
             if (expenses.isNotEmpty) ...[
               const SizedBox(height: 8),
               const Text(
