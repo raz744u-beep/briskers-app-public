@@ -669,8 +669,8 @@ jobs:
           CERTS="$("$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk)"
           printf '%s\n' "$CERTS"
           EXPECTED_CERT="82075a34ef748541a270af4172dd3ddc37f3e464d9ac9f20eeef7f40a029ff08"
-          ACTUAL_CERT="$(printf '%s\n' "$CERTS" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:upper:]' '[:lower:]')"
-          test "$ACTUAL_CERT" = "$EXPECTED_CERT" || { echo "Unexpected signing certificate"; exit 1; }
+          python3 ../tools/tests/test_apk_certificate_verification.py
+          printf '%s\n' "$CERTS" | python3 ../tools/verify_apk_certificate.py --expected "$EXPECTED_CERT"
           if printf '%s\n' "$CERTS" | grep -q "CN=Android Debug"; then
             echo "ERROR: APK was signed with a temporary Android Debug certificate."
             exit 1
