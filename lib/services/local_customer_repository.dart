@@ -136,6 +136,17 @@ class LocalCustomerRepository {
         .toList();
   }
 
+  /// Notification focus bypasses ordinary list search and other view state.
+  Future<List<Map<String, dynamic>>> customersByIds(
+    String businessId,
+    Iterable<String> customerIds,
+  ) async {
+    final ids = customerIds.toSet();
+    if (ids.isEmpty) return const [];
+    final rows = await customers(businessId);
+    return rows.where((row) => ids.contains(row['id'])).toList();
+  }
+
   Future<Map<String, dynamic>?> customerDetail(
     String businessId,
     String customerId,

@@ -56,12 +56,50 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
   void initState() {
     super.initState();
     final cached = widget.cachedDetail;
-    if (cached != null) {
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // The same local detail path must work from Jobs → Job Expenses,
+      // even when the caller has no summary to pass in.
+      _loadOffline();
+    } else if (cached != null) {
       _loadCached(cached);
     } else {
       _load();
     }
     _loadLocalExpenseIqPhoto();
+  }
+
+  Future<void> _loadOffline() async {
+    try {
+      final saved = await _localFinancial.loadTransactionDetail(
+        widget.businessId, widget.transactionId,
+      );
+      if (!mounted) return;
+      final detail = saved ?? widget.cachedDetail;
+      if (detail == null) {
+        setState(() {
+          _loading = false;
+          _error = 'This expense has not been cached on this device. '
+              'Open it while online first to make it available offline.';
+        });
+        return;
+      }
+      setState(() {
+        _detail = Map<String, dynamic>.from(detail)
+          ..['editable'] = saved != null
+          ..['deletable'] = false
+          ..['date'] = detail['date'] ?? detail['transaction_date']
+          ..['attachments'] = detail['attachments'] ?? const <dynamic>[];
+        _loading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Offline expense details unavailable: $error';
+        });
+      }
+    }
   }
 
   Future<void> _loadCached(Map<String, dynamic> summary) async {
@@ -266,14 +304,14 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
-            ),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
+              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF167F43)),
               title: const Text('Take photo'),
               onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
             ),
           ],
         ),

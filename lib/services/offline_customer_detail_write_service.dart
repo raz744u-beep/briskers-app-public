@@ -5,18 +5,23 @@ import 'dart:math';
 import 'package:drift/drift.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'customer_detail_cache.dart';
+import 'local_job_quarantine.dart';
 
 class OfflineCustomerDetailWriteService {
   OfflineCustomerDetailWriteService({
     BriskersApi api = const BriskersApi(),
     CustomerDetailCache cache = const CustomerDetailCache(),
+    BriskersLocalDatabase? database,
   })  : _api = api,
-        _cache = cache;
+        _cache = cache,
+        _database = database ?? localDatabase;
 
   final BriskersApi _api;
+  final BriskersLocalDatabase _database;
   final CustomerDetailCache _cache;
   final Random _random = Random.secure();
 
@@ -81,7 +86,7 @@ class OfflineCustomerDetailWriteService {
     String operation,
     Map<String, dynamic> payload,
   ) async {
-    await localDatabase.customStatement(
+    await _database.customStatement(
       '''
       INSERT INTO sync_outbox (
         business_id, entity_type, entity_id, operation,
@@ -110,7 +115,7 @@ class OfflineCustomerDetailWriteService {
     final localId = 'local-note-$op';
     final attachments = <Map<String, dynamic>>[];
 
-    await localDatabase.transaction(() async {
+    await _database.transaction(() async {
       await _enqueue(
         businessId,
         'customer_note_create',
@@ -256,7 +261,7 @@ class OfflineCustomerDetailWriteService {
     };
     await _saveList(businessId, customerId, 'notes', rows);
 
-    final pendingCreate = await localDatabase.customSelect(
+    final pendingCreate = await _database.customSelect(
       '''
       SELECT id, payload_json
       FROM sync_outbox
@@ -279,7 +284,7 @@ class OfflineCustomerDetailWriteService {
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
       payload['body'] = body;
-      await localDatabase.customStatement(
+      await _database.customStatement(
         'UPDATE sync_outbox SET payload_json = ?, last_error = NULL WHERE id = ?',
         [jsonEncode(payload), row.read<int>('id')],
       );
@@ -311,7 +316,7 @@ class OfflineCustomerDetailWriteService {
     final localId = 'local-finding-$op';
     final attachments = <Map<String, dynamic>>[];
 
-    await localDatabase.transaction(() async {
+    await _database.transaction(() async {
       await _enqueue(
         businessId,
         'customer_finding_create',
@@ -464,7 +469,7 @@ class OfflineCustomerDetailWriteService {
     };
     await _saveList(businessId, customerId, 'findings', rows);
 
-    final pendingCreate = await localDatabase.customSelect(
+    final pendingCreate = await _database.customSelect(
       '''
       SELECT id, payload_json
       FROM sync_outbox
@@ -487,7 +492,7 @@ class OfflineCustomerDetailWriteService {
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
       payload['body'] = body;
-      await localDatabase.customStatement(
+      await _database.customStatement(
         'UPDATE sync_outbox SET payload_json = ?, last_error = NULL WHERE id = ?',
         [jsonEncode(payload), row.read<int>('id')],
       );
@@ -508,7 +513,7 @@ class OfflineCustomerDetailWriteService {
   }
 
   Future<void> flush(String businessId) async {
-    final rows = await localDatabase.customSelect(
+    final rows = await _database.customSelect(
       '''
       SELECT *
       FROM sync_outbox
@@ -530,6 +535,9 @@ class OfflineCustomerDetailWriteService {
     for (final row in rows) {
       final id = row.read<int>('id');
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: id,
+        );
         final type = row.read<String>('entity_type');
         final payload = Map<String, dynamic>.from(
           jsonDecode(row.read<String>('payload_json')) as Map,
@@ -537,28 +545,39 @@ class OfflineCustomerDetailWriteService {
         if (type == 'customer_note_create') {
           await _flushNoteCreate(businessId, id, payload);
         } else if (type == 'customer_note_update') {
-          await _api.updateCustomerNote(
+          await LocalJobQuarantine.guardReplay(
+            _database,
             businessId,
-            payload['note_id'].toString(),
-            body: payload['body']?.toString() ?? '',
+            () => _api.updateCustomerNote(
+              businessId,
+              payload['note_id'].toString(),
+              body: payload['body']?.toString() ?? '',
+            ),
+            outboxId: id,
           );
-          await _deleteOutbox(id);
+          await _deleteOutbox(businessId, id);
         } else if (type == 'customer_note_photo') {
           await _flushNotePhoto(businessId, id, payload);
         } else if (type == 'customer_finding_create') {
           await _flushFindingCreate(businessId, id, payload);
         } else if (type == 'customer_finding_update') {
-          await _api.updateVehicleFinding(
+          await LocalJobQuarantine.guardReplay(
+            _database,
             businessId,
-            payload['finding_id'].toString(),
-            body: payload['body']?.toString() ?? '',
+            () => _api.updateVehicleFinding(
+              businessId,
+              payload['finding_id'].toString(),
+              body: payload['body']?.toString() ?? '',
+            ),
+            outboxId: id,
           );
-          await _deleteOutbox(id);
+          await _deleteOutbox(businessId, id);
         } else if (type == 'customer_finding_photo') {
           await _flushFindingPhoto(businessId, id, payload);
         }
       } catch (error) {
-        await localDatabase.customStatement(
+        if (error is LocalJobQuarantineException) rethrow;
+        await _database.customStatement(
           '''
           UPDATE sync_outbox
           SET attempt_count = attempt_count + 1,
@@ -580,14 +599,22 @@ class OfflineCustomerDetailWriteService {
   ) async {
     final customerId = payload['customer_id'].toString();
     final localId = payload['local_note_id'].toString();
-    final serverId = await _api.createCustomerNote(
+    final serverId = await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      customerId,
-      body: payload['body']?.toString(),
+      () => _api.createCustomerNote(
+        businessId,
+        customerId,
+        body: payload['body']?.toString(),
+      ),
+      outboxId: outboxId,
     );
 
-    await localDatabase.transaction(() async {
-      final photoRows = await localDatabase.customSelect(
+    await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: outboxId,
+      );
+      final photoRows = await _database.customSelect(
         '''
         SELECT id, payload_json
         FROM sync_outbox
@@ -603,24 +630,26 @@ class OfflineCustomerDetailWriteService {
         );
         if (photoPayload['note_id']?.toString() != localId) continue;
         photoPayload['note_id'] = serverId;
-        await localDatabase.customStatement(
+        await _database.customStatement(
           'UPDATE sync_outbox SET payload_json = ? WHERE id = ?',
           [jsonEncode(photoPayload), photoRow.read<int>('id')],
         );
       }
-      await _deleteOutbox(outboxId);
+      final rows = await _loadList(businessId, customerId, 'notes');
+      final index = rows.indexWhere((row) => row['id']?.toString() == localId);
+      if (index >= 0) {
+        rows[index] = {
+          ...rows[index],
+          'id': serverId,
+          'sync_state': 'pending',
+        };
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: outboxId,
+        );
+        await _saveList(businessId, customerId, 'notes', rows);
+      }
+      await _deleteOutbox(businessId, outboxId);
     });
-
-    final rows = await _loadList(businessId, customerId, 'notes');
-    final index = rows.indexWhere((row) => row['id']?.toString() == localId);
-    if (index >= 0) {
-      rows[index] = {
-        ...rows[index],
-        'id': serverId,
-        'sync_state': 'pending',
-      };
-      await _saveList(businessId, customerId, 'notes', rows);
-    }
   }
 
   Future<void> _flushNotePhoto(
@@ -630,14 +659,23 @@ class OfflineCustomerDetailWriteService {
   ) async {
     final file = File(payload['local_file_path'].toString());
     final bytes = await file.readAsBytes();
-    await _api.uploadCustomerNotePhoto(
+    await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      payload['note_id'].toString(),
-      filename: payload['filename'].toString(),
-      mimeType: payload['mime_type'].toString(),
-      bytes: bytes,
+      () => _api.uploadCustomerNotePhoto(
+        businessId,
+        payload['note_id'].toString(),
+        filename: payload['filename'].toString(),
+        mimeType: payload['mime_type'].toString(),
+        bytes: bytes,
+        replayGuard: <T>(Future<T> Function() operation) =>
+            LocalJobQuarantine.guardReplay<T>(
+          _database, businessId, operation, outboxId: outboxId,
+        ),
+      ),
+      outboxId: outboxId,
     );
-    await _deleteOutbox(outboxId);
+    await _deleteOutbox(businessId, outboxId);
   }
 
   Future<void> _flushFindingCreate(
@@ -647,16 +685,24 @@ class OfflineCustomerDetailWriteService {
   ) async {
     final customerId = payload['customer_id'].toString();
     final localId = payload['local_finding_id'].toString();
-    final serverId = await _api.createVehicleFindingForVehicle(
+    final serverId = await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      customerId,
-      payload['vehicle_id'].toString(),
-      body: payload['body']?.toString() ?? '',
-      includeOnInvoice: payload['include_on_invoice'] == true,
+      () => _api.createVehicleFindingForVehicle(
+        businessId,
+        customerId,
+        payload['vehicle_id'].toString(),
+        body: payload['body']?.toString() ?? '',
+        includeOnInvoice: payload['include_on_invoice'] == true,
+      ),
+      outboxId: outboxId,
     );
 
-    await localDatabase.transaction(() async {
-      final photoRows = await localDatabase.customSelect(
+    await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: outboxId,
+      );
+      final photoRows = await _database.customSelect(
         '''
         SELECT id, payload_json
         FROM sync_outbox
@@ -672,24 +718,26 @@ class OfflineCustomerDetailWriteService {
         );
         if (photoPayload['finding_id']?.toString() != localId) continue;
         photoPayload['finding_id'] = serverId;
-        await localDatabase.customStatement(
+        await _database.customStatement(
           'UPDATE sync_outbox SET payload_json = ? WHERE id = ?',
           [jsonEncode(photoPayload), photoRow.read<int>('id')],
         );
       }
-      await _deleteOutbox(outboxId);
+      final rows = await _loadList(businessId, customerId, 'findings');
+      final index = rows.indexWhere((row) => row['id']?.toString() == localId);
+      if (index >= 0) {
+        rows[index] = {
+          ...rows[index],
+          'id': serverId,
+          'sync_state': 'pending',
+        };
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: outboxId,
+        );
+        await _saveList(businessId, customerId, 'findings', rows);
+      }
+      await _deleteOutbox(businessId, outboxId);
     });
-
-    final rows = await _loadList(businessId, customerId, 'findings');
-    final index = rows.indexWhere((row) => row['id']?.toString() == localId);
-    if (index >= 0) {
-      rows[index] = {
-        ...rows[index],
-        'id': serverId,
-        'sync_state': 'pending',
-      };
-      await _saveList(businessId, customerId, 'findings', rows);
-    }
   }
 
   Future<void> _flushFindingPhoto(
@@ -699,18 +747,30 @@ class OfflineCustomerDetailWriteService {
   ) async {
     final file = File(payload['local_file_path'].toString());
     final bytes = await file.readAsBytes();
-    await _api.uploadVehicleFindingPhoto(
+    await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      payload['finding_id'].toString(),
-      filename: payload['filename'].toString(),
-      mimeType: payload['mime_type'].toString(),
-      bytes: bytes,
+      () => _api.uploadVehicleFindingPhoto(
+        businessId,
+        payload['finding_id'].toString(),
+        filename: payload['filename'].toString(),
+        mimeType: payload['mime_type'].toString(),
+        bytes: bytes,
+        replayGuard: <T>(Future<T> Function() operation) =>
+            LocalJobQuarantine.guardReplay<T>(
+          _database, businessId, operation, outboxId: outboxId,
+        ),
+      ),
+      outboxId: outboxId,
     );
-    await _deleteOutbox(outboxId);
+    await _deleteOutbox(businessId, outboxId);
   }
 
-  Future<void> _deleteOutbox(int id) {
-    return localDatabase.customStatement(
+  Future<void> _deleteOutbox(String businessId, int id) async {
+    await LocalJobQuarantine.assertReplayAllowed(
+      _database, businessId, outboxId: id,
+    );
+    await _database.customStatement(
       'DELETE FROM sync_outbox WHERE id = ?',
       [id],
     );

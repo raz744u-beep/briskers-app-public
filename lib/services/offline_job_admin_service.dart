@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_quarantine.dart';
 
 class OfflineJobAdminService {
   OfflineJobAdminService({
@@ -109,6 +110,9 @@ class OfflineJobAdminService {
       final data = Map<String,dynamic>.from(
           jsonDecode(row.read<String>('payload_json')) as Map);
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: outboxId,
+        );
         final customerId = data['customer_id']?.toString() ?? '';
         final vehicleId = data['vehicle_id']?.toString();
         if (customerId.startsWith('local-') ||
@@ -116,12 +120,18 @@ class OfflineJobAdminService {
           continue;
         }
         try {
-          await _api.createJob(businessId,
-            id:id,customerId:customerId,
-            vehicleId:data['vehicle_id']?.toString(),
-            title:data['title']?.toString() ?? 'New Job',
-            description:data['requested_work']?.toString());
+          await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.createJob(businessId,
+              id:id,customerId:customerId,
+              vehicleId:data['vehicle_id']?.toString(),
+              title:data['title']?.toString() ?? 'New Job',
+              description:data['requested_work']?.toString()),
+            outboxId: outboxId,
+          );
         } catch (error) {
+          if (error is LocalJobQuarantineException) rethrow;
           // A prior request may have committed even if its response was lost.
           // Verify the same UUID and customer before treating it as replayed.
           final existing = await _api.jobDetail(businessId,id);
@@ -130,17 +140,30 @@ class OfflineJobAdminService {
             rethrow;
           }
         }
-        await _api.updateJob(businessId,id,
-          customerId:customerId,
-          vehicleId:data['vehicle_id']?.toString(),
-          title:data['title']?.toString() ?? 'New Job',
-          requestedWork:data['requested_work']?.toString(),
-          plannedHours:num.tryParse(data['planned_hours']?.toString() ?? '') ?? 0);
+        await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => _api.updateJob(businessId,id,
+            customerId:customerId,
+            vehicleId:data['vehicle_id']?.toString(),
+            title:data['title']?.toString() ?? 'New Job',
+            requestedWork:data['requested_work']?.toString(),
+            plannedHours:num.tryParse(data['planned_hours']?.toString() ?? '') ?? 0),
+          outboxId: outboxId,
+        );
         final employeeId = data['employee_id']?.toString();
         if (employeeId != null && employeeId.isNotEmpty) {
-          await _api.setPrimaryJobEmployee(businessId,id,employeeId);
+          await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.setPrimaryJobEmployee(businessId,id,employeeId),
+            outboxId: outboxId,
+          );
         }
         await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database, businessId, outboxId: outboxId,
+          );
           await _database.customStatement(
             "DELETE FROM sync_outbox WHERE id=? AND entity_type='job_create'",
             [outboxId]);
@@ -148,7 +171,8 @@ class OfflineJobAdminService {
             "UPDATE local_jobs SET sync_state='synced' WHERE business_id=? AND id=?",
             [businessId,id]);
         });
-      } catch (_) {
+      } catch (error) {
+        if (error is LocalJobQuarantineException) rethrow;
         // Keep the identical operation ID and payload for a safe later retry.
       }
     }
@@ -438,6 +462,9 @@ class OfflineJobAdminService {
         continue;
       }
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: outboxId,
+        );
         final payload = Map<String, dynamic>.from(
           jsonDecode(row.read<String>('payload_json')) as Map,
         );
@@ -458,27 +485,32 @@ class OfflineJobAdminService {
           ).get();
           if (jobRows.isNotEmpty) {
             final job = jobRows.first;
-            await _api.updateJob(
+            await LocalJobQuarantine.guardReplay(
+              _database,
               businessId,
-              jobId,
-              customerId:
-                  payload['customer_id']?.toString() ??
-                  job.readNullable<String>('customer_id') ??
-                  '',
-              vehicleId: payload.containsKey('vehicle_id')
-                  ? payload['vehicle_id']?.toString()
-                  : job.readNullable<String>('vehicle_id'),
-              title:
-                  payload['title']?.toString() ?? job.read<String>('title'),
-              requestedWork: payload.containsKey('requested_work')
-                  ? payload['requested_work']?.toString()
-                  : job.readNullable<String>('requested_work'),
-              plannedHours: num.tryParse(
-                    payload['planned_hours']?.toString() ??
-                        job.data['planned_hours']?.toString() ??
-                        '',
-                  ) ??
-                  0,
+              () => _api.updateJob(
+                businessId,
+                jobId,
+                customerId:
+                    payload['customer_id']?.toString() ??
+                    job.readNullable<String>('customer_id') ??
+                    '',
+                vehicleId: payload.containsKey('vehicle_id')
+                    ? payload['vehicle_id']?.toString()
+                    : job.readNullable<String>('vehicle_id'),
+                title:
+                    payload['title']?.toString() ?? job.read<String>('title'),
+                requestedWork: payload.containsKey('requested_work')
+                    ? payload['requested_work']?.toString()
+                    : job.readNullable<String>('requested_work'),
+                plannedHours: num.tryParse(
+                      payload['planned_hours']?.toString() ??
+                          job.data['planned_hours']?.toString() ??
+                          '',
+                    ) ??
+                    0,
+              ),
+              outboxId: outboxId,
             );
           }
         }
@@ -486,11 +518,16 @@ class OfflineJobAdminService {
         if (payload['status_changed'] == true) {
           final statusCode = payload['status_code']?.toString() ?? '';
           if (statusCode.isNotEmpty) {
-            await _api.changeJobStatus(
+            await LocalJobQuarantine.guardReplay(
+              _database,
               businessId,
-              jobId,
-              statusCode,
-              note: payload['status_note']?.toString(),
+              () => _api.changeJobStatus(
+                businessId,
+                jobId,
+                statusCode,
+                note: payload['status_note']?.toString(),
+              ),
+              outboxId: outboxId,
             );
           }
         }
@@ -498,25 +535,41 @@ class OfflineJobAdminService {
         if (payload['assignment_changed'] == true) {
           final employeeId = payload['employee_id']?.toString();
           if (employeeId == null || employeeId.isEmpty) {
-            await _api.clearJobAssignments(businessId, jobId);
+            await LocalJobQuarantine.guardReplay(
+              _database,
+              businessId,
+              () => _api.clearJobAssignments(businessId, jobId),
+              outboxId: outboxId,
+            );
           } else {
-            await _api.setPrimaryJobEmployee(businessId, jobId, employeeId);
+            await LocalJobQuarantine.guardReplay(
+              _database,
+              businessId,
+              () => _api.setPrimaryJobEmployee(businessId, jobId, employeeId),
+              outboxId: outboxId,
+            );
           }
         }
 
-        await _database.customStatement(
-          'DELETE FROM sync_outbox WHERE id = ?',
-          [outboxId],
-        );
-        await _database.customStatement(
-          '''
-          UPDATE local_jobs
-          SET sync_state = 'synced'
-          WHERE business_id = ? AND id = ?
-          ''',
-          [businessId, jobId],
-        );
+        await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database, businessId, outboxId: outboxId,
+          );
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE id = ?',
+            [outboxId],
+          );
+          await _database.customStatement(
+            '''
+            UPDATE local_jobs
+            SET sync_state = 'synced'
+            WHERE business_id = ? AND id = ?
+            ''',
+            [businessId, jobId],
+          );
+        });
       } catch (error) {
+        if (error is LocalJobQuarantineException) rethrow;
         await _database.customStatement(
           '''
           UPDATE sync_outbox

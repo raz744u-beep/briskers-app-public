@@ -18,11 +18,13 @@ class CustomersScreen extends StatefulWidget {
     required this.businessId,
     required this.roleCode,
     this.refreshToken = 0,
+    this.onCustomerReviewed,
   });
 
   final String businessId;
   final String roleCode;
   final int refreshToken;
+  final ValueChanged<String>? onCustomerReviewed;
 
   @override
   State<CustomersScreen> createState() => _CustomersScreenState();
@@ -195,6 +197,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
           businessId: widget.businessId,
           customerId: '${customer['id']}',
           roleCode: widget.roleCode,
+          onReviewed: () => widget.onCustomerReviewed?.call(customer['id'].toString()),
         ),
       ),
     );

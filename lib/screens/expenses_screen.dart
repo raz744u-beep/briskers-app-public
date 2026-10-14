@@ -759,7 +759,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         ),
       ),
     );
-    await _load();
+    // Keep the cached list on screen while refreshing in the background.
+    unawaited(_load(showLoading: false));
   }
 
   Future<void> _editTransactionFromList(String transactionId) async {

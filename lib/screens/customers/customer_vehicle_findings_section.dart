@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
+import '../../services/job_summary_visibility.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/offline_customer_detail_write_service.dart';
 
@@ -37,6 +38,8 @@ class _CustomerVehicleFindingsSectionState
       OfflineCustomerDetailWriteService();
   final ImagePicker _picker = ImagePicker();
 
+  late JobSummaryVisibility _jobVisibility;
+  final ValueNotifier<int> _quarantineChanges = ValueNotifier(0);
   late Future<List<Map<String, dynamic>>> _findingsFuture;
   bool _expanded = false;
   bool _busy = false;
@@ -45,12 +48,50 @@ class _CustomerVehicleFindingsSectionState
   @override
   void initState() {
     super.initState();
+    _listenForQuarantine();
     _findingsFuture = _allFindings();
   }
+
+  void _listenForQuarantine() {
+    _jobVisibility = JobSummaryVisibility(
+      businessId: widget.businessId,
+      onQuarantine: (_) {
+        if (!mounted) return;
+        _quarantineChanges.value++;
+        // Reset the FutureBuilder so its retained old data cannot paint while
+        // the exact archived finding identities are checked in the database.
+        setState(() => _findingsFuture = _allFindings(cacheOnly: true));
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _jobVisibility.dispose();
+    _quarantineChanges.dispose();
+    super.dispose();
+  }
+
+  Widget _guardModal(int generation, Widget child) => ValueListenableBuilder<int>(
+    valueListenable: _quarantineChanges,
+    child: child,
+    builder: (context, current, content) => current == generation
+        ? content!
+        : const SafeArea(child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('Job access changed. Close and reopen to verify this finding.'),
+          )),
+  );
 
   @override
   void didUpdateWidget(covariant CustomerVehicleFindingsSection oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.customerId != widget.customerId) {
+      _jobVisibility.dispose();
+      _quarantineChanges.value++;
+      _listenForQuarantine();
+    }
     if (oldWidget.businessId != widget.businessId ||
         oldWidget.customerId != widget.customerId ||
         oldWidget.vehicles != widget.vehicles) {
@@ -67,34 +108,36 @@ class _CustomerVehicleFindingsSectionState
     await future;
   }
 
-  Future<List<Map<String, dynamic>>> _allFindings() async {
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      final cached = await _cache.load(
-        widget.businessId,
-        widget.customerId,
-        'findings',
-      );
-      return cached is List
-          ? cached
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList()
+  Future<List<Map<String, dynamic>>> _allFindings({bool cacheOnly = false}) async {
+    final visibility = _jobVisibility;
+    final generation = visibility.beginLoad();
+    final businessId = widget.businessId;
+    final customerId = widget.customerId;
+    Future<List<Map<String, dynamic>>> cachedFindings() async {
+      final cached = await _cache.load(businessId, customerId, 'findings');
+      final rows = cached is List
+          ? cached.whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row)).toList()
           : <Map<String, dynamic>>[];
+      final visible = await visibility.filterFindings(rows, cached: true);
+      return visibility.isCurrent(generation) ? visible : [];
+    }
+
+    if (cacheOnly || BriskersConnectionModeController.instance.forceOffline) {
+      return cachedFindings();
     }
 
     final all = <Map<String, dynamic>>[];
     try {
+      final snapshotGeneration = await visibility.captureSnapshotGeneration();
       for (final raw in widget.vehicles) {
+        if (!visibility.isCurrent(generation)) return [];
         final vehicle = Map<String, dynamic>.from(raw as Map);
         final vehicleId = vehicle['id']?.toString() ?? '';
         if (vehicleId.isEmpty) continue;
-
         final rows = await _api.vehicleFindings(
-          widget.businessId,
-          vehicleId,
-          includeResolved: true,
+          businessId, vehicleId, includeResolved: true,
         );
-
         final vehicleLabel = _vehicleLabel(vehicle);
         for (final row in rows) {
           all.add(<String, dynamic>{
@@ -104,22 +147,17 @@ class _CustomerVehicleFindingsSectionState
           });
         }
       }
-      await _cache.save(
-        widget.businessId,
-        widget.customerId,
-        'findings',
-        all,
-      );
+      final visible = await visibility.filterFindings(all);
+      if (!visibility.isCurrent(generation)) return [];
+      await _cache.save(businessId, customerId, 'findings',
+          JobSummaryVisibility.stampSnapshot(visible, snapshotGeneration));
       final pending = <Future<dynamic>>[];
-      for (final finding in all) {
-        final attachments = List<dynamic>.from(
-          finding['attachments'] ?? const [],
-        ).whereType<Map>().map((raw) {
-          return Map<String, dynamic>.from(raw);
-        });
+      for (final finding in visible) {
+        if (!visibility.isCurrent(generation)) return [];
+        final attachments = List<dynamic>.from(finding['attachments'] ?? const [])
+            .whereType<Map>().map((raw) => Map<String, dynamic>.from(raw));
         for (final attachment in attachments) {
-          final bucket =
-              attachment['bucket']?.toString() ?? 'briskers-private';
+          final bucket = attachment['bucket']?.toString() ?? 'briskers-private';
           final key = attachment['key']?.toString() ?? '';
           if (key.isEmpty) continue;
           pending.add(_attachmentCache.getOrDownload(bucket, key));
@@ -130,19 +168,10 @@ class _CustomerVehicleFindingsSectionState
         }
       }
       if (pending.isNotEmpty) await Future.wait(pending);
-      return all;
+      return visibility.isCurrent(generation) ? visible : [];
     } catch (_) {
-      final cached = await _cache.load(
-        widget.businessId,
-        widget.customerId,
-        'findings',
-      );
-      return cached is List
-          ? cached
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList()
-          : <Map<String, dynamic>>[];
+      if (!visibility.isCurrent(generation)) return [];
+      return cachedFindings();
     }
   }
 
@@ -388,6 +417,7 @@ class _CustomerVehicleFindingsSectionState
     int initialIndex = 0,
   }) async {
     if (attachments.isEmpty) return;
+    final quarantine = _quarantineChanges.value;
 
     final images = <ImageProvider>[];
     for (final attachment in attachments) {
@@ -419,7 +449,10 @@ class _CustomerVehicleFindingsSectionState
       }
     }
 
-    if (images.isEmpty || !context.mounted) return;
+    if (images.isEmpty || !context.mounted ||
+        quarantine != _quarantineChanges.value) {
+      return;
+    }
 
     var current = initialIndex.clamp(0, images.length - 1);
     final controller = PageController(initialPage: current);
@@ -428,7 +461,7 @@ class _CustomerVehicleFindingsSectionState
       context: context,
       barrierColor: Colors.black87,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => Dialog(
+        builder: (context, setDialogState) => _guardModal(quarantine, Dialog(
           insetPadding: const EdgeInsets.all(12),
           backgroundColor: Colors.black,
           child: Stack(
@@ -487,7 +520,7 @@ class _CustomerVehicleFindingsSectionState
                 ),
             ],
           ),
-        ),
+        )),
       ),
     );
 
@@ -667,6 +700,11 @@ class _CustomerVehicleFindingsSectionState
   Future<void> _openFinding(Map<String, dynamic> finding) async {
     final findingId = finding['id']?.toString() ?? '';
     if (findingId.isEmpty || !mounted) return;
+    final visibility = _jobVisibility;
+    final generation = visibility.epoch;
+    final allowed = await visibility.filterFindings([finding]);
+    if (!mounted || !visibility.isCurrent(generation) || allowed.isEmpty) return;
+    final quarantine = _quarantineChanges.value;
 
     var localBody = finding['body']?.toString().trim() ?? '';
     var localAttachments = List<dynamic>.from(
@@ -681,7 +719,7 @@ class _CustomerVehicleFindingsSectionState
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
-      builder: (sheetContext) => StatefulBuilder(
+      builder: (sheetContext) => _guardModal(quarantine, StatefulBuilder(
         builder: (context, setSheetState) {
           final vehicle = finding['_vehicle_label']?.toString().trim() ?? '';
           final date = _dateLabel(finding['created_at']);
@@ -696,7 +734,7 @@ class _CustomerVehicleFindingsSectionState
             final controller = TextEditingController(text: localBody);
             final updatedBody = await showDialog<String>(
               context: sheetContext,
-              builder: (dialogContext) => AlertDialog(
+              builder: (dialogContext) => _guardModal(quarantine, AlertDialog(
                 title: const Text('Edit finding'),
                 content: TextField(
                   controller: controller,
@@ -722,10 +760,13 @@ class _CustomerVehicleFindingsSectionState
                     child: const Text('Save'),
                   ),
                 ],
-              ),
+              )),
             );
             controller.dispose();
-            if (updatedBody == null || updatedBody == localBody) return;
+            if (quarantine != _quarantineChanges.value ||
+                updatedBody == null || updatedBody == localBody) {
+              return;
+            }
 
             setSheetState(() => actionBusy = true);
             try {
@@ -756,7 +797,7 @@ class _CustomerVehicleFindingsSectionState
           Future<void> deleteFinding() async {
             final confirmed = await showDialog<bool>(
               context: sheetContext,
-              builder: (dialogContext) => AlertDialog(
+              builder: (dialogContext) => _guardModal(quarantine, AlertDialog(
                 title: const Text('Delete finding?'),
                 content: const Text(
                   'This will permanently delete this vehicle finding.',
@@ -775,9 +816,9 @@ class _CustomerVehicleFindingsSectionState
                     child: const Text('Delete'),
                   ),
                 ],
-              ),
+              )),
             );
-            if (confirmed != true) return;
+            if (confirmed != true || quarantine != _quarantineChanges.value) return;
 
             setSheetState(() => actionBusy = true);
             try {
@@ -986,9 +1027,10 @@ class _CustomerVehicleFindingsSectionState
             ),
           );
         },
-      ),
+      )),
     );
 
+    if (quarantine != _quarantineChanges.value) return;
     if (changed && mounted) await _refresh();
     if (addAnother && mounted) await _addFinding();
   }
@@ -1068,6 +1110,7 @@ class _CustomerVehicleFindingsSectionState
     if (widget.vehicles.isEmpty) return const SizedBox.shrink();
 
     return FutureBuilder<List<Map<String, dynamic>>>(
+      key: ValueKey(('vehicle-findings', _jobVisibility.epoch)),
       future: _findingsFuture,
       builder: (context, snapshot) {
         final allRows = snapshot.data ?? const <Map<String, dynamic>>[];

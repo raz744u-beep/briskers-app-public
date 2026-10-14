@@ -105,7 +105,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         return tr('invoiceOpen');
       case 'Pending Close':
       case 'Paid · Pending Close':
-        return 'Paid · Pending Close';
+        return tr('invoicePaidPendingClose');
       case 'Paid':
         return tr('invoicePaid');
       case 'Closed':
@@ -414,6 +414,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: row['id'].toString(),
           isOwner: widget.isOwner,
@@ -1182,6 +1183,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: invoiceId,
           isOwner: widget.isOwner,
@@ -1210,7 +1212,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => JobDocumentScreen(
-            businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          businessId: widget.businessId,
             documentId: documentId,
             isOwner: widget.isOwner,
             canManageExpenses: widget.canManageExpenses,

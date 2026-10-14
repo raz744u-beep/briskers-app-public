@@ -124,8 +124,24 @@ void main() {
 
   test('offline new Jobs are sorted before historical jobs', () async {
     final repository = await File('lib/services/local_job_repository.dart').readAsString();
-    expect(repository, contains("j.sync_state = 'pending' AND j.job_number = 'Pending sync'"));
+    expect(repository, contains("j.job_number = 'Pending sync'"));
+    expect(repository, contains("OR upper(j.job_number) LIKE 'TEMP-%'"));
+    expect(repository, isNot(contains("j.sync_state = 'pending' AND j.job_number")));
     expect(repository, contains('THEN j.created_at END DESC'));
+  });
+
+  test('new Job refresh resets filters and Jobs tab passes a current refresh token',
+      () async {
+    final jobs = await File('lib/screens/jobs_screen.dart').readAsString();
+    final shell = await File('lib/screens/shell_screen.dart').readAsString();
+    final created = jobs.substring(jobs.indexOf('if (created == true && mounted)'));
+    expect(created.indexOf('_search.clear();'), lessThan(created.indexOf('await _load();')));
+    expect(created.indexOf('_selectedStatus = null'), lessThan(created.indexOf('await _load();')));
+    expect(created.indexOf('_scrollController.jumpTo(0)'), lessThan(created.indexOf('await _load();')));
+    expect(shell.indexOf('return JobsScreen('),
+        lessThan(shell.indexOf('_lazyPages.putIfAbsent(index')));
+    expect(shell, contains('refreshToken: _jobsRefreshToken'));
+    expect(jobs, contains('oldWidget.refreshToken != widget.refreshToken'));
   });
 
   test('Jobs cards prefer job title over customer requested work', () async {
@@ -147,7 +163,8 @@ void main() {
     expect(invoice, contains('_offerCompletePaidJob()'));
     expect(invoice, contains("paid >= total - 0.005"));
     expect(invoice, contains("await _api.jobDocuments(widget.businessId, jobId)"));
-    expect(invoice, contains("child: const Text('Keep Job Open')"));
+    expect(invoice, contains("child: const Text('Keep In Progress')"));
+    expect(invoice, contains("title: const Text('Mark Job Completed?')"));
     expect(invoice, contains("child: const Text('Complete Job')"));
   });
 
@@ -163,7 +180,8 @@ void main() {
     final screen = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
     expect(draft, contains('Future<String> convertEstimateOffline('));
     expect(draft, contains("'kind': 'convert_invoice'"));
-    expect(draft, contains("serverId = await _api.convertEstimate(businessId, estimateServerId)"));
+    expect(draft, contains("() => _api.convertEstimate(businessId, estimateServerId)"));
+    expect(draft, contains('LocalJobQuarantine.guardReplay('));
     expect(draft, contains("estimate['job_id']"));
     expect(screen, contains('_offlineDocumentDraft.convertEstimateOffline('));
     expect(screen, isNot(contains('Creating a new invoice from an estimate still requires a connection.')));
@@ -212,9 +230,10 @@ void main() {
   test('Standalone offline conversion keeps new Job open and linked on invoice', () async {
     final draft = await File('lib/services/offline_document_draft_service.dart').readAsString();
     final invoice = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
-    expect(draft, contains("'job_number': provisionalJobId != null ? 'Pending sync'"));
-    expect(draft, contains("'Pending sync',?,'open','Open'"));
-    expect(invoice, contains("jobId.startsWith('local-') ? 'Pending sync' : ''"));
+    expect(draft, contains("'job_number': provisionalJobId != null ? temporaryJobNumber"));
+    expect(draft, contains("final temporaryJobNumber = 'TEMP-"));
+    expect(draft, contains("'open','Open'"));
+    expect(invoice, contains("final job = rawJob.isNotEmpty ? rawJob"));
     expect(invoice, contains("onTap: jobId.isEmpty ? null : _openLinkedJob"));
   });
 
@@ -227,11 +246,64 @@ void main() {
     expect(screen, contains('No payment methods saved offline.'));
   });
 
+  test('Offline warranty on synced invoice queues changes for replay', () async {
+    final screen = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    final edits = await File('lib/services/offline_document_edit_service.dart').readAsString();
+    expect(screen, contains('.saveWarranty(widget.businessId,'));
+    expect(edits, contains("'warranty',"));
+    expect(edits, contains("operation == 'warranty'"));
+    expect(edits, contains('() => _api.updateDocumentWarranty('));
+    expect(edits, contains('LocalJobQuarantine.guardReplay('));
+    expect(edits, contains("'offline_warranty_detail': updatedWarranty"));
+  });
+
+  test('Unsynced invoices use local standard notes even in Auto mode', () async {
+    final screen = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    expect(screen, contains('final offline = BriskersConnectionModeController.instance.forceOffline ||'));
+    expect(screen, contains('_offlineDocumentDraft.isLocalDraftId(widget.documentId);'));
+    expect(screen, contains('await _standardNotes.saveOffline('));
+  });
+
+  test('Warranty options and detail cache are prepared for offline reopening', () async {
+    final shell = await File('lib/screens/shell_screen.dart').readAsString();
+    final invoice = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    expect(shell, contains('briskers_warranty_companies_'));
+    expect(invoice, contains("'offline_warranty_detail': warrantyDetail"));
+  });
+
+  test('Temporary Job detail stays local in Auto mode until sync', () async {
+    final job = await File('lib/screens/jobs/job_detail_screen.dart').readAsString();
+    final draft = await File('lib/services/offline_document_draft_service.dart').readAsString();
+    expect(job, contains("widget.jobId.startsWith('local-') && !forceOnline"));
+    expect(draft, contains("'job_number': temporaryJobNumber"));
+    expect(draft, contains("'provisional_job_id':provisionalJobId"));
+  });
+
+  test('Payment method cache survives empty online refresh', () async {
+    final screen = await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    final shell = await File('lib/screens/shell_screen.dart').readAsString();
+    expect(screen, contains('if (methods.isEmpty && cached.isNotEmpty) return cached;'));
+    expect(screen, contains('if (methods.isNotEmpty) {'));
+    expect(shell, contains('if (methods.isNotEmpty) {'));
+    expect(screen, contains('_offlinePayments.recordReceivedPayment('));
+    expect(screen, contains('remainingBeforePaymentCents: (remaining * 100).round()'));
+  });
+
+  test('Offline payment ledger keeps an idempotent operation per payment', () async {
+    final ledger = await File('lib/services/offline_invoice_payment_ledger.dart').readAsString();
+    expect(ledger, contains("'operation_id': operationId"));
+    expect(ledger, contains('addPendingInvoicePaymentOnce('));
+    expect(ledger, contains('serverAcknowledgesPayment(detail, paymentId)'));
+    expect(ledger, contains('if (invoiceId.startsWith(\'local-\')) continue;'));
+    expect(ledger, contains("DELETE FROM sync_outbox WHERE id=?"));
+  });
+
   test('Offline warranty editor fits above system navigation and keyboard', () async {
     final source = await File('lib/screens/jobs/invoice_warranty_panel.dart').readAsString();
-    expect(source, contains('builder: (context, setSheetState) => SafeArea('));
-    expect(source, contains('heightFactor: MediaQuery.viewInsetsOf(sheetContext).bottom > 0'));
-    expect(source, contains('EdgeInsets.fromLTRB(16, 12, 16, 28)'));
+    expect(source, contains('isScrollControlled: true'));
+    expect(source, contains('MediaQuery.viewInsetsOf(sheetContext).bottom + 18'));
+    expect(source, contains("allowCreate: false"));
+    expect(source, contains("tr('saveWarrantyInformation')"));
   });
 
 }

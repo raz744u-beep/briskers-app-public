@@ -336,7 +336,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           !_copying) {
         _autoScanLaunched = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _takeReceiptPhoto();
+          if (mounted) _takeReceiptPhoto(scanWithAi: true);
         });
       }
     } catch (error) {
@@ -875,7 +875,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     if (value != null && mounted) setState(() => _endDate = value);
   }
 
-  Future<void> _takeReceiptPhoto() async {
+  Future<void> _takeReceiptPhoto({bool scanWithAi = false}) async {
     _counterpartyFocusNode.unfocus();
     final file = await _picker.pickImage(
       source: ImageSource.camera,
@@ -884,11 +884,11 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
     );
     if (file != null && mounted) {
       setState(() => _receipts = [..._receipts, file]);
-      await _readReceipt(file);
+      if (scanWithAi) await _readReceipt(file);
     }
   }
 
-  Future<void> _addReceipts() async {
+  Future<void> _addReceipts({bool scanWithAi = false}) async {
     _counterpartyFocusNode.unfocus();
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
@@ -898,14 +898,14 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF167F43)),
+              title: Text(tr('takePhoto')),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
-              title: const Text('Take photo'),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
+              title: Text(tr('chooseFromGallery')),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
             ),
           ],
         ),
@@ -920,10 +920,10 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
       );
       if (files.isNotEmpty && mounted) {
         setState(() => _receipts = [..._receipts, ...files]);
-        await _readReceipt(files.first);
+        if (scanWithAi) await _readReceipt(files.first);
       }
     } else {
-      await _takeReceiptPhoto();
+      await _takeReceiptPhoto(scanWithAi: scanWithAi);
     }
   }
 
@@ -1287,22 +1287,34 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen> {
                           }),
                 ),
                 const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _saving || _readingReceipt ? null : _addReceipts,
-                  icon: _readingReceipt
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.document_scanner_outlined),
-                  label: Text(
-                    _readingReceipt
-                        ? tr('readingReceipt')
-                        : (_receipts.isEmpty
-                            ? tr('scanAddReceipt')
-                            : '${_receipts.length} receipt photo(s)'),
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _saving || _readingReceipt
+                            ? null : () => _addReceipts(),
+                        icon: const Icon(Icons.add_a_photo_outlined,
+                            color: Color(0xFF167F43)),
+                        label: Text(_receipts.isEmpty
+                            ? tr('attachPhoto')
+                            : '${_receipts.length} ${tr('photosAttached')}'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _saving || _readingReceipt
+                            ? null : () => _addReceipts(scanWithAi: true),
+                        icon: _readingReceipt
+                            ? const SizedBox(width: 18, height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.document_scanner_outlined,
+                                color: Color(0xFF2468BB)),
+                        label: Text(_readingReceipt ? tr('readingReceipt')
+                            : tr('scanWithAi')),
+                      ),
+                    ),
+                  ],
                 ),
                 if ((_receiptReadMessage ?? '').isNotEmpty)
                   Padding(

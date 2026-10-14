@@ -6,11 +6,14 @@ import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
 import '../core/job_status_style.dart';
+import '../core/job_list_options.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
+import '../services/job_summary_visibility.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_job_repository.dart';
+import '../services/local_job_access_history.dart';
 import '../services/local_customer_repository.dart';
 import '../services/offline_job_admin_service.dart';
 import '../widgets/job_compact_card.dart';
@@ -27,6 +30,10 @@ class JobsScreen extends StatefulWidget {
     this.refreshToken = 0,
     this.onJobsChanged,
     this.jobDetailBottomNavigationBar,
+    this.repository,
+    this.documentRepository,
+    this.userId,
+    this.visibilityFactory,
   });
 
   final String businessId;
@@ -34,6 +41,14 @@ class JobsScreen extends StatefulWidget {
   final int refreshToken;
   final VoidCallback? onJobsChanged;
   final Widget? jobDetailBottomNavigationBar;
+  final LocalJobRepository? repository;
+  final LocalDocumentRepository? documentRepository;
+  final String? userId;
+  final JobSummaryVisibility Function(
+    String businessId,
+    ValueChanged<Set<String>> onQuarantine,
+  )?
+  visibilityFactory;
 
   @override
   State<JobsScreen> createState() => _JobsScreenState();
@@ -41,18 +56,77 @@ class JobsScreen extends StatefulWidget {
 
 class _JobsScreenState extends State<JobsScreen> {
   static const _api = BriskersApi();
-  final LocalJobRepository _localJobs = LocalJobRepository();
+  late final LocalJobRepository _localJobs =
+      widget.repository ?? LocalJobRepository();
   final JobSyncService _jobSync = JobSyncService();
   final DocumentIndexSyncService _documentSync = DocumentIndexSyncService();
-  final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
+  late final LocalDocumentRepository _localDocuments =
+      widget.documentRepository ?? LocalDocumentRepository();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
 
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _statuses = const [];
   String? _selectedStatus;
+  JobListView _view = JobListView.recent;
+  JobListSort _sort = JobListSort.lastAccessed;
+  static const _pageSize = 30;
+  int _visibleLimit = _pageSize;
+  bool _restoredView = false;
+  bool _loadingMore = false;
+  String? get _userId => widget.userId ?? LocalJobAccessHistory.currentUserId;
+  String get _storageId =>
+      'jobs-view:${widget.businessId}:${_userId ?? "signed-out"}';
+  String _text(String en, String es) =>
+      BriskersLanguageController.instance.isSpanish ? es : en;
+
+  void _rememberView() {
+    PageStorage.maybeOf(context)?.writeState(
+      context,
+      JobListPreferences(
+        view: _view,
+        sort: _sort,
+        status: _selectedStatus,
+        search: _search.text,
+        visibleLimit: _visibleLimit,
+      ),
+      identifier: _storageId,
+    );
+  }
+
+  void _changeView(JobListView value) {
+    _searchDebounce?.cancel();
+    setState(() {
+      _view = value;
+      _visibleLimit = _pageSize;
+      if (value == JobListView.active &&
+          const {
+            'completed',
+            'cancelled',
+            'closed',
+          }.contains(_selectedStatus)) {
+        _selectedStatus = null;
+      }
+    });
+    _rememberView();
+    unawaited(_load(refreshRemote: false));
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore) return;
+    setState(() {
+      _loadingMore = true;
+      _visibleLimit += _pageSize;
+    });
+    _rememberView();
+    // Re-read an expanded prefix instead of appending OFFSET pages: if a sync
+    // changed ordering, a row cannot be duplicated or silently skipped.
+    await _load(refreshRemote: false);
+    if (mounted) setState(() => _loadingMore = false);
+  }
+
   final TextEditingController _search = TextEditingController();
   Timer? _searchDebounce;
-  int _loadGeneration = 0;
+  late JobSummaryVisibility _jobVisibility;
   int _totalCount = 0;
   Map<String, int> _statusCounts = const {};
   List<Map<String, dynamic>> _documentMatches = const [];
@@ -69,11 +143,93 @@ class _JobsScreenState extends State<JobsScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _listenForQuarantine();
+  }
+
+  void _listenForQuarantine() {
+    void onQuarantine(Set<String> jobIds) {
+      if (!mounted) return;
+      setState(() {
+        if (_rows != null) {
+          _rows = JobSummaryVisibility.withoutJobs(_rows!, jobIds);
+        }
+        _documentMatches = _withoutJobLabels(_documentMatches, jobIds);
+        _totalCount = _rows?.length ?? 0;
+        _statusCounts = const {};
+        if (jobIds.contains(_busyJobId)) _busyJobId = null;
+        _onlineReady = false;
+        _showingLocal = _rows != null;
+      });
+      unawaited(_refreshQuarantineCounts());
+    }
+
+    _jobVisibility =
+        widget.visibilityFactory?.call(widget.businessId, onQuarantine) ??
+        JobSummaryVisibility(
+          businessId: widget.businessId,
+          onQuarantine: onQuarantine,
+        );
+  }
+
+  // A document may remain independently readable after its Job is revoked.
+  List<Map<String, dynamic>> _withoutJobLabels(
+    List<Map<String, dynamic>> rows,
+    Set<String> jobIds,
+  ) => rows
+      .map(
+        (row) => jobIds.contains(row['job_id']?.toString())
+            ? <String, dynamic>{...row, 'job_number': null, 'job_title': null}
+            : row,
+      )
+      .toList();
+
+  Future<void> _refreshQuarantineCounts() async {
+    final visibility = _jobVisibility;
+    final generation = visibility.epoch;
+    try {
+      final counts = await Future.wait<dynamic>([
+        _localJobs.jobCount(
+          widget.businessId,
+          status: _selectedStatus,
+          search: _search.text.trim(),
+          view: _view,
+        ),
+        _localJobs.jobStatusCounts(widget.businessId, view: _view),
+      ]);
+      if (!mounted || !visibility.isCurrent(generation)) return;
+      setState(() {
+        _totalCount = counts[0] as int;
+        _statusCounts = Map<String, int>.from(counts[1] as Map);
+      });
+    } catch (_) {
+      // Keep already-pruned cards if the durable local counts cannot be read.
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _restoreView();
+  }
+
+  void _restoreView() {
+    if (_restoredView) return;
+    _restoredView = true;
+    final saved = PageStorage.maybeOf(context)
+        ?.readState(context, identifier: _storageId);
+    if (saved is JobListPreferences) {
+      _view = saved.view;
+      _sort = saved.sort;
+      _selectedStatus = saved.status;
+      _search.text = saved.search;
+      _visibleLimit = saved.visibleLimit;
+    }
+    unawaited(_load());
   }
 
   @override
   void dispose() {
+    _jobVisibility.dispose();
     _searchDebounce?.cancel();
     _search.dispose();
     super.dispose();
@@ -82,7 +238,28 @@ class _JobsScreenState extends State<JobsScreen> {
   @override
   void didUpdateWidget(covariant JobsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.refreshToken != widget.refreshToken) {
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.userId != widget.userId) {
+      _jobVisibility.dispose();
+      _searchDebounce?.cancel();
+      _search.clear();
+      _rows = null;
+      _documentMatches = const [];
+      _statuses = const [];
+      _statusCounts = const {};
+      _totalCount = 0;
+      _busyJobId = null;
+      _onlineReady = false;
+      _showingLocal = false;
+      _loadingMore = false;
+      _view = JobListView.recent;
+      _sort = JobListSort.lastAccessed;
+      _selectedStatus = null;
+      _visibleLimit = _pageSize;
+      _restoredView = false;
+      _listenForQuarantine();
+      _restoreView();
+    } else if (oldWidget.refreshToken != widget.refreshToken) {
       _load();
     }
   }
@@ -91,27 +268,32 @@ class _JobsScreenState extends State<JobsScreen> {
     if (!_canManage) return;
     final selected = await Navigator.push<Map<String, dynamic>>(
       context,
-      MaterialPageRoute(builder: (_) =>
-          JobCustomerPickerScreen(businessId: widget.businessId)),
+      MaterialPageRoute(
+        builder: (_) => JobCustomerPickerScreen(businessId: widget.businessId),
+      ),
     );
     if (selected == null || !mounted) return;
     try {
       final id = selected['id']?.toString() ?? '';
       if (id.isEmpty) return;
-      final localDetail = await LocalCustomerRepository()
-          .customerDetail(widget.businessId, id);
-      final detail = localDetail ??
-          await _api.customerDetail(widget.businessId, id);
+      final localDetail = await LocalCustomerRepository().customerDetail(
+        widget.businessId,
+        id,
+      );
+      final detail =
+          localDetail ?? await _api.customerDetail(widget.businessId, id);
       if (!mounted) return;
       final created = await Navigator.push<bool>(
         context,
-        MaterialPageRoute(builder: (_) => JobCreateScreen(
-          businessId: widget.businessId,
-          customerId: id,
-          customerName: selected['display_name']?.toString() ?? 'Customer',
-          roleCode: widget.roleCode,
-          vehicles: List<dynamic>.from(detail['vehicles'] ?? const []),
-        )),
+        MaterialPageRoute(
+          builder: (_) => JobCreateScreen(
+            businessId: widget.businessId,
+            customerId: id,
+            customerName: selected['display_name']?.toString() ?? 'Customer',
+            roleCode: widget.roleCode,
+            vehicles: List<dynamic>.from(detail['vehicles'] ?? const []),
+          ),
+        ),
       );
       if (created == true && mounted) {
         await _load();
@@ -126,138 +308,124 @@ class _JobsScreenState extends State<JobsScreen> {
     }
   }
 
-  Future<void> _load() async {
-    final generation = ++_loadGeneration;
+  Future<void> _load({bool refreshRemote = true}) async {
+    final visibility = _jobVisibility;
+    final generation = visibility.beginLoad();
+    final businessId = widget.businessId;
+    final query = _search.text.trim();
+    final view = _view;
+    final sort = _sort;
+    final status = _selectedStatus;
+    final limit = _visibleLimit;
+    final userId = _userId;
     var localAvailable = false;
-    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
+    final mode = BriskersConnectionModeController.instance;
 
-    if (!forceOnline) {
-      try {
-      final query = _search.text.trim();
-      final localResults = await Future.wait<dynamic>([
+    Future<void> readSavedJobs({required bool online}) async {
+      final results = await Future.wait<dynamic>([
         _localJobs.listJobs(
-          widget.businessId,
-          status: _selectedStatus,
-          search: query.isEmpty ? null : query,
-          limit: 30,
+          businessId,
+          status: status,
+          search: query,
+          view: view,
+          sort: sort,
+          userId: userId,
+          limit: limit,
         ),
-        _localJobs.jobStatuses(widget.businessId),
-        _localJobs.hasJobBootstrap(widget.businessId),
+        _localJobs.jobStatuses(businessId),
         _localJobs.jobCount(
-          widget.businessId,
-          status: _selectedStatus,
-          search: query.isEmpty ? null : query,
+          businessId,
+          status: status,
+          search: query,
+          view: view,
         ),
-        _localJobs.jobStatusCounts(widget.businessId),
+        _localJobs.jobStatusCounts(businessId, view: view),
+        query.isEmpty
+            ? Future.value(<Map<String, dynamic>>[])
+            : _localDocuments.search(businessId, query, limit: 30),
       ]);
-
-      final localRows =
-          List<Map<String, dynamic>>.from(localResults[0] as List);
-      final documentMatches = query.isEmpty
-          ? <Map<String, dynamic>>[]
-          : await _localDocuments.search(widget.businessId, query, limit: 30);
-      final localStatuses =
-          List<Map<String, dynamic>>.from(localResults[1] as List);
-      final bootstrapped = localResults[2] == true;
-      final localTotal = localResults[3] as int;
-      final statusCounts = Map<String, int>.from(localResults[4] as Map);
-
-      localAvailable = bootstrapped || localRows.isNotEmpty;
-
-      if (mounted && localAvailable && generation == _loadGeneration) {
-        setState(() {
-          _rows = localRows;
-          _statuses = localStatuses;
-          _showingLocal = true;
-          _onlineReady = false;
-          _totalCount = localTotal;
-          _statusCounts = statusCounts;
-          _documentMatches = documentMatches;
-          _error = null;
-        });
-      }
-    } catch (_) {
-      // Online loading below can still succeed if the local cache is unavailable.
-      }
-    }
-
-    try {
-      // Jobs themselves are refreshed incrementally into the local database.
-      // Do not download the complete server job list as history grows.
-      final onlineStatuses = await _api.jobStatuses(widget.businessId);
-      await _localJobs.replaceJobStatuses(widget.businessId, onlineStatuses);
-      if (_canManage) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {
-          // Queued job edits remain local and retry when connectivity returns.
-        }
-        try {
-          await _offlineJobAdmin.refreshEmployees(widget.businessId);
-        } catch (_) {
-          // Keep the last cached employee list for offline assignment.
-        }
-      }
-      await _jobSync.pull(widget.businessId);
-      unawaited(_documentSync.refreshBestEffort(widget.businessId));
-
-      final query = _search.text.trim();
-      final refreshed = await Future.wait<dynamic>([
-        _localJobs.listJobs(
-          widget.businessId,
-          status: _selectedStatus,
-          search: query.isEmpty ? null : query,
-          limit: 30,
-        ),
-        _localJobs.jobCount(
-          widget.businessId,
-          status: _selectedStatus,
-          search: query.isEmpty ? null : query,
-        ),
-        _localJobs.jobStatusCounts(widget.businessId),
-      ]);
-
-      final onlineDocumentMatches = query.isEmpty
-          ? <Map<String, dynamic>>[]
-          : await _localDocuments.search(
-              widget.businessId, query, limit: 30,
-            );
-      if (!mounted || generation != _loadGeneration) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
+      final visibleRows = await visibility.filter(
+        List<Map<String, dynamic>>.from(results[0] as List),
+      );
+      final blockedJobIds = await visibility.blockedJobIds();
+      if (!mounted || !visibility.isCurrent(generation)) return;
+      localAvailable = true;
       setState(() {
-        _rows = List<Map<String, dynamic>>.from(refreshed[0] as List);
-        _statuses = onlineStatuses;
-        _documentMatches = onlineDocumentMatches;
-        _totalCount = refreshed[1] as int;
-        _statusCounts = Map<String, int>.from(refreshed[2] as Map);
-        _showingLocal = false;
-        _onlineReady = true;
+        _rows = visibleRows;
+        _statuses = List<Map<String, dynamic>>.from(results[1] as List);
+        _totalCount = results[2] as int;
+        _statusCounts = Map<String, int>.from(results[3] as Map);
+        _documentMatches = _withoutJobLabels(
+          List<Map<String, dynamic>>.from(results[4] as List),
+          blockedJobIds,
+        );
+        _showingLocal = !online;
+        _onlineReady = online;
         _error = null;
       });
+    }
+
+    if (!mode.forceOnline || !refreshRemote) {
+      try {
+        await readSavedJobs(online: !refreshRemote && _onlineReady);
+      } catch (error) {
+        if (mode.forceOffline && mounted && visibility.isCurrent(generation)) {
+          setState(() {
+            _rows = const [];
+            _error = error.toString();
+          });
+        }
+      }
+    }
+    if (!mounted || !visibility.isCurrent(generation)) return;
+    if (mode.forceOffline || !refreshRemote) return;
+
+    try {
+      final onlineStatuses = await _api.jobStatuses(businessId);
+      if (!mounted || !visibility.isCurrent(generation)) return;
+      await _localJobs.replaceJobStatuses(businessId, onlineStatuses);
+      if (_canManage) {
+        try {
+          await _offlineJobAdmin.flush(businessId);
+        } catch (_) {
+          // Queued edits remain local and retry when connectivity returns.
+        }
+        try {
+          await _offlineJobAdmin.refreshEmployees(businessId);
+        } catch (_) {
+          // Keep the last employee choices for offline assignment.
+        }
+      }
+      if (!mounted || !visibility.isCurrent(generation)) return;
+      // Incremental sync populates the same SQLite query in every mode.
+      await _jobSync.pull(businessId);
+      unawaited(_documentSync.refreshBestEffort(businessId));
+      if (!mounted || !visibility.isCurrent(generation)) return;
+      await readSavedJobs(online: true);
     } catch (error) {
-      if (!mounted || generation != _loadGeneration) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _onlineReady = false;
-        if (localAvailable && !forceOnline) {
-          _showingLocal = true;
+        _showingLocal = localAvailable && !mode.forceOnline;
+        if (_showingLocal) {
           _error = null;
         } else {
           _rows = const [];
-          _showingLocal = false;
           _error = error.toString();
         }
       });
     }
   }
 
-
   void _searchChanged() {
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(
-      const Duration(milliseconds: 300),
-      () {
-        if (mounted) _load();
-      },
-    );
+    _visibleLimit = _pageSize;
+    _rememberView();
+    _jobVisibility.beginLoad();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) _load(refreshRemote: false);
+    });
   }
 
   Future<void> _openDocument(Map<String, dynamic> document) async {
@@ -269,9 +437,13 @@ class _JobsScreenState extends State<JobsScreen> {
         builder: (_) => JobDocumentScreen(
           businessId: widget.businessId,
           documentId: id,
+          roleCode: widget.roleCode,
           isOwner: widget.roleCode == 'owner',
-          canManageExpenses: <String>{'owner', 'manager', 'office'}
-              .contains(widget.roleCode),
+          canManageExpenses: <String>{
+            'owner',
+            'manager',
+            'office',
+          }.contains(widget.roleCode),
         ),
       ),
     );
@@ -279,7 +451,10 @@ class _JobsScreenState extends State<JobsScreen> {
     widget.onJobsChanged?.call();
   }
 
-  Future<void> _openJob(Map<String, dynamic> job, {String? initialAction}) async {
+  Future<void> _openJob(
+    Map<String, dynamic> job, {
+    String? initialAction,
+  }) async {
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
@@ -304,15 +479,14 @@ class _JobsScreenState extends State<JobsScreen> {
       List<Map<String, dynamic>> employees;
       if (_onlineReady) {
         try {
-          employees =
-              await _offlineJobAdmin.refreshEmployees(widget.businessId);
+          employees = await _offlineJobAdmin.refreshEmployees(
+            widget.businessId,
+          );
         } catch (_) {
-          employees =
-              await _offlineJobAdmin.cachedEmployees(widget.businessId);
+          employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
         }
       } else {
-        employees =
-            await _offlineJobAdmin.cachedEmployees(widget.businessId);
+        employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
       }
 
       if (!mounted) return;
@@ -459,7 +633,9 @@ class _JobsScreenState extends State<JobsScreen> {
               ),
             ),
             onPressed: () {
-              final parsed = num.tryParse(controller.text.trim().isEmpty ? '0' : controller.text.trim());
+              final parsed = num.tryParse(
+                controller.text.trim().isEmpty ? '0' : controller.text.trim(),
+              );
               Navigator.pop(dialogContext, parsed);
             },
             child: const Text('Save'),
@@ -498,8 +674,7 @@ class _JobsScreenState extends State<JobsScreen> {
     Map<String, dynamic> job,
     String statusCode,
   ) async {
-    if (!_canManage ||
-        statusCode == job['status']?.toString()) {
+    if (!_canManage || statusCode == job['status']?.toString()) {
       return;
     }
 
@@ -540,13 +715,123 @@ class _JobsScreenState extends State<JobsScreen> {
     }
   }
 
-  List<Map<String, dynamic>> get _visibleRows {
-    final rows = _rows ?? const <Map<String, dynamic>>[];
-    if (_selectedStatus == null) return rows;
-    return rows
-        .where((job) => job['status']?.toString() == _selectedStatus)
-        .toList();
+  List<Map<String, dynamic>> get _visibleRows =>
+      _rows ?? const <Map<String, dynamic>>[];
+
+  Iterable<Widget> _jobCards(List<Map<String, dynamic>> rows) sync* {
+    String? previousGroup;
+    for (final job in rows) {
+      if (_view == JobListView.active) {
+        final group = job['_temporary'] == true
+            ? '__temporary__'
+            : job['status']?.toString() ?? '';
+        if (group != previousGroup) {
+          yield Padding(
+            padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
+            child: Text(
+              group == '__temporary__'
+                  ? _text('Pending sync', 'Pendiente de sincronización')
+                  : jobStatusLabel(
+                      group,
+                      job['status_name']?.toString() ?? group,
+                    ),
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: BriskersColors.jobs,
+              ),
+            ),
+          );
+          previousGroup = group;
+        }
+      }
+      yield _jobCard(job);
+    }
   }
+
+  Widget _viewControls() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      SegmentedButton<JobListView>(
+        segments: [
+          ButtonSegment(
+            value: JobListView.recent,
+            label: Text(_text('Recent', 'Recientes')),
+          ),
+          ButtonSegment(
+            value: JobListView.active,
+            label: Text(_text('Active', 'Activos')),
+          ),
+          ButtonSegment(
+            value: JobListView.all,
+            label: Text(_text('All', 'Todos')),
+          ),
+        ],
+        selected: {_view},
+        onSelectionChanged: (values) => _changeView(values.single),
+      ),
+      if (_view == JobListView.recent)
+        Row(
+          children: [
+            const Icon(Icons.sort, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DropdownButton<JobListSort>(
+                key: const ValueKey('job-list-sort'),
+                isExpanded: true,
+                value: _sort,
+                underline: const SizedBox.shrink(),
+                items: [
+                  DropdownMenuItem(
+                    value: JobListSort.lastAccessed,
+                    child: Text(_text('Last accessed', 'Último acceso')),
+                  ),
+                  DropdownMenuItem(
+                    value: JobListSort.lastModified,
+                    child: Text(_text('Last modified', 'Última modificación')),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {
+                    _sort = value;
+                    _visibleLimit = _pageSize;
+                  });
+                  _rememberView();
+                  unawaited(_load(refreshRemote: false));
+                },
+              ),
+            ),
+          ],
+        )
+      else
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Text(
+            _view == JobListView.active
+                ? _text(
+                    'By status · newest created first',
+                    'Por estado · más recientes primero',
+                  )
+                : _text(
+                    'Complete history · last modified',
+                    'Historial completo · última modificación',
+                  ),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      if (_view == JobListView.recent && _sort == JobListSort.lastAccessed)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            _text(
+              'Your opens on this device. Unopened jobs use last activity.',
+              'Tus accesos en este dispositivo. Sin accesos, se usa la última actividad.',
+            ),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+    ],
+  );
 
   int _statusCount(String code) => _statusCounts[code] ?? 0;
 
@@ -564,13 +849,15 @@ class _JobsScreenState extends State<JobsScreen> {
     );
   }
 
-  List<Map<String, dynamic>> _availableStatusesFor(
-    Map<String, dynamic> job,
-  ) => _statuses;
+  List<Map<String, dynamic>> _availableStatusesFor(Map<String, dynamic> job) =>
+      _statuses;
 
   Widget _statusControl(Map<String, dynamic> job) {
     final color = colorFromHex(job['status_color']?.toString());
-    final label = jobStatusLabel(job['status']?.toString(), job['status_name']?.toString() ?? 'Status');
+    final label = jobStatusLabel(
+      job['status']?.toString(),
+      job['status_name']?.toString() ?? 'Status',
+    );
     final busy = _busyJobId == job['id']?.toString();
 
     final child = Container(
@@ -588,10 +875,7 @@ class _JobsScreenState extends State<JobsScreen> {
             SizedBox(
               width: 12,
               height: 12,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.5,
-                color: color,
-              ),
+              child: CircularProgressIndicator(strokeWidth: 1.5, color: color),
             )
           else
             Flexible(
@@ -633,7 +917,12 @@ class _JobsScreenState extends State<JobsScreen> {
                 color: itemColor,
               ),
               const SizedBox(width: 10),
-              Text(jobStatusLabel(status['code']?.toString(), status['name']?.toString() ?? '')),
+              Text(
+                jobStatusLabel(
+                  status['code']?.toString(),
+                  status['name']?.toString() ?? '',
+                ),
+              ),
             ],
           ),
         );
@@ -666,7 +955,10 @@ class _JobsScreenState extends State<JobsScreen> {
             if (owner)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.red),
-                title: const Text('Delete Job', style: TextStyle(color: Colors.red)),
+                title: const Text(
+                  'Delete Job',
+                  style: TextStyle(color: Colors.red),
+                ),
                 onTap: () => Navigator.pop(sheetContext, 'delete'),
               ),
             const Divider(),
@@ -711,16 +1003,14 @@ class _JobsScreenState extends State<JobsScreen> {
   }
 
   Widget _jobCard(Map<String, dynamic> job) => JobCompactCard(
-        job: job,
-        statusControl: _statusControl(job),
-        onOpen: () => _openJob(job),
-        onLongPress: () => _showJobActions(job),
-        onEditMechanic:
-            _canManage ? () => _quickEditMechanic(job) : null,
-        onEditPlannedTime:
-            _canManage ? () => _quickEditPlannedTime(job) : null,
-        canOpen: _busyJobId != job['id']?.toString(),
-      );
+    job: job,
+    statusControl: _statusControl(job),
+    onOpen: () => _openJob(job),
+    onLongPress: () => _showJobActions(job),
+    onEditMechanic: _canManage ? () => _quickEditMechanic(job) : null,
+    onEditPlannedTime: _canManage ? () => _quickEditPlannedTime(job) : null,
+    canOpen: _busyJobId != job['id']?.toString(),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -739,143 +1029,202 @@ class _JobsScreenState extends State<JobsScreen> {
                   children: [
                     Text(
                       tr('jobs'),
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  color: BriskersColors.jobs,
-                                ),
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: BriskersColors.jobs,
+                          ),
                     ),
                     const SizedBox(width: 8),
-                    PopupMenuButton<String>(
-                    tooltip: tr('filterJobs'),
-                    onSelected: (value) {
-                      setState(() => _selectedStatus = value == '__all__' ? null : value);
-                      _load();
-                    },
-                    itemBuilder: (_) => [
-                      const PopupMenuItem<String>(
-                        value: 'paid_still_open',
-                        child: Row(children: [
-                          Icon(Icons.payments_outlined),
-                          SizedBox(width: 10),
-                          Text('Paid, Still Open'),
-                        ]),
-                      ),
-                      PopupMenuItem<String>(
-                        value: '__all__',
-                        child: Row(
-                                children: [
-                                  const Icon(Icons.all_inclusive),
-                                  const SizedBox(width: 10),
-                                  Expanded(child: Text(tr('all'))),
-                                  _menuCount(_statusCounts.values.fold<int>(0, (a, b) => a + b), alwaysShow: true),
-                                ],
-                        ),
-                      ),
-                      ..._statuses.map((status) {
-                        final color =
-                                  colorFromHex(status['color_hex']?.toString());
-                        final code = status['code']?.toString() ?? '';
-                        final count = _statusCount(code);
-                        return PopupMenuItem<String>(
-                                value: code,
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      jobStatusIcon(status['icon_key']?.toString()),
-                                      color: color,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(jobStatusLabel(status['code']?.toString(), status['name']?.toString() ?? '')),
-                                    ),
-                                    _menuCount(count),
-                                  ],
-                                ),
-                        );
-                      }),
-                    ],
-                    child: Builder(
-                      builder: (context) {
-                        Map<String, dynamic>? selected;
-                        if (_selectedStatus != null) {
-                                for (final status in _statuses) {
-                                  if (status['code']?.toString() == _selectedStatus) {
-                                    selected = status;
-                                    break;
-                                  }
-                                }
-                        }
-                        final color = selected == null
-                                  ? BriskersColors.jobs
-                                  : colorFromHex(selected['color_hex']?.toString());
-                        final label = _selectedStatus == 'paid_still_open'
-                                  ? 'Paid, Still Open'
-                                  : selected == null
-                                  ? tr('all')
-                                  : jobStatusLabel(selected['code']?.toString(), selected['name']?.toString() ?? '');
-
-                        return Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: color.withValues(alpha: 0.08),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: color.withValues(alpha: 0.45),
+                    Expanded(
+                      child: PopupMenuButton<String>(
+                        tooltip: tr('filterJobs'),
+                        onSelected: (value) {
+                          setState(() {
+                            _selectedStatus = value == '__all__' ? null : value;
+                            _visibleLimit = _pageSize;
+                          });
+                          _rememberView();
+                          _load(refreshRemote: false);
+                        },
+                        itemBuilder: (_) => [
+                          PopupMenuItem<String>(
+                            value: 'paid_still_open',
+                            child: Row(
+                              children: [
+                                const Icon(Icons.payments_outlined),
+                                const SizedBox(width: 10),
+                                Text(
+                                  _text(
+                                    'Paid, Still Open',
+                                    'Pagado, aún abierto',
                                   ),
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem<String>(
+                            value: '__all__',
+                            child: Row(
+                              children: [
+                                const Icon(Icons.all_inclusive),
+                                const SizedBox(width: 10),
+                                Expanded(child: Text(tr('all'))),
+                                _menuCount(
+                                  _statusCounts.values.fold<int>(
+                                    0,
+                                    (a, b) => a + b,
+                                  ),
+                                  alwaysShow: true,
+                                ),
+                              ],
+                            ),
+                          ),
+                          ..._statuses
+                              .where(
+                                (status) =>
+                                    _view != JobListView.active ||
+                                    !const {
+                                      'completed',
+                                      'cancelled',
+                                      'closed',
+                                    }.contains(status['code']),
+                              )
+                              .map((status) {
+                                final color = colorFromHex(
+                                  status['color_hex']?.toString(),
+                                );
+                                final code = status['code']?.toString() ?? '';
+                                final count = _statusCount(code);
+                                return PopupMenuItem<String>(
+                                  value: code,
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        jobStatusIcon(
+                                          status['icon_key']?.toString(),
+                                        ),
+                                        color: color,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          jobStatusLabel(
+                                            status['code']?.toString(),
+                                            status['name']?.toString() ?? '',
+                                          ),
+                                        ),
+                                      ),
+                                      _menuCount(count),
+                                    ],
+                                  ),
+                                );
+                              }),
+                        ],
+                        child: Builder(
+                          builder: (context) {
+                            Map<String, dynamic>? selected;
+                            if (_selectedStatus != null) {
+                              for (final status in _statuses) {
+                                if (status['code']?.toString() ==
+                                    _selectedStatus) {
+                                  selected = status;
+                                  break;
+                                }
+                              }
+                            }
+                            final color = selected == null
+                                ? BriskersColors.jobs
+                                : colorFromHex(
+                                    selected['color_hex']?.toString(),
+                                  );
+                            final label = _selectedStatus == 'paid_still_open'
+                                ? _text(
+                                    'Paid, Still Open',
+                                    'Pagado, aún abierto',
+                                  )
+                                : selected == null
+                                ? _text('All statuses', 'Todos los estados')
+                                : jobStatusLabel(
+                                    selected['code']?.toString(),
+                                    selected['name']?.toString() ?? '',
+                                  );
+
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: color.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: color.withValues(alpha: 0.45),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(
+                                    child: Text(
                                       label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         color: color,
                                         fontWeight: FontWeight.w800,
                                       ),
                                     ),
-                                    const SizedBox(width: 3),
-                                    Icon(
-                                      Icons.chevron_right,
-                                      size: 18,
-                                      color: color,
-                                    ),
-                                  ],
-                                ),
-                        );
-                      },
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Icon(
+                                    Icons.chevron_right,
+                                    size: 18,
+                                    color: color,
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
                     ),
-                  ),
-                    const Spacer(),
+                    const SizedBox(width: 8),
                     if (_rows != null)
                       Text(
                         '${tr('total')} $_totalCount',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    color: BriskersColors.jobs,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: BriskersColors.jobs,
+                              fontWeight: FontWeight.w700,
+                            ),
                       ),
                   ],
                 ),
                 const SizedBox(height: 8),
+                _viewControls(),
                 Row(
                   children: [
                     Expanded(
                       child: SearchBar(
                         controller: _search,
-                        hintText: 'Search job, customer, vehicle, VIN, plate or invoice #',
+                        hintText: _text(
+                          'Search job, customer, vehicle or invoice #',
+                          'Buscar trabajo, cliente, vehículo o factura',
+                        ),
                         leading: const Icon(Icons.search),
                         trailing: [
                           if (_search.text.isNotEmpty)
                             IconButton(
-                              tooltip: 'Clear',
+                              tooltip: _text('Clear', 'Borrar'),
                               onPressed: () {
                                 _searchDebounce?.cancel();
                                 _search.clear();
-                                setState(() {});
-                                _load();
+                                setState(() {
+                                  _visibleLimit = _pageSize;
+                                });
+                                _rememberView();
+                                _load(refreshRemote: false);
                               },
                               icon: const Icon(Icons.close),
                             ),
@@ -905,8 +1254,10 @@ class _JobsScreenState extends State<JobsScreen> {
         ),
         Expanded(
           child: RefreshIndicator(
-            onRefresh: _load,
+            onRefresh: () => _load(),
             child: ListView(
+              key: PageStorageKey('jobs-list:$_storageId'),
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 80),
               children: [
                 if (_showingLocal)
@@ -920,15 +1271,18 @@ class _JobsScreenState extends State<JobsScreen> {
                       color: BriskersColors.jobs.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(9),
                     ),
-                    child: const Row(
+                    child: Row(
                       children: [
-                        Icon(Icons.cloud_off_outlined, size: 18),
-                        SizedBox(width: 7),
+                        const Icon(Icons.cloud_off_outlined, size: 18),
+                        const SizedBox(width: 7),
                         Expanded(
-                                child: Text(
-                                  'Showing saved jobs • online actions are temporarily disabled',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
-                                ),
+                          child: Text(
+                            _text(
+                              'Showing saved jobs · changes sync when connected',
+                              'Trabajos guardados · los cambios se sincronizarán al conectar',
+                            ),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
                         ),
                       ],
                     ),
@@ -944,13 +1298,14 @@ class _JobsScreenState extends State<JobsScreen> {
                     ),
                   ),
                 const SizedBox(height: 6),
-                if (_search.text.trim().isNotEmpty && _documentMatches.isNotEmpty) ...[
+                if (_search.text.trim().isNotEmpty &&
+                    _documentMatches.isNotEmpty) ...[
                   Text(
                     'Invoices & estimates',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                color: BriskersColors.invoices,
-                        ),
+                      fontWeight: FontWeight.w800,
+                      color: BriskersColors.invoices,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   ..._documentMatches.map(
@@ -958,21 +1313,28 @@ class _JobsScreenState extends State<JobsScreen> {
                       child: ListTile(
                         onTap: () => _openDocument(document),
                         leading: Icon(
-                                document['kind'] == 'estimate'
-                                    ? Icons.request_quote_outlined
-                                    : Icons.receipt_long_outlined,
-                                color: BriskersColors.invoices,
+                          document['kind'] == 'estimate'
+                              ? Icons.request_quote_outlined
+                              : Icons.receipt_long_outlined,
+                          color: BriskersColors.invoices,
                         ),
                         title: Text(
-                                '${document['kind'] == 'estimate' ? 'Estimate' : 'Invoice'} #${document['document_number'] ?? ''}',
+                          '${document['kind'] == 'estimate' ? 'Estimate' : 'Invoice'} #${document['document_number'] ?? ''}',
                         ),
                         subtitle: Text(
-                                [
-                                  document['customer_name'],
-                                  if ((document['job_number']?.toString() ?? '').isNotEmpty)
-                                    'Job #${document['job_number']}',
-                                  document['vehicle'],
-                                ].where((value) => value != null && value.toString().isNotEmpty).join(' • '),
+                          [
+                                document['customer_name'],
+                                if ((document['job_number']?.toString() ?? '')
+                                    .isNotEmpty)
+                                  'Job #${document['job_number']}',
+                                document['vehicle'],
+                              ]
+                              .where(
+                                (value) =>
+                                    value != null &&
+                                    value.toString().isNotEmpty,
+                              )
+                              .join(' • '),
                         ),
                       ),
                     ),
@@ -987,15 +1349,35 @@ class _JobsScreenState extends State<JobsScreen> {
                     ),
                   )
                 else if (visible.isEmpty)
-                  const Card(
+                  Card(
                     child: Padding(
-                      padding: EdgeInsets.all(18),
-                      child: Text('No jobs in this status.'),
+                      padding: const EdgeInsets.all(18),
+                      child: Text(
+                        _text(
+                          'No jobs match this view and filters.',
+                          'No hay trabajos para esta vista y filtros.',
+                        ),
+                      ),
                     ),
                   )
                 else
-                  ...visible.map(_jobCard),
-
+                  ..._jobCards(visible),
+                if (_rows != null && _rows!.length < _totalCount)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: OutlinedButton(
+                      key: const ValueKey('load-more-jobs'),
+                      onPressed: _loadingMore ? null : _loadMore,
+                      child: Text(
+                        _loadingMore
+                            ? _text('Loading…', 'Cargando…')
+                            : _text(
+                                'Load more (${_rows!.length} of $_totalCount)',
+                                'Cargar más (${_rows!.length} de $_totalCount)',
+                              ),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

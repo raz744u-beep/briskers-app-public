@@ -5,6 +5,24 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/import_cache_repair_service.dart';
+import 'package:briskers_app/services/test_job_cleanup_gateway.dart';
+
+class _RepairCleanupGateway extends TestJobCleanupGateway {
+  bool fail = false;
+  int calls = 0;
+
+  @override
+  Future<Map<String, dynamic>> tombstones(String businessId) async {
+    calls++;
+    if (fail) throw StateError('Deletion feed unavailable');
+    return {
+      'schema_version': 1,
+      'business_id': businessId,
+      'deleted_job_ids': <String>[],
+      'deleted_document_ids': <String>[],
+    };
+  }
+}
 
 class _RepairApi extends BriskersApi {
   _RepairApi({this.changeCursorOnVerify = false});
@@ -164,6 +182,7 @@ void main() {
     final result = await ImportCacheRepairService(
       api: _RepairApi(),
       database: db,
+      cleanupGateway: _RepairCleanupGateway(),
     ).repair('business-1');
 
     expect(result.customersRemoved, 1);
@@ -184,12 +203,35 @@ void main() {
       ImportCacheRepairService(
         api: _RepairApi(changeCursorOnVerify: true),
         database: db,
+        cleanupGateway: _RepairCleanupGateway(),
       ).repair('business-1'),
       throwsStateError,
     );
     expect(await _rows(db, 'local_customers'), 2);
     expect(await _rows(db, 'local_jobs'), 2);
     await db.close();
+  });
+
+  test('unknown cleanup feed stops repair without pruning cached records', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    try {
+      await _seed(db);
+      final api = _RepairApi();
+      final cleanup = _RepairCleanupGateway()..fail = true;
+      await expectLater(
+        ImportCacheRepairService(api: api, database: db, cleanupGateway: cleanup)
+            .repair('business-1'),
+        throwsStateError,
+      );
+      expect(cleanup.calls, 1);
+      expect(api.inventoryCalls, 0);
+      expect(await _rows(db, 'local_customers'), 2);
+      expect(await _rows(db, 'local_vehicles'), 2);
+      expect(await _rows(db, 'local_jobs'), 2);
+      expect(await _rows(db, 'local_documents'), 1);
+    } finally {
+      await db.close();
+    }
   });
 
   test('refuses repair with queued offline changes', () async {
@@ -203,7 +245,8 @@ void main() {
       ''',
     );
     await expectLater(
-      ImportCacheRepairService(api: _RepairApi(), database: db)
+      ImportCacheRepairService(api: _RepairApi(), database: db,
+        cleanupGateway: _RepairCleanupGateway())
           .repair('business-1'),
       throwsStateError,
     );
@@ -233,7 +276,8 @@ void main() {
       ''',
     );
     await expectLater(
-      ImportCacheRepairService(api: _RepairApi(), database: db)
+      ImportCacheRepairService(api: _RepairApi(), database: db,
+        cleanupGateway: _RepairCleanupGateway())
           .repair('business-1'),
       throwsStateError,
     );
