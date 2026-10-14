@@ -151,6 +151,7 @@ class SettingsScreen extends StatelessWidget {
                 MaterialPageRoute(
                   builder: (_) => LocalSyncStatusScreen(
                     businessId: businessId,
+                    isOwner: roleCode == 'owner',
                   ),
                 ),
               );
