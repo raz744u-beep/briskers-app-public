@@ -19,6 +19,7 @@ import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../../services/offline_customer_detail_write_service.dart';
 import '../../services/offline_financial_write_service.dart';
 import '../../services/offline_document_draft_service.dart';
+import '../../services/local_document_detail_cache.dart';
 import '../../services/offline_document_edit_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
@@ -438,6 +439,97 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     }
   }
 
+  Future<void> _removeTestEstimate78() async {
+    if (!widget.isOwner || _syncing) return;
+    const localId = 'local-estimate-ff67c47c-b116-437a-a8a4-2e3511695ef2';
+    const customerId = '74e2a6ce-75f7-4c9e-a888-fde4bfeab2b2';
+    const vehicleId = 'local-vehicle-1791733959244810';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remove disposable test estimate?'),
+        content: const Text(
+          'Remove only offline test estimate #78 and its pending upload? '
+          'All other estimates, invoices, customers, and jobs are preserved.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remove test estimate'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _syncing = true);
+    try {
+      await localDatabase.transaction(() async {
+        final queued = await localDatabase.customSelect(
+          """SELECT entity_id, state, payload_json FROM sync_outbox
+             WHERE business_id=? AND id=78 AND entity_type='document_draft_create'
+             LIMIT 1""",
+          variables: [Variable<String>(widget.businessId)],
+        ).get();
+        if (queued.length != 1 ||
+            queued.single.read<String>('entity_id') != localId ||
+            queued.single.read<String>('state') != 'pending') {
+          throw StateError('The test estimate queue changed. Nothing removed.');
+        }
+        final payload = Map<String, dynamic>.from(
+          jsonDecode(queued.single.read<String>('payload_json')) as Map);
+        if (payload['kind'] != 'estimate' ||
+            payload['customer_id'] != customerId ||
+            payload['vehicle_id'] != vehicleId ||
+            payload['job_id'] != null) {
+          throw StateError('Unexpected test estimate dependencies. Nothing removed.');
+        }
+        final docs = await localDatabase.customSelect(
+          """SELECT id,customer_id,job_id,sync_state FROM local_documents
+             WHERE business_id=? AND id=? LIMIT 1""",
+          variables: [Variable<String>(widget.businessId),
+            const Variable<String>(localId)],
+        ).get();
+        if (docs.length != 1 ||
+            docs.single.read<String>('customer_id') != customerId ||
+            docs.single.readNullable<String>('job_id') != null ||
+            docs.single.read<String>('sync_state') != 'pending') {
+          throw StateError('Local estimate has changed. Nothing removed.');
+        }
+        final other = await localDatabase.customSelect(
+          """SELECT COUNT(*) AS n FROM sync_outbox WHERE business_id=?
+             AND entity_id=? AND id<>78""",
+          variables: [Variable<String>(widget.businessId),
+            const Variable<String>(localId)],
+        ).getSingle();
+        if (other.read<int>('n') != 0) {
+          throw StateError('Another pending edit references the estimate.');
+        }
+        await localDatabase.customStatement(
+          """DELETE FROM sync_outbox WHERE business_id=? AND id=78
+             AND entity_id=? AND state='pending'""",
+          [widget.businessId, localId],
+        );
+        await localDatabase.customStatement(
+          """DELETE FROM local_documents WHERE business_id=? AND id=?
+             AND customer_id=? AND sync_state='pending'""",
+          [widget.businessId, localId, customerId],
+        );
+      });
+      await const LocalDocumentDetailCache().remove(widget.businessId, localId);
+      await _load();
+      if (mounted) {
+        setState(() => _syncMessage = 'Disposable estimate #78 removed locally.');
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
   Future<void> _syncNow() async {
     if (_syncing) return;
     setState(() {
@@ -818,6 +910,18 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                           ? null : _cancelOrphanedTestJobUpdate,
                       icon: const Icon(Icons.remove_circle_outline),
                       label: const Text('Cancel orphaned test update #81'),
+                    ),
+                  ],
+                  if (widget.isOwner &&
+                      _pendingDetails.any((e) => e['id'] == 78 &&
+                        e['type'] == 'document_draft_create' &&
+                        e['entity'] ==
+                          'local-estimate-ff67c47c-b116-437a-a8a4-2e3511695ef2')) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _syncing ? null : _removeTestEstimate78,
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Remove disposable test estimate #78'),
                     ),
                   ],
                   const SizedBox(height: 10),
