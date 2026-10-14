@@ -29,9 +29,11 @@ class LocalSyncStatusScreen extends StatefulWidget {
   const LocalSyncStatusScreen({
     super.key,
     required this.businessId,
+    this.isOwner = false,
   });
 
   final String businessId;
+  final bool isOwner;
 
   @override
   State<LocalSyncStatusScreen> createState() =>
@@ -349,6 +351,76 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       if (mounted) {
         setState(() => _syncing = false);
       }
+    }
+  }
+
+  /// Cancel only the proven orphaned test Job update. This operation
+  /// targets a local-only ID that cannot be used by UUID server RPCs.
+  Future<void> _cancelOrphanedTestJobUpdate() async {
+    if (!widget.isOwner || _syncing) return;
+    const orphanId = 'local-conversion-job-5b982dcb-6cd7-4aae-8e29-0945d100c04';
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Cancel orphaned test update?'),
+        content: const Text(
+          'This removes only the pending local Job update #81. '
+          'It does not delete an invoice, estimate, Job, customer, '
+          'or any server record. The action is blocked if anything '
+          'still references the temporary Job.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Confirm cancel'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true || !mounted) return;
+    setState(() => _syncing = true);
+    try {
+      await localDatabase.transaction(() async {
+        final rows = await localDatabase.customSelect(
+          """SELECT entity_id,state FROM sync_outbox
+             WHERE business_id=? AND id=81 AND entity_type='job_admin'
+             LIMIT 1""",
+          variables: [Variable<String>(widget.businessId)],
+        ).get();
+        if (rows.length != 1 ||
+            rows.single.read<String>('entity_id') != orphanId ||
+            rows.single.read<String>('state') != 'pending') {
+          throw StateError('Test operation #81 no longer matches. Nothing removed.');
+        }
+        final jobs = await localDatabase.customSelect(
+          'SELECT COUNT(*) AS n FROM local_jobs WHERE business_id=? AND id=?',
+          variables: [Variable<String>(widget.businessId),
+            const Variable<String>(orphanId)],
+        ).getSingle();
+        final docs = await localDatabase.customSelect(
+          'SELECT COUNT(*) AS n FROM local_documents WHERE business_id=? AND job_id=?',
+          variables: [Variable<String>(widget.businessId),
+            const Variable<String>(orphanId)],
+        ).getSingle();
+        if (jobs.read<int>('n') != 0 || docs.read<int>('n') != 0) {
+          throw StateError('Local Job or documents still reference #81. Nothing removed.');
+        }
+        await localDatabase.customStatement(
+          """DELETE FROM sync_outbox WHERE business_id=? AND id=81
+             AND entity_type='job_admin' AND entity_id=? AND state='pending'""",
+          [widget.businessId, orphanId],
+        );
+      });
+      await _load();
+      if (mounted) setState(() =>
+        _syncMessage = 'Orphaned test operation #81 cancelled. Other data untouched.');
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _syncing = false);
     }
   }
 
@@ -719,6 +791,21 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                     const Text(
                       'Inspection only. No pending data is removed here.',
                       style: TextStyle(fontSize: 12),
+                    ),
+                  ],
+                  if (widget.isOwner &&
+                      _pendingDetails.any((entry) =>
+                        entry['id'] == 81 &&
+                        entry['type'] == 'job_admin' &&
+                        entry['entity'] ==
+                          'local-conversion-job-5b982dcb-6cd7-4aae-8e29-0945d100c04' &&
+                        entry['linked_documents'] == 0 &&
+                        entry['linked_jobs'] == 0)) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _syncing ? null : _cancelOrphanedTestJobUpdate,
+                      icon: const Icon(Icons.remove_circle_outline),
+                      label: const Text('Cancel orphaned test update #81'),
                     ),
                   ],
                   const SizedBox(height: 10),
