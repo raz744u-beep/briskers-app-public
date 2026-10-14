@@ -1909,18 +1909,20 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final save = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
+      useSafeArea: true,
       isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            16,
-            0,
-            16,
-            MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
-          ),
-          child: SafeArea(
-            top: false,
+        builder: (context, setSheetState) => SafeArea(
+          top: false,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: MediaQuery.sizeOf(sheetContext).height * 0.48,
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.84,
+            ),
             child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(20, 12, 20,
+                MediaQuery.viewInsetsOf(sheetContext).bottom + 28),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1984,7 +1986,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             }
                           },
                           icon:
-                              const Icon(Icons.photo_library_outlined, color: Color(0xFF2468BB)),
+                              const Icon(Icons.photo_library_outlined, color: Colors.teal),
                           label: const Text('Gallery'),
                         ),
                       ),
@@ -2003,7 +2005,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                             }
                           },
                           icon:
-                              const Icon(Icons.photo_camera_outlined, color: Color(0xFF167F43)),
+                              const Icon(Icons.photo_camera_outlined, color: Colors.teal),
                           label: const Text('Camera'),
                         ),
                       ),
@@ -2014,7 +2016,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     width: double.infinity,
                     child: FilledButton.icon(
                       style: FilledButton.styleFrom(
-                        backgroundColor: Colors.deepOrange,
+                        backgroundColor: Colors.teal.shade700,
                         foregroundColor: Colors.white,
                       ),
                       onPressed: () {
