@@ -3648,8 +3648,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         customerId: selectedCustomerId,
         vehicleId: selectedVehicleId,
       );
-      // This follows the same local-first creation path as New Invoice /
-      // Standalone Estimate and assigns a new temporary Job for invoices.
+      // One creation queue entry and a fully populated first snapshot.
+      // No partially copied invoice can upload between line mutations.
+      final lines = (plan['lines'] as List)
+          .whereType<Map<String, dynamic>>().toList();
       newId = _estimate
           ? await _offlineDocumentDraft.createStandaloneEstimate(
               widget.businessId,
@@ -3657,6 +3659,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               customerName: selectedCustomerName,
               vehicleId: selectedVehicleId,
               vehicleLabel: selectedVehicleName,
+              initialLines: lines,
+              initialMemo: plan['memo']?.toString(),
             )
           : await _offlineDocumentDraft.createQuickInvoice(
               widget.businessId,
@@ -3664,29 +3668,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               customerName: selectedCustomerName,
               vehicleId: selectedVehicleId,
               vehicleLabel: selectedVehicleName,
+              initialLines: lines,
+              initialMemo: plan['memo']?.toString(),
             );
-
-      for (final raw in plan['lines'] as List) {
-        if (raw is! Map) continue;
-        num number(Object? value) =>
-            value is num ? value : num.tryParse(value?.toString() ?? '') ?? 0;
-        await _offlineDocumentDraft.addLine(
-          widget.businessId,
-          newId!,
-          name: raw['name']?.toString() ?? '',
-          description: raw['description']?.toString(),
-          itemId: raw['item_id']?.toString(),
-          quantity: number(raw['quantity']),
-          unitPrice: number(raw['unit_price']),
-          taxRate: number(raw['tax_rate']),
-          lineKind: raw['line_kind']?.toString() ?? 'item',
-        );
-      }
-      final memo = plan['memo']?.toString();
-      if (memo != null && memo.isNotEmpty) {
-        await _offlineDocumentDraft.saveMemo(
-          widget.businessId, newId!, memo);
-      }
     });
     if (!mounted || !done || newId == null) return;
     await Navigator.push<void>(
