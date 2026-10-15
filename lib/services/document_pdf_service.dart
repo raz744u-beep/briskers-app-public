@@ -1059,11 +1059,6 @@ class DocumentPdfService {
                 row('Approved warranty amount', approved),
                 row('Warranty Card Payment Amount', terminal),
                 row('Credit Card Processing Fee\n(Customer Responsibility)', processorFee),
-                row(
-                  'Customer Responsibility',
-                  customerAllocationNeedsReview ? null : (customerResponsibility - (processorFee ?? 0))
-                      .clamp(0, double.infinity),
-                ),
                 pw.Divider(height: 8, color: PdfColors.grey500),
                 row(
                   'Total Customer Responsibility',
