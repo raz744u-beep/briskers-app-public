@@ -193,8 +193,9 @@ class OfflineDocumentDraftService {
           }),_unixNow(),
         ],
       );
+      // A sync worker cannot observe the queued copy before its full detail.
+      await _cache.save(businessId, id, detail);
     });
-    await _cache.save(businessId,id,detail);
     return id;
   }
 
@@ -537,8 +538,9 @@ class OfflineDocumentDraftService {
           _unixNow(),
         ],
       );
+      // A sync worker cannot observe the queued copy before its full detail.
+      await _cache.save(businessId, id, detail);
     });
-    await _cache.save(businessId,id,detail);
     return id;
   }
 
