@@ -3097,9 +3097,27 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<Map<String, dynamic>?> _pickInvoiceCustomer() async {
-    final customers = BriskersConnectionModeController.instance.forceOffline
-        ? await LocalCustomerRepository().customers(widget.businessId)
-        : await _api.customers(widget.businessId, limit: 200);
+    final cached = await LocalCustomerRepository().customers(widget.businessId);
+    final List<Map<String, dynamic>> customers;
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      customers = cached;
+    } else {
+      // Verify online access first; then supplement the first server page
+      // with all of this shop's already-synced local customer records.
+      final online = await _api.customers(widget.businessId, limit: 200);
+      final byId = <String, Map<String, dynamic>>{
+        for (final customer in cached)
+          if ((customer['id']?.toString() ?? '').isNotEmpty)
+            customer['id'].toString(): customer,
+        for (final customer in online)
+          if ((customer['id']?.toString() ?? '').isNotEmpty)
+            customer['id'].toString(): customer,
+      };
+      customers = byId.values.toList()
+        ..sort((a, b) => (a['display_name']?.toString() ?? '')
+            .toLowerCase().compareTo(
+              (b['display_name']?.toString() ?? '').toLowerCase()));
+    }
     if (!mounted) return null;
     var query = '';
 
