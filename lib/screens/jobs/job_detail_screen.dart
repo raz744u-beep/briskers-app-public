@@ -1237,18 +1237,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           await _offlineJobAdmin.flush(widget.businessId);
         } catch (_) {}
       }
-      if (code == 'completed' && widget.roleCode == 'owner' &&
-          !BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await OwnerInvoiceAutoCloseService().closeEligible(
-            businessId: widget.businessId,
-            jobId: widget.jobId,
-            isOwner: true,
-          );
-        } catch (_) {
-          // Leave eligible invoices pending close if sync/server verification fails.
-        }
-      }
       if (mounted) await _load();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -1388,6 +1376,19 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         try {
           await _offlineJobAdmin.flush(widget.businessId);
         } catch (_) {}
+      }
+      if (code == 'completed' && widget.roleCode == 'owner' &&
+          !BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await OwnerInvoiceAutoCloseService().closeEligible(
+            businessId: widget.businessId,
+            jobId: widget.jobId,
+            isOwner: true,
+          );
+        } catch (_) {
+          // A failed close does not undo job completion or payment history.
+          // The owner may review the invoice later.
+        }
       }
       if (mounted) await _load();
     } catch (error) {
