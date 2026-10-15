@@ -465,7 +465,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           isOwner: widget.isOwner,
           canManageExpenses: widget.canManageExpenses,
           initialAction: initialAction == 'payment' ? null : initialAction,
-          initialTab: initialAction == 'payment' ? 'payment' : null,
+          initialTab: initialAction == 'payment' ? 'payment' : 'items',
         ),
       ),
     );
