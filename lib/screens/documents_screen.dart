@@ -723,15 +723,15 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   onTap: () => Navigator.pop(sheetContext, 'add_to_invoice'),
                 ),
               ],
-              if (!_estimate)
-                ListTile(
-                  leading: const Icon(
-                    Icons.copy_outlined,
-                    color: BriskersColors.invoices,
-                  ),
-                  title: Text(tr('copyInvoice')),
-                  onTap: () => Navigator.pop(sheetContext, 'copy'),
+              ListTile(
+                leading: Icon(
+                  Icons.copy_outlined,
+                  color: _estimate
+                      ? BriskersColors.estimates : BriskersColors.invoices,
                 ),
+                title: Text(_estimate ? 'Copy Estimate' : tr('copyInvoice')),
+                onTap: () => Navigator.pop(sheetContext, 'copy'),
+              ),
               if (canExpenses)
                 ListTile(
                   leading: const Icon(
