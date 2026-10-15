@@ -57,7 +57,9 @@ void main() {
     expect(durableGuard, greaterThan(consent));
     expect(mutation, greaterThan(durableGuard));
     expect(action, contains('invoiceIds: [widget.documentId], isOwner: widget.isOwner'));
-    expect(action, contains('if (mounted && succeeded) await _offerCompletePaidJob();'));
+    expect(action, contains('if (mounted && succeeded) {'));
+    expect(action, contains('await _offerCompletePaidJob();'));
+    expect(action, contains('await _autoCloseOwnerInvoiceIfReady();'));
   });
 
   test('warranty company sheet scrolls around keyboard without bypassing name', () {
