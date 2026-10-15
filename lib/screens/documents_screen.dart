@@ -464,7 +464,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           documentId: row['id'].toString(),
           isOwner: widget.isOwner,
           canManageExpenses: widget.canManageExpenses,
-          initialAction: initialAction,
+          initialAction: initialAction == 'payment' ? null : initialAction,
+          initialTab: initialAction == 'payment' ? 'payment' : null,
         ),
       ),
     );
