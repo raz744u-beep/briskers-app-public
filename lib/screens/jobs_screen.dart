@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+import '../services/owner_invoice_auto_close_service.dart';
 
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
@@ -560,6 +561,20 @@ class _JobsScreenState extends State<JobsScreen>
         }
       }
 
+      if (statusCode == 'completed' && widget.roleCode == 'owner' &&
+          !BriskersConnectionModeController.instance.forceOffline) {
+        // A queued status that has not reached the server cannot close invoices.
+        try {
+          await OwnerInvoiceAutoCloseService().closeEligible(
+            businessId: widget.businessId,
+            jobId: job['id'].toString(),
+            isOwner: true,
+          );
+        } catch (_) {
+          // Payment records are never rolled back because closeout failed.
+          // The invoice remains in Pending Close for owner review.
+        }
+      }
       await _load();
       widget.onJobsChanged?.call();
     } catch (error) {
