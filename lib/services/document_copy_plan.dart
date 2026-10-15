@@ -15,7 +15,9 @@ class DocumentCopyPlan {
     if (customerId.trim().isEmpty) {
       throw ArgumentError('Select an existing customer.');
     }
-    final sourceLines = original['lines'];
+    final sourceLines = original['lines'] is List
+        ? original['lines']
+        : original['items'];
     if (sourceLines is! List) {
       throw ArgumentError('Load the original items before copying.');
     }
