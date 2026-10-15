@@ -71,9 +71,13 @@ class InvoiceFinalizationGuard {
     required num pendingPayments,
     required bool reopenedForCorrection,
   }) {
-    if (!isOwner || !jobCompleted || reopenedForCorrection) return false;
+    if (!isOwner || !jobCompleted || reopenedForCorrection) {
+      return false;
+    }
     if (!invoiceTotal.isFinite || !finalizedPayments.isFinite ||
-        !pendingPayments.isFinite) return false;
+        !pendingPayments.isFinite) {
+      return false;
+    }
     if (invoiceTotal < 0 || finalizedPayments < 0 || pendingPayments < 0) {
       return false;
     }
