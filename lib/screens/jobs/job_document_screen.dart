@@ -2797,9 +2797,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<void> _autoCloseOwnerInvoiceIfReady() async {
     if (!widget.isOwner || _estimate ||
-        BriskersConnectionModeController.instance.forceOffline) return;
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     final jobId = _detail?['job_id']?.toString() ?? '';
-    if (jobId.isEmpty || widget.documentId.startsWith('local-')) return;
+    if (jobId.isEmpty || widget.documentId.startsWith('local-')) {
+      return;
+    }
     final job = await _api.jobDetail(widget.businessId, jobId);
     final invoice = await _api.documentDetail(
       widget.businessId, widget.documentId);
@@ -2809,7 +2813,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (invoice['job_id']?.toString() != jobId ||
         invoice['closed_at'] != null ||
         status == 'closed' || code == 'closed' ||
-        status == 'reopened' || code == 'reopened') return;
+        status == 'reopened' || code == 'reopened') {
+      return;
+    }
     num? validMoney(Object? value) {
       final n = value is num ? value : num.tryParse(value?.toString() ?? '');
       return n != null && n.isFinite ? n : null;
@@ -2817,7 +2823,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     final total = validMoney(invoice['total_amount']);
     final posted = validMoney(invoice['paid_amount']);
     final pending = validMoney(invoice['pending_payment']);
-    if (total == null || posted == null || pending == null) return;
+    if (total == null || posted == null || pending == null) {
+      return;
+    }
     if (!InvoiceFinalizationGuard.canAutoClose(
       isOwner: widget.isOwner,
       jobCompleted: job['status']?.toString().toLowerCase() == 'completed',
@@ -2825,7 +2833,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       finalizedPayments: posted,
       pendingPayments: pending,
       reopenedForCorrection: status == 'reopened' || code == 'reopened',
-    )) return;
+    )) {
+      return;
+    }
     await InvoiceFinalizationGuard().run<void>(
       businessId: widget.businessId,
       invoiceIds: [widget.documentId],
