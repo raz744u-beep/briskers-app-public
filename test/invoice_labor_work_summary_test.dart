@@ -72,7 +72,7 @@ void main() {
           {'name': 'Unclassified line', 'description': 'Do not guess labor'},
         ],
       }),
-      'Replace rear air springs. Calibrate air suspension\\n'
+      'Replace rear air springs. Calibrate air suspension\n'
       'Replace airmatic compressor, valve block and filter',
     );
   });
