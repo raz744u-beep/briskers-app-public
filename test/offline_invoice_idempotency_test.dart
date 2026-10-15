@@ -63,7 +63,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     final api = _InterruptedSyncApi();
-    final cache = const LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database: db);
     final drafts = OfflineDocumentDraftService(
       database: db, api: api, cache: cache,
       documents: LocalDocumentRepository(database:db),
@@ -144,7 +144,7 @@ void main() {
       ).getSingle();
       expect(rows.read<int>('n'), 0, reason: name);
     }
-    expect(await const LocalDocumentDetailCache().load('cancel-shop', id), isNull);
+    expect(await LocalDocumentDetailCache(database: db).load('cancel-shop', id), isNull);
     await drafts.flush('cancel-shop');
     expect(api.operationIds, isEmpty);
     await db.close();
@@ -174,3 +174,4 @@ void main() {
   });
 
 }
+

@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
+
 import '../../core/module_modal_theme.dart';
 import '../../core/briskers_colors.dart';
 
 import '../../core/briskers_i18n.dart';
 
-/// Whole-Job deletion is intentionally disabled in this release. A client-side
-/// flag is never authorization: future enablement also requires the audited
-/// server contract and approved rollout. Never fall back to legacy deletion.
+/// The legacy invoice-cascade route remains permanently disabled.
+/// Owner Job deletion uses OwnerJobRetirementService and the audited v2
+/// server protocol instead. This flag must never enable the legacy endpoint.
 class OwnerJobDeletionGate {
   static const enabled = false;
 }

@@ -1,3 +1,8 @@
+import 'dart:async';
+
+import '../../services/local_job_retirement.dart';
+import '../../local/local_database_provider.dart';
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -45,6 +50,7 @@ class _CustomerServiceHistorySectionState
   static const _historicalMatcher = HistoricalPhotoMatcher();
 
   late JobSummaryVisibility _jobVisibility;
+  StreamSubscription<({String businessId, Set<String> jobIds})>? _retirement;
   List<Map<String, dynamic>> _jobs = const [];
   List<Map<String, dynamic>> _documents = const [];
   List<Map<String, dynamic>> _expenses = const [];
@@ -67,6 +73,16 @@ class _CustomerServiceHistorySectionState
   void initState() {
     super.initState();
     _listenForQuarantine();
+    _retirement = LocalJobRetirement.events.listen((event) {
+      if (event.businessId != widget.businessId || !mounted) return;
+      unawaited(
+        _refreshRetiredDocuments().then((_) {
+          if (mounted && event.businessId == widget.businessId) {
+            unawaited(_load());
+          }
+        }),
+      );
+    });
     _load();
   }
 
@@ -86,6 +102,7 @@ class _CustomerServiceHistorySectionState
   @override
   void dispose() {
     _jobVisibility.dispose();
+    _retirement?.cancel();
     super.dispose();
   }
 
@@ -104,6 +121,38 @@ class _CustomerServiceHistorySectionState
     }
   }
 
+  Future<List<Map<String, dynamic>>> _filterRetiredDocuments(
+    String businessId,
+    Iterable<Map<String, dynamic>> rows,
+  ) async {
+    final blocked = await LocalJobRetirement.blockedDocumentIds(
+      localDatabase,
+      businessId,
+    );
+    return rows
+        .where(
+          (row) =>
+              !blocked.contains('${row['id'] ?? row['document_id'] ?? ''}'),
+        )
+        .toList();
+  }
+
+  Future<void> _refreshRetiredDocuments() async {
+    final businessId = widget.businessId;
+    try {
+      final documents = await _filterRetiredDocuments(businessId, _documents);
+      if (!mounted || widget.businessId != businessId) return;
+      setState(() {
+        _documents = documents;
+        _documentSummaries.clear();
+      });
+    } catch (_) {
+      if (mounted && widget.businessId == businessId) {
+        setState(() => _documents = const []);
+      }
+    }
+  }
+
   Future<bool> _showCachedHistory(
     JobSummaryVisibility visibility, int generation,
     String businessId, String customerId,
@@ -116,11 +165,14 @@ class _CustomerServiceHistorySectionState
           .whereType<Map>().map((row) => Map<String, dynamic>.from(row)),
       cached: true,
     );
+    final documents = await _filterRetiredDocuments(businessId,
+      List<dynamic>.from(data['documents'] ?? const [])
+          .whereType<Map>().map((row) => Map<String, dynamic>.from(row)),
+    );
     if (!mounted || !visibility.isCurrent(generation)) return true;
-    setState(() {
+    setState((){
       _jobs = jobs;
-      _documents = List<dynamic>.from(data['documents'] ?? const [])
-          .whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
+      _documents = documents;
       _expenses = List<dynamic>.from(data['expenses'] ?? const [])
           .whereType<Map>().map((row) => Map<String, dynamic>.from(row)).toList();
 
@@ -139,7 +191,8 @@ class _CustomerServiceHistorySectionState
     final offline = BriskersConnectionModeController.instance.forceOffline;
     try {
       if (offline) {
-        if (await _showCachedHistory(visibility, generation, businessId, customerId)) {
+        if (await _showCachedHistory(visibility, generation, businessId, customerId,
+        )) {
           return;
         }
         if (!mounted || !visibility.isCurrent(generation)) return;
@@ -157,7 +210,8 @@ class _CustomerServiceHistorySectionState
         _api.myBusinesses(),
       ]);
       final rows = await visibility.filter(
-          List<Map<String, dynamic>>.from(results[0] as List));
+          List<Map<String, dynamic>>.from(results[0] as List),
+      );
       final businesses = List<Map<String, dynamic>>.from(results[1] as List);
       final current = businesses.where(
         (business) => business['id']?.toString() == businessId,
@@ -168,7 +222,8 @@ class _CustomerServiceHistorySectionState
       List<Map<String, dynamic>> expenses = const [];
       if (<String>{'owner', 'manager', 'office'}.contains(role)) {
         try {
-          final financial = await _api.customerFinancialHistory(businessId, customerId);
+          final financial = await _api.customerFinancialHistory(businessId, customerId,
+          );
           documents = List<dynamic>.from(financial['documents'] ?? const [])
               .map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
           expenses = List<dynamic>.from(financial['expenses'] ?? const [])
@@ -178,6 +233,8 @@ class _CustomerServiceHistorySectionState
           expenses = const [];
         }
       }
+      if (!mounted || !visibility.isCurrent(generation)) return;
+      documents = await _filterRetiredDocuments(businessId, documents);
       if (!mounted || !visibility.isCurrent(generation)) return;
       await _cache.save(businessId, customerId, 'service_history', {
         'jobs': JobSummaryVisibility.stampSnapshot(rows, snapshotGeneration),
@@ -197,7 +254,8 @@ class _CustomerServiceHistorySectionState
     } catch (error) {
       if (!mounted || !visibility.isCurrent(generation)) return;
       try {
-        if (await _showCachedHistory(visibility, generation, businessId, customerId)) {
+        if (await _showCachedHistory(visibility, generation, businessId, customerId,
+        )) {
           return;
         }
       } catch (_) {
@@ -246,7 +304,8 @@ class _CustomerServiceHistorySectionState
     }).toList();
     if (completedJobs.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No completed jobs are available to match.')),
+        const SnackBar(content: Text('No completed jobs are available to match.'),
+        ),
       );
       return;
     }
@@ -258,7 +317,8 @@ class _CustomerServiceHistorySectionState
       );
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = 'Could not scan the selected photo folder. $error');
+      setState(() => _error = 'Could not scan the selected photo folder. $error',
+      );
       return;
     }
     if (picked == null || !mounted) return;
@@ -269,8 +329,7 @@ class _CustomerServiceHistorySectionState
         .toList();
     final matches = _historicalMatcher.exactMatches(
       completedJobs,
-      files,
-    );
+      files);
     final matchedUris = matches
         .map((match) => match.file['uri']?.toString() ?? '')
         .where((uri) => uri.isNotEmpty)
@@ -549,8 +608,7 @@ class _CustomerServiceHistorySectionState
                 'Vehicle',
                 style: TextStyle(
                   fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                ),
+                  fontWeight: FontWeight.w800),
               ),
             ),
             ListTile(
@@ -607,8 +665,7 @@ class _CustomerServiceHistorySectionState
                 'View',
                 style: TextStyle(
                   fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                ),
+                  fontWeight: FontWeight.w800),
               ),
             ),
             ...choices.map((choice) => ListTile(
@@ -619,8 +676,7 @@ class _CustomerServiceHistorySectionState
                       Text(
                         '${choice.$3}',
                         style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                        ),
+                          fontWeight: FontWeight.w800),
                       ),
                       if (_view == choice.$1) ...[
                         const SizedBox(width: 10),
@@ -629,7 +685,8 @@ class _CustomerServiceHistorySectionState
                     ],
                   ),
                   onTap: () => Navigator.pop(sheetContext, choice.$1),
-                )),
+                ),
+            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -684,9 +741,7 @@ class _CustomerServiceHistorySectionState
               Text(
                 label,
                 style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+                  fontWeight: FontWeight.w700)),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -695,8 +750,7 @@ class _CustomerServiceHistorySectionState
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                  ),
+                    fontWeight: FontWeight.w700),
                 ),
               ),
               const SizedBox(width: 6),
@@ -802,7 +856,9 @@ class _CustomerServiceHistorySectionState
           ),
           subtitle: FutureBuilder<Map<String, dynamic>>(
             future: _documentSummaries.putIfAbsent(document['id'].toString(),
-              () => CustomerDocumentSummaryService().hydrate(widget.businessId, document)),
+              () => CustomerDocumentSummaryService().hydrate(widget.businessId, document,
+              ),
+            ),
             builder: (context, snapshot) => Text(
               <String>[
                 if (snapshot.hasData) DocumentPresentation(snapshot.data!).statusLabel,
@@ -921,8 +977,7 @@ class _CustomerServiceHistorySectionState
                 child: Text(
                   _error!,
                   style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
+                    color: Theme.of(context).colorScheme.error),
                 ),
               ),
             )
@@ -962,3 +1017,4 @@ class _CustomerServiceHistorySectionState
     );
   }
 }
+

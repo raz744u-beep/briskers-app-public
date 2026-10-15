@@ -1,3 +1,5 @@
+import 'support/empty_retirement_gateway.dart';
+
 import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -43,8 +45,7 @@ class _RepairApi extends BriskersApi {
       'ids': [entity == 'customers' ? 'current-customer' : 'current-job'],
       'next_id': entity == 'customers' ? 'current-customer' : 'current-job',
       'has_more': false,
-      'snapshot_cursor':
-          changeCursorOnVerify && limit == 1 ? 11 : 10,
+      'snapshot_cursor': changeCursorOnVerify && limit == 1 ? 11 : 10,
     };
   }
 
@@ -115,7 +116,7 @@ Future<void> _seed(BriskersLocalDatabase db) async {
         (business_id, scope, last_server_cursor, bootstrapped)
       VALUES (?, ?, 10, 1)
       ''',
-      ['business-1', scope],
+      ['00000000-0000-4000-8000-000000000001', scope],
     );
   }
   for (final id in ['current-customer', 'old-customer']) {
@@ -125,7 +126,7 @@ Future<void> _seed(BriskersLocalDatabase db) async {
         (id, business_id, display_name, sync_state)
       VALUES (?, ?, ?, 'synced')
       ''',
-      [id, 'business-1', 'Raymond Taylor'],
+      [id, '00000000-0000-4000-8000-000000000001', 'Raymond Taylor'],
     );
   }
   for (final id in ['current-vehicle', 'old-vehicle']) {
@@ -135,7 +136,7 @@ Future<void> _seed(BriskersLocalDatabase db) async {
         (id, business_id, make, model, sync_state)
       VALUES (?, ?, 'BMW', 'X5', 'synced')
       ''',
-      [id, 'business-1'],
+      [id, '00000000-0000-4000-8000-000000000001'],
     );
   }
   for (final i in ['current', 'old']) {
@@ -145,7 +146,7 @@ Future<void> _seed(BriskersLocalDatabase db) async {
         (business_id, customer_id, vehicle_id, is_primary)
       VALUES (?, ?, ?, 1)
       ''',
-      ['business-1', '$i-customer', '$i-vehicle'],
+      ['00000000-0000-4000-8000-000000000001', '$i-customer', '$i-vehicle'],
     );
     await db.customStatement(
       '''
@@ -154,36 +155,43 @@ Future<void> _seed(BriskersLocalDatabase db) async {
          customer_id, vehicle_id, sync_state)
       VALUES (?, ?, 'full', 'Service', 'completed', ?, ?, 'synced')
       ''',
-      ['$i-job', 'business-1', '$i-customer', '$i-vehicle'],
+      [
+        '$i-job',
+        '00000000-0000-4000-8000-000000000001',
+        '$i-customer',
+        '$i-vehicle',
+      ],
     );
   }
-  await db.customStatement(
-    '''
+  await db.customStatement('''
     INSERT INTO local_documents
       (id, business_id, kind, sync_state)
-    VALUES ('doc-1', 'business-1', 'invoice', 'synced')
-    ''',
-  );
+    VALUES ('doc-1', '00000000-0000-4000-8000-000000000001', 'invoice', 'synced')
+    ''');
 }
 
 Future<int> _rows(BriskersLocalDatabase db, String table) async {
-  final row = await db.customSelect(
-    'SELECT COUNT(*) AS count FROM $table WHERE business_id = ?',
-    variables: [const Variable<String>('business-1')],
-  ).getSingle();
+  final row = await db
+      .customSelect(
+        'SELECT COUNT(*) AS count FROM $table WHERE business_id = ?',
+        variables: [
+          const Variable<String>('00000000-0000-4000-8000-000000000001'),
+        ],
+      )
+      .getSingle();
   return row.read<int>('count');
 }
 
 void main() {
-  test('repairs stale local customers, vehicles and jobs without touching invoices',
-      () async {
+  test('repairs stale local customers, vehicles and jobs without touching invoices', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     await _seed(db);
     final result = await ImportCacheRepairService(
+      retirementGateway: const EmptyRetirementGateway(),
       api: _RepairApi(),
       database: db,
       cleanupGateway: _RepairCleanupGateway(),
-    ).repair('business-1');
+    ).repair('00000000-0000-4000-8000-000000000001');
 
     expect(result.customersRemoved, 1);
     expect(result.vehiclesRemoved, 1);
@@ -195,59 +203,70 @@ void main() {
     await db.close();
   });
 
-  test('blocks cleanup if server inventory changes during validation',
-      () async {
-    final db = BriskersLocalDatabase(NativeDatabase.memory());
-    await _seed(db);
-    await expectLater(
-      ImportCacheRepairService(
-        api: _RepairApi(changeCursorOnVerify: true),
-        database: db,
-        cleanupGateway: _RepairCleanupGateway(),
-      ).repair('business-1'),
-      throwsStateError,
-    );
-    expect(await _rows(db, 'local_customers'), 2);
-    expect(await _rows(db, 'local_jobs'), 2);
-    await db.close();
-  });
-
-  test('unknown cleanup feed stops repair without pruning cached records', () async {
-    final db = BriskersLocalDatabase(NativeDatabase.memory());
-    try {
+  test(
+    'blocks cleanup if server inventory changes during validation',
+    () async {
+      final db = BriskersLocalDatabase(NativeDatabase.memory());
       await _seed(db);
-      final api = _RepairApi();
-      final cleanup = _RepairCleanupGateway()..fail = true;
       await expectLater(
-        ImportCacheRepairService(api: api, database: db, cleanupGateway: cleanup)
-            .repair('business-1'),
+        ImportCacheRepairService(
+          retirementGateway: const EmptyRetirementGateway(),
+          api: _RepairApi(changeCursorOnVerify: true),
+          database: db,
+          cleanupGateway: _RepairCleanupGateway(),
+        ).repair('00000000-0000-4000-8000-000000000001'),
         throwsStateError,
       );
-      expect(cleanup.calls, 1);
-      expect(api.inventoryCalls, 0);
       expect(await _rows(db, 'local_customers'), 2);
-      expect(await _rows(db, 'local_vehicles'), 2);
       expect(await _rows(db, 'local_jobs'), 2);
-      expect(await _rows(db, 'local_documents'), 1);
-    } finally {
       await db.close();
-    }
-  });
+    },
+  );
+
+  test(
+    'unknown cleanup feed stops repair without pruning cached records',
+    () async {
+      final db = BriskersLocalDatabase(NativeDatabase.memory());
+      try {
+        await _seed(db);
+        final api = _RepairApi();
+        final cleanup = _RepairCleanupGateway()..fail = true;
+        await expectLater(
+          ImportCacheRepairService(
+            retirementGateway: const EmptyRetirementGateway(),
+            api: api,
+            database: db,
+            cleanupGateway: cleanup,
+          ).repair('00000000-0000-4000-8000-000000000001'),
+          throwsStateError,
+        );
+        expect(cleanup.calls, 1);
+        expect(api.inventoryCalls, 0);
+        expect(await _rows(db, 'local_customers'), 2);
+        expect(await _rows(db, 'local_vehicles'), 2);
+        expect(await _rows(db, 'local_jobs'), 2);
+        expect(await _rows(db, 'local_documents'), 1);
+      } finally {
+        await db.close();
+      }
+    },
+  );
 
   test('refuses repair with queued offline changes', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     await _seed(db);
-    await db.customStatement(
-      '''
+    await db.customStatement('''
       INSERT INTO sync_outbox
         (business_id, entity_type, entity_id, operation, payload_json)
-      VALUES ('business-1', 'customer', 'old-customer', 'update', '{}')
-      ''',
-    );
+      VALUES ('00000000-0000-4000-8000-000000000001', 'customer', 'old-customer', 'update', '{}')
+      ''');
     await expectLater(
-      ImportCacheRepairService(api: _RepairApi(), database: db,
-        cleanupGateway: _RepairCleanupGateway())
-          .repair('business-1'),
+      ImportCacheRepairService(
+        retirementGateway: const EmptyRetirementGateway(),
+        api: _RepairApi(),
+        database: db,
+        cleanupGateway: _RepairCleanupGateway(),
+      ).repair('00000000-0000-4000-8000-000000000001'),
       throwsStateError,
     );
     expect(await _rows(db, 'local_customers'), 2);
@@ -258,27 +277,26 @@ void main() {
   test('refuses repair when old jobs have local photo files', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     await _seed(db);
-    await db.customStatement(
-      '''
+    await db.customStatement('''
       INSERT INTO local_pre_inspections
         (id, business_id, job_id, vehicle_id, sync_state)
-      VALUES ('inspection-1', 'business-1', 'old-job',
+      VALUES ('inspection-1', '00000000-0000-4000-8000-000000000001', 'old-job',
               'old-vehicle', 'synced')
-      ''',
-    );
-    await db.customStatement(
-      '''
+      ''');
+    await db.customStatement('''
       INSERT INTO local_pre_inspection_photos
         (id, business_id, inspection_id, attachment_id,
          local_file_path, upload_state)
-      VALUES ('photo-1', 'business-1', 'inspection-1',
+      VALUES ('photo-1', '00000000-0000-4000-8000-000000000001', 'inspection-1',
               'photo-1', '/photos/keep-this.jpg', 'synced')
-      ''',
-    );
+      ''');
     await expectLater(
-      ImportCacheRepairService(api: _RepairApi(), database: db,
-        cleanupGateway: _RepairCleanupGateway())
-          .repair('business-1'),
+      ImportCacheRepairService(
+        retirementGateway: const EmptyRetirementGateway(),
+        api: _RepairApi(),
+        database: db,
+        cleanupGateway: _RepairCleanupGateway(),
+      ).repair('00000000-0000-4000-8000-000000000001'),
       throwsStateError,
     );
     expect(await _rows(db, 'local_customers'), 2);

@@ -3,6 +3,7 @@ import 'dart:async';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_quarantine.dart';
+import 'local_job_retirement.dart';
 
 /// Invalidates retained summaries as soon as a durable revocation is observed.
 /// A load started before that event must not publish its result, even if the
@@ -19,12 +20,19 @@ class JobSummaryVisibility {
       _epoch++;
       onQuarantine(event.jobIds);
     });
+    _retirementSubscription = LocalJobRetirement.events.listen((event) {
+      if (_disposed || event.businessId != businessId) return;
+      _epoch++;
+      onQuarantine(event.jobIds);
+    });
   }
 
   final String businessId;
   final BriskersLocalDatabase _database;
   late final StreamSubscription<({String businessId, Set<String> jobIds})>
-      _subscription;
+  _subscription;
+  late final StreamSubscription<({String businessId, Set<String> jobIds})>
+  _retirementSubscription;
   int _epoch = 0;
   bool _disposed = false;
 
@@ -34,8 +42,10 @@ class JobSummaryVisibility {
 
   bool isCurrent(int epoch) => !_disposed && epoch == _epoch;
 
-  Future<Set<String>> blockedJobIds() =>
-      LocalJobQuarantine.blockedJobIds(_database, businessId);
+  Future<Set<String>> blockedJobIds() async => {
+    ...await LocalJobQuarantine.blockedJobIds(_database, businessId),
+    ...await LocalJobRetirement.blockedJobIds(_database, businessId),
+  };
 
   Future<int> captureSnapshotGeneration() =>
       LocalJobQuarantine.captureGeneration(_database, businessId);
@@ -43,10 +53,13 @@ class JobSummaryVisibility {
   static const _snapshotGenerationKey = '_job_quarantine_generation';
 
   static List<Map<String, dynamic>> stampSnapshot(
-    Iterable<Map<String, dynamic>> rows, int generation,
-  ) => rows.map((row) => <String, dynamic>{
-      ...row, _snapshotGenerationKey: generation,
-    }).toList();
+    Iterable<Map<String, dynamic>> rows,
+    int generation,
+  ) => rows
+      .map(
+        (row) => <String, dynamic>{...row, _snapshotGenerationKey: generation},
+      )
+      .toList();
 
   Future<List<Map<String, dynamic>>> filter(
     Iterable<Map<String, dynamic>> rows, {
@@ -65,17 +78,29 @@ class JobSummaryVisibility {
   }
 
   Future<List<Map<String, dynamic>>> filterFindings(
-    Iterable<Map<String, dynamic>> rows, {bool cached = false}
-  ) async {
-    final blockedJobs = await blockedJobIds();
+    Iterable<Map<String, dynamic>> rows, {
+    bool cached = false,
+  }) async {
+    // Retirement does not revoke shared vehicle findings. Existing access
+    // quarantine remains authoritative for findings visibility.
+    final blockedJobs = await LocalJobQuarantine.blockedJobIds(
+      _database,
+      businessId,
+    );
     final blockedFindings = await LocalJobQuarantine.blockedEntityIds(
-        _database, businessId, entityType: 'local_findings');
+      _database,
+      businessId,
+      entityType: 'local_findings',
+    );
     final jobGenerations = cached
         ? await LocalJobQuarantine.quarantineGenerations(_database, businessId)
         : const <String, int>{};
     final findingGenerations = cached
         ? await LocalJobQuarantine.entityQuarantineGenerations(
-            _database, businessId, entityType: 'local_findings')
+            _database,
+            businessId,
+            entityType: 'local_findings',
+          )
         : const <String, int>{};
     return rows.where((row) {
       final id = row['id']?.toString();
@@ -103,11 +128,13 @@ class JobSummaryVisibility {
     Iterable<Map<String, dynamic>> rows,
     Set<String> jobIds, {
     String jobIdKey = 'id',
-  }) => rows.where((row) => !jobIds.contains(row[jobIdKey]?.toString())).toList();
+  }) =>
+      rows.where((row) => !jobIds.contains(row[jobIdKey]?.toString())).toList();
 
   void dispose() {
     _disposed = true;
     _epoch++;
     unawaited(_subscription.cancel());
+    unawaited(_retirementSubscription.cancel());
   }
 }

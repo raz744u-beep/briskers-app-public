@@ -50,7 +50,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final db=BriskersLocalDatabase(NativeDatabase.memory());
     final api=_StandaloneApi();
-    final cache=const LocalDocumentDetailCache();
+    final cache=LocalDocumentDetailCache(database: db);
     final drafts=OfflineDocumentDraftService(
       database:db,api:api,cache:cache,
       documents:LocalDocumentRepository(database:db),
@@ -88,3 +88,4 @@ void main() {
     await db.close();
   });
 }
+

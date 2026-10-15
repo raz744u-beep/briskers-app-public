@@ -1,12 +1,17 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:drift/native.dart';
+import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  late BriskersLocalDatabase db;
+  setUp(() => db = BriskersLocalDatabase(NativeDatabase.memory()));
+  tearDown(() => db.close());
   test('cleanup invalidation preserves a newer pending detail snapshot', () async {
     SharedPreferences.setMockInitialValues({});
-    const cache = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database: db);
     final original = {'id': 'd', 'row_version': 1, 'sync_state': 'synced'};
     await cache.save('shop', 'd', original);
     final captured = await cache.load('shop', 'd');
@@ -16,7 +21,7 @@ void main() {
   });
   test('cleanup invalidation removes only matching scoped snapshot', () async {
     SharedPreferences.setMockInitialValues({});
-    const cache = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database: db);
     final original = {'id': 'd', 'row_version': 1};
     await cache.save('shop', 'd', original);
     await cache.save('other', 'd', original);
@@ -26,7 +31,7 @@ void main() {
   });
   test('cache-only pending state is never invalidated even with a matching snapshot', () async {
     SharedPreferences.setMockInitialValues({});
-    const cache = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database: db);
     final pending = {'id': 'd', 'memo': 'Not queued yet', 'sync_state': 'pending'};
     await cache.save('shop', 'd', pending);
     expect(await cache.removeIfUnchanged('shop', 'd', pending), isFalse);
@@ -34,8 +39,8 @@ void main() {
   });
   test('concurrent newer write survives regardless of invalidation queue order', () async {
     SharedPreferences.setMockInitialValues({});
-    const cache = LocalDocumentDetailCache();
-    const anotherInstance = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database: db);
+    final anotherInstance = LocalDocumentDetailCache(database: db);
     final old = {'id': 'd', 'row_version': 1};
     final edit = {'id': 'd', 'memo': 'New edit', 'sync_state': 'pending'};
     await cache.save('shop', 'd', old);
@@ -53,3 +58,4 @@ void main() {
   });
 
 }
+

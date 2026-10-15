@@ -5,6 +5,7 @@ import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'customer_vehicle_sync_service.dart';
 import 'job_sync_service.dart';
+import 'owner_job_retirement_service.dart';
 import 'test_job_cleanup_gateway.dart';
 
 class ImportCacheRepairResult {
@@ -29,17 +30,20 @@ class ImportCacheRepairService {
     BriskersApi api = const BriskersApi(),
     BriskersLocalDatabase? database,
     TestJobCleanupGateway cleanupGateway = const TestJobCleanupGateway(),
-  })  : _api = api,
-        _database = database ?? localDatabase,
-        _customers = CustomerVehicleSyncService(
-          api: api,
-          database: database ?? localDatabase,
-        ),
-        _jobs = JobSyncService(
-          api: api,
-          database: database ?? localDatabase,
-          cleanupGateway: cleanupGateway,
-        );
+    OwnerJobRetirementGateway retirementGateway =
+        const OwnerJobRetirementGateway(),
+  }) : _api = api,
+       _database = database ?? localDatabase,
+       _customers = CustomerVehicleSyncService(
+         api: api,
+         database: database ?? localDatabase,
+       ),
+       _jobs = JobSyncService(
+         api: api,
+         database: database ?? localDatabase,
+         cleanupGateway: cleanupGateway,
+         retirementGateway: retirementGateway,
+       );
 
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
@@ -47,10 +51,9 @@ class ImportCacheRepairService {
   final JobSyncService _jobs;
 
   Future<int> _count(String businessId, String sql) async {
-    final row = await _database.customSelect(
-      sql,
-      variables: [Variable<String>(businessId)],
-    ).getSingle();
+    final row = await _database
+        .customSelect(sql, variables: [Variable<String>(businessId)])
+        .getSingle();
     return row.read<int>('count');
   }
 
@@ -134,9 +137,7 @@ class ImportCacheRepairService {
       );
       if (cursor == null ||
           (snapshotCursor != null && snapshotCursor != cursor)) {
-        throw StateError(
-          '$entity changed during repair. Please retry.',
-        );
+        throw StateError('$entity changed during repair. Please retry.');
       }
       snapshotCursor = cursor;
 
@@ -189,10 +190,12 @@ class ImportCacheRepairService {
     String table,
     Set<String> serverIds,
   ) async {
-    final rows = await _database.customSelect(
-      'SELECT id FROM $table WHERE business_id = ?',
-      variables: [Variable<String>(businessId)],
-    ).get();
+    final rows = await _database
+        .customSelect(
+          'SELECT id FROM $table WHERE business_id = ?',
+          variables: [Variable<String>(businessId)],
+        )
+        .get();
     final localIds = rows.map((row) => row.read<String>('id')).toSet();
     final missing = serverIds.difference(localIds);
     if (missing.isNotEmpty) {
@@ -219,30 +222,21 @@ class ImportCacheRepairService {
     if (customerIds.isEmpty || jobIds.isEmpty) {
       throw StateError('Empty server snapshot: local cleanup is blocked.');
     }
-    await _checkLocalCoverage(
-      businessId, 'local_customers', customerIds,
-    );
-    await _checkLocalCoverage(
-      businessId, 'local_jobs', jobIds,
-    );
+    await _checkLocalCoverage(businessId, 'local_customers', customerIds);
+    await _checkLocalCoverage(businessId, 'local_jobs', jobIds);
     await _assertNoLocalWork(businessId);
-    await _verifyServerUnchanged(
-      businessId, 'customers', customers.cursor,
-    );
-    await _verifyServerUnchanged(
-      businessId, 'jobs', jobs.cursor,
-    );
+    await _verifyServerUnchanged(businessId, 'customers', customers.cursor);
+    await _verifyServerUnchanged(businessId, 'jobs', jobs.cursor);
 
     final vehiclesBefore = await _count(
       businessId,
       'SELECT COUNT(*) AS count FROM local_vehicles WHERE business_id = ?',
     );
     // Jobs are checked for cached photo paths *before* any removal.
-    final jobsRemoved = await _jobs.pruneObsoleteCache(
-      businessId, jobIds,
-    );
+    final jobsRemoved = await _jobs.pruneObsoleteCache(businessId, jobIds);
     final customersRemoved = await _customers.pruneObsoleteCache(
-      businessId, customerIds,
+      businessId,
+      customerIds,
     );
     final vehiclesAfter = await _count(
       businessId,

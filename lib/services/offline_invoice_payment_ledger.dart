@@ -375,7 +375,7 @@ class OfflineInvoicePaymentLedger {
           if (cacheInvoice != null) {
             await cacheInvoice(businessId, invoiceId, detail);
           } else {
-            const cache = LocalDocumentDetailCache();
+            final cache = LocalDocumentDetailCache(database: _database);
             final cached = await cache.load(businessId, invoiceId);
             final refreshed = Map<String, dynamic>.from(detail);
             // Warranty detail has its own endpoint. A payment refresh must not
@@ -427,3 +427,4 @@ class OfflineInvoicePaymentLedger {
     }).toList();
   }
 }
+

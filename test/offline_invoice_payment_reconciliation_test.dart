@@ -382,7 +382,7 @@ void main() {
     for (final includesWarranty in [false, true]) {
       test('default payment refresh preserves separately cached warranty unless replaced: $includesWarranty', () async {
         SharedPreferences.setMockInitialValues({});
-        const cache = LocalDocumentDetailCache();
+        final cache = LocalDocumentDetailCache(database: db);
         final oldWarranty = <String, dynamic>{
           'company_name': 'Sandbox warranty', 'approved_amount': 500,
         };
@@ -592,3 +592,4 @@ void main() {
     }
   });
 }
+

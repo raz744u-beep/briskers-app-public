@@ -97,13 +97,12 @@ class DiagnosticsReport {
 class BriskersDiagnosticsService {
   BriskersDiagnosticsService({
     BriskersLocalDatabase? database,
-    LocalDocumentDetailCache detailCache =
-        const LocalDocumentDetailCache(),
+    LocalDocumentDetailCache? detailCache,
     LocalTaxSettingsCache? taxSettingsCache,
     LocalInvoiceStatusStylesCache? invoiceStatusStylesCache,
     BriskersConnectionModeController? connectionMode,
   })  : _database = database ?? localDatabase,
-        _detailCache = detailCache,
+        _detailCache = detailCache ?? LocalDocumentDetailCache(database:database),
         _taxSettingsCache =
             taxSettingsCache ?? LocalTaxSettingsCache(),
         _invoiceStatusStylesCache =
@@ -1888,3 +1887,4 @@ class BriskersDiagnosticsService {
     );
   }
 }
+

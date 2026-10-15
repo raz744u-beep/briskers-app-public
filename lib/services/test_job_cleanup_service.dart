@@ -19,11 +19,11 @@ class TestJobCleanupService {
   TestJobCleanupService({
     TestJobCleanupGateway gateway = const TestJobCleanupGateway(),
     BriskersLocalDatabase? database,
-    LocalDocumentDetailCache cache = const LocalDocumentDetailCache(),
+    LocalDocumentDetailCache? cache,
     DateTime Function()? now,
   }) : _gateway = gateway,
        _database = database ?? localDatabase,
-       _cache = cache,
+       _cache = cache ?? LocalDocumentDetailCache(database: database),
        _now = now ?? DateTime.now;
 
   final TestJobCleanupGateway _gateway;
@@ -263,3 +263,4 @@ class TestJobCleanupService {
     }
   }
 }
+

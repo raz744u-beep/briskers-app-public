@@ -10,6 +10,7 @@ import 'package:briskers_app/services/job_summary_visibility.dart';
 import 'package:briskers_app/services/job_sync_service.dart';
 import 'package:briskers_app/services/local_job_quarantine.dart';
 import 'package:briskers_app/services/local_job_repository.dart';
+import 'support/empty_retirement_gateway.dart';
 import 'package:briskers_app/services/test_job_cleanup_gateway.dart';
 
 class _RevocationApi extends BriskersApi {
@@ -54,20 +55,20 @@ void main() {
     for (final id in ['revoked', 'unrelated']) {
       await db.customStatement(
         'INSERT INTO local_jobs(id,business_id,access_scope,title,status,vehicle_id) '
-        "VALUES (?,'shop','full',?,'open','shared-vehicle')", [id, '$id title']);
+        "VALUES (?,'11111111-1111-4111-8111-111111111111','full',?,'open','shared-vehicle')", [id, '$id title']);
     }
     await db.customStatement(
       'INSERT INTO local_sync_states(business_id,scope,last_server_cursor,bootstrapped) '
-      "VALUES ('shop','jobs',10,1)");
+      "VALUES ('11111111-1111-4111-8111-111111111111','jobs',10,1)");
   });
   tearDown(() => db.close());
 
   test('failed tombstones immediately prune retained cards and reject an old load', () async {
     final jobs = LocalJobRepository(database: db);
-    var retained = await jobs.listJobs('shop');
+    var retained = await jobs.listJobs('11111111-1111-4111-8111-111111111111');
     final staleRows = List<Map<String, dynamic>>.from(retained);
     final visibility = JobSummaryVisibility(
-      businessId: 'shop', database: db,
+      businessId: '11111111-1111-4111-8111-111111111111', database: db,
       onQuarantine: (ids) {
         retained = JobSummaryVisibility.withoutJobs(retained, ids);
       },
@@ -84,14 +85,14 @@ void main() {
         expect(retained.map((row) => row['id']), ['unrelated']);
         expect(visibility.isCurrent(generation), isFalse);
       };
-    final sync = JobSyncService(database: db, api: _RevocationApi(),
+    final sync = JobSyncService(database: db, retirementGateway: const EmptyRetirementGateway(), api: _RevocationApi(),
         cleanupGateway: gateway);
-    await expectLater(sync.pull('shop'), throwsStateError);
+    await expectLater(sync.pull('11111111-1111-4111-8111-111111111111'), throwsStateError);
     slowRead.complete(staleRows);
     await pending;
     expect(retained.map((row) => row['id']), ['unrelated']);
     expect((await db.customSelect("SELECT last_server_cursor FROM local_sync_states "
-      "WHERE business_id='shop' AND scope='jobs'").getSingle())
+      "WHERE business_id='11111111-1111-4111-8111-111111111111' AND scope='jobs'").getSingle())
         .read<int>('last_server_cursor'), 10);
     expect((await visibility.filter(staleRows)).map((row) => row['id']), ['unrelated']);
   });
@@ -99,7 +100,7 @@ void main() {
   test('business scoping and disposal preserve unrelated screens', () async {
     var events = 0;
     final visibility = JobSummaryVisibility(
-      businessId: 'shop', database: db, onQuarantine: (_) => events++,
+      businessId: '11111111-1111-4111-8111-111111111111', database: db, onQuarantine: (_) => events++,
     );
     final generation = visibility.beginLoad();
     await LocalJobQuarantine.quarantineJobs(db, 'other', ['revoked']);
@@ -107,17 +108,17 @@ void main() {
     expect(visibility.isCurrent(generation), isTrue);
     expect(await visibility.filter([{'id': 'revoked'}]), hasLength(1));
     visibility.dispose();
-    await LocalJobQuarantine.quarantineJobs(db, 'shop', ['revoked']);
+    await LocalJobQuarantine.quarantineJobs(db, '11111111-1111-4111-8111-111111111111', ['revoked']);
     expect(events, 0);
     expect(visibility.isCurrent(generation), isFalse);
   });
 
   test('linked appointments are hidden without dropping unlinked records', () async {
     final visibility = JobSummaryVisibility(
-      businessId: 'shop', database: db, onQuarantine: (_) {},
+      businessId: '11111111-1111-4111-8111-111111111111', database: db, onQuarantine: (_) {},
     );
     addTearDown(visibility.dispose);
-    await LocalJobQuarantine.quarantineJobs(db, 'shop', ['revoked']);
+    await LocalJobQuarantine.quarantineJobs(db, '11111111-1111-4111-8111-111111111111', ['revoked']);
     final rows = [
       {'id': 'linked', 'job_id': 'revoked'},
       {'id': 'independent', 'job_id': 'unrelated'},
@@ -131,20 +132,20 @@ void main() {
     final oldCache = [{'id': 'revoked', 'title': 'Old saved edit'}];
     final api = _RevocationApi();
     final gateway = _FailingTombstones();
-    final sync = JobSyncService(database: db, api: api, cleanupGateway: gateway);
-    await expectLater(sync.pull('shop'), throwsStateError);
+    final sync = JobSyncService(database: db, retirementGateway: const EmptyRetirementGateway(), api: api, cleanupGateway: gateway);
+    await expectLater(sync.pull('11111111-1111-4111-8111-111111111111'), throwsStateError);
     final visibility = JobSummaryVisibility(
-      businessId: 'shop', database: db, onQuarantine: (_) {},
+      businessId: '11111111-1111-4111-8111-111111111111', database: db, onQuarantine: (_) {},
     );
     addTearDown(visibility.dispose);
     expect(await visibility.filter(oldCache, cached: true), isEmpty);
     final archiveBefore = await db.customSelect('SELECT * FROM local_job_recovery_rows').get();
     api.authorize = true;
     gateway.fail = false;
-    await sync.pull('shop');
+    await sync.pull('11111111-1111-4111-8111-111111111111');
     // A new authorized server bundle restores current display, never old cache.
     expect(await visibility.filter(oldCache, cached: true), isEmpty);
-    final current = (await LocalJobRepository(database: db).listJobs('shop'))
+    final current = (await LocalJobRepository(database: db).listJobs('11111111-1111-4111-8111-111111111111'))
         .where((row) => row['id'] == 'revoked').toList();
     expect(current.single['title'], 'Current server summary');
     expect(await visibility.filter(current), hasLength(1));
@@ -159,14 +160,14 @@ void main() {
     for (final entry in {'owned': 'revoked', 'other-finding': 'unrelated'}.entries) {
       await db.customStatement(
         'INSERT INTO local_findings(id,business_id,vehicle_id,found_job_id,body,status) '
-        "VALUES (?,'shop','shared-vehicle',?,'Saved finding','open')",
+        "VALUES (?,'11111111-1111-4111-8111-111111111111','shared-vehicle',?,'Saved finding','open')",
         [entry.key, entry.value]);
     }
     final visibility = JobSummaryVisibility(
-      businessId: 'shop', database: db, onQuarantine: (_) {},
+      businessId: '11111111-1111-4111-8111-111111111111', database: db, onQuarantine: (_) {},
     );
     addTearDown(visibility.dispose);
-    await LocalJobQuarantine.quarantineJobs(db, 'shop', ['revoked']);
+    await LocalJobQuarantine.quarantineJobs(db, '11111111-1111-4111-8111-111111111111', ['revoked']);
     final cached = <Map<String, dynamic>>[
       {'id': 'owned', 'vehicle_id': 'shared-vehicle'}, // Old API omitted Job IDs.
       {'id': 'other-finding', 'vehicle_id': 'shared-vehicle'},
@@ -176,7 +177,7 @@ void main() {
     expect((await visibility.filterFindings(cached, cached: true))
         .map((row) => row['id']), ['other-finding', 'independent']);
     final generation = await visibility.captureSnapshotGeneration();
-    await LocalJobQuarantine.authorizeFreshJob(db, 'shop', 'revoked',
+    await LocalJobQuarantine.authorizeFreshJob(db, '11111111-1111-4111-8111-111111111111', 'revoked',
         requestGeneration: generation);
     expect((await visibility.filterFindings(cached, cached: true))
         .map((row) => row['id']), ['other-finding', 'independent']);
@@ -205,3 +206,4 @@ void main() {
     expect(findings, contains('_guardModal(quarantine,'));
   });
 }
+

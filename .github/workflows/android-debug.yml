@@ -9,6 +9,7 @@ on:
 
 # Build/test commands never transmit Flutter or Dart analytics.
 env:
+  CI: 'true'
   FLUTTER_SUPPRESS_ANALYTICS: 'true'
   DASH__SUPPRESS_ANALYTICS: 'true'
 
@@ -712,3 +713,4 @@ jobs:
             generated/build/app/outputs/flutter-apk/Briskers-v*.verification.txt
           if-no-files-found: error
           retention-days: 30
+

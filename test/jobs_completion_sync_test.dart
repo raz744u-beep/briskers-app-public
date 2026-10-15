@@ -1,3 +1,4 @@
+import 'support/empty_retirement_gateway.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/job_sync_service.dart';
@@ -76,27 +77,27 @@ void main() {
       final db = BriskersLocalDatabase(NativeDatabase.memory());
       addTearDown(db.close);
       final api = _Api();
-      final sync = JobSyncService(
+      final sync = JobSyncService(retirementGateway: const EmptyRetirementGateway(),
         api: api,
         database: db,
         cleanupGateway: _Cleanup(),
       );
       final admin = OfflineJobAdminService(database: db);
       final jobs = LocalJobRepository(database: db);
-      await sync.pull('shop');
+      await sync.pull('00000000-0000-4000-8000-000000000001');
       await admin.queueStatus(
-        'shop',
+        '00000000-0000-4000-8000-000000000001',
         'synthetic-j6',
         code: 'completed',
         name: 'Completed',
       );
-      var row = (await jobs.listJobs('shop', status: 'completed')).single;
+      var row = (await jobs.listJobs('00000000-0000-4000-8000-000000000001', status: 'completed')).single;
       final localCompletion = row['completed_at'];
       expect(localCompletion, isNotNull);
 
       api.version = 2;
-      await sync.pull('shop');
-      row = (await jobs.listJobs('shop', status: 'completed')).single;
+      await sync.pull('00000000-0000-4000-8000-000000000001');
+      row = (await jobs.listJobs('00000000-0000-4000-8000-000000000001', status: 'completed')).single;
       expect(row['completed_at'], localCompletion);
       var saved = await db
           .customSelect("SELECT * FROM local_jobs WHERE id='synthetic-j6'")
@@ -111,13 +112,13 @@ void main() {
       // Once the operation has been acknowledged, the authoritative server date
       // replaces the local projection. No sync payload or RPC is changed.
       await db.customStatement(
-        "DELETE FROM sync_outbox WHERE business_id='shop'",
+        "DELETE FROM sync_outbox WHERE business_id='00000000-0000-4000-8000-000000000001'",
       );
       api.status = 'completed';
       api.completedAt = '2026-10-14T14:00:00Z';
       api.version = 3;
-      await sync.pull('shop');
-      row = (await jobs.listJobs('shop', status: 'completed')).single;
+      await sync.pull('00000000-0000-4000-8000-000000000001');
+      row = (await jobs.listJobs('00000000-0000-4000-8000-000000000001', status: 'completed')).single;
       expect(
         row['completed_at'],
         DateTime.parse(api.completedAt!).toIso8601String(),
@@ -128,26 +129,26 @@ void main() {
       expect(saved.read<String>('sync_state'), 'synced');
 
       await admin.queueStatus(
-        'shop',
+        '00000000-0000-4000-8000-000000000001',
         'synthetic-j6',
         code: 'open',
         name: 'Open',
       );
       api.version = 4;
-      await sync.pull('shop');
-      row = (await jobs.listJobs('shop')).single;
+      await sync.pull('00000000-0000-4000-8000-000000000001');
+      row = (await jobs.listJobs('00000000-0000-4000-8000-000000000001')).single;
       expect(row['status'], 'open');
       expect(row['completed_at'], isNull);
-      expect(await jobs.listJobs('shop', status: 'completed'), isEmpty);
+      expect(await jobs.listJobs('00000000-0000-4000-8000-000000000001', status: 'completed'), isEmpty);
 
       // A similarly named queued operation in another business cannot retain a
       // local status in this business after its own operation is acknowledged.
       await db.customStatement(
-        "UPDATE sync_outbox SET business_id='other-shop'",
+        "UPDATE sync_outbox SET business_id='other-00000000-0000-4000-8000-000000000001'",
       );
       api.version = 5;
-      await sync.pull('shop');
-      row = (await jobs.listJobs('shop')).single;
+      await sync.pull('00000000-0000-4000-8000-000000000001');
+      row = (await jobs.listJobs('00000000-0000-4000-8000-000000000001')).single;
       expect(row['status'], 'completed');
       expect(
         row['completed_at'],
@@ -156,3 +157,4 @@ void main() {
     },
   );
 }
+

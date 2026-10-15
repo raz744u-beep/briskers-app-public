@@ -6,6 +6,7 @@ import '../core/job_list_options.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_access_history.dart';
+import 'local_job_retirement.dart';
 
 class LocalJobDetailSnapshot {
   const LocalJobDetailSnapshot({
@@ -42,6 +43,16 @@ class LocalJobRepository {
 
     return rows.isNotEmpty && rows.first.read<int>('bootstrapped') == 1;
   }
+
+  // Retirement is a durable visibility decision. Keep the retained rows for
+  // reconciliation, but exclude them before sorting, paging, or aggregating.
+  static String _visibleJobSql(String alias) =>
+      """
+    NOT EXISTS (SELECT 1 FROM local_job_retirement_entities r
+      WHERE r.business_id = $alias.business_id AND r.entity_kind = 'job'
+        AND r.entity_id = $alias.id
+        AND r.state IN ('pending','accepted','locally_cancelled'))
+  """;
 
   static const _finishedStatuses = "('completed','cancelled','closed')";
 
@@ -153,7 +164,7 @@ class LocalJobRepository {
     String? search,
     JobListView view = JobListView.all,
   }) {
-    final where = <String>['j.business_id = ?'];
+    final where = <String>['j.business_id = ?', _visibleJobSql('j')];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
     if (view == JobListView.active) {
       where.add('lower(j.status) NOT IN $_finishedStatuses');
@@ -208,6 +219,7 @@ class LocalJobRepository {
     int limit = 50,
     int offset = 0,
   }) async {
+    await LocalJobRetirement.ensureSchema(_database);
     await LocalJobAccessHistory(database: _database).ensureTable();
     // Activity is sorted before paging. Keep related lookups indexed even on
     // older installed databases so a large imported history stays usable.
@@ -307,9 +319,13 @@ class LocalJobRepository {
   }
 
   Future<String?> jobNumberForJob(String businessId, String jobId) async {
+    if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
+      return null;
+    }
     final rows = await _database
         .customSelect(
-          'SELECT job_number FROM local_jobs WHERE business_id = ? AND id = ?',
+          "SELECT job_number FROM local_jobs j WHERE business_id = ? AND id = ? "
+          "AND ${_visibleJobSql('j')}",
           variables: [Variable<String>(businessId), Variable<String>(jobId)],
         )
         .get();
@@ -332,6 +348,21 @@ class LocalJobRepository {
     }
     final number = jobNumber?.trim();
     return _database.transaction(() async {
+      if (await LocalJobRetirement.isJobBlocked(
+            _database,
+            businessId,
+            provisionalJobId,
+          ) ||
+          await LocalJobRetirement.isJobBlocked(
+            _database,
+            businessId,
+            serverJobId,
+          )) {
+        throw StateError(
+          'The linked Job is pending deletion or retired. '
+          'Its provisional work has been preserved.',
+        );
+      }
       final source =
           await (_database.select(_database.localJobs)..where(
                 (row) =>
@@ -444,9 +475,8 @@ class LocalJobRepository {
             ],
           );
         }
-        await LocalJobAccessHistory(
-          database: _database,
-        ).remapJob(businessId, provisionalJobId, serverJobId);
+        await LocalJobAccessHistory(database: _database)
+            .remapJob(businessId, provisionalJobId, serverJobId);
         await _database.customStatement(
           'DELETE FROM local_jobs WHERE business_id = ? AND id = ?',
           [businessId, provisionalJobId],
@@ -462,6 +492,7 @@ class LocalJobRepository {
     String? search,
     JobListView view = JobListView.all,
   }) async {
+    await LocalJobRetirement.ensureSchema(_database);
     final filters = _filters(
       businessId,
       status: status,
@@ -477,17 +508,18 @@ class LocalJobRepository {
     return row.read<int>('count');
   }
 
-  Stream<int> watchJobCount(String businessId, {String? status}) {
-    final where = <String>['business_id = ?'];
+  Stream<int> watchJobCount(String businessId, {String? status}) async* {
+    await LocalJobRetirement.ensureSchema(_database);
+    final where = <String>['j.business_id = ?', _visibleJobSql('j')];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
     if (status != null && status.isNotEmpty) {
       where.add('status = ?');
       variables.add(Variable<String>(status));
     }
 
-    return _database
+    yield* _database
         .customSelect(
-          'SELECT COUNT(*) AS count FROM local_jobs WHERE ${where.join(' AND ')}',
+          'SELECT COUNT(*) AS count FROM local_jobs j WHERE ${where.join(' AND ')}',
           variables: variables,
           readsFrom: {_database.localJobs},
         )
@@ -499,12 +531,14 @@ class LocalJobRepository {
     String businessId, {
     int limit = 25,
   }) async {
+    await LocalJobRetirement.ensureSchema(_database);
     final rows = await _database
         .customSelect(
           '''
       SELECT id, job_number, title, customer_name, vehicle_label, status
-      FROM local_jobs
-      WHERE business_id = ?
+      FROM local_jobs j
+      WHERE j.business_id = ?
+        AND ${_visibleJobSql('j')}
         AND is_unassigned = 1
         AND lower(status) NOT IN $_finishedStatuses
       ORDER BY created_at DESC, id
@@ -530,12 +564,14 @@ class LocalJobRepository {
   }
 
   Future<int> unassignedOpenJobCount(String businessId) async {
+    await LocalJobRetirement.ensureSchema(_database);
     final row = await _database
         .customSelect(
           '''
       SELECT COUNT(*) AS count
-      FROM local_jobs
-      WHERE business_id = ?
+      FROM local_jobs j
+      WHERE j.business_id = ?
+        AND ${_visibleJobSql('j')}
         AND is_unassigned = 1
         AND lower(status) NOT IN $_finishedStatuses
       ''',
@@ -546,12 +582,14 @@ class LocalJobRepository {
   }
 
   Future<int> activeJobCount(String businessId) async {
+    await LocalJobRetirement.ensureSchema(_database);
     final row = await _database
         .customSelect(
           '''
       SELECT COUNT(*) AS count
-      FROM local_jobs
-      WHERE business_id = ?
+      FROM local_jobs j
+      WHERE j.business_id = ?
+        AND ${_visibleJobSql('j')}
         AND lower(status) NOT IN $_finishedStatuses
       ''',
           variables: [Variable<String>(businessId)],
@@ -560,13 +598,15 @@ class LocalJobRepository {
     return row.read<int>('count');
   }
 
-  Stream<int> watchActiveJobCount(String businessId) {
-    return _database
+  Stream<int> watchActiveJobCount(String businessId) async* {
+    await LocalJobRetirement.ensureSchema(_database);
+    yield* _database
         .customSelect(
           '''
           SELECT COUNT(*) AS count
-          FROM local_jobs
-          WHERE business_id = ?
+          FROM local_jobs j
+          WHERE j.business_id = ?
+        AND ${_visibleJobSql('j')}
             AND lower(status) NOT IN $_finishedStatuses
           ''',
           variables: [Variable<String>(businessId)],
@@ -580,12 +620,14 @@ class LocalJobRepository {
     String businessId, {
     JobListView view = JobListView.all,
   }) async {
+    await LocalJobRetirement.ensureSchema(_database);
     final rows = await _database
         .customSelect(
           '''
       SELECT status, COUNT(*) AS count
-      FROM local_jobs
-      WHERE business_id = ?
+      FROM local_jobs j
+      WHERE j.business_id = ?
+        AND ${_visibleJobSql('j')}
       ${view == JobListView.active ? 'AND lower(status) NOT IN $_finishedStatuses' : ''}
       GROUP BY status
       ''',
@@ -663,7 +705,10 @@ class LocalJobRepository {
     await _database.transaction(() async {
       for (final job in jobs) {
         final id = job['id']?.toString() ?? '';
-        if (id.isEmpty) continue;
+        if (id.isEmpty ||
+            await LocalJobRetirement.isJobBlocked(_database, businessId, id)) {
+          continue;
+        }
         await _database.customStatement(
           '''
           UPDATE local_jobs
@@ -686,6 +731,9 @@ class LocalJobRepository {
     String businessId,
     String jobId,
   ) async {
+    if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
+      return null;
+    }
     final jobRows = await _database
         .customSelect(
           '''
@@ -800,6 +848,10 @@ class LocalJobRepository {
         : await _findings(businessId, vehicleId);
     final statuses = await jobStatuses(businessId);
 
+    // A retirement observed while assembling nested rows also hides this load.
+    if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
+      return null;
+    }
     return LocalJobDetailSnapshot(
       job: job,
       preInspection: preInspection,

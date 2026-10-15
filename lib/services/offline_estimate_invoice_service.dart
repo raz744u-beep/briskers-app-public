@@ -7,15 +7,16 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
+import 'local_job_retirement.dart';
 import 'local_document_detail_cache.dart';
 
 class OfflineEstimateInvoiceService {
   OfflineEstimateInvoiceService({
     BriskersApi api = const BriskersApi(),
-    LocalDocumentDetailCache cache = const LocalDocumentDetailCache(),
+    LocalDocumentDetailCache? cache,
     BriskersLocalDatabase? database,
   })  : _api = api,
-        _cache = cache,
+        _cache = cache ?? LocalDocumentDetailCache(database: database),
         _database = database ?? localDatabase;
 
   final BriskersApi _api;
@@ -85,6 +86,7 @@ class OfflineEstimateInvoiceService {
     final result = <Map<String, dynamic>>[];
     for (final row in rows) {
       final id = row.read<String>('id');
+      if(await LocalJobRetirement.isDocumentBlocked(_database,businessId,id)) continue;
       final cached = await _cache.load(businessId, id);
 
       String prefer(String? primary, Object? fallback) {
@@ -393,3 +395,4 @@ class OfflineEstimateInvoiceService {
     }
   }
 }
+

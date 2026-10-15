@@ -2,6 +2,10 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:typed_data';
 
+import 'job_quarantine_view_guard.dart';
+import '../../services/local_job_retirement.dart';
+import '../../local/local_database_provider.dart';
+
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 import '../../core/module_modal_theme.dart';
 import '../../widgets/estimate_merge_confirmation_dialog.dart';
@@ -442,6 +446,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<void> _load({bool fastAfterMutation = false}) async {
     final generation = ++_loadGeneration;
+    if ((await LocalJobRetirement.blockedDocumentIds(localDatabase, widget.businessId)).contains(widget.documentId)) {
+      if (mounted && generation == _loadGeneration) _blockRetiredDocument();
+      return;
+    }
     final loadWatch = Stopwatch()..start();
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
@@ -6656,8 +6664,38 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
+  void _blockRetiredDocument() {
+    _loadGeneration++;
+    if (!mounted) return;
+    setState(() {
+      _detail = null;
+      _identifixMeta = const {};
+      _warrantyDetail = const {};
+      _signatureStatus = const {};
+      _submissionReadiness = const {};
+      _openFindings = const [];
+      _loading = false;
+      _busy = true;
+      _initialActionHandled = true;
+      _error =
+          'Document deletion is pending or accepted. Saved work is preserved.';
+    });
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => JobQuarantineViewGuard(
+    businessId: widget.businessId,
+    jobId: '',
+    documentId: widget.documentId,
+    onBlocked: _blockRetiredDocument,
+    onRestored: () {
+      if (mounted) setState(() => _busy = false);
+      unawaited(_load());
+    },
+    child: _buildDocumentContent(context),
+  );
+
+  Widget _buildDocumentContent(BuildContext context) {
     if (_loading) {
       return Scaffold(
         appBar: AppBar(
@@ -8048,3 +8086,4 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
     );
   }
 }
+

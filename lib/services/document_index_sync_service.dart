@@ -1,6 +1,5 @@
 import 'dart:async';
 
-
 import '../local/local_database_provider.dart';
 import '../local/briskers_local_database.dart';
 import 'briskers_api.dart';
@@ -10,19 +9,28 @@ import 'document_edit_permission_cache.dart';
 import 'local_cleanup_safety.dart';
 import 'test_job_cleanup_gateway.dart';
 import 'test_job_cleanup_policy.dart';
+import 'local_job_retirement.dart';
+import 'owner_job_retirement_service.dart';
 
 class DocumentIndexSyncService {
   DocumentIndexSyncService({
     BriskersApi api = const BriskersApi(),
     LocalDocumentRepository? repository,
     BriskersLocalDatabase? database,
-    LocalDocumentDetailCache detailCache = const LocalDocumentDetailCache(),
+    LocalDocumentDetailCache? detailCache,
+    OwnerJobRetirementGateway retirementGateway =
+        const OwnerJobRetirementGateway(),
     TestJobCleanupGateway cleanupGateway = const TestJobCleanupGateway(),
-  })  : _api = api,
-        _cleanupGateway = cleanupGateway,
-        _database = database ?? localDatabase,
-        _detailCache = detailCache,
-        _repository = repository ?? LocalDocumentRepository(database: database);
+  }) : _api = api,
+       _cleanupGateway = cleanupGateway,
+       _database = database ?? localDatabase,
+       _detailCache =
+           detailCache ?? LocalDocumentDetailCache(database: database),
+       _retirement = OwnerJobRetirementService(
+         database: database,
+         gateway: retirementGateway,
+       ),
+       _repository = repository ?? LocalDocumentRepository(database: database);
 
   static const _scope = 'documents';
   static final StreamController<String> _syncEvents =
@@ -33,52 +41,88 @@ class DocumentIndexSyncService {
   /// Refresh existing listeners after a verified, server-committed cleanup.
   static void notifyCleanup(String businessId) => _syncEvents.add(businessId);
   final BriskersApi _api;
+  final OwnerJobRetirementService _retirement;
   final TestJobCleanupGateway _cleanupGateway;
   final LocalDocumentRepository _repository;
   final LocalDocumentDetailCache _detailCache;
   final BriskersLocalDatabase _database;
 
   Future<void> pull(String businessId) async {
+    await _retirement.pullTombstones(businessId);
     final results = await Future.wait<dynamic>([
       _api.documents(businessId, kind: 'estimate'),
       _api.documents(businessId, kind: 'invoice'),
     ]);
+    await _retirement.pullTombstones(businessId);
+    final retiredDocuments = await LocalJobRetirement.blockedDocumentIds(
+      _database,
+      businessId,
+    );
+    final retiredJobs = await LocalJobRetirement.blockedJobIds(
+      _database,
+      businessId,
+    );
     // Fetch after document reads so a deletion reflected by those reads cannot
     // be mistaken for an ordinary missing list row.
     final cleanup = TestJobCleanupTombstones.fromJson(
-      await _cleanupGateway.tombstones(businessId), businessId,
+      await _cleanupGateway.tombstones(businessId),
+      businessId,
     );
 
-    final estimates =
-        List<Map<String, dynamic>>.from(results[0] as List)
-            .where((row) => !cleanup.documentIds.contains(row['id'])).toList();
-    final invoices =
-        List<Map<String, dynamic>>.from(results[1] as List)
-            .where((row) => !cleanup.documentIds.contains(row['id'])).toList();
-    final all = <Map<String, dynamic>>[
-      ...estimates,
-      ...invoices,
-    ];
+    final estimates = List<Map<String, dynamic>>.from(results[0] as List)
+        .where(
+          (row) =>
+              !cleanup.documentIds.contains(row['id']) &&
+              !retiredDocuments.contains(row['id']),
+        )
+        .toList();
+    final invoices = List<Map<String, dynamic>>.from(results[1] as List)
+        .where(
+          (row) =>
+              !cleanup.documentIds.contains(row['id']) &&
+              !retiredDocuments.contains(row['id']) &&
+              !retiredJobs.contains(row['job_id']),
+        )
+        .toList();
+    final all = <Map<String, dynamic>>[...estimates, ...invoices];
 
     await _database.transaction(() async {
       await LocalCleanupSafety.requireDocumentsRemovable(
-        _database, businessId, cleanup.documentIds,
+        _database,
+        businessId,
+        cleanup.documentIds,
       );
       final snapshots = <String, Map<String, dynamic>?>{};
       for (final id in cleanup.documentIds) {
         final snapshot = await _detailCache.load(businessId, id);
         if (TestJobCleanupPolicy.hasPendingSnapshot(snapshot)) {
-          throw StateError('A server-deleted document has local edits or '
-              'payment history. Its snapshot has been preserved.');
+          throw StateError(
+            'A server-deleted document has local edits or '
+            'payment history. Its snapshot has been preserved.',
+          );
         }
         snapshots[id] = snapshot;
       }
-      await _repository.replaceFromServer(businessId, estimates, kind: 'estimate');
-      await _repository.replaceFromServer(businessId, invoices, kind: 'invoice');
+      await _repository.replaceFromServer(
+        businessId,
+        estimates,
+        kind: 'estimate',
+      );
+      await _repository.replaceFromServer(
+        businessId,
+        invoices,
+        kind: 'invoice',
+      );
       for (final entry in snapshots.entries) {
-        if (!await _detailCache.removeIfUnchanged(businessId, entry.key, entry.value)) {
-          throw StateError('A document changed while synchronizing cleanup. '
-              'Its latest snapshot has been preserved; retry after reconciliation.');
+        if (!await _detailCache.removeIfUnchanged(
+          businessId,
+          entry.key,
+          entry.value,
+        )) {
+          throw StateError(
+            'A document changed while synchronizing cleanup. '
+            'Its latest snapshot has been preserved; retry after reconciliation.',
+          );
         }
       }
     });
@@ -124,17 +168,18 @@ class DocumentIndexSyncService {
       if (id.isEmpty) continue;
       final cached = await _detailCache.load(businessId, id);
       final expectedKind = document['kind']?.toString() ?? '';
-      final cachedValid = cached != null &&
+      final cachedValid =
+          cached != null &&
           cached['id']?.toString() == id &&
           cached['kind']?.toString() == expectedKind &&
           cached['lines'] is List;
       // Never overwrite pending offline edits. Otherwise refresh server data
       // when its version changed (not on every index synchronization).
-      final hasLocalEdits =
-          cached?['sync_state']?.toString() == 'pending';
+      final hasLocalEdits = cached?['sync_state']?.toString() == 'pending';
       final serverVersion = document['row_version']?.toString();
       final cachedVersion = cached?['row_version']?.toString();
-      final current = cachedValid &&
+      final current =
+          cachedValid &&
           (hasLocalEdits ||
               serverVersion == null ||
               serverVersion == cachedVersion);
@@ -165,8 +210,7 @@ class DocumentIndexSyncService {
         if (id.isEmpty) continue;
         try {
           final detail = await _api.documentDetail(businessId, id);
-          if (detail['id']?.toString() != id ||
-              detail['lines'] is! List) {
+          if (detail['id']?.toString() != id || detail['lines'] is! List) {
             throw StateError('Invalid document detail response');
           }
           await _detailCache.save(businessId, id, detail);

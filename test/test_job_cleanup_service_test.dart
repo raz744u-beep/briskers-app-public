@@ -124,7 +124,7 @@ void main() {
   });
 
   test('local paid or uncertain snapshot blocks even with clean outbox', () async {
-    await const LocalDocumentDetailCache().save('shop', 'doc', {'paid_amount': 5});
+    await LocalDocumentDetailCache(database: db).save('shop', 'doc', {'paid_amount': 5});
     final plan = await service.preview('shop', 'job', roleCode: 'owner');
     expect(plan.canDelete, isFalse);
     expect(plan.blockedReasons.join(), contains('payment'));
@@ -180,3 +180,4 @@ void main() {
     expect(gateway.executions, 0);
   });
 }
+

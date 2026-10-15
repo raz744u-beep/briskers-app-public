@@ -10,6 +10,7 @@ import '../core/job_list_options.dart';
 import '../core/module_modal_theme.dart';
 import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
+import '../services/owner_job_retirement_service.dart';
 import '../services/job_summary_visibility.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/local_document_repository.dart';
@@ -111,6 +112,7 @@ class _JobsScreenState extends State<JobsScreen>
 
   final TextEditingController _search = TextEditingController();
   Timer? _searchDebounce;
+  StreamSubscription<String>? _retirementChanges;
   late JobSummaryVisibility _jobVisibility;
   int _totalCount = 0;
   Map<String, int> _statusCounts = const {};
@@ -129,6 +131,13 @@ class _JobsScreenState extends State<JobsScreen>
   void initState() {
     super.initState();
     _listenForQuarantine();
+    _retirementChanges = OwnerJobRetirementService.statusEvents.listen((
+      businessId,
+    ) {
+      if (businessId == widget.businessId && mounted) {
+        unawaited(_load(refreshRemote: false));
+      }
+    });
   }
 
   void _listenForQuarantine() {
@@ -200,9 +209,8 @@ class _JobsScreenState extends State<JobsScreen>
   void _restoreView() {
     if (_restoredView) return;
     _restoredView = true;
-    final saved = PageStorage.maybeOf(
-      context,
-    )?.readState(context, identifier: _storageId);
+    final saved = PageStorage.maybeOf(context)
+        ?.readState(context, identifier: _storageId);
     if (saved is JobListPreferences) {
       _selectedStatus = saved.status;
       _search.text = saved.search;
@@ -214,6 +222,7 @@ class _JobsScreenState extends State<JobsScreen>
   @override
   void dispose() {
     _jobVisibility.dispose();
+    _retirementChanges?.cancel();
     _searchDebounce?.cancel();
     _search.dispose();
     super.dispose();

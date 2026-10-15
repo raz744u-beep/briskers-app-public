@@ -14,6 +14,8 @@ import '../core/document_search.dart';
 import '../core/document_future_date.dart';
 import '../core/document_presentation.dart';
 import '../services/briskers_api.dart';
+import '../services/local_job_retirement.dart';
+import '../local/local_database_provider.dart';
 import '../services/local_financial_cache.dart';
 import '../services/local_document_repository.dart';
 import '../services/offline_document_draft_service.dart';
@@ -115,6 +117,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       InvoiceFinalizationGuard();
 
   List<Map<String, dynamic>>? _rows;
+  int _loadEpoch = 0;
+  StreamSubscription<({String businessId, Set<String> jobIds})>? _retirement;
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
   bool _futureDatedOnly = false;
@@ -215,17 +219,39 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if (!_estimate && cachedStyles != null) {
       _invoiceStyles = List<Map<String, dynamic>>.from(cachedStyles);
     }
+    _retirement = LocalJobRetirement.events.listen((event) {
+      if (event.businessId == widget.businessId && mounted) {
+        // Invalidate any response captured before the durable tombstone.
+        _loadEpoch++;
+        unawaited(_load());
+      }
+    });
     unawaited(_load());
   }
 
   @override
+  void didUpdateWidget(covariant DocumentsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.kind != widget.kind) {
+      _loadEpoch++;
+      _rows = null;
+      _invoiceStyles = const [];
+      _error = null;
+      unawaited(_load());
+    }
+  }
+
+  @override
   void dispose() {
+    _retirement?.cancel();
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
+    final epoch = ++_loadEpoch;
     var localShown = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
     final forceOffline = BriskersConnectionModeController.instance.forceOffline;
@@ -245,7 +271,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           widget.businessId,
           kind: widget.kind,
         );
-        if (mounted) {
+        if (mounted && epoch == _loadEpoch) {
           localShown = true;
           setState(() {
             _rows = local.map(documentListIndexPresentation).toList();
@@ -256,7 +282,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     }
 
     if (forceOffline) {
-      if (mounted && !localShown) {
+      if (mounted && epoch == _loadEpoch && !localShown) {
         setState(() {
           _rows ??= const [];
           _error = null;
@@ -274,7 +300,14 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           Future.value(const <Map<String, dynamic>>[]),
       ]);
 
-      final rows = List<Map<String, dynamic>>.from(results[0] as List);
+      final blocked = await LocalJobRetirement.blockedDocumentIds(
+        localDatabase,
+        widget.businessId,
+      );
+      final rows = List<Map<String, dynamic>>.from(results[0] as List)
+          .where((row) => !blocked.contains('${row['id'] ?? ''}'))
+          .toList();
+      if (!mounted || epoch != _loadEpoch) return;
       final styles = List<Map<String, dynamic>>.from(results[1] as List);
 
       // A complete server snapshot must evict stale synced MobileBiz rows.
@@ -291,14 +324,14 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         await _localInvoiceStyles.save(widget.businessId, styles);
       }
 
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() {
         _rows = rows;
         _invoiceStyles = styles;
         _error = null;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() {
         _rows ??= const [];
         _error = (_rows!.isEmpty && !localShown)

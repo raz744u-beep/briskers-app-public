@@ -14,9 +14,12 @@ import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/job_sync_service.dart';
 import '../../services/local_job_quarantine.dart';
+import '../../services/local_job_retirement.dart';
 import '../../local/local_database_provider.dart';
 import 'job_quarantine_view_guard.dart';
-import 'owner_job_deletion_gate.dart';
+import 'owner_job_delete_dialog.dart';
+import '../../services/owner_job_retirement_service.dart';
+import '../../core/supabase_config.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/local_job_access_history.dart';
@@ -81,6 +84,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   final LocalDocumentDetailCache _documentDetailCache =
       const LocalDocumentDetailCache();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
+  final OwnerJobRetirementService _jobRetirement = OwnerJobRetirementService();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
 
@@ -305,7 +309,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   Future<void> _load() async {
     final epoch = ++_loadEpoch;
     try {
-      if (await LocalJobQuarantine.isJobBlocked(localDatabase, widget.businessId, widget.jobId)) {
+      if (await LocalJobQuarantine.isJobBlocked(localDatabase, widget.businessId, widget.jobId) ||
+          await LocalJobRetirement.isJobBlocked(localDatabase, widget.businessId, widget.jobId)) {
         if (mounted && epoch == _loadEpoch) _blockJobContent();
         return;
       }
@@ -621,7 +626,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         }
       }
 
-      if (await LocalJobQuarantine.isJobBlocked(localDatabase, widget.businessId, widget.jobId)) {
+      if (await LocalJobQuarantine.isJobBlocked(localDatabase, widget.businessId, widget.jobId) ||
+          await LocalJobRetirement.isJobBlocked(localDatabase, widget.businessId, widget.jobId)) {
         if (mounted && epoch == _loadEpoch) _blockJobContent();
         return;
       }
@@ -644,6 +650,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       _modalRefresh?.call();
       _scheduleInitialAction();
       unawaited(_prefetchFindingPhotos(findings));
+      unawaited(_cacheDeletionPreview());
 
       unawaited(
         _persistOnlineJobSnapshot(statuses),
@@ -661,6 +668,24 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           _error = error.toString();
         }
       });
+    }
+  }
+
+  Future<void> _cacheDeletionPreview() async {
+    if (!_owner || _contentBlocked || widget.jobId.startsWith('local-')) return;
+    final actorId = supabase.auth.currentUser?.id;
+    if (actorId == null) return;
+    try {
+      // Save a server-verified graph while online so a later offline action
+      // can queue this exact graph, subject to revalidation on reconnect.
+      await _jobRetirement.preview(
+        widget.businessId,
+        widget.jobId,
+        actorId: actorId,
+        isOwner: true,
+      );
+    } catch (_) {
+      // A missing/unavailable backend must never break ordinary Job access.
     }
   }
 
@@ -3382,51 +3407,55 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
   Future<void> _deleteUnusedJob() async {
     if (!_owner || _busy) return;
-    // Read-only Owner preflight only. Never expose the legacy destructive
-    // endpoint until tombstone, offline and number-reuse safeguards ship.
-    if (BriskersConnectionModeController.instance.forceOffline) {
-      await showOwnerJobDeletionUnavailable(context);
-      return;
-    }
+    final actorId = supabase.auth.currentUser?.id;
+    if (actorId == null) return;
+    final offline = BriskersConnectionModeController.instance.forceOffline;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
     try {
-      final plan = await _api.jobDeletionPlan(widget.businessId, widget.jobId);
-      if (!mounted) return;
-      final invoices = List<dynamic>.from(plan['invoices'] ?? const []);
-      final estimates = List<dynamic>.from(plan['estimates_preserved'] ?? const []);
-      final canDelete = plan['can_delete'] == true;
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          backgroundColor: Theme.of(dialogContext).colorScheme.surface,
-          title: Text('Delete Job ${plan['job_number'] ?? ''}'),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('${invoices.length} linked invoice(s)'),
-              for (final invoice in invoices)
-                Text('Invoice ${(invoice as Map)['number'] ?? ''} — ${invoice['status'] ?? ''}'),
-              const SizedBox(height: 8),
-              Text('${estimates.length} linked estimate(s)'),
-              for (final estimate in estimates)
-                Text('Estimate ${(estimate as Map)['number'] ?? ''}'),
-              const SizedBox(height: 12),
-              Text(canDelete
-                ? 'Eligible for review. Deletion remains disabled until offline synchronization and number-reuse safeguards are complete.'
-                : 'Protected: ${plan['reason'] ?? 'This job cannot be deleted safely.'}'),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Close')),
-          ],
-        ),
+      final preview = await _jobRetirement.preview(
+        widget.businessId,
+        widget.jobId,
+        actorId: actorId,
+        isOwner: _owner,
+        online: !offline,
       );
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to check deletion safety: $error')),
-        );
+      if (!mounted || _contentBlocked) return;
+      final confirmed = await showOwnerJobDeleteConfirmation(
+        context,
+        snapshot: preview.snapshot,
+        canRetire: preview.canRetire,
+        blockedReasons: preview.blockedReasons,
+        offline: offline || preview.fromCache,
+      );
+      if (!confirmed || !mounted || _contentBlocked) return;
+      // Recheck identity after the dialog. Neither a cached role nor a preview
+      // grants server authority, and a changed session cannot inherit consent.
+      if (!_owner || supabase.auth.currentUser?.id != actorId) {
+        throw StateError('Your access changed. Reopen Delete Job to review.');
       }
+      final result = await _jobRetirement.queueConfirmed(
+        preview,
+        actorId: actorId,
+        isOwner: _owner,
+        online: !BriskersConnectionModeController.instance.forceOffline,
+      );
+      messenger.showSnackBar(SnackBar(content: Text(result.message)));
+      if (!mounted) return;
+      if (result.status != OwnerJobRetirementStatus.rejected) {
+        Navigator.pop(context, true);
+      } else {
+        await _load();
+      }
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Unable to delete Job: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -4943,8 +4972,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.delete_outline, color: Colors.red),
                     title: Text(BriskersLanguageController.instance.isSpanish
-                        ? 'Eliminar trabajo (verificación pendiente)'
-                        : 'Delete Job (safety checks pending)'),
+                        ? 'Eliminar trabajo'
+                        : 'Delete Job'),
                   ),
                 ),
               ],
@@ -5268,3 +5297,4 @@ class _JobDrawerSurface extends StatelessWidget {
     );
   }
 }
+

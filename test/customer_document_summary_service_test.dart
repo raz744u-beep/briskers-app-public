@@ -12,7 +12,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late BriskersLocalDatabase db;
   late CustomerDocumentSummaryService summaries;
-  const cache = LocalDocumentDetailCache();
+  late LocalDocumentDetailCache cache;
 
   Future<void> document(
     String id, {
@@ -65,6 +65,7 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     db = BriskersLocalDatabase(NativeDatabase.memory());
+    cache = LocalDocumentDetailCache(database: db);
     summaries = CustomerDocumentSummaryService(database: db);
   });
   tearDown(() => db.close());
@@ -200,3 +201,4 @@ void main() {
     },
   );
 }
+

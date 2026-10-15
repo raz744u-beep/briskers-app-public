@@ -41,7 +41,7 @@ void main() {
       () async {
     SharedPreferences.setMockInitialValues({});
     final db = BriskersLocalDatabase(NativeDatabase.memory());
-    const cache = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database: db);
     final documents = LocalDocumentRepository(database: db);
     final jobs = LocalJobRepository(database: db);
     final ledger = OfflineInvoicePaymentLedger(database: db);
@@ -92,3 +92,4 @@ void main() {
     }
   });
 }
+

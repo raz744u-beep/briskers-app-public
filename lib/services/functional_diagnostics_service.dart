@@ -911,7 +911,7 @@ class BriskersFunctionalDiagnosticsService {
         '$table still contains records for the canceled invoice.',
       );
     }
-    final cache = await const LocalDocumentDetailCache().load(businessId,id);
+    final cache = await LocalDocumentDetailCache(database:database).load(businessId,id);
     _require(cache == null, 'Deleted invoice still has a cached detail.');
   }
 
@@ -1066,7 +1066,7 @@ class BriskersFunctionalDiagnosticsService {
     BriskersLocalDatabase database,
     String businessId,
   ) async {
-    final cache = const LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database:database);
     final drafts = OfflineDocumentDraftService(
       database: database,
       cache: cache,
@@ -1218,7 +1218,7 @@ class BriskersFunctionalDiagnosticsService {
     String businessId,
   ) async {
     await _seedCustomerVehicleJob(database, businessId);
-    const cache = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database:database);
     final service = OfflineDocumentDraftService(
       database: database,
       cache: cache,
@@ -1323,7 +1323,7 @@ class BriskersFunctionalDiagnosticsService {
       [businessId],
     );
 
-    const cache = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database:database);
     await cache.save(businessId, 'estimate-1', {
       'id': 'estimate-1',
       'kind': 'estimate',
@@ -1819,3 +1819,4 @@ class BriskersFunctionalDiagnosticsService {
     );
   }
 }
+

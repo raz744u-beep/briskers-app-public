@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
+import 'local_job_retirement.dart';
 
 /// Device-only navigation history. Reading/syncing a job is never an access,
 /// and an access never changes its server modification time or sync outbox.
@@ -38,21 +39,26 @@ class LocalJobAccessHistory {
   }) async {
     if (businessId.isEmpty || jobId.isEmpty || userId.isEmpty) return;
     await ensureTable();
-    await _database.customStatement(
-      '''
+    await _database.transaction(() async {
+      if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
+        return;
+      }
+      await _database.customStatement(
+        '''
       INSERT INTO local_job_accesses
         (business_id, user_id, job_id, last_accessed_at)
       VALUES (?, ?, ?, ?)
       ON CONFLICT (business_id, user_id, job_id) DO UPDATE SET
         last_accessed_at = MAX(last_accessed_at, excluded.last_accessed_at)
     ''',
-      [
-        businessId,
-        userId,
-        jobId,
-        (at ?? DateTime.now()).toUtc().millisecondsSinceEpoch,
-      ],
-    );
+        [
+          businessId,
+          userId,
+          jobId,
+          (at ?? DateTime.now()).toUtc().millisecondsSinceEpoch,
+        ],
+      );
+    });
   }
 
   /// UI-only hook. A failed history write must never stop the job opening.
@@ -76,6 +82,18 @@ class LocalJobAccessHistory {
     if (localJobId == serverJobId || serverJobId.isEmpty) return;
     await ensureTable();
     await _database.transaction(() async {
+      if (await LocalJobRetirement.isJobBlocked(
+            _database,
+            businessId,
+            localJobId,
+          ) ||
+          await LocalJobRetirement.isJobBlocked(
+            _database,
+            businessId,
+            serverJobId,
+          )) {
+        return;
+      }
       await _database.customStatement(
         '''
         INSERT INTO local_job_accesses

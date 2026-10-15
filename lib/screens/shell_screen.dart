@@ -14,6 +14,7 @@ import '../services/customer_notification_service.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/job_sync_service.dart';
+import '../services/owner_job_retirement_service.dart';
 import '../services/local_appointment_repository.dart';
 import '../services/local_customer_repository.dart';
 import '../services/local_document_repository.dart';
@@ -52,6 +53,10 @@ class ShellScreen extends StatefulWidget {
 class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   static const _api = BriskersApi();
   bool _preparingOfflineChoices = false;
+  bool _retirementSyncing = false;
+  bool _foreground = true;
+  Timer? _retirementRetry;
+  StreamSubscription<String>? _retirementChanges;
   static const _sectionColors = [
     BriskersColors.today,
     BriskersColors.customers,
@@ -100,6 +105,17 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _retirementRetry = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_foreground) unawaited(_syncRetirements());
+    });
+    _retirementChanges = OwnerJobRetirementService.statusEvents.listen((businessId) {
+      if (mounted && businessId == widget.businessId) {
+        _refreshHomeJobsCount();
+        _refreshHomeEstimatesCount();
+        _refreshHomeInvoicesCount();
+      }
+    });
+    unawaited(_syncRetirements());
     final userId = supabase.auth.currentUser?.id;
     if (userId != null) {
       _customerNotifications = CustomerNotificationService(
@@ -166,18 +182,51 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _refreshHomeCustomersCount();
+    _foreground = state == AppLifecycleState.resumed;
+    if (_foreground) {
+      _refreshHomeCustomersCount();
+      unawaited(_syncRetirements());
+    }
   }
 
   void _connectionChanged() {
     if (!mounted) return;
     unawaited(_prepareOfflineChoices());
+    unawaited(_syncRetirements());
     _refreshHomeCustomersCount();
     setState(() {
       _lazyPages.clear();
       _customersRefreshToken++;
       _jobsRefreshToken++;
     });
+  }
+
+  Future<void> _syncRetirements() async {
+    if (!OwnerJobRetirementService.isTombstoneReaderRole(widget.roleCode) ||
+        !mounted || !_foreground || _retirementSyncing ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
+    final businessId = widget.businessId;
+    final actorId = supabase.auth.currentUser?.id;
+    if (actorId == null) return;
+    _retirementSyncing = true;
+    try {
+      final service = OwnerJobRetirementService();
+      await service.pullTombstones(businessId);
+      if (!mounted || !_foreground || widget.businessId != businessId ||
+          BriskersConnectionModeController.instance.forceOffline ||
+          supabase.auth.currentUser?.id != actorId) {
+        return;
+      }
+      await service.flush(businessId,
+        actorId: actorId, isOwner: widget.roleCode == 'owner');
+    } catch (_) {
+      // The persisted sync diagnostics explain any block; uncertainty never
+      // clears a fence. Foreground retries and app restart resume the request.
+    } finally {
+      _retirementSyncing = false;
+    }
   }
 
   /// Preload the shop's actual payment method IDs for future offline use.
@@ -310,6 +359,8 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _retirementRetry?.cancel();
+    _retirementChanges?.cancel();
     _customerReviewsSubscription?.cancel();
     BriskersConnectionModeController.instance.removeListener(_connectionChanged);
     _homeJobsCountSubscription?.cancel();
@@ -620,3 +671,4 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     );
   }
 }
+

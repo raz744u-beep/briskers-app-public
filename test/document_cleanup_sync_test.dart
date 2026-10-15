@@ -1,3 +1,4 @@
+import 'support/empty_retirement_gateway.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,37 +32,39 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late BriskersLocalDatabase db;
   late DocumentIndexSyncService sync;
-  const cache = LocalDocumentDetailCache();
+  late LocalDocumentDetailCache cache;
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     db = BriskersLocalDatabase(NativeDatabase.memory());
+    cache = LocalDocumentDetailCache(database:db);
     final api = _DocumentsApi();
-    sync = DocumentIndexSyncService(api: api, database: db, cleanupGateway: _CleanupFeed(api));
+    sync = DocumentIndexSyncService(retirementGateway: const EmptyRetirementGateway(), api: api, database: db, cleanupGateway: _CleanupFeed(api));
     await db.customStatement("INSERT INTO local_documents "
-      "(id,business_id,kind) VALUES ('doc','shop','estimate')");
+      "(id,business_id,kind) VALUES ('doc','00000000-0000-4000-8000-000000000001','estimate')");
   });
   tearDown(() => db.close());
 
   test('interrupted cache-only edit survives cleanup pull with synced index', () async {
-    await cache.save('shop', 'doc', {'id': 'doc', 'memo': 'Unsent note', 'sync_state': 'pending'});
-    await expectLater(sync.pull('shop'), throwsStateError);
-    expect((await cache.load('shop', 'doc'))?['memo'], 'Unsent note');
+    await cache.save('00000000-0000-4000-8000-000000000001', 'doc', {'id': 'doc', 'memo': 'Unsent note', 'sync_state': 'pending'});
+    await expectLater(sync.pull('00000000-0000-4000-8000-000000000001'), throwsStateError);
+    expect((await cache.load('00000000-0000-4000-8000-000000000001', 'doc'))?['memo'], 'Unsent note');
     expect((await db.customSelect('SELECT * FROM local_documents').get()).length, 1);
   });
 
   test('clean acknowledged tombstones remove index and matching snapshot', () async {
-    await cache.save('shop', 'doc', {'id': 'doc', 'sync_state': 'synced'});
-    await sync.pull('shop');
-    expect(await cache.load('shop', 'doc'), isNull);
+    await cache.save('00000000-0000-4000-8000-000000000001', 'doc', {'id': 'doc', 'sync_state': 'synced'});
+    await sync.pull('00000000-0000-4000-8000-000000000001');
+    expect(await cache.load('00000000-0000-4000-8000-000000000001', 'doc'), isNull);
     expect(await db.customSelect('SELECT * FROM local_documents').get(), isEmpty);
   });
 
   test('queued payment preserves deleted document until explicit reconciliation', () async {
     await db.customStatement("INSERT INTO sync_outbox "
       "(business_id,entity_type,entity_id,operation,payload_json) "
-      "VALUES ('shop','invoice_payment_received','doc','create','{}')");
-    await expectLater(sync.pull('shop'), throwsStateError);
+      "VALUES ('00000000-0000-4000-8000-000000000001','invoice_payment_received','doc','create','{}')");
+    await expectLater(sync.pull('00000000-0000-4000-8000-000000000001'), throwsStateError);
     expect((await db.customSelect('SELECT * FROM local_documents').get()).length, 1);
     expect((await db.customSelect('SELECT * FROM sync_outbox').get()).length, 1);
   });
 }
+

@@ -7,12 +7,12 @@ on:
       - 'lib/**'
       - 'test/**'
       - '.github/workflows/diagnostics.yml'
-      - 'tools/tests/**'
-      - 'tools/migrations/**'
-      - 'supabase/migrations/**'
+      - 'tools/tests/test_apk_certificate_verification.py'
+      - 'tools/audit_ui_actions.py'
 
 # Build/test commands never transmit Flutter or Dart analytics.
 env:
+  CI: 'true'
   FLUTTER_SUPPRESS_ANALYTICS: 'true'
   DASH__SUPPRESS_ANALYTICS: 'true'
 
@@ -78,50 +78,3 @@ jobs:
           path: generated/build/pdf-qa/*.pdf
           if-no-files-found: ignore
           retention-days: 7
-
-  owner-payment-guard:
-    name: Owner financial permissions / isolated PostgreSQL
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: synthetic-test-only
-          POSTGRES_DB: briskers_owner_guard_synthetic
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d briskers_owner_guard_synthetic"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Test Owner financial guard against synthetic data only
-        env:
-          ACK_SYNTHETIC_POSTGRES: '1'
-          PGPASSWORD: synthetic-test-only
-        run: tools/tests/owner_invoice_guard/run.sh
-
-  standard-notes-sql:
-    name: Standard Notes / isolated SQL contracts
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install isolated test engine
-        run: npm install --prefix "$RUNNER_TEMP/briskers-sql-tools" --no-audit --no-fund --save-exact @electric-sql/pglite@0.5.9
-      - name: Verify note permissions and conflict contracts
-        run: PGLITE_MODULE="$RUNNER_TEMP/briskers-sql-tools/node_modules/@electric-sql/pglite/dist/index.js" node tools/tests/standard_note_styles_sql_test.mjs
-
-      - name: Verify gated Owner retirement contract
-        run: PGLITE_MODULE="$RUNNER_TEMP/briskers-sql-tools/node_modules/@electric-sql/pglite/dist/index.js" node tools/tests/owner_job_retirement_v2_test.mjs

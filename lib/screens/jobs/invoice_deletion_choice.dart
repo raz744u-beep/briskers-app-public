@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../core/module_modal_theme.dart';
 import '../../core/briskers_colors.dart';
 
@@ -25,8 +26,7 @@ Future<bool?> showInvoiceDeletionChoice(
       content: Text(
         [
           'Delete invoice #$invoiceNumber?',
-          if (!OwnerJobDeletionGate.enabled && jobNumber.isNotEmpty)
-            'The Job will be kept. Whole-Job deletion is awaiting additional safety checks.',
+          if (!OwnerJobDeletionGate.enabled && jobNumber.isNotEmpty) 'The Job will be kept. To remove the whole Job safely, use Delete Job from its menu.',
           if (jobNumber.isNotEmpty && allowed)
             'You can also delete Job $jobNumber and its '
                 '${invoiceRows.length} unpaid invoice'

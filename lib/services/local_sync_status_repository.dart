@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
+import 'local_job_retirement.dart';
 
 class LocalSyncStatusSnapshot {
   const LocalSyncStatusSnapshot({
@@ -27,6 +28,8 @@ class LocalSyncStatusRepository {
   final BriskersLocalDatabase _database;
   static final _refreshEvents = StreamController<String>.broadcast();
   static Stream<String> get refreshEvents => _refreshEvents.stream;
+  static void notifyStateChanged(String businessId) =>
+      _refreshEvents.add(businessId);
   static final _manualFailures = <String, List<String>>{};
   static String _failureKey(String businessId) =>
       'sync-header:manual-refresh-failures:$businessId';
@@ -48,11 +51,13 @@ class LocalSyncStatusRepository {
   }
 
   Future<LocalSyncStatusSnapshot> load(String businessId) async {
-    final rows = await _database.customSelect(
-      'SELECT scope, last_pull_at, last_error, bootstrapped '
-      'FROM local_sync_states WHERE business_id = ?',
-      variables: [Variable<String>(businessId)],
-    ).get();
+    final rows = await _database
+        .customSelect(
+          'SELECT scope, last_pull_at, last_error, bootstrapped '
+          'FROM local_sync_states WHERE business_id = ?',
+          variables: [Variable<String>(businessId)],
+        )
+        .get();
     DateTime? latest;
     final issues = <String>[];
     for (final row in rows) {
@@ -81,25 +86,60 @@ class LocalSyncStatusRepository {
         latest = pulled;
       }
     }
-    final uploads = await _database.customSelect(
-      "SELECT COUNT(*) AS pending, SUM(CASE WHEN state IN ('failed','conflict') "
-      "OR NULLIF(TRIM(last_error), '') IS NOT NULL THEN 1 ELSE 0 END) AS failed "
-      "FROM sync_outbox WHERE business_id = ? "
-      "AND state IN ('pending','inflight','failed','conflict')",
-      variables: [Variable<String>(businessId)],
-    ).getSingle();
+    final uploads = await _database
+        .customSelect(
+          "SELECT COUNT(*) AS pending, SUM(CASE WHEN state IN ('failed','conflict') "
+          "OR NULLIF(TRIM(last_error), '') IS NOT NULL THEN 1 ELSE 0 END) AS failed "
+          "FROM sync_outbox WHERE business_id = ? "
+          "AND state IN ('pending','inflight','failed','conflict')",
+          variables: [Variable<String>(businessId)],
+        )
+        .getSingle();
     final failed = uploads.readNullable<int>('failed') ?? 0;
     if (failed > 0) issues.add('$failed upload(s) need attention');
+    await LocalJobRetirement.ensureSchema(_database);
+    final retirements = await _database
+        .customSelect(
+          "SELECT state,last_error FROM local_job_retirement_requests WHERE business_id=? AND state IN ('pending','rejected')",
+          variables: [Variable<String>(businessId)],
+        )
+        .get();
+    final pendingRetirements = retirements
+        .where((row) => row.read<String>('state') == 'pending')
+        .length;
+    for (final row in retirements) {
+      issues.add(
+        row.readNullable<String>('last_error') ??
+            (row.read<String>('state') == 'pending'
+                ? 'Job deletion awaiting server confirmation'
+                : 'Job deletion rejected; refresh and review'),
+      );
+    }
+    final held = await _database
+        .customSelect(
+          "SELECT COUNT(*) AS n FROM sync_outbox WHERE business_id=? AND state='retirement_quarantine'",
+          variables: [Variable<String>(businessId)],
+        )
+        .getSingle();
+    if (held.read<int>('n') > 0) {
+      issues.add(
+        '${held.read<int>('n')} preserved operation(s) require review after Job deletion',
+      );
+    }
     final prefs = await SharedPreferences.getInstance();
-    final manualFailures = _manualFailures[businessId] ??
-        prefs.getStringList(_failureKey(businessId)) ?? const <String>[];
+    final manualFailures =
+        _manualFailures[businessId] ??
+        prefs.getStringList(_failureKey(businessId)) ??
+        const <String>[];
     if (manualFailures.isNotEmpty) {
-      issues.add('Last manual refresh incomplete: ${manualFailures.join(', ')}');
+      issues.add(
+        'Last manual refresh incomplete: ${manualFailures.join(', ')}',
+      );
     }
     return LocalSyncStatusSnapshot(
       lastSuccessfulPull: latest,
       issues: List<String>.unmodifiable(issues),
-      pendingUploads: uploads.read<int>('pending'),
+      pendingUploads: uploads.read<int>('pending') + pendingRetirements,
     );
   }
 }

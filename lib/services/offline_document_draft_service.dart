@@ -15,11 +15,11 @@ import 'offline_invoice_payment_ledger.dart';
 class OfflineDocumentDraftService {
   OfflineDocumentDraftService({
     BriskersApi api = const BriskersApi(),
-    LocalDocumentDetailCache cache = const LocalDocumentDetailCache(),
+    LocalDocumentDetailCache? cache,
     LocalDocumentRepository? documents,
     BriskersLocalDatabase? database,
   })  : _api = api,
-        _cache = cache,
+        _cache = cache ?? LocalDocumentDetailCache(database: database),
         _database = database ?? localDatabase,
         _documents =
             documents ?? LocalDocumentRepository(database: database);
@@ -1443,3 +1443,4 @@ class OfflineDocumentDraftService {
     }
   }
 }
+

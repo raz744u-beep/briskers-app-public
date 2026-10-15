@@ -13,11 +13,11 @@ import 'local_catalog_repository.dart';
 class OfflineDocumentEditService {
   OfflineDocumentEditService({
     BriskersApi api = const BriskersApi(),
-    LocalDocumentDetailCache cache = const LocalDocumentDetailCache(),
+    LocalDocumentDetailCache? cache,
     BriskersLocalDatabase? database,
     LocalCatalogRepository? catalog,
   })  : _api = api,
-        _cache = cache,
+        _cache = cache ?? LocalDocumentDetailCache(database: database),
         _database = database ?? localDatabase,
         _catalog = catalog ?? LocalCatalogRepository(database: database);
 
@@ -921,3 +921,4 @@ class OfflineDocumentEditService {
     }
   }
 }
+

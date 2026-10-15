@@ -26,7 +26,7 @@ void main() {
     () async {
       final db = BriskersLocalDatabase(NativeDatabase.memory());
       addTearDown(db.close);
-      const cache = LocalDocumentDetailCache();
+      final cache = LocalDocumentDetailCache(database: db);
       await cache.save('shop', 'TEST-NOTES-001', {
         'id': 'TEST-NOTES-001',
         'kind': 'invoice',
@@ -39,7 +39,7 @@ void main() {
       await OfflineDocumentEditService(database: db)
           .saveMemo('shop', 'TEST-NOTES-001', merged);
       // A fresh service and cache read model reopening after interruption.
-      final reopened = await const LocalDocumentDetailCache().load(
+      final reopened = await LocalDocumentDetailCache(database: db).load(
         'shop',
         'TEST-NOTES-001',
       );
@@ -82,7 +82,7 @@ void main() {
       id,
       mergeStandardNoteIntoDraft(manual, warranty),
     );
-    final restored = await const LocalDocumentDetailCache().load('shop', id);
+    final restored = await LocalDocumentDetailCache(database: db).load('shop', id);
     final repeated = mergeStandardNoteIntoDraft(
       restored!['memo'].toString(),
       warranty,
@@ -90,7 +90,7 @@ void main() {
     await OfflineDocumentDraftService(database: db)
         .saveMemo('shop', id, repeated);
     expect(
-      (await const LocalDocumentDetailCache().load('shop', id))?['memo'],
+      (await LocalDocumentDetailCache(database: db).load('shop', id))?['memo'],
       '$manual\n\n$warranty',
     );
     final queue = await db
@@ -129,3 +129,4 @@ void main() {
     expect(editor, contains('_standardNotes.saveOffline'));
   });
 }
+

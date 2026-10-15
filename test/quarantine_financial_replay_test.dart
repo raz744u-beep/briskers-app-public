@@ -19,7 +19,7 @@ import 'package:briskers_app/services/offline_invoice_payment_ledger.dart';
 
 const _business = 'quarantine-test-business';
 const _job = 'revoked-job';
-const _cache = LocalDocumentDetailCache();
+late LocalDocumentDetailCache _cache;
 
 Map<String, dynamic> _detail(String id) => {
   'id': id,
@@ -262,6 +262,7 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     db = BriskersLocalDatabase(NativeDatabase.memory());
+    _cache = LocalDocumentDetailCache(database: db);
     api = _ReplayApi();
   });
   tearDown(() async => db.close());
@@ -513,3 +514,4 @@ void main() {
     expect(rows, isEmpty);
   });
 }
+
