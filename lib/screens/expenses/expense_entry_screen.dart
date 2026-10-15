@@ -835,9 +835,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     final today = DateTime.now();
     final cutoff = DateTime(today.year, today.month, today.day);
     DateTime occurrence(int n) {
-      if (frequency == 'daily') return start.add(Duration(days: n));
-      if (frequency == 'weekly') return start.add(Duration(days: 7 * n));
-      if (frequency == 'biweekly') return start.add(Duration(days: 14 * n));
+      if (frequency == 'daily') return DateTime(start.year, start.month, start.day + n);
+      if (frequency == 'weekly') return DateTime(start.year, start.month, start.day + 7 * n);
+      if (frequency == 'biweekly') return DateTime(start.year, start.month, start.day + 14 * n);
       final months = frequency == 'yearly' ? 12 * n : n;
       final targetFirst = DateTime(start.year, start.month + months);
       final end = DateTime(targetFirst.year, targetFirst.month + 1, 0).day;
