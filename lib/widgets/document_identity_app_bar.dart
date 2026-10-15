@@ -39,8 +39,7 @@ class DocumentIdentityAppBar extends StatelessWidget
     titleSpacing: 0,
     title: Row(
       children: [
-        Flexible(
-          fit: FlexFit.loose,
+        IntrinsicWidth(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onLongPress: onLongPress,
@@ -60,7 +59,7 @@ class DocumentIdentityAppBar extends StatelessWidget
           ),
         ),
         const SizedBox(width: 8),
-        Flexible(
+        Expanded(
           child: Align(
             alignment: Alignment.centerRight,
             child: FittedBox(
