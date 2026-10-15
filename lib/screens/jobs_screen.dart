@@ -839,15 +839,6 @@ class _JobsScreenState extends State<JobsScreen>
                   title: const Text('Edit Job'),
                   onTap: () => choose(sheetContext, 'edit'),
                 ),
-              if (owner)
-                ListTile(
-                  leading: const Icon(Icons.delete_outline, color: Colors.red),
-                  title: const Text(
-                    'Delete Job',
-                    style: TextStyle(color: Colors.red),
-                  ),
-                  onTap: () => choose(sheetContext, 'delete'),
-                ),
               const Divider(),
               if (_canManage) ...[
                 ListTile(
@@ -866,24 +857,36 @@ class _JobsScreenState extends State<JobsScreen>
                   onTap: () => choose(sheetContext, 'finding'),
                 ),
                 ListTile(
-                  leading: const Icon(Icons.request_quote_outlined),
+                  leading: const Icon(Icons.request_quote_outlined, color: Colors.deepPurple),
                   title: const Text('Add Estimate'),
                   onTap: () => choose(sheetContext, 'estimate'),
                 ),
                 ListTile(
-                  leading: const Icon(Icons.receipt_long_outlined),
+                  leading: const Icon(Icons.receipt_long_outlined, color: BriskersColors.invoices),
                   title: const Text('Add Invoice'),
                   onTap: () => choose(sheetContext, 'invoice'),
                 ),
                 ListTile(
-                  leading: const Icon(Icons.payments_outlined),
+                  leading: const Icon(Icons.payments_outlined, color: Colors.green),
                   title: const Text('Add Payment'),
                   onTap: () => choose(sheetContext, 'payment'),
                 ),
                 ListTile(
-                  leading: const Icon(Icons.add_card_outlined),
+                  leading: const Icon(Icons.add_card_outlined,
+                      color: BriskersColors.expenses),
                   title: const Text('Add Expense'),
                   onTap: () => choose(sheetContext, 'expense'),
+                ),
+              ],
+              if (owner) ...[
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.red),
+                  title: const Text(
+                    'Delete Job',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  onTap: () => choose(sheetContext, 'delete'),
                 ),
               ],
             ],
