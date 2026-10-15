@@ -3097,7 +3097,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<Map<String, dynamic>?> _pickInvoiceCustomer() async {
-    final customers = await _api.customers(widget.businessId, limit: 200);
+    final customers = BriskersConnectionModeController.instance.forceOffline
+        ? await LocalCustomerRepository().customers(widget.businessId)
+        : await _api.customers(widget.businessId, limit: 200);
     if (!mounted) return null;
     var query = '';
 
@@ -3189,8 +3191,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<Map<String, dynamic>?> _pickInvoiceVehicle(
     String customerId,
   ) async {
-    final detail = await _api.customerDetail(widget.businessId, customerId);
-    final vehicles = List<dynamic>.from(detail['vehicles'] ?? const [])
+    final detail = BriskersConnectionModeController.instance.forceOffline
+        ? await LocalCustomerRepository().customerDetail(
+            widget.businessId, customerId)
+        : await _api.customerDetail(widget.businessId, customerId);
+    final vehicles = List<dynamic>.from(detail?['vehicles'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
 
