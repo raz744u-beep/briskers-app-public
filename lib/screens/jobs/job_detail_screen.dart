@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+import '../../services/owner_invoice_auto_close_service.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -1235,6 +1236,18 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         try {
           await _offlineJobAdmin.flush(widget.businessId);
         } catch (_) {}
+      }
+      if (code == 'completed' && widget.roleCode == 'owner' &&
+          !BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await OwnerInvoiceAutoCloseService().closeEligible(
+            businessId: widget.businessId,
+            jobId: widget.jobId,
+            isOwner: true,
+          );
+        } catch (_) {
+          // Leave eligible invoices pending close if sync/server verification fails.
+        }
       }
       if (mounted) await _load();
     } catch (error) {
