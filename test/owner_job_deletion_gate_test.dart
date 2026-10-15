@@ -14,7 +14,9 @@ void main() {
     final deletion = screen.substring(start, end);
     expect(deletion, contains('if (!_owner || _busy) return;'));
     expect(deletion, contains('showOwnerJobDeletionUnavailable(context)'));
-    expect(deletion, isNot(contains('_api.')));
+    // Read-only server dependency preview is allowed; execution remains gated.
+    expect(deletion, contains('_api.jobDeletionPlan('));
+    expect(deletion, isNot(contains('_api.deleteJobWithUnpaidInvoices(')));
     expect(screen, isNot(contains('_api.deleteJobWithUnpaidInvoices(')));
   });
 
