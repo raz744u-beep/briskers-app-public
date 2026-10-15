@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// Document identity keeps the full toolbar width. Status and editing actions
-/// use their own second row, so neither can shrink the invoice number.
+/// Compact document header: number and status share the primary row;
+/// actions remain accessible in a short row without shrinking the number.
 class DocumentIdentityAppBar extends StatelessWidget
     implements PreferredSizeWidget {
   const DocumentIdentityAppBar({
@@ -14,45 +14,78 @@ class DocumentIdentityAppBar extends StatelessWidget
     required this.actions,
     this.onLongPress,
   });
+
   final String label;
   final String number;
   final Color accent;
   final Widget status;
+  // Retained for backwards compatibility with existing call sites.
   final double statusRowHeight;
   final List<Widget> actions;
   final VoidCallback? onLongPress;
+
   @override
-  Size get preferredSize => Size.fromHeight(kToolbarHeight + statusRowHeight);
+  Size get preferredSize => Size.fromHeight(
+    kToolbarHeight + (actions.isEmpty ? 0 : 44),
+  );
+
   @override
   Widget build(BuildContext context) => AppBar(
     backgroundColor: accent,
     foregroundColor: Colors.white,
+    iconTheme: const IconThemeData(color: Colors.white),
+    actionsIconTheme: const IconThemeData(color: Colors.white),
     elevation: 1,
     titleSpacing: 0,
-    title: GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onLongPress: onLongPress,
-      child: Semantics(
-        label: number.isEmpty ? label : '$label #$number',
-        child: Text(
-          number.isEmpty ? label : '#$number',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w800),
-        ),
-      ),
-    ),
-    bottom: PreferredSize(
-      preferredSize: Size.fromHeight(statusRowHeight),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 4, 8),
-        child: Row(
-          children: [
-            Expanded(
-              child: Align(alignment: Alignment.centerLeft, child: status),
+    title: Row(
+      children: [
+        Flexible(
+          fit: FlexFit.loose,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onLongPress: onLongPress,
+            child: Semantics(
+              label: number.isEmpty ? label : '$label #$number',
+              child: Text(
+                number.isEmpty ? label : '#$number',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 23,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
-            ...actions,
-          ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: status,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+      ],
+    ),
+    bottom: actions.isEmpty ? null : PreferredSize(
+      preferredSize: const Size.fromHeight(44),
+      child: SizedBox(
+        height: 44,
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: IconTheme(
+            data: const IconThemeData(color: Colors.white),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: actions,
+            ),
+          ),
         ),
       ),
     ),
