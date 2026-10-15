@@ -47,6 +47,7 @@ import '../../services/offline_document_edit_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/invoice_finalization_guard.dart';
+import '../../services/document_copy_plan.dart';
 import '../../services/pending_document_memo_projection.dart';
 import '../../services/local_payment_methods_cache.dart';
 import '../expenses/expense_detail_screen.dart';
@@ -898,7 +899,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         await _editDocumentHeader();
         break;
       case 'copy':
-        await _copyInvoice();
+        await _copyDocument();
         break;
       case 'add_expense':
         await _addInvoiceExpense();
@@ -3503,21 +3504,65 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
-  Future<void> _copyInvoice() async {
-    if (_estimate || _detail == null || _busy) return;
+  /// Copy into a NEW local-first document. Source job, document identities,
+  /// payments and signed authorizations never become part of the draft.
+  Future<void> _copyDocument() async {
+    if (_detail == null || _busy) return;
+    final original = _detail!;
+    var selectedCustomerId = original['customer_id']?.toString() ?? '';
+    var selectedCustomerName = original['customer_name']?.toString() ?? '';
+    String? selectedVehicleId = original['vehicle_id']?.toString();
+    var selectedVehicleName = original['vehicle']?.toString() ?? '';
 
-    var copyNotes = false;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Copy invoice?'),
-          content: CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Copy invoice notes'),
-            value: copyNotes,
-            onChanged: (value) =>
-                setDialogState(() => copyNotes = value == true),
+        builder: (dialogContext, refresh) => AlertDialog(
+          title: Text(_estimate ? 'Copy Estimate' : 'Copy Invoice'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.person_outline),
+                title: Text(selectedCustomerName.isEmpty
+                    ? 'Select customer' : selectedCustomerName),
+                subtitle: const Text('Customer · tap to change'),
+                onTap: () async {
+                  final customer = await _pickInvoiceCustomer();
+                  if (customer == null || !dialogContext.mounted) return;
+                  final next = customer['id']?.toString() ?? '';
+                  if (next.isEmpty) return;
+                  final vehicle = await _pickInvoiceVehicle(next);
+                  if (!dialogContext.mounted) return;
+                  refresh(() {
+                    selectedCustomerId = next;
+                    selectedCustomerName =
+                        customer['display_name']?.toString() ?? '';
+                    selectedVehicleId = vehicle?['id']?.toString();
+                    selectedVehicleName = _vehicleLabel(vehicle);
+                  });
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.directions_car_outlined),
+                title: Text(selectedVehicleName.isEmpty
+                    ? 'Select vehicle' : selectedVehicleName),
+                subtitle: const Text('Vehicle · tap to change'),
+                onTap: selectedCustomerId.isEmpty ? null : () async {
+                  final vehicle = await _pickInvoiceVehicle(selectedCustomerId);
+                  if (vehicle == null || !dialogContext.mounted) return;
+                  refresh(() {
+                    selectedVehicleId = vehicle['id']?.toString();
+                    selectedVehicleName = _vehicleLabel(vehicle);
+                  });
+                },
+              ),
+              Text(_estimate
+                  ? 'A new standalone estimate will be created.'
+                  : 'A new invoice and a new Job will be created.'),
+            ],
           ),
           actions: [
             TextButton(
@@ -3525,34 +3570,69 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               child: Text(tr('cancel')),
             ),
             FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: BriskersColors.invoices,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Copy invoice'),
+              onPressed: selectedCustomerId.isEmpty
+                  ? null : () => Navigator.pop(dialogContext, true),
+              child: const Text('Create editable copy'),
             ),
           ],
         ),
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted) return;
 
     String? newId;
-    await _run(() async {
-      newId = await _api.copyInvoice(
-        widget.businessId,
-        widget.documentId,
-        copyNotes: copyNotes,
+    final done = await _run(() async {
+      final plan = DocumentCopyPlan.prepare(
+        original,
+        customerId: selectedCustomerId,
+        vehicleId: selectedVehicleId,
       );
-    });
+      // This follows the same local-first creation path as New Invoice /
+      // Standalone Estimate and assigns a new temporary Job for invoices.
+      newId = _estimate
+          ? await _offlineDocumentDraft.createStandaloneEstimate(
+              widget.businessId,
+              customerId: selectedCustomerId,
+              customerName: selectedCustomerName,
+              vehicleId: selectedVehicleId,
+              vehicleLabel: selectedVehicleName,
+            )
+          : await _offlineDocumentDraft.createQuickInvoice(
+              widget.businessId,
+              customerId: selectedCustomerId,
+              customerName: selectedCustomerName,
+              vehicleId: selectedVehicleId,
+              vehicleLabel: selectedVehicleName,
+            );
 
-    if (!mounted || newId == null) return;
+      for (final raw in plan['lines'] as List) {
+        if (raw is! Map) continue;
+        num number(Object? value) =>
+            value is num ? value : num.tryParse(value?.toString() ?? '') ?? 0;
+        await _offlineDocumentDraft.addLine(
+          widget.businessId,
+          newId!,
+          name: raw['name']?.toString() ?? '',
+          description: raw['description']?.toString(),
+          itemId: raw['item_id']?.toString(),
+          quantity: number(raw['quantity']),
+          unitPrice: number(raw['unit_price']),
+          taxRate: number(raw['tax_rate']),
+          lineKind: raw['line_kind']?.toString() ?? 'item',
+        );
+      }
+      final memo = plan['memo']?.toString();
+      if (memo != null && memo.isNotEmpty) {
+        await _offlineDocumentDraft.saveMemo(
+          widget.businessId, newId!, memo);
+      }
+    });
+    if (!mounted || !done || newId == null) return;
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
-            roleCode: _navigationRoleCode,
+          roleCode: _navigationRoleCode,
           businessId: widget.businessId,
           documentId: newId!,
           isOwner: widget.isOwner,
@@ -6568,12 +6648,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   title: Text(tr('forceReopenInvoice')),
                   onTap: () => Navigator.pop(sheetContext, 'force_reopen'),
                 ),
-              if (!_estimate)
-                ListTile(
-                  leading: const Icon(Icons.copy_outlined),
-                  title: Text(tr('copyInvoice')),
-                  onTap: () => Navigator.pop(sheetContext, 'copy'),
-                ),
+              ListTile(
+                leading: Icon(Icons.copy_outlined,
+                  color: _estimate ? BriskersColors.estimates
+                      : BriskersColors.invoices),
+                title: Text(_estimate ? 'Copy Estimate' : tr('copyInvoice')),
+                onTap: () => Navigator.pop(sheetContext, 'copy'),
+              ),
               if (!_estimate)
                 ListTile(
                   leading: const Icon(Icons.car_repair_outlined),
@@ -6645,7 +6726,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       case 'edit':
         await _editDocumentHeader();
       case 'copy':
-        await _copyInvoice();
+        await _copyDocument();
       case 'findings':
         await _showInvoiceFindings();
       case 'expenses':
