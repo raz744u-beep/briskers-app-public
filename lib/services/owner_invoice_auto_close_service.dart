@@ -25,13 +25,19 @@ class OwnerInvoiceAutoCloseService {
       return 0;
     }
     final job = await _api.jobDetail(businessId, jobId);
-    if (job['status']?.toString().toLowerCase() != 'completed') return 0;
+    if (job['status']?.toString().toLowerCase() != 'completed') {
+      return 0;
+    }
     final documents = await _api.jobDocuments(businessId, jobId);
     var closed = 0;
     for (final row in documents) {
-      if (row['kind'] != 'invoice') continue;
+      if (row['kind'] != 'invoice') {
+        continue;
+      }
       final id = row['id']?.toString() ?? '';
-      if (id.isEmpty || id.startsWith('local-')) continue;
+      if (id.isEmpty || id.startsWith('local-')) {
+        continue;
+      }
       // Each source is reloaded, not derived from list/cache status.
       final invoice = await _api.documentDetail(businessId, id);
       final status = invoice['status']?.toString().toLowerCase() ?? '';
@@ -51,7 +57,9 @@ class OwnerInvoiceAutoCloseService {
       final total = money(invoice['total_amount']);
       final paid = money(invoice['paid_amount']);
       final pending = money(invoice['pending_payment']);
-      if (total == null || paid == null || pending == null) continue;
+      if (total == null || paid == null || pending == null) {
+        continue;
+      }
       if (!InvoiceFinalizationGuard.canAutoClose(
         isOwner: isOwner,
         jobCompleted: true,
@@ -59,7 +67,9 @@ class OwnerInvoiceAutoCloseService {
         finalizedPayments: paid,
         pendingPayments: pending,
         reopenedForCorrection: status == 'reopened' || display == 'reopened',
-      )) continue;
+      )) {
+        continue;
+      }
       await _guard.run<void>(
         businessId: businessId,
         invoiceIds: [id],
