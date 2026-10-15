@@ -20,7 +20,9 @@ String invoiceLaborWorkSummary(Map<String, dynamic> invoice) {
       final value = line[key]?.toString().trim().toLowerCase();
       if (value == 'labor' || value == 'labour') return true;
       if (value == 'part' || value == 'parts' ||
-          value == 'discount' || value == 'item') return false;
+          value == 'discount' || value == 'item') {
+        return false;
+      }
     }
     return false;
   }
