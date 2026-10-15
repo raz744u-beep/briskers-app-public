@@ -561,20 +561,6 @@ class _JobsScreenState extends State<JobsScreen>
         }
       }
 
-      if (statusCode == 'completed' && widget.roleCode == 'owner' &&
-          !BriskersConnectionModeController.instance.forceOffline) {
-        // A queued status that has not reached the server cannot close invoices.
-        try {
-          await OwnerInvoiceAutoCloseService().closeEligible(
-            businessId: widget.businessId,
-            jobId: job['id'].toString(),
-            isOwner: true,
-          );
-        } catch (_) {
-          // Payment records are never rolled back because closeout failed.
-          // The invoice remains in Pending Close for owner review.
-        }
-      }
       await _load();
       widget.onJobsChanged?.call();
     } catch (error) {
@@ -710,6 +696,19 @@ class _JobsScreenState extends State<JobsScreen>
         }
       }
 
+      if (statusCode == 'completed' && widget.roleCode == 'owner' &&
+          !BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          await OwnerInvoiceAutoCloseService().closeEligible(
+            businessId: widget.businessId,
+            jobId: job['id'].toString(),
+            isOwner: true,
+          );
+        } catch (_) {
+          // A failed close does not undo job completion or payment history.
+          // The owner may review the invoice later.
+        }
+      }
       await _load();
       widget.onJobsChanged?.call();
     } catch (error) {
