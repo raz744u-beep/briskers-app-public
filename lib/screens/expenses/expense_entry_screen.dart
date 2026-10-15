@@ -1221,6 +1221,27 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
             ),
         ],
       ),
+      bottomNavigationBar: _loading
+          ? null
+          : SafeArea(
+              top: false,
+              minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: BriskersColors.expenses,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                onPressed: _saving ? null : _save,
+                icon: _saving
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_outlined),
+                label: Text(_saving ? tr('saving') : tr('saveTransaction')),
+              ),
+            ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -1603,21 +1624,6 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                     ),
                   ),
                 ],
-                const SizedBox(height: 18),
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: BriskersColors.expenses,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: _saving ? null : _save,
-                  icon: _saving
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.save_outlined),
-                  label: Text(_saving ? tr('saving') : tr('saveTransaction')),
-                ),
               ],
             ),
     );
