@@ -733,6 +733,15 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 title: Text(_estimate ? 'Copy Estimate' : tr('copyInvoice')),
                 onTap: () => Navigator.pop(sheetContext, 'copy'),
               ),
+              if (canPayment)
+                ListTile(
+                  leading: const Icon(
+                    Icons.credit_card_outlined,
+                    color: Colors.green,
+                  ),
+                  title: Text(tr('addPayment')),
+                  onTap: () => Navigator.pop(sheetContext, 'payment'),
+                ),
               if (canExpenses)
                 ListTile(
                   leading: const Icon(
@@ -750,15 +759,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   ),
                   title: Text(tr('viewExpenses')),
                   onTap: () => Navigator.pop(sheetContext, 'expenses'),
-                ),
-              if (canPayment)
-                ListTile(
-                  leading: const Icon(
-                    Icons.credit_card_outlined,
-                    color: BriskersColors.invoices,
-                  ),
-                  title: Text(tr('addPayment')),
-                  onTap: () => Navigator.pop(sheetContext, 'payment'),
                 ),
               if (!_estimate)
                 ListTile(
