@@ -2795,6 +2795,46 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
+  Future<void> _autoCloseOwnerInvoiceIfReady() async {
+    if (!widget.isOwner || _estimate ||
+        BriskersConnectionModeController.instance.forceOffline) return;
+    final jobId = _detail?['job_id']?.toString() ?? '';
+    if (jobId.isEmpty || widget.documentId.startsWith('local-')) return;
+    final job = await _api.jobDetail(widget.businessId, jobId);
+    final invoice = await _api.documentDetail(
+      widget.businessId, widget.documentId);
+    final status = invoice['status']?.toString().toLowerCase() ?? '';
+    final code = invoice['display_status_code']
+        ?.toString().toLowerCase() ?? '';
+    if (invoice['job_id']?.toString() != jobId ||
+        invoice['closed_at'] != null ||
+        status == 'closed' || code == 'closed' ||
+        status == 'reopened' || code == 'reopened') return;
+    num? validMoney(Object? value) {
+      final n = value is num ? value : num.tryParse(value?.toString() ?? '');
+      return n != null && n.isFinite ? n : null;
+    }
+    final total = validMoney(invoice['total_amount']);
+    final posted = validMoney(invoice['paid_amount']);
+    final pending = validMoney(invoice['pending_payment']);
+    if (total == null || posted == null || pending == null) return;
+    if (!InvoiceFinalizationGuard.canAutoClose(
+      isOwner: widget.isOwner,
+      jobCompleted: job['status']?.toString().toLowerCase() == 'completed',
+      invoiceTotal: total,
+      finalizedPayments: posted,
+      pendingPayments: pending,
+      reopenedForCorrection: status == 'reopened' || code == 'reopened',
+    )) return;
+    await InvoiceFinalizationGuard().run<void>(
+      businessId: widget.businessId,
+      invoiceIds: [widget.documentId],
+      isOwner: widget.isOwner,
+      action: () => _api.closeInvoice(
+        widget.businessId, widget.documentId),
+    );
+  }
+
   Future<void> _finalizeEnteredPayments() async {
     if (!widget.isOwner) return;
     await _collapseWorkspaceHeader();
@@ -2835,7 +2875,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         },
       );
     });
-    if (mounted && succeeded) await _offerCompletePaidJob();
+    if (mounted && succeeded) {
+      await _offerCompletePaidJob();
+      try {
+        await _autoCloseOwnerInvoiceIfReady();
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Payment finalized. Invoice closing needs review: $error'),
+          ));
+        }
+      }
+    }
   }
 
   Future<void> _enterWarrantyPayment() async {
