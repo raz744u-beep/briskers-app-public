@@ -823,9 +823,28 @@ class OwnerJobRetirementService {
     LocalSyncStatusRepository.notifyStateChanged(businessId);
   }
 
+  static final _tombstonePulls = Expando<Map<String, Future<void>>>(
+    'retirement_tombstone_pulls',
+  );
+
+  /// All sync services sharing this database must share one feed traversal.
+  /// Otherwise a slower response can replace a newer cursor or reader scope.
+  Future<void> pullTombstones(String businessId) async {
+    final active = _tombstonePulls[_database] ??= <String, Future<void>>{};
+    final before = active[businessId];
+    if (before != null) return before;
+    final future = _pullTombstonesWithDiagnostics(businessId);
+    active[businessId] = future;
+    try {
+      await future;
+    } finally {
+      if (identical(active[businessId], future)) active.remove(businessId);
+    }
+  }
+
   /// Tombstones and their cursor commit together. Any invalid page or failed
   /// request leaves the last committed cursor intact and prevents stale pulls.
-  Future<void> pullTombstones(String businessId) async {
+  Future<void> _pullTombstonesWithDiagnostics(String businessId) async {
     try {
       await _pullTombstones(businessId);
     } catch (error) {
@@ -1012,3 +1031,4 @@ class OwnerJobRetirementService {
     }
   }
 }
+

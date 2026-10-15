@@ -434,6 +434,61 @@ void main() {
     },
   );
 
+  test('concurrent feed readers share traversal and resume from committed cursor', () async {
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final cursors = <int>[];
+    gateway.onTombstones = (cursor) async {
+      cursors.add(cursor);
+      if (!entered.isCompleted) entered.complete();
+      await release.future;
+      return cursor == 0
+          ? feedPage(1, [tombstone('job', job, 1)])
+          : feedPage(cursor, []);
+    };
+    final first = service.pullTombstones(business);
+    await entered.future;
+    final second = OwnerJobRetirementService(
+      database: db,
+      gateway: gateway,
+    ).pullTombstones(business);
+    // Drain queued database work while the first network response is held.
+    await db.customSelect('SELECT 1').get();
+    release.complete();
+    await Future.wait([first, second]);
+    expect(cursors, [0]);
+    expect(await LocalJobRetirement.isJobBlocked(db, business, job), isTrue);
+    await service.pullTombstones(business);
+    expect(cursors, [0, 1]);
+  });
+
+  test('failed shared feed releases its slot and allows safe retry', () async {
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    var calls = 0;
+    gateway.onTombstones = (cursor) async {
+      calls++;
+      if (!entered.isCompleted) entered.complete();
+      await release.future;
+      throw TimeoutException('Synthetic feed failure');
+    };
+    final first = expectLater(service.pullTombstones(business), throwsA(isA<TimeoutException>()));
+    await entered.future;
+    final second = expectLater(
+      OwnerJobRetirementService(database: db, gateway: gateway).pullTombstones(business),
+      throwsA(isA<TimeoutException>()),
+    );
+    release.complete();
+    await Future.wait([first, second]);
+    expect(calls, 1);
+    gateway.onTombstones = (cursor) async {
+      expect(cursor, 0);
+      return feedPage(1, [tombstone('job', job, 1)]);
+    };
+    await service.pullTombstones(business);
+    expect(await LocalJobRetirement.isJobBlocked(db, business, job), isTrue);
+  });
+
   test('paginated cross-device tombstones atomically retain cursor, local work and shared data', () async {
     await db.customStatement(
       "INSERT INTO sync_outbox (business_id,entity_type,entity_id,operation,payload_json) VALUES (?,'invoice_payment_received',?,'create','{}')",
@@ -1062,3 +1117,4 @@ void main() {
     },
   );
 }
+
