@@ -48,12 +48,16 @@ Future<List<Map<String, dynamic>>> recoverLegacyJobDocuments({
   for (final row in candidates) {
     if (!canRecoverLegacyJobDocumentLink(
       requestedJobId: requestedJobId, indexedJobId: row['job_id'],
-    )) continue;
+    )) {
+      continue;
+    }
     final id = row['id']?.toString() ?? '';
     if (id.isEmpty) continue;
     final detail = await readDetail(id);
     if (detail == null || detail['id'] != id || detail['job_id'] != requestedJobId ||
-        !isLegacyJobDocumentDetailCurrent(index: row, detail: detail)) continue;
+        !isLegacyJobDocumentDetailCurrent(index: row, detail: detail)) {
+      continue;
+    }
     recovered.add({...row, ...detail,
       'total_amount': detail['total_amount'] ?? row['total_amount'] ?? 0,
       '_local_snapshot': true,
