@@ -41,12 +41,14 @@ class CustomerDetailScreen extends StatefulWidget {
     required this.customerId,
     required this.roleCode,
     this.onReviewed,
+    this.sharedBottomNavigationBar,
   });
 
   final String businessId;
   final String customerId;
   final String roleCode;
   final VoidCallback? onReviewed;
+  final Widget? sharedBottomNavigationBar;
 
   @override
   State<CustomerDetailScreen> createState() => _CustomerDetailScreenState();
@@ -1156,6 +1158,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           ],
         ),
       ),
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       floatingActionButton: _data == null || !_canManageQuickActions
           ? null
           : FloatingActionButton(
