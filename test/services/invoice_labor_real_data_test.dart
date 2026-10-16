@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:briskers/services/invoice_labor_work_summary.dart';
+import 'package:briskers_app/services/invoice_labor_work_summary.dart';
 
 void main() {
   group('Invoice labor from actual Briskers item encoding', () {
