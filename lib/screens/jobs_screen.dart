@@ -842,6 +842,7 @@ class _JobsScreenState extends State<JobsScreen>
           child: ListView(
             shrinkWrap: true,
             children: [
+              const _ActionSectionLabel('Job'),
               ListTile(
                 leading: const Icon(Icons.folder_open_outlined),
                 title: const Text('Open Job'),
@@ -853,8 +854,9 @@ class _JobsScreenState extends State<JobsScreen>
                   title: const Text('Edit Job'),
                   onTap: () => choose(sheetContext, 'edit'),
                 ),
-              const Divider(),
               if (_canManage) ...[
+                const Divider(height: 1),
+                const _ActionSectionLabel('Repair and documents'),
                 ListTile(
                   leading: const Icon(Icons.camera_alt_outlined),
                   title: const Text('Add Pre-inspection'),
@@ -880,6 +882,8 @@ class _JobsScreenState extends State<JobsScreen>
                   title: const Text('Add Invoice'),
                   onTap: () => choose(sheetContext, 'invoice'),
                 ),
+                const Divider(height: 1),
+                const _ActionSectionLabel('Payment and expenses'),
                 ListTile(
                   leading: const Icon(Icons.payments_outlined, color: Colors.green),
                   title: const Text('Add Payment'),
@@ -893,7 +897,8 @@ class _JobsScreenState extends State<JobsScreen>
                 ),
               ],
               if (owner) ...[
-                const Divider(),
+                const Divider(height: 1),
+                const _ActionSectionLabel('Delete'),
                 ListTile(
                   leading: const Icon(Icons.delete_outline, color: Colors.red),
                   title: const Text(
@@ -1301,4 +1306,18 @@ class _JobsScreenState extends State<JobsScreen>
       ],
     );
   }
+}
+
+class _ActionSectionLabel extends StatelessWidget {
+  const _ActionSectionLabel(this.label);
+  final String label;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+    child: Align(alignment: Alignment.centerLeft,
+      child: Text(label.toUpperCase(),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          letterSpacing: 0.8, fontWeight: FontWeight.w700))),
+  );
 }
