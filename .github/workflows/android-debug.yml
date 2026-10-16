@@ -3,7 +3,7 @@ name: Build Android debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, feat/combined-118-20261014]
+    branches: [main]
     paths-ignore:
       - '.github/workflows/**'
 
@@ -18,6 +18,8 @@ permissions:
 
 jobs:
   build:
+    # This integration branch is code-only; keep APK builds paused here.
+    if: github.ref != 'refs/heads/feat/combined-118-20261014'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
