@@ -521,7 +521,7 @@ class LocalDocumentRepository {
             Variable<String>(value),
             Variable<String>('I-$value'),
             Variable<String>('MB-$value'),
-            Variable<int>(numeric ? 0 : 1),
+            Variable<int>(numeric ? 1 : 0),
             Variable<String>(like),
             Variable<String>(like),
             Variable<String>(like),

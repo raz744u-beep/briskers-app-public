@@ -882,7 +882,9 @@ class LocalJobDeletionV3 {
     if (rows.isEmpty) { return true; }
     final support = await provider();
     final canonicalSupport = await support.resolveSymbolicLinks();
-    final expectedRoot = Directory('$canonicalSupport/briskers_media/$business').absolute.uri.normalizePath().toFilePath();
+    // Directory.uri adds a trailing separator; resolveSymbolicLinks does not.
+    final expectedRoot = Directory('$canonicalSupport/briskers_media/$business')
+        .absolute.uri.normalizePath().toFilePath().replaceFirst(RegExp(r'[/\\]+$'), '');
     final root = Directory('${support.path}/briskers_media/$business');
     final rootExists = await root.exists();
     final canonicalRoot = rootExists ? await root.resolveSymbolicLinks() : expectedRoot;

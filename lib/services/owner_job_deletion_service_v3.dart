@@ -193,7 +193,7 @@ class OwnerJobDeletionServiceV3 {
 
   Future<void> flush(String business) {
     final flights = _flights[_db] ??= {};
-    return flights[business] ??= _flush(business).whenComplete(() => flights.remove(business));
+    return flights[business] ??= _flush(business).whenComplete(() { flights.remove(business); });
   }
 
   Future<void> _flush(String business) async {
@@ -280,7 +280,7 @@ class OwnerJobDeletionServiceV3 {
   static final _pulls = Expando<Map<String, Future<void>>>('job_delete_v3_pull');
   Future<void> pullTombstones(String business) {
     final flights = _pulls[_db] ??= {};
-    return flights[business] ??= _pullWithDiagnostics(business).whenComplete(() => flights.remove(business));
+    return flights[business] ??= _pullWithDiagnostics(business).whenComplete(() { flights.remove(business); });
   }
 
   Future<void> _pullWithDiagnostics(String business) async {
