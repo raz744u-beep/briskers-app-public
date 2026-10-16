@@ -83,7 +83,7 @@ class DocumentPresentation {
         case 'closed':
           return tr('invoiceClosed');
         case 'pending_close':
-          return 'Pending Close';
+          return tr('invoicePendingClose');
         case 'reopened':
           return 'Reopened';
         default:
