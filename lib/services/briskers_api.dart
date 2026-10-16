@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/supabase_config.dart';
+import '../local/local_database_provider.dart';
+import 'local_job_deletion_v3.dart';
 
 /// A queued replay can checkpoint each mutation within a multi-stage upload.
 /// Keeping the actual response inside the guard also preserves late receipts.
@@ -736,6 +738,7 @@ class BriskersApi {
     String businessId,
     String customerId,
   ) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_customer_financial_history',
       params: {
@@ -743,7 +746,8 @@ class BriskersApi {
         'p_customer_id': customerId,
       },
     );
-    return Map<String, dynamic>.from(result as Map);
+    await LocalJobDeletionV3.assertVisibilityGeneration(localDatabase, businessId, visibilityGeneration);
+    return {...Map<String, dynamic>.from(result as Map), '_local_visibility_generation': visibilityGeneration};
   }
 
   Future<Map<String, dynamic>?> customerAccountContext(
@@ -1464,11 +1468,13 @@ class BriskersApi {
   }
 
   Future<Map<String, dynamic>> transactionOptions(String businessId) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_transaction_options',
       params: {'p_business_id': businessId},
     );
-    return Map<String, dynamic>.from(result as Map);
+    await LocalJobDeletionV3.assertVisibilityGeneration(localDatabase, businessId, visibilityGeneration);
+    return {...Map<String, dynamic>.from(result as Map), '_local_visibility_generation': visibilityGeneration};
   }
 
   Future<Map<String, dynamic>> expenseLinkIntegrity(
@@ -1486,6 +1492,7 @@ class BriskersApi {
     int limit = 500,
     int offset = 0,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_linked_expenses_page',
       params: {
@@ -1494,8 +1501,9 @@ class BriskersApi {
         'p_offset': offset,
       },
     );
+    await LocalJobDeletionV3.assertVisibilityGeneration(localDatabase, businessId, visibilityGeneration);
     return (result as List<dynamic>)
-        .map((row) => Map<String, dynamic>.from(row as Map))
+        .map((row) => <String, dynamic>{...Map<String, dynamic>.from(row as Map), '_local_visibility_generation': visibilityGeneration})
         .toList();
   }
 
@@ -1505,6 +1513,7 @@ class BriskersApi {
     String? afterAllocationId,
     int limit = 500,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_linked_expenses_after_v1',
       params: {
@@ -1513,8 +1522,9 @@ class BriskersApi {
         'p_limit': limit,
       },
     );
+    await LocalJobDeletionV3.assertVisibilityGeneration(localDatabase, businessId, visibilityGeneration);
     return (result as List<dynamic>)
-        .map((row) => Map<String, dynamic>.from(row as Map))
+        .map((row) => <String, dynamic>{...Map<String, dynamic>.from(row as Map), '_local_visibility_generation': visibilityGeneration})
         .toList();
   }
 
@@ -1522,6 +1532,7 @@ class BriskersApi {
     String businessId,
     String jobId,
   ) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_job_linked_expenses',
       params: {
@@ -1529,8 +1540,9 @@ class BriskersApi {
         'p_job_id': jobId,
       },
     );
+    await LocalJobDeletionV3.assertVisibilityGeneration(localDatabase, businessId, visibilityGeneration);
     return (result as List<dynamic>)
-        .map((row) => Map<String, dynamic>.from(row as Map))
+        .map((row) => <String, dynamic>{...Map<String, dynamic>.from(row as Map), '_local_visibility_generation': visibilityGeneration})
         .toList();
   }
 
@@ -1538,12 +1550,14 @@ class BriskersApi {
     String businessId, {
     int limit = 500,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_list_transactions',
       params: {'p_business_id': businessId, 'p_limit': limit},
     );
+    await LocalJobDeletionV3.assertVisibilityGeneration(localDatabase, businessId, visibilityGeneration);
     return (result as List<dynamic>)
-        .map((row) => Map<String, dynamic>.from(row as Map))
+        .map((row) => <String, dynamic>{...Map<String, dynamic>.from(row as Map), '_local_visibility_generation': visibilityGeneration})
         .toList();
   }
 
@@ -1559,6 +1573,7 @@ class BriskersApi {
     String? categoryId,
     String? counterpartyId,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_list_transactions_v2',
       params: {
@@ -1576,8 +1591,9 @@ class BriskersApi {
         'p_counterparty_id': counterpartyId,
       },
     );
+    await LocalJobDeletionV3.assertVisibilityGeneration(localDatabase, businessId, visibilityGeneration);
     return (result as List<dynamic>)
-        .map((row) => Map<String, dynamic>.from(row as Map))
+        .map((row) => <String, dynamic>{...Map<String, dynamic>.from(row as Map), '_local_visibility_generation': visibilityGeneration})
         .toList();
   }
 
@@ -1585,6 +1601,7 @@ class BriskersApi {
     String businessId,
     String transactionId,
   ) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_transaction_detail',
       params: {
@@ -1592,7 +1609,8 @@ class BriskersApi {
         'p_transaction_id': transactionId,
       },
     );
-    return Map<String, dynamic>.from(result as Map);
+    await LocalJobDeletionV3.assertVisibilityGeneration(localDatabase, businessId, visibilityGeneration);
+    return {...Map<String, dynamic>.from(result as Map), '_local_visibility_generation': visibilityGeneration};
   }
 
   Future<Map<String, dynamic>> syncCreateManualTransaction(
@@ -2015,6 +2033,7 @@ class BriskersApi {
     String businessId, {
     int limit = 200,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_list_expenses',
       params: {
@@ -2022,8 +2041,9 @@ class BriskersApi {
         'p_limit': limit,
       },
     );
+    await LocalJobDeletionV3.assertVisibilityGeneration(localDatabase, businessId, visibilityGeneration);
     return (result as List<dynamic>)
-        .map((row) => Map<String, dynamic>.from(row as Map))
+        .map((row) => <String, dynamic>{...Map<String, dynamic>.from(row as Map), '_local_visibility_generation': visibilityGeneration})
         .toList();
   }
 
@@ -2031,6 +2051,7 @@ class BriskersApi {
     String businessId,
     String documentId,
   ) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_document_related_expenses_v1',
       params: {
@@ -2038,8 +2059,9 @@ class BriskersApi {
         'p_document_id': documentId,
       },
     );
+    await LocalJobDeletionV3.assertVisibilityGeneration(localDatabase, businessId, visibilityGeneration);
     return (result as List<dynamic>)
-        .map((row) => Map<String, dynamic>.from(row as Map))
+        .map((row) => <String, dynamic>{...Map<String, dynamic>.from(row as Map), '_local_visibility_generation': visibilityGeneration})
         .toList();
   }
 
@@ -2047,6 +2069,7 @@ class BriskersApi {
     String businessId,
     String transactionId,
   ) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_expense_detail',
       params: {
@@ -2054,7 +2077,8 @@ class BriskersApi {
         'p_transaction_id': transactionId,
       },
     );
-    return Map<String, dynamic>.from(result as Map);
+    await LocalJobDeletionV3.assertVisibilityGeneration(localDatabase, businessId, visibilityGeneration);
+    return {...Map<String, dynamic>.from(result as Map), '_local_visibility_generation': visibilityGeneration};
   }
 
   Future<List<Map<String, dynamic>>> expenseReceiptImportCandidates(
@@ -3339,6 +3363,7 @@ class BriskersApi {
     String businessId,
     String documentId,
   ) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(localDatabase, businessId);
     final result = await networkSupabase.rpc(
       'briskers_document_detail_v3',
       params: {
@@ -3346,7 +3371,8 @@ class BriskersApi {
         'p_document_id': documentId,
       },
     );
-    return Map<String, dynamic>.from(result as Map);
+    await LocalJobDeletionV3.assertVisibilityGeneration(localDatabase, businessId, visibilityGeneration);
+    return {...Map<String, dynamic>.from(result as Map), '_local_visibility_generation': visibilityGeneration};
   }
 
   Future<List<Map<String, dynamic>>> itemCategories(
@@ -4416,3 +4442,4 @@ class BriskersApi {
     );
   }
 }
+

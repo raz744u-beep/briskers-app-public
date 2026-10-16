@@ -4,6 +4,7 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_document_detail_cache.dart';
 import 'local_job_retirement.dart';
+import 'local_job_deletion_v3.dart';
 
 class LocalDocumentRepository {
   LocalDocumentRepository({BriskersLocalDatabase? database})
@@ -21,7 +22,13 @@ class LocalDocumentRepository {
         AND ((r.entity_kind = 'invoice' AND r.entity_id = $alias.id)
           OR ($alias.kind = 'invoice' AND r.entity_kind = 'job'
             AND r.entity_id = $alias.job_id)))
+    AND NOT EXISTS (SELECT 1 FROM local_job_deletion_v3_fences v3
+      WHERE v3.business_id=$alias.business_id AND v3.entity_kind=$alias.kind
+        AND v3.entity_id=$alias.id)
   """;
+
+  static const _visibleJoinedJobSql = "NOT EXISTS(SELECT 1 FROM local_job_deletion_v3_fences hidden_job "
+      "WHERE hidden_job.business_id=j.business_id AND hidden_job.entity_kind='job' AND hidden_job.entity_id=j.id)";
 
   Future<bool> _serverDocumentBlocked(
     String businessId,
@@ -34,7 +41,7 @@ class LocalDocumentRepository {
     final jobId = document['job_id']?.toString() ?? '';
     return (document['kind']?.toString() ?? 'invoice') == 'invoice' &&
         jobId.isNotEmpty &&
-        await LocalJobRetirement.isJobBlocked(_database, businessId, jobId);
+        (await LocalJobRetirement.blockedJobIds(_database, businessId, includeVisibilityScope: false)).contains(jobId);
   }
 
   Future<void> replaceFromServer(
@@ -44,6 +51,7 @@ class LocalDocumentRepository {
   }) async {
     await _database.transaction(() async {
       await LocalJobRetirement.ensureSchema(_database);
+    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
       // A pending request can be rejected later. Retain its exact prior row
       // rather than letting an unrelated full refresh erase the recovery data.
       final visible = _visibleDocumentSql('local_documents');
@@ -167,6 +175,7 @@ class LocalDocumentRepository {
     required String kind,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final rows = await _database
         .customSelect(
           '''
@@ -176,6 +185,7 @@ class LocalDocumentRepository {
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
+        AND $_visibleJoinedJobSql
       LEFT JOIN local_customers c ON c.business_id=d.business_id
         AND c.id=d.customer_id
       WHERE d.business_id = ? AND d.kind = ?
@@ -260,6 +270,7 @@ class LocalDocumentRepository {
         }
       }
     }
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return result;
   }
 
@@ -268,6 +279,7 @@ class LocalDocumentRepository {
     String documentId,
   ) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final rows = await _database
         .customSelect(
           '''
@@ -282,6 +294,7 @@ class LocalDocumentRepository {
           ],
         )
         .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     if (rows.isEmpty) return null;
     return _isoFromDb(rows.first.data['created_at']);
   }
@@ -291,6 +304,7 @@ class LocalDocumentRepository {
     String jobId,
   ) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final rows = await _database
         .customSelect(
           '''
@@ -298,6 +312,7 @@ class LocalDocumentRepository {
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
+        AND $_visibleJoinedJobSql
       WHERE d.business_id = ? AND d.job_id = ?
         AND ${_visibleDocumentSql('d')}
       ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
@@ -327,6 +342,7 @@ class LocalDocumentRepository {
           .join(' ');
     }
 
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return rows
         .map(
           (row) => <String, dynamic>{
@@ -386,6 +402,7 @@ class LocalDocumentRepository {
     int limit = 25,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final where =
         '''
       d.business_id = ? AND d.kind = 'invoice'
@@ -409,7 +426,7 @@ class LocalDocumentRepository {
              coalesce(j.vehicle_label,'') AS vehicle
       FROM local_documents d
       LEFT JOIN local_jobs j ON j.business_id = d.business_id
-        AND j.id = d.job_id
+        AND j.id = d.job_id AND $_visibleJoinedJobSql
       LEFT JOIN local_customers c ON c.business_id = d.business_id
         AND c.id = d.customer_id
       WHERE $where
@@ -419,6 +436,7 @@ class LocalDocumentRepository {
           variables: [Variable<String>(businessId), Variable<int>(limit)],
         )
         .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return {
       'count': countRow.read<int>('count'),
       'items': [
@@ -437,6 +455,7 @@ class LocalDocumentRepository {
 
   Future<int> openInvoiceCount(String businessId) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final row = await _database
         .customSelect(
           '''
@@ -451,11 +470,13 @@ class LocalDocumentRepository {
           variables: [Variable<String>(businessId)],
         )
         .getSingle();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return row.read<int>('count');
   }
 
   Stream<int> watchOpenInvoiceCount(String businessId) async* {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     yield* _database
         .customSelect(
           '''
@@ -471,7 +492,10 @@ class LocalDocumentRepository {
           readsFrom: {_database.localDocuments},
         )
         .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .asyncMap((row) async {
+          await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+          return row.read<int>('count');
+        });
   }
 
   Future<List<Map<String, dynamic>>> search(
@@ -480,6 +504,7 @@ class LocalDocumentRepository {
     int limit = 30,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final value = query.trim().toLowerCase();
     if (value.isEmpty) return const [];
     final numeric = RegExp(r'^[0-9]+$').hasMatch(value);
@@ -491,6 +516,7 @@ class LocalDocumentRepository {
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
+        AND $_visibleJoinedJobSql
       WHERE d.business_id = ?
         AND ${_visibleDocumentSql('d')}
         AND (
@@ -518,7 +544,7 @@ class LocalDocumentRepository {
             Variable<String>(value),
             Variable<String>('I-$value'),
             Variable<String>('MB-$value'),
-            Variable<int>(numeric ? 0 : 1),
+            Variable<int>(numeric ? 1 : 0),
             Variable<String>(like),
             Variable<String>(like),
             Variable<String>(like),
@@ -527,6 +553,7 @@ class LocalDocumentRepository {
         )
         .get();
 
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return rows
         .map(
           (row) => <String, dynamic>{
@@ -581,3 +608,4 @@ class LocalDocumentRepository {
   int? _unix(DateTime? value) =>
       value == null ? null : value.toUtc().millisecondsSinceEpoch ~/ 1000;
 }
+

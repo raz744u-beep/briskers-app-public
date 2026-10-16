@@ -10,6 +10,7 @@ import 'local_cleanup_safety.dart';
 import 'test_job_cleanup_gateway.dart';
 import 'test_job_cleanup_policy.dart';
 import 'local_job_retirement.dart';
+import 'local_job_deletion_v3.dart';
 import 'owner_job_retirement_service.dart';
 
 class DocumentIndexSyncService {
@@ -49,6 +50,7 @@ class DocumentIndexSyncService {
 
   Future<void> pull(String businessId) async {
     await _retirement.pullTombstones(businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final results = await Future.wait<dynamic>([
       _api.documents(businessId, kind: 'estimate'),
       _api.documents(businessId, kind: 'invoice'),
@@ -57,10 +59,12 @@ class DocumentIndexSyncService {
     final retiredDocuments = await LocalJobRetirement.blockedDocumentIds(
       _database,
       businessId,
+      includeVisibilityScope: false,
     );
     final retiredJobs = await LocalJobRetirement.blockedJobIds(
       _database,
       businessId,
+      includeVisibilityScope: false,
     );
     // Fetch after document reads so a deletion reflected by those reads cannot
     // be mistaken for an ordinary missing list row.
@@ -87,6 +91,10 @@ class DocumentIndexSyncService {
     final all = <Map<String, dynamic>>[...estimates, ...invoices];
 
     await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await LocalJobDeletionV3.authorizeScopedEntities(_database, businessId, visibilityGeneration,
+        [for (final row in estimates) {'entity_kind': 'estimate', 'entity_id': row['id']},
+         for (final row in invoices) {'entity_kind': 'invoice', 'entity_id': row['id']}]);
       await LocalCleanupSafety.requireDocumentsRemovable(
         _database,
         businessId,
@@ -134,7 +142,8 @@ class DocumentIndexSyncService {
       "WHERE business_id = ? AND scope = ?",
       [businessId, _scope],
     );
-    await _prefetchAllDocumentDetails(businessId, all);
+    await _prefetchAllDocumentDetails(businessId, all, visibilityGeneration);
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
 
     await _database.customStatement(
       '''
@@ -161,9 +170,11 @@ class DocumentIndexSyncService {
   Future<void> _prefetchAllDocumentDetails(
     String businessId,
     List<Map<String, dynamic>> documents,
+    int visibilityGeneration,
   ) async {
     final missing = <Map<String, dynamic>>[];
     for (final document in documents) {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
       final id = document['id']?.toString() ?? '';
       if (id.isEmpty) continue;
       final cached = await _detailCache.load(businessId, id);
@@ -189,7 +200,7 @@ class DocumentIndexSyncService {
         // retaining its historical lines and local offline edits.
         final hydrated = withVerifiedDocumentEditMetadata(document, cached);
         if (hydrated != null) {
-          await _detailCache.save(businessId, id, hydrated);
+          await _detailCache.save(businessId, id, hydrated, visibilityGeneration: visibilityGeneration);
         }
       } else {
         missing.add(document);
@@ -213,7 +224,8 @@ class DocumentIndexSyncService {
           if (detail['id']?.toString() != id || detail['lines'] is! List) {
             throw StateError('Invalid document detail response');
           }
-          await _detailCache.save(businessId, id, detail);
+          await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+          await _detailCache.save(businessId, id, detail, visibilityGeneration: visibilityGeneration);
         } catch (_) {
           failures++;
           if (examples.length < 5) {
@@ -257,3 +269,4 @@ class DocumentIndexSyncService {
     }
   }
 }
+

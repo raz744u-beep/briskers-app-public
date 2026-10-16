@@ -780,14 +780,21 @@ void main() {
         await expectLater(
           preview(service),
           throwsA(
-            isA<StateError>().having(
+            isA<OwnerJobDeletionUnavailable>().having(
               (error) => error.message,
               'message',
-              'Safe Job deletion requires the server update. Nothing has been deleted.',
+              'Job deletion is temporarily unavailable. Nothing has been deleted.',
             ),
           ),
         );
       }
+      expect(
+        ownerJobDeletionFailureMessage(OwnerJobDeletionUnavailable()),
+        'Job deletion is temporarily unavailable. Nothing has been deleted.',
+      );
+      expect(gateway.calls, isEmpty);
+      expect(await service.status(business, job), isNull);
+      expect(await LocalJobRetirement.isJobBlocked(db, business, job), isFalse);
       for (final error in [
         const PostgrestException(message: 'Owner required', code: '42501'),
         const PostgrestException(
@@ -1117,4 +1124,3 @@ void main() {
     },
   );
 }
-
