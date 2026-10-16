@@ -1369,7 +1369,7 @@ class _NeedsAttentionPanel extends StatelessWidget {
                   Text(
                     '$count',
                     style: TextStyle(
-                      fontSize: 18,
+                      fontSize: 20,
                       fontWeight: FontWeight.w800,
                       color: count > 0
                           ? const Color(0xFFC62828)
@@ -1380,7 +1380,7 @@ class _NeedsAttentionPanel extends StatelessWidget {
                     label,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                      fontSize: 11,
+                      fontSize: 12.5,
                       color: Color(0xFF475467),
                     ),
                   ),
@@ -1519,7 +1519,7 @@ class _HomeTiles extends StatelessWidget {
               maxLines: 1,
               softWrap: false,
               style: const TextStyle(
-                fontSize: 15,
+                fontSize: 17,
                 fontWeight: FontWeight.w800,
                 color: Color(0xFF101828),
               ),
@@ -1536,7 +1536,7 @@ class _HomeTiles extends StatelessWidget {
                     overflow: TextOverflow.fade,
                     softWrap: false,
                     style: const TextStyle(
-                      fontSize: 12.5,
+                      fontSize: 14,
                       fontWeight: FontWeight.w700,
                       color: Color(0xFF667085),
                     ),
@@ -1696,7 +1696,7 @@ class _ActionDrawer extends StatelessWidget {
               title: Text(
                 actions[index].label,
                 style: const TextStyle(
-                  fontSize: 14,
+                  fontSize: 16,
                   fontWeight: FontWeight.w700,
                 ),
               ),
