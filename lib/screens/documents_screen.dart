@@ -38,7 +38,9 @@ String documentListStage(Map<String, dynamic> row, {required bool estimate}) {
     case 'closed':
       return 'Closed';
     case 'pending_close':
-      return 'Paid · Pending Close';
+      return 'Pending Close';
+    case 'reopened':
+      return 'Reopened';
     case 'void':
       return 'Void';
     default:
@@ -48,8 +50,9 @@ String documentListStage(Map<String, dynamic> row, {required bool estimate}) {
 
 const invoiceListStatusFilters = [
   'Open',
-  'Paid · Pending Close',
+  'Pending Close',
   'Closed',
+  'Reopened',
   'Void',
 ];
 const estimateListStatusFilters = [
@@ -141,12 +144,13 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       case 'Open':
         return tr('invoiceOpen');
       case 'Pending Close':
-      case 'Paid · Pending Close':
-        return tr('invoicePaidPendingClose');
+        return 'Pending Close';
       case 'Paid':
         return tr('invoicePaid');
       case 'Closed':
         return tr('invoiceClosed');
+      case 'Reopened':
+        return 'Reopened';
       case 'Partial':
         return tr('invoicePartial');
       case 'Draft':
@@ -174,6 +178,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   }
 
   Color _statusColor(String status) {
+    if (!_estimate && const {'Open', 'Pending Close', 'Closed', 'Reopened'}.contains(status)) {
+      return invoiceStatusDefaultColor(status);
+    }
     if (!_estimate) {
       final style = _invoiceStyleByName(status);
       if (style != null) {
@@ -821,7 +828,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if (_estimate || !widget.isOwner) return;
 
     final eligible = (_rows ?? const <Map<String, dynamic>>[])
-        .where((row) => _invoiceStage(row) == 'Paid · Pending Close')
+        .where((row) => _invoiceStage(row) == 'Pending Close')
         .toList();
 
     if (eligible.isEmpty) {
