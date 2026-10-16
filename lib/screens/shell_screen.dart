@@ -491,6 +491,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
           roleCode: widget.roleCode,
           refreshToken: _customersRefreshToken,
           onCustomerReviewed: (id) => unawaited(_reviewCustomer(id)),
+          detailBottomNavigationBar: _shellNavigationBar(nested: true),
         );
       }
       if (index == 2) {
@@ -519,6 +520,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
               isOwner: widget.roleCode == 'owner',
               canManageExpenses: false,
               showAppBar: false,
+              sharedBottomNavigationBar: _shellNavigationBar(nested: true),
             );
           case 6:
             return ExpensesScreen(businessId: widget.businessId, roleCode: widget.roleCode);
