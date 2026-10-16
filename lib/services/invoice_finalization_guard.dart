@@ -59,6 +59,33 @@ class InvoiceFinalizationGuard {
     }
   }
 
+  /// Owner-only eligibility preflight for automatic close. This is strictly
+  /// a client-side convenience check: the server must independently verify
+  /// authoritative job completion, all posted payments, and zero balance
+  /// inside the same protected close operation.
+  static bool canAutoClose({
+    required bool isOwner,
+    required bool jobCompleted,
+    required num invoiceTotal,
+    required num finalizedPayments,
+    required num pendingPayments,
+    required bool reopenedForCorrection,
+  }) {
+    if (!isOwner || !jobCompleted || reopenedForCorrection) {
+      return false;
+    }
+    if (!invoiceTotal.isFinite || !finalizedPayments.isFinite ||
+        !pendingPayments.isFinite) {
+      return false;
+    }
+    if (invoiceTotal < 0 || finalizedPayments < 0 || pendingPayments < 0) {
+      return false;
+    }
+    // Prevent closing with unresolved receipts or overpayments.
+    return pendingPayments.abs() < 0.005 &&
+        (invoiceTotal - finalizedPayments).abs() < 0.005;
+  }
+
   Future<T> run<T>({
     required String businessId,
     required Iterable<String> invoiceIds,

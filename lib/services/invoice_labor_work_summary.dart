@@ -8,12 +8,33 @@ String _descriptionKey(String value) =>
 /// never participate, so the Work Performed draft contains no billing fields.
 String invoiceLaborWorkSummary(Map<String, dynamic> invoice) {
   if (invoice['kind'] != 'invoice') return '';
-  final lines = invoice['lines'];
+  // Online document detail and the offline snapshot may use different
+  // collection/type keys. Never infer labor from a price or description.
+  final lines = invoice['lines'] is List
+      ? invoice['lines']
+      : invoice['items'];
   if (lines is! List) return '';
   final seen = <String>{};
+  bool isLabor(Map line) {
+    for (final key in ['line_kind', 'item_type', 'type', 'category']) {
+      final value = line[key]?.toString().trim().toLowerCase();
+      if (value == 'labor' || value == 'labour') return true;
+      // Imported and locally-created invoices sometimes persist a Labor
+      // named row with the generic 'item' discriminator. Do not return
+      // false until checking its explicit display name below.
+      if (value == 'part' || value == 'parts' || value == 'discount') {
+        return false;
+      }
+    }
+    // Verified invoice #6345 fixture: line_kind='item', name='Labor',
+    // description contains work text. Match the exact item name, never
+    // guess from price or a free-form description.
+    final name = line['name']?.toString().trim().toLowerCase();
+    return name == 'labor' || name == 'labour';
+  }
   return lines
       .whereType<Map>()
-      .where((line) => line['line_kind'] == 'labor')
+      .where(isLabor)
       .map((line) {
         final description = line['description']?.toString().trim() ?? '';
         return description.isNotEmpty

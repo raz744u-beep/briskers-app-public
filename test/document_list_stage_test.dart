@@ -62,7 +62,7 @@ void main() {
         invoice(pending: 100),
         invoice(paid: 25, pending: 75),
       ]) {
-        expect(stage(row), 'Paid · Pending Close');
+        expect(stage(row), 'Pending Close');
       }
       expect(stage(invoice()), 'Open');
     },
@@ -84,8 +84,9 @@ void main() {
       };
       expect(counts, {
         'Open': 2,
-        'Paid · Pending Close': 1,
+        'Pending Close': 1,
         'Closed': 1,
+        'Reopened': 0,
         'Void': 1,
       });
       expect(counts.values.reduce((a, b) => a + b), rows.length);
@@ -100,7 +101,7 @@ void main() {
     expect(prepared.containsKey('paid_amount'), false);
     expect(prepared.containsKey('pending_payment'), false);
     expect(DocumentPresentation(prepared).balanceDueCents, isNull);
-    expect(stage(prepared), 'Paid · Pending Close');
+    expect(stage(prepared), 'Pending Close');
     expect(
       local['paid_amount'],
       0,
@@ -130,10 +131,10 @@ void main() {
   test('filter values remain stable across Spanish language changes', () async {
     SharedPreferences.setMockInitialValues({});
     await BriskersLanguageController.instance.setLanguage('es');
-    expect(stage(invoice(paid: 100)), 'Paid · Pending Close');
+    expect(stage(invoice(paid: 100)), 'Pending Close');
     expect(
       DocumentPresentation(invoice(paid: 100)).statusLabel,
-      'Pagada · Pendiente de cierre',
+      'Pendiente de cierre',
     );
     await BriskersLanguageController.instance.setLanguage('en');
   });

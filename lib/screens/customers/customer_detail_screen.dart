@@ -41,12 +41,14 @@ class CustomerDetailScreen extends StatefulWidget {
     required this.customerId,
     required this.roleCode,
     this.onReviewed,
+    this.sharedBottomNavigationBar,
   });
 
   final String businessId;
   final String customerId;
   final String roleCode;
   final VoidCallback? onReviewed;
+  final Widget? sharedBottomNavigationBar;
 
   @override
   State<CustomerDetailScreen> createState() => _CustomerDetailScreenState();
@@ -72,6 +74,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   bool get _canManageQuickActions => canManageCustomerActions(widget.roleCode);
   final GlobalKey _notesSectionKey = GlobalKey();
   bool _expandQuickNotes = false;
+  int _customerTab = 0; // Overview, Info, Vehicles, Notes.
 
   Future<Map<String, dynamic>> _loadOfflineSections() async {
     final visibility = _jobVisibility;
@@ -136,7 +139,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     }
     final jobs = await localDatabase.customSelect(
       "SELECT id,title,status,payment_state,job_number FROM local_jobs WHERE business_id=? AND customer_id=? "
-      "AND lower(status) NOT IN ('completed','closed','cancelled')",
+      "",
       variables: vars).get();
     for (final j in jobs) {
       final rawStatus = j.read<String>('status');
@@ -150,12 +153,16 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         'status':jobStatus});
     }
     final docs = await CustomerDocumentSummaryService().forCustomer(
-      widget.businessId, widget.customerId);
+      widget.businessId, widget.customerId, includeClosed: true);
     for (final document in docs) {
       final presentation = DocumentPresentation(document);
       rows.add({
         'type': document['kind'],
         'id': document['id'],
+        'job_id': document['job_id'],
+        'vehicle': document['vehicle'] ?? document['vehicle_label'],
+        'document_date': document['document_date'],
+        'server_updated_at': document['server_updated_at'] ?? document['updated_at'],
         'title': document['title'] ?? document['job_title'] ??
             (presentation.isInvoice ? tr('invoice') : tr('estimate')),
         'status': presentation.statusLabel,
@@ -166,105 +173,178 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         'payment_reconciliation_required': presentation.requiresReconciliation,
       });
     }
+    final visits = await localDatabase.customSelect(
+      'SELECT v.id,v.job_id,v.reason,j.job_number FROM local_job_visits v '
+      'JOIN local_jobs j ON j.id=v.job_id AND j.business_id=v.business_id '
+      'WHERE v.business_id=? AND j.customer_id=?',
+      variables: vars).get();
+    for (final visit in visits) {
+      rows.add({'type': 'Visit', 'id': visit.read<String>('id'),
+        'job_id': visit.read<String>('job_id'),
+        'number': visit.readNullable<String>('job_number') ?? '',
+        'title': visit.readNullable<String>('reason') ?? 'Shop visit'});
+    }
     final visibleRows = await visibility.filter(rows, jobIdKey: 'job_id');
     return visibility.isCurrent(generation) ? visibleRows : [];
+  }
+
+  Future<void> _openOverviewRecord(Map<String, dynamic> item) async {
+    final id = item['id']?.toString() ?? '';
+    final jobId = item['job_id']?.toString() ?? '';
+    if (id.isEmpty || !mounted) return;
+    final type = item['type']?.toString() ?? '';
+    if (type == 'Job' || type == 'Visit') {
+      if (type == 'Visit' && jobId.isEmpty) return;
+      await Navigator.push<void>(context, MaterialPageRoute(
+        builder: (_) => JobDetailScreen(
+          businessId: widget.businessId,
+          jobId: type == 'Visit' ? jobId : id,
+          roleCode: widget.roleCode)));
+    } else if (type == 'Appointment') {
+      await Navigator.push<void>(context, MaterialPageRoute(
+        builder: (_) => AppointmentManageScreen(
+          businessId: widget.businessId,
+          isOwner: widget.roleCode == 'owner',
+          appointment: {'id': id, 'customer_id': widget.customerId,
+            'title': item['title'], 'status': item['status']})));
+    } else if (type == 'invoice' || type == 'estimate') {
+      await Navigator.push<void>(context, MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: id,
+          isOwner: widget.roleCode == 'owner',
+          roleCode: widget.roleCode)));
+    }
+  }
+
+  Future<void> _showOverviewList(String title, List<Map<String, dynamic>> records) async {
+    await showModalBottomSheet<void>(
+      context: context, showDragHandle: true, isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: 0.75,
+          child: Column(children: [
+            Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Text(title, style: Theme.of(context).textTheme.titleLarge)),
+            Expanded(child: records.isEmpty
+              ? const Center(child: Text('No records found on this device.'))
+              : ListView.builder(
+                  itemCount: records.length,
+                  itemBuilder: (context, i) {
+                    final item = records[i];
+                    final number = item['number']?.toString() ?? '';
+                    final status = item['status']?.toString() ?? '';
+                    return ListTile(
+                      title: Text(number.isEmpty ? '${item['title'] ?? title}'
+                        : '${item['type']} $number'),
+                      subtitle: Text([item['title'], status, item['vehicle']]
+                        .map((e) => e?.toString().trim() ?? '')
+                        .where((s) => s.isNotEmpty).join(' • ')),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _openOverviewRecord(item);
+                      },
+                    );
+                  },
+                )),
+          ]),
+        ),
+      ),
+    );
   }
 
   Widget _customerOverviewCard() => FutureBuilder<List<Map<String, dynamic>>>(
     key: ValueKey(('customer-overview', _jobVisibility.epoch)),
     future: _activeCustomerItems(),
     builder: (context, snapshot) {
-      final rows = snapshot.data ?? const <Map<String,dynamic>>[];
-      final estimates = rows.where((x) => x['type'] == 'estimate').toList();
-      final invoices = rows.where((x) => x['type'] == 'invoice').toList();
-      final estimateTotal = estimates.fold<double>(0,
-        (sum, x) => sum + ((x['total'] as num?)?.toDouble() ?? 0));
-      final knownInvoiceBalances = invoices.where((x) => x['balance_due_cents'] is int).toList();
-      final balance = knownInvoiceBalances.fold<int>(0,
-        (sum, x) => sum + (x['balance_due_cents'] as int)) / 100;
-      final pending = knownInvoiceBalances.fold<int>(0,
-        (sum, x) => sum + ((x['pending_cents'] as int?) ?? 0)) / 100;
-      String money(double value) => '${String.fromCharCode(36)}${value.toStringAsFixed(2)}';
-      return Card(child: ExpansionTile(
-        initiallyExpanded: false,
-        leading: const Icon(Icons.dashboard_outlined, color: BriskersColors.customers),
-        title: Text(tr('customerOverview'), style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(snapshot.hasError ? 'Could not read saved activity'
-          : snapshot.hasData ? '${rows.length} active records' : 'Loading activity...'),
-        children: [
-          ListTile(
-            dense: true,
-            leading: const Icon(Icons.account_balance_wallet_outlined),
-            title: Text(tr('customerInvoiceBalanceDue')),
-            trailing: Text(money(balance),
-              style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: knownInvoiceBalances.length < invoices.length
-              ? Text(tr('customerPaymentDetailsUnavailable').replaceAll('{count}', '${invoices.length - knownInvoiceBalances.length}'))
-              : Text(tr('customerBalanceExplanation')),
-          ),
-          if (pending > 0) ListTile(
-            dense: true,
-            leading: const Icon(Icons.schedule_outlined),
-            title: Text(tr('customerPendingReceipts')),
-            trailing: Text(money(pending)),
-            subtitle: Text(tr('customerPendingReceiptsHelp')),
-          ),
-          ListTile(
-            dense: true,
-            leading: const Icon(Icons.request_quote_outlined),
-            title: Text(tr('customerActiveEstimates')),
-            trailing: Text(money(estimateTotal)),
-          ),
-          for (final item in rows)
+      final rows = snapshot.data ?? const <Map<String, dynamic>>[];
+      final jobs = rows.where((item) => item['type'] == 'Job').toList();
+      final invoices = rows.where((item) => item['type'] == 'invoice').toList();
+      final estimates = rows.where((item) => item['type'] == 'estimate').toList();
+      final appointments = rows.where((item) => item['type'] == 'Appointment').toList();
+      final visits = rows.where((item) => item['type'] == 'Visit').toList();
+      final docs = [...invoices, ...estimates];
+      DateTime activityDate(Map<String, dynamic> item) =>
+        DateTime.tryParse(item['server_updated_at']?.toString() ?? '') ??
+        DateTime.tryParse(item['document_date']?.toString() ?? '') ??
+        DateTime(1970);
+      docs.sort((a, b) => activityDate(b).compareTo(activityDate(a)));
+      final balance = invoices.fold<int>(0, (sum, item) =>
+        sum + ((item['balance_due_cents'] as int?) ?? 0));
+      final pending = invoices.fold<int>(0, (sum, item) =>
+        sum + ((item['pending_cents'] as int?) ?? 0));
+      final paymentInvoices = invoices.where((item) =>
+        (item['pending_cents'] as int? ?? 0) > 0 ||
+        (item['balance_due_cents'] is int &&
+          item['balance_due_cents'] != null &&
+          (item['total'] is num) &&
+          (item['balance_due_cents'] as int) <
+            ((item['total'] as num) * 100).round())).toList();
+      Widget link(String title, IconData icon, Color color,
+          List<Map<String, dynamic>> items) => ListTile(
+        dense: true, visualDensity: VisualDensity.compact,
+        leading: Icon(icon, color: color, size: 23),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text('${items.length}', style: const TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(width: 6), const Icon(Icons.chevron_right, size: 18),
+        ]),
+        onTap: () => _showOverviewList(title, items),
+      );
+      return Card(child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (snapshot.connectionState == ConnectionState.waiting)
+            const LinearProgressIndicator(minHeight: 2),
+          if (snapshot.hasError)
+            const ListTile(title: Text('Saved customer activity unavailable')),
+          link('Jobs', Icons.build_outlined, BriskersColors.jobs, jobs),
+          link('Invoices', Icons.receipt_long_outlined, BriskersColors.invoices, invoices),
+          link('Estimates', Icons.description_outlined, BriskersColors.estimates, estimates),
+          link('Appointments', Icons.calendar_today_outlined, BriskersColors.schedule, appointments),
+          link('Visits', Icons.history_outlined, BriskersColors.jobs, visits),
+          link('Payments', Icons.payments_outlined, BriskersColors.invoices, paymentInvoices),
+          if (balance > 0 || pending > 0) ...[
+            const Divider(height: 12),
+            if (balance > 0)
+              ListTile(dense: true, title: Text(tr('customerInvoiceBalanceDue')),
+                trailing: Text('\u0024${(balance/100).toStringAsFixed(2)}')),
+            if (pending > 0)
+              ListTile(dense: true, title: Text(tr('customerPendingReceipts')),
+                trailing: Text('\u0024${(pending/100).toStringAsFixed(2)}')),
+          ],
+          const Divider(height: 16),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 3, 16, 5),
+            child: Text('Recent Invoices & Estimates',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800))),
+          for (final item in docs.take(3))
             ListTile(
               dense: true,
-              leading: Icon(
-                item['type'] == 'Job' ? Icons.build_outlined :
-                item['type'] == 'Appointment' ? Icons.calendar_month_outlined :
-                item['type'] == 'estimate' ? Icons.description_outlined :
-                Icons.receipt_long_outlined,
-                color: item['type'] == 'Job' ? BriskersColors.jobs :
-                  item['type'] == 'Appointment' ? BriskersColors.schedule :
-                  item['type'] == 'estimate' ? BriskersColors.estimates :
-                  BriskersColors.invoices,
-              ),
-              title: Text(item['title'].toString()),
-              subtitle: Text(item['type'] == 'Job'
-                ? 'Job ${item['number']} · ${item['status']}'
-                : "${item['type'] == 'invoice' ? tr('invoice') : item['type'] == 'estimate' ? tr('estimate') : item['type']} ${item['number'] ?? ''} · ${item['status']}"),
+              leading: Icon(item['type'] == 'invoice' ?
+                Icons.receipt_long_outlined : Icons.description_outlined,
+                color: item['type'] == 'invoice' ? BriskersColors.invoices :
+                  BriskersColors.estimates),
+              title: Text('${item['type'] == 'invoice' ? 'Invoice' : 'Estimate'} #${item['number'] ?? 'Pending sync'}',
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text([
+                item['status']?.toString() ?? '',
+                item['vehicle']?.toString() ?? '',
+                if ((item['job_id']?.toString() ?? '').isNotEmpty) 'Linked Job',
+              ].where((s) => s.isNotEmpty).join(' • '),
+                maxLines: 2, overflow: TextOverflow.ellipsis),
               trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                 if (item['total'] is num)
-                  Text(
-                    '${String.fromCharCode(36)}${(item['total'] as num).toStringAsFixed(2)}',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                const SizedBox(width: 6),
+                  Text('\u0024${(item['total'] as num).toStringAsFixed(2)}'),
                 const Icon(Icons.chevron_right, size: 18),
               ]),
-              onTap: () {
-                final id = item['id']?.toString();
-                if (id == null || id.isEmpty) return;
-                final type = item['type']?.toString();
-                if (type == 'Job') {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) =>
-                    JobDetailScreen(businessId:widget.businessId,jobId:id,
-                      roleCode:widget.roleCode)));
-                } else if (type == 'Appointment') {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) =>
-                    AppointmentManageScreen(businessId: widget.businessId,
-                      isOwner: widget.roleCode == 'owner',
-                      appointment: {'id':id,'customer_id':widget.customerId,
-                        'title':item['title'],'status':item['status']})));
-                } else {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) =>
-                    JobDocumentScreen(businessId:widget.businessId,
-                      documentId:id,isOwner:widget.roleCode=='owner',roleCode:widget.roleCode)));
-                }
-              },
+              onTap: () => _openOverviewRecord(item),
             ),
-          if (rows.isEmpty && snapshot.hasData)
-            const ListTile(title: Text('No active records saved locally')),
-        ],
+          if (docs.isEmpty && snapshot.hasData)
+            const Padding(padding: EdgeInsets.all(16),
+              child: Text('No estimates or invoices found on this device.')),
+        ]),
       ));
     },
   );
@@ -984,7 +1064,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   void _openCustomerNoteComposer() {
-    setState(() => _expandQuickNotes = true);
+    setState(() { _expandQuickNotes = true; _customerTab = 3; });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final target = _notesSectionKey.currentContext;
       if (mounted && target != null) {
@@ -1078,6 +1158,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           ],
         ),
       ),
+      bottomNavigationBar: widget.sharedBottomNavigationBar,
       floatingActionButton: _data == null || !_canManageQuickActions
           ? null
           : FloatingActionButton(
@@ -1124,7 +1205,26 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                         ],
                       ),
                     ),
-                  Card(
+                  Row(children: [
+                    for (var i = 0; i < 4; i++)
+                      Expanded(child: TextButton(
+                        onPressed: () => setState(() => _customerTab = i),
+                        style: TextButton.styleFrom(
+                          backgroundColor: _customerTab == i
+                            ? BriskersColors.customers.withValues(alpha: 0.14) : null,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(const <IconData>[Icons.dashboard_outlined,
+                            Icons.person_outline, Icons.directions_car_outlined,
+                            Icons.note_alt_outlined][i], size: 21),
+                          Text(const <String>['Overview', 'Info', 'Vehicles', 'Notes'][i],
+                            style: const TextStyle(fontSize: 11)),
+                        ]),
+                      )),
+                  ]),
+                  const SizedBox(height: 8),
+                  if (_customerTab == 1) Card(
                     child: ExpansionTile(
                       initiallyExpanded: false,
                       leading: const Icon(Icons.person_outline, color: BriskersColors.customers),
@@ -1188,9 +1288,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  _customerOverviewCard(),
+                  if (_customerTab == 0) _customerOverviewCard(),
                   const SizedBox(height: 10),
-                  CustomerProblemFlagCard(
+                  if (_customerTab == 1) CustomerProblemFlagCard(
                     customerId: widget.customerId,
                     flagged: customer['problem_flag'] == true,
                     note: customer['problem_flag_note']?.toString() ?? '',
@@ -1198,22 +1298,38 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     onEdit: _editProblemFlag,
                   ),
                   const SizedBox(height: 18),
-                  CustomerVehiclesSection(
+                  if (_customerTab == 2) CustomerVehiclesSection(
                     vehicles: vehicles,
                     onAdd: _addVehicle,
                     onEdit: _editVehicle,
                     enabled: _canEditLocal,
                   ),
                   const SizedBox(height: 18),
-                  CustomerVehicleFindingsSection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
-                    vehicles: vehicles,
-                    canManage: _canManageQuickActions,
-                    canDelete: widget.roleCode == 'owner',
+                  if (_customerTab == 2) Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.car_repair_outlined, color: BriskersColors.vehicles),
+                      title: const Text('All Vehicle Findings',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: const Text('View open and resolved findings across vehicles'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.push<void>(
+                        context,
+                        MaterialPageRoute(builder: (_) => Scaffold(
+                          appBar: AppBar(title: const Text('All Vehicle Findings')),
+                          body: ListView(children: [CustomerVehicleFindingsSection(
+                            businessId: widget.businessId,
+                            customerId: widget.customerId,
+                            vehicles: vehicles,
+                            canManage: _canManageQuickActions,
+                            canDelete: widget.roleCode == 'owner',
+                            initiallyExpanded: true,
+                          )]),
+                        )),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 18),
-                  Container(
+                  if (_customerTab == 3) Container(
                     key: _notesSectionKey,
                     child: KeyedSubtree(
                       key: ValueKey(_expandQuickNotes),
@@ -1225,9 +1341,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 18),
-                  if (BriskersConnectionModeController.instance.forceOffline)
+                  if (_customerTab == 0 && BriskersConnectionModeController.instance.forceOffline)
                     _offlineCustomerSections()
-                  else ...[
+                  else if (_customerTab == 0) ...[
                     CustomerAppointmentsSection(
                       businessId: widget.businessId,
                       customerId: widget.customerId,

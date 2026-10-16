@@ -38,7 +38,9 @@ String documentListStage(Map<String, dynamic> row, {required bool estimate}) {
     case 'closed':
       return 'Closed';
     case 'pending_close':
-      return 'Paid · Pending Close';
+      return 'Pending Close';
+    case 'reopened':
+      return 'Reopened';
     case 'void':
       return 'Void';
     default:
@@ -48,8 +50,9 @@ String documentListStage(Map<String, dynamic> row, {required bool estimate}) {
 
 const invoiceListStatusFilters = [
   'Open',
-  'Paid · Pending Close',
+  'Pending Close',
   'Closed',
+  'Reopened',
   'Void',
 ];
 const estimateListStatusFilters = [
@@ -141,12 +144,13 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       case 'Open':
         return tr('invoiceOpen');
       case 'Pending Close':
-      case 'Paid · Pending Close':
-        return tr('invoicePaidPendingClose');
+        return tr('invoicePendingClose');
       case 'Paid':
         return tr('invoicePaid');
       case 'Closed':
         return tr('invoiceClosed');
+      case 'Reopened':
+        return 'Reopened';
       case 'Partial':
         return tr('invoicePartial');
       case 'Draft':
@@ -174,6 +178,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   }
 
   Color _statusColor(String status) {
+    if (!_estimate && const {'Open', 'Pending Close', 'Closed', 'Reopened'}.contains(status)) {
+      return invoiceStatusDefaultColor(status);
+    }
     if (!_estimate) {
       final style = _invoiceStyleByName(status);
       if (style != null) {
@@ -459,12 +466,14 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
           roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: row['id'].toString(),
           isOwner: widget.isOwner,
           canManageExpenses: widget.canManageExpenses,
-          initialAction: initialAction,
+          initialAction: initialAction == 'payment' ? null : initialAction,
+          initialTab: initialAction == 'payment' ? 'payment' : 'items',
         ),
       ),
     );
@@ -723,14 +732,23 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   onTap: () => Navigator.pop(sheetContext, 'add_to_invoice'),
                 ),
               ],
-              if (!_estimate)
+              ListTile(
+                leading: Icon(
+                  Icons.copy_outlined,
+                  color: _estimate
+                      ? BriskersColors.estimates : BriskersColors.invoices,
+                ),
+                title: Text(_estimate ? 'Copy Estimate' : tr('copyInvoice')),
+                onTap: () => Navigator.pop(sheetContext, 'copy'),
+              ),
+              if (canPayment)
                 ListTile(
                   leading: const Icon(
-                    Icons.copy_outlined,
-                    color: BriskersColors.invoices,
+                    Icons.credit_card_outlined,
+                    color: Colors.green,
                   ),
-                  title: Text(tr('copyInvoice')),
-                  onTap: () => Navigator.pop(sheetContext, 'copy'),
+                  title: Text(tr('addPayment')),
+                  onTap: () => Navigator.pop(sheetContext, 'payment'),
                 ),
               if (canExpenses)
                 ListTile(
@@ -749,15 +767,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   ),
                   title: Text(tr('viewExpenses')),
                   onTap: () => Navigator.pop(sheetContext, 'expenses'),
-                ),
-              if (canPayment)
-                ListTile(
-                  leading: const Icon(
-                    Icons.credit_card_outlined,
-                    color: BriskersColors.invoices,
-                  ),
-                  title: Text(tr('addPayment')),
-                  onTap: () => Navigator.pop(sheetContext, 'payment'),
                 ),
               if (!_estimate)
                 ListTile(
@@ -820,7 +829,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if (_estimate || !widget.isOwner) return;
 
     final eligible = (_rows ?? const <Map<String, dynamic>>[])
-        .where((row) => _invoiceStage(row) == 'Paid · Pending Close')
+        .where((row) => _invoiceStage(row) == 'Pending Close')
         .toList();
 
     if (eligible.isEmpty) {
@@ -1280,6 +1289,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
           roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: invoiceId,
@@ -1309,6 +1319,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         context,
         MaterialPageRoute(
           builder: (_) => JobDocumentScreen(
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
             roleCode: widget.roleCode,
             businessId: widget.businessId,
             documentId: documentId,

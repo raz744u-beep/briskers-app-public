@@ -24,6 +24,8 @@ import '../services/local_standard_notes_service.dart';
 import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
 import '../widgets/connection_header_toggle.dart';
+import '../widgets/briskers_module_dock.dart';
+import 'expenses_screen.dart';
 import 'appointments_screen.dart';
 import 'customers/customers_screen.dart';
 import 'customers/new_customers_screen.dart';
@@ -60,9 +62,11 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   static const _sectionColors = [
     BriskersColors.today,
     BriskersColors.customers,
-    BriskersColors.schedule,
     BriskersColors.jobs,
+    BriskersColors.estimates,
     BriskersColors.invoices,
+    BriskersColors.schedule,
+    BriskersColors.expenses,
     BriskersColors.more,
   ];
 
@@ -125,7 +129,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
       if (businessId == widget.businessId) _refreshHomeCustomersCount();
     });
     _businessName = widget.businessName;
-    _index = widget.initialIndex.clamp(0, 5);
+    _index = widget.initialIndex.clamp(0, 7);
     BriskersConnectionModeController.instance.addListener(_connectionChanged);
     unawaited(_prepareOfflineChoices());
     _refreshHomeJobsCount();
@@ -421,58 +425,30 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     }
     setState(() {
       _index = index;
-      if (index == 3) _jobsRefreshToken++;
+      if (index == 2) _jobsRefreshToken++;
       if (index == 0) _homeAttentionRefreshToken++;
     });
   }
 
   String get _roleLabel => roleLabel(widget.roleCode);
 
-  Widget _navIcon(
-    IconData icon,
-    String countKey,
-  ) {
-    final count = int.tryParse(_navCounts[countKey]?.toString() ?? '') ?? 0;
-    if (count <= 0) return Icon(icon);
-    return Badge(
-      label: Text('$count'),
-      smallSize: 16,
-      largeSize: 18,
-      child: Icon(icon),
-    );
-  }
-
-  Widget _shellNavigationBar() {
-    final activeColor = _sectionColors[_index];
-    return Theme(
-      data: Theme.of(context).copyWith(
-        navigationBarTheme: NavigationBarThemeData(
-          height: 70,
-          backgroundColor: Colors.white,
-          elevation: 4,
-          indicatorColor: activeColor.withValues(alpha: 0.16),
-        ),
-      ),
-      child: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (index) {
-          if (Navigator.of(context).canPop()) {
-            Navigator.of(context).pop();
-          }
-          _goTo(index);
-        },
-        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-        destinations: [
-          const NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
-          NavigationDestination(icon: _navIcon(Icons.people_outline, 'customers'), selectedIcon: _navIcon(Icons.people, 'customers'), label: tr('customers')),
-          NavigationDestination(icon: _navIcon(Icons.calendar_month_outlined, 'appointments'), selectedIcon: _navIcon(Icons.calendar_month, 'appointments'), label: tr('schedule')),
-          NavigationDestination(icon: _navIcon(Icons.build_outlined, 'jobs'), selectedIcon: _navIcon(Icons.build, 'jobs'), label: tr('jobs')),
-          NavigationDestination(icon: _navIcon(Icons.receipt_long_outlined, 'invoices'), selectedIcon: _navIcon(Icons.receipt_long, 'invoices'), label: tr('invoices')),
-          const NavigationDestination(icon: Icon(Icons.more_horiz), selectedIcon: Icon(Icons.more_horiz), label: 'More'),
-        ],
-      ),
-    );
-  }
+  Widget _shellNavigationBar({bool nested = false}) => BriskersModuleDock(
+    selectedIndex: _index,
+    destinations: [
+      const BriskersDockDestination(label: 'Home', icon: Icons.home_outlined, color: BriskersColors.today),
+      const BriskersDockDestination(label: 'Customers', icon: Icons.people_outline, color: BriskersColors.customers),
+      const BriskersDockDestination(label: 'Jobs', icon: Icons.build_outlined, color: BriskersColors.jobs),
+      const BriskersDockDestination(label: 'Estimates', icon: Icons.description_outlined, color: BriskersColors.estimates),
+      const BriskersDockDestination(label: 'Invoices', icon: Icons.receipt_long_outlined, color: BriskersColors.invoices),
+      const BriskersDockDestination(label: 'Schedule', icon: Icons.calendar_month_outlined, color: BriskersColors.schedule),
+      const BriskersDockDestination(label: 'Expenses', icon: Icons.account_balance_wallet_outlined, color: BriskersColors.expenses),
+      const BriskersDockDestination(label: 'More', icon: Icons.more_horiz, color: BriskersColors.more),
+    ],
+    onSelected: (index) {
+      if (nested && Navigator.of(context).canPop()) Navigator.of(context).pop();
+      _goTo(index);
+    },
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -483,11 +459,11 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
       if (index == 0) {
         return HomeScreen(
           onCustomersTap: () => _goTo(1),
-          onAppointmentsTap: () => _goTo(2),
-          onJobsTap: () => _goTo(3),
+          onAppointmentsTap: () => _goTo(5),
+          onJobsTap: () => _goTo(2),
           onInvoicesTap: () => _goTo(4),
-          onMoreTap: () => _goTo(5),
-          estimatesNavigationBar: _shellNavigationBar(),
+          onMoreTap: () => _goTo(7),
+          estimatesNavigationBar: _shellNavigationBar(nested: true),
           businessId: widget.businessId,
           roleCode: widget.roleCode,
           jobsCount: _homeJobsCount,
@@ -515,9 +491,10 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
           roleCode: widget.roleCode,
           refreshToken: _customersRefreshToken,
           onCustomerReviewed: (id) => unawaited(_reviewCustomer(id)),
+          detailBottomNavigationBar: _shellNavigationBar(nested: true),
         );
       }
-      if (index == 3) {
+      if (index == 2) {
         // Deliver a fresh refreshToken even when Jobs is already selected.
         // Reusing the cached Widget bypasses JobsScreen.didUpdateWidget.
         return JobsScreen(
@@ -525,16 +502,28 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
           roleCode: widget.roleCode,
           refreshToken: _jobsRefreshToken,
           onJobsChanged: _refreshHomeJobsCount,
-          jobDetailBottomNavigationBar: _shellNavigationBar(),
+          jobDetailBottomNavigationBar: _shellNavigationBar(nested: true),
         );
       }
       return _lazyPages.putIfAbsent(index, () {
         switch (index) {
-          case 2:
+          case 5:
             return AppointmentsScreen(
               businessId: widget.businessId,
               roleCode: widget.roleCode,
             );
+          case 3:
+            return DocumentsScreen(
+              roleCode: widget.roleCode,
+              businessId: widget.businessId,
+              kind: 'estimate',
+              isOwner: widget.roleCode == 'owner',
+              canManageExpenses: false,
+              showAppBar: false,
+              sharedBottomNavigationBar: _shellNavigationBar(nested: true),
+            );
+          case 6:
+            return ExpensesScreen(businessId: widget.businessId, roleCode: widget.roleCode);
           case 4:
             return DocumentsScreen(
               roleCode: widget.roleCode,
@@ -598,76 +587,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
         ],
       ),
       body: currentPage,
-      bottomNavigationBar: Theme(
-        data: Theme.of(context).copyWith(
-          navigationBarTheme: NavigationBarThemeData(
-            height: 70,
-            backgroundColor: Colors.white,
-            elevation: 4,
-            indicatorColor: activeColor.withValues(alpha: 0.16),
-            iconTheme: WidgetStateProperty.resolveWith((states) {
-              final selected = states.contains(WidgetState.selected);
-              return IconThemeData(
-                color: selected ? activeColor : const Color(0xFF667085),
-                size: selected ? 27 : 25,
-              );
-            }),
-            labelTextStyle: WidgetStateProperty.resolveWith((states) {
-              final selected = states.contains(WidgetState.selected);
-              return TextStyle(
-                color: selected ? activeColor : const Color(0xFF667085),
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                fontSize: 12,
-              );
-            }),
-          ),
-        ),
-        child: NavigationBar(
-          selectedIndex: _index,
-          onDestinationSelected: _goTo,
-          labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-          destinations: [
-            const NavigationDestination(
-              icon: Icon(Icons.dashboard_outlined),
-              selectedIcon: Icon(Icons.dashboard),
-              label: 'Home',
-            ),
-            NavigationDestination(
-              icon: _navIcon(Icons.people_outline, 'customers'),
-              selectedIcon: _navIcon(
-                Icons.people,
-                'customers',
-              ),
-              label: tr('customers'),
-            ),
-            NavigationDestination(
-              icon: _navIcon(Icons.calendar_month_outlined, 'appointments'),
-              selectedIcon: _navIcon(
-                Icons.calendar_month,
-                'appointments',
-              ),
-              label: tr('schedule'),
-            ),
-            NavigationDestination(
-              icon: _navIcon(Icons.build_outlined, 'jobs'),
-              selectedIcon: _navIcon(
-                Icons.build,
-                'jobs',
-              ),
-              label: tr('jobs'),
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.receipt_long_outlined),
-              selectedIcon: const Icon(Icons.receipt_long),
-              label: tr('invoices'),
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.more_horiz),
-              label: tr('more'),
-            ),
-          ],
-        ),
-      ),
+      bottomNavigationBar: _shellNavigationBar(),
     );
   }
 }

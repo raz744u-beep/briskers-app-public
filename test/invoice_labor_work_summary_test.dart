@@ -51,6 +51,31 @@ void main() {
       );
     },
   );
+  test('reads explicitly typed labor in offline item snapshots', () {
+    expect(
+      invoiceLaborWorkSummary({
+        'kind': 'invoice',
+        'items': [
+          {
+            'item_type': 'Labor',
+            'name': 'Labor',
+            'description': 'Replace rear air springs. Calibrate air suspension',
+          },
+          {
+            'type': 'labor',
+            'description': 'Replace airmatic compressor, valve block and filter',
+          },
+          {
+            'type': 'part',
+            'description': 'Never copy part descriptions',
+          },
+          {'name': 'Unclassified line', 'description': 'Do not guess labor'},
+        ],
+      }),
+      'Replace rear air springs. Calibrate air suspension\n'
+      'Replace airmatic compressor, valve block and filter',
+    );
+  });
   test('estimates and missing labor produce no draft', () {
     expect(
       invoiceLaborWorkSummary({

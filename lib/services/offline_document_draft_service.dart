@@ -52,12 +52,48 @@ class OfflineDocumentDraftService {
 
   /// Store a blank invoice with a temporary local ID; the server allocates
   /// its number atomically after reconnecting. No fake invoice number is used.
+  /// Prefill copied documents BEFORE enqueuing creation. Sync therefore
+  /// observes a complete draft rather than a half-copied series of line edits.
+  List<Map<String, dynamic>> _prepareCopiedLines(
+      List<Map<String, dynamic>> source) {
+    return [
+      for (var index = 0; index < source.length; index++)
+        <String, dynamic>{
+          'id': _lineId(),
+          'name': source[index]['name']?.toString() ?? '',
+          'description': source[index]['description']?.toString(),
+          'item_id': source[index]['item_id']?.toString(),
+          'line_kind': source[index]['line_kind']?.toString() ?? 'item',
+          'quantity': _number(source[index]['quantity']),
+          'unit_price': _number(source[index]['unit_price']),
+          'tax_rate': _number(source[index]['tax_rate']),
+          'position': index + 1,
+          '_local_draft_line': true,
+        },
+    ];
+  }
+
+  ({double net, double tax, double total}) _copiedTotals(
+      List<Map<String, dynamic>> lines) {
+    var net = 0.0;
+    var tax = 0.0;
+    for (final line in lines) {
+      if (line['line_kind'] == 'discount') continue;
+      final price = _number(line['quantity']) * _number(line['unit_price']);
+      net += price.toDouble();
+      tax += (price * _number(line['tax_rate'])).toDouble();
+    }
+    return (net: net, tax: tax, total: net + tax);
+  }
+
   Future<String> createQuickInvoice(
     String businessId, {
     required String customerId,
     required String customerName,
     String? vehicleId,
     String? vehicleLabel,
+    List<Map<String, dynamic>> initialLines = const [],
+    String? initialMemo,
   }) async {
     if (customerId.isEmpty) {
       throw StateError('Select a saved customer before creating an invoice.');
@@ -68,6 +104,8 @@ class OfflineDocumentDraftService {
     final temporaryJobNumber = 'TEMP-${operationId.substring(0, 8).toUpperCase()}';
     final now = DateTime.now();
     final date = now.toIso8601String().split('T').first;
+    final copiedLines = _prepareCopiedLines(initialLines);
+    final totals = _copiedTotals(copiedLines);
     final detail = <String, dynamic>{
       'id': id,
       'kind': 'invoice',
@@ -84,11 +122,11 @@ class OfflineDocumentDraftService {
       'document_date': date,
       'created_at': now.toIso8601String(),
       'updated_at': now.toIso8601String(),
-      'memo': null,
-      'lines': <Map<String, dynamic>>[],
-      'net_amount': 0,
-      'tax_amount': 0,
-      'total_amount': 0,
+      'memo': initialMemo,
+      'lines': copiedLines,
+      'net_amount': totals.net,
+      'tax_amount': totals.tax,
+      'total_amount': totals.total,
       'paid_amount': 0,
       'pending_payment': 0,
       'row_version': 1,
@@ -133,9 +171,9 @@ class OfflineDocumentDraftService {
           status,display_status_code,closed_at,converted,total,
           document_date,created_at,server_updated_at,row_version,sync_state
         ) VALUES (?, ?, ?, ?, 'invoice', NULL, 'issued', 'open',
-                  NULL, 0, 0, ?, ?, NULL, 1, 'pending')
+                  NULL, 0, ?, ?, ?, NULL, 1, 'pending')
         ''',
-        [id,businessId,provisionalJobId,customerId,date,_unixNow()],
+        [id,businessId,provisionalJobId,customerId,totals.total,date,_unixNow()],
       );
       await _database.customStatement(
         '''
@@ -155,8 +193,9 @@ class OfflineDocumentDraftService {
           }),_unixNow(),
         ],
       );
+      // A sync worker cannot observe the queued copy before its full detail.
+      await _cache.save(businessId, id, detail);
     });
-    await _cache.save(businessId,id,detail);
     return id;
   }
 
@@ -440,6 +479,8 @@ class OfflineDocumentDraftService {
     required String customerName,
     String? vehicleId,
     String? vehicleLabel,
+    List<Map<String, dynamic>> initialLines = const [],
+    String? initialMemo,
   }) async {
     if (customerId.isEmpty) {
       throw StateError('Select a saved customer before creating an estimate.');
@@ -448,6 +489,8 @@ class OfflineDocumentDraftService {
     final id='local-estimate-$operationId';
     final now=DateTime.now();
     final date=now.toIso8601String().split('T').first;
+    final copiedLines = _prepareCopiedLines(initialLines);
+    final totals = _copiedTotals(copiedLines);
     final detail=<String,dynamic>{
       'id':id,'kind':'estimate','document_number':null,
       'status':'draft','display_status':'Draft',
@@ -458,8 +501,8 @@ class OfflineDocumentDraftService {
       'document_date':date,
       'created_at':now.toIso8601String(),
       'updated_at':now.toIso8601String(),
-      'memo':null,'lines':<Map<String,dynamic>>[],
-      'net_amount':0,'tax_amount':0,'total_amount':0,
+      'memo':initialMemo,'lines':copiedLines,
+      'net_amount':totals.net,'tax_amount':totals.tax,'total_amount':totals.total,
       'paid_amount':0,'pending_payment':0,
       'row_version':1,'converted':false,
       'sync_state':'pending','_local_snapshot':true,'_local_draft':true,
@@ -472,9 +515,9 @@ class OfflineDocumentDraftService {
           status,display_status_code,closed_at,converted,total,
           document_date,created_at,server_updated_at,row_version,sync_state
         ) VALUES (?, ?, NULL, ?, 'estimate', NULL, 'draft','draft',
-                  NULL,0,0,?,?,NULL,1,'pending')
+                  NULL,0,?,?,?,NULL,1,'pending')
         ''',
-        [id,businessId,customerId,date,_unixNow()],
+        [id,businessId,customerId,totals.total,date,_unixNow()],
       );
       await _database.customStatement(
         '''
@@ -495,8 +538,9 @@ class OfflineDocumentDraftService {
           _unixNow(),
         ],
       );
+      // A sync worker cannot observe the queued copy before its full detail.
+      await _cache.save(businessId, id, detail);
     });
-    await _cache.save(businessId,id,detail);
     return id;
   }
 

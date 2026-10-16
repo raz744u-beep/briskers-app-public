@@ -289,7 +289,8 @@ void main() {
         "NOT IN ('cancelled','canceled','no_show','checked_in','completed')",
       ),
     );
-    expect(activeFlow, contains("NOT IN ('completed','closed','cancelled')"));
+    expect(activeFlow, contains('includeClosed: true'));
+    expect(activeFlow, contains("'type': 'Visit'"));
     expect(
       activeFlow,
       contains('CustomerDocumentSummaryService().forCustomer('),
@@ -362,7 +363,8 @@ void main() {
     final shell = await File('lib/screens/shell_screen.dart').readAsString();
     final home = await File('lib/screens/home_screen.dart').readAsString();
     final docs = await File('lib/screens/documents_screen.dart').readAsString();
-    expect(shell, contains('estimatesNavigationBar: _shellNavigationBar()'));
+    expect(shell, contains('estimatesNavigationBar: _shellNavigationBar(nested: true)'));
+    expect(shell, contains("label: 'Estimates'"));
     expect(home, contains('sharedBottomNavigationBar: widget.estimatesNavigationBar'));
     expect(docs, matches(RegExp(r'widget\.sharedBottomNavigationBar\s*\?\?\s*NavigationBar\(')));
   });

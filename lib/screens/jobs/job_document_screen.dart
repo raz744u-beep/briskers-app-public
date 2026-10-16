@@ -47,6 +47,7 @@ import '../../services/offline_document_edit_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/invoice_finalization_guard.dart';
+import '../../services/document_copy_plan.dart';
 import '../../services/pending_document_memo_projection.dart';
 import '../../services/local_payment_methods_cache.dart';
 import '../expenses/expense_detail_screen.dart';
@@ -149,6 +150,7 @@ class JobDocumentScreen extends StatefulWidget {
     this.canManageExpenses = false,
     this.initialAction,
     this.initialTab = 'items',
+    this.sharedBottomNavigationBar,
   });
 
   final String businessId;
@@ -158,6 +160,7 @@ class JobDocumentScreen extends StatefulWidget {
   final bool canManageExpenses;
   final String? initialAction;
   final String initialTab;
+  final Widget? sharedBottomNavigationBar;
 
   @visibleForTesting
   static Widget historicalReopenDialogForTesting(
@@ -898,7 +901,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         await _editDocumentHeader();
         break;
       case 'copy':
-        await _copyInvoice();
+        await _copyDocument();
         break;
       case 'add_expense':
         await _addInvoiceExpense();
@@ -2794,6 +2797,56 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
+  Future<void> _autoCloseOwnerInvoiceIfReady() async {
+    if (!widget.isOwner || _estimate ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
+    final jobId = _detail?['job_id']?.toString() ?? '';
+    if (jobId.isEmpty || widget.documentId.startsWith('local-')) {
+      return;
+    }
+    final job = await _api.jobDetail(widget.businessId, jobId);
+    final invoice = await _api.documentDetail(
+      widget.businessId, widget.documentId);
+    final status = invoice['status']?.toString().toLowerCase() ?? '';
+    final code = invoice['display_status_code']
+        ?.toString().toLowerCase() ?? '';
+    if (invoice['job_id']?.toString() != jobId ||
+        invoice['closed_at'] != null ||
+        status == 'closed' || code == 'closed' ||
+        status == 'reopened' || code == 'reopened') {
+      return;
+    }
+    num? validMoney(Object? value) {
+      final n = value is num ? value : num.tryParse(value?.toString() ?? '');
+      return n != null && n.isFinite ? n : null;
+    }
+    final total = validMoney(invoice['total_amount']);
+    final posted = validMoney(invoice['paid_amount']);
+    final pending = validMoney(invoice['pending_payment']);
+    if (total == null || posted == null || pending == null) {
+      return;
+    }
+    if (!InvoiceFinalizationGuard.canAutoClose(
+      isOwner: widget.isOwner,
+      jobCompleted: job['status']?.toString().toLowerCase() == 'completed',
+      invoiceTotal: total,
+      finalizedPayments: posted,
+      pendingPayments: pending,
+      reopenedForCorrection: status == 'reopened' || code == 'reopened',
+    )) {
+      return;
+    }
+    await InvoiceFinalizationGuard().run<void>(
+      businessId: widget.businessId,
+      invoiceIds: [widget.documentId],
+      isOwner: widget.isOwner,
+      action: () => _api.closeInvoice(
+        widget.businessId, widget.documentId),
+    );
+  }
+
   Future<void> _finalizeEnteredPayments() async {
     if (!widget.isOwner) return;
     await _collapseWorkspaceHeader();
@@ -2834,7 +2887,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         },
       );
     });
-    if (mounted && succeeded) await _offerCompletePaidJob();
+    if (mounted && succeeded) {
+      await _offerCompletePaidJob();
+      try {
+        await _autoCloseOwnerInvoiceIfReady();
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Payment finalized. Invoice closing needs review: $error'),
+          ));
+        }
+      }
+    }
   }
 
   Future<void> _enterWarrantyPayment() async {
@@ -3035,7 +3099,27 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<Map<String, dynamic>?> _pickInvoiceCustomer() async {
-    final customers = await _api.customers(widget.businessId, limit: 200);
+    final cached = await LocalCustomerRepository().customers(widget.businessId);
+    final List<Map<String, dynamic>> customers;
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      customers = cached;
+    } else {
+      // Verify online access first; then supplement the first server page
+      // with all of this shop's already-synced local customer records.
+      final online = await _api.customers(widget.businessId, limit: 200);
+      final byId = <String, Map<String, dynamic>>{
+        for (final customer in cached)
+          if ((customer['id']?.toString() ?? '').isNotEmpty)
+            customer['id'].toString(): customer,
+        for (final customer in online)
+          if ((customer['id']?.toString() ?? '').isNotEmpty)
+            customer['id'].toString(): customer,
+      };
+      customers = byId.values.toList()
+        ..sort((a, b) => (a['display_name']?.toString() ?? '')
+            .toLowerCase().compareTo(
+              (b['display_name']?.toString() ?? '').toLowerCase()));
+    }
     if (!mounted) return null;
     var query = '';
 
@@ -3127,8 +3211,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<Map<String, dynamic>?> _pickInvoiceVehicle(
     String customerId,
   ) async {
-    final detail = await _api.customerDetail(widget.businessId, customerId);
-    final vehicles = List<dynamic>.from(detail['vehicles'] ?? const [])
+    final detail = BriskersConnectionModeController.instance.forceOffline
+        ? await LocalCustomerRepository().customerDetail(
+            widget.businessId, customerId)
+        : await _api.customerDetail(widget.businessId, customerId);
+    final vehicles = List<dynamic>.from(detail?['vehicles'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
 
@@ -3503,21 +3590,65 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
-  Future<void> _copyInvoice() async {
-    if (_estimate || _detail == null || _busy) return;
+  /// Copy into a NEW local-first document. Source job, document identities,
+  /// payments and signed authorizations never become part of the draft.
+  Future<void> _copyDocument() async {
+    if (_detail == null || _busy) return;
+    final original = _detail!;
+    var selectedCustomerId = original['customer_id']?.toString() ?? '';
+    var selectedCustomerName = original['customer_name']?.toString() ?? '';
+    String? selectedVehicleId = original['vehicle_id']?.toString();
+    var selectedVehicleName = original['vehicle']?.toString() ?? '';
 
-    var copyNotes = false;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Copy invoice?'),
-          content: CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Copy invoice notes'),
-            value: copyNotes,
-            onChanged: (value) =>
-                setDialogState(() => copyNotes = value == true),
+        builder: (dialogContext, refresh) => AlertDialog(
+          title: Text(_estimate ? 'Copy Estimate' : 'Copy Invoice'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.person_outline),
+                title: Text(selectedCustomerName.isEmpty
+                    ? 'Select customer' : selectedCustomerName),
+                subtitle: const Text('Customer · tap to change'),
+                onTap: () async {
+                  final customer = await _pickInvoiceCustomer();
+                  if (customer == null || !dialogContext.mounted) return;
+                  final next = customer['id']?.toString() ?? '';
+                  if (next.isEmpty) return;
+                  final vehicle = await _pickInvoiceVehicle(next);
+                  if (!dialogContext.mounted) return;
+                  refresh(() {
+                    selectedCustomerId = next;
+                    selectedCustomerName =
+                        customer['display_name']?.toString() ?? '';
+                    selectedVehicleId = vehicle?['id']?.toString();
+                    selectedVehicleName = _vehicleLabel(vehicle);
+                  });
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.directions_car_outlined),
+                title: Text(selectedVehicleName.isEmpty
+                    ? 'Select vehicle' : selectedVehicleName),
+                subtitle: const Text('Vehicle · tap to change'),
+                onTap: selectedCustomerId.isEmpty ? null : () async {
+                  final vehicle = await _pickInvoiceVehicle(selectedCustomerId);
+                  if (vehicle == null || !dialogContext.mounted) return;
+                  refresh(() {
+                    selectedVehicleId = vehicle['id']?.toString();
+                    selectedVehicleName = _vehicleLabel(vehicle);
+                  });
+                },
+              ),
+              Text(_estimate
+                  ? 'A new standalone estimate will be created.'
+                  : 'A new invoice and a new Job will be created.'),
+            ],
           ),
           actions: [
             TextButton(
@@ -3525,34 +3656,53 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               child: Text(tr('cancel')),
             ),
             FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: BriskersColors.invoices,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Copy invoice'),
+              onPressed: selectedCustomerId.isEmpty
+                  ? null : () => Navigator.pop(dialogContext, true),
+              child: const Text('Create editable copy'),
             ),
           ],
         ),
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted) return;
 
     String? newId;
-    await _run(() async {
-      newId = await _api.copyInvoice(
-        widget.businessId,
-        widget.documentId,
-        copyNotes: copyNotes,
+    final done = await _run(() async {
+      final plan = DocumentCopyPlan.prepare(
+        original,
+        customerId: selectedCustomerId,
+        vehicleId: selectedVehicleId,
       );
+      // One creation queue entry and a fully populated first snapshot.
+      // No partially copied invoice can upload between line mutations.
+      final lines = (plan['lines'] as List)
+          .whereType<Map<String, dynamic>>().toList();
+      newId = _estimate
+          ? await _offlineDocumentDraft.createStandaloneEstimate(
+              widget.businessId,
+              customerId: selectedCustomerId,
+              customerName: selectedCustomerName,
+              vehicleId: selectedVehicleId,
+              vehicleLabel: selectedVehicleName,
+              initialLines: lines,
+              initialMemo: plan['memo']?.toString(),
+            )
+          : await _offlineDocumentDraft.createQuickInvoice(
+              widget.businessId,
+              customerId: selectedCustomerId,
+              customerName: selectedCustomerName,
+              vehicleId: selectedVehicleId,
+              vehicleLabel: selectedVehicleName,
+              initialLines: lines,
+              initialMemo: plan['memo']?.toString(),
+            );
     });
-
-    if (!mounted || newId == null) return;
+    if (!mounted || !done || newId == null) return;
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
-            roleCode: _navigationRoleCode,
+          roleCode: _navigationRoleCode,
           businessId: widget.businessId,
           documentId: newId!,
           isOwner: widget.isOwner,
@@ -4262,6 +4412,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }).statusLabel;
 
   Color _statusColor(String label, {String? code}) {
+    if (!_estimate && code != null &&
+        const {'open','pending_close','paid','closed','reopened'}.contains(code)) {
+      return invoiceStatusDefaultColor(code);
+    }
     if (!_estimate && code != null) {
       final style = _invoiceStyle(code);
       if (style != null) {
@@ -4737,6 +4891,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   customer.isEmpty ? 'Customer' : customer,
                   bold: true,
                   maxLines: 2,
+                  onTap: (_detail?['customer_id']?.toString().isNotEmpty ?? false)
+                      ? _openInvoiceCustomer : null,
+                  valueColor: BriskersColors.invoices,
+                  underline: true,
                   problemFlag: _detail?['customer_problem_flag'] == true,
                 ),
                 if (phone.isNotEmpty) ...[
@@ -6568,12 +6726,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   title: Text(tr('forceReopenInvoice')),
                   onTap: () => Navigator.pop(sheetContext, 'force_reopen'),
                 ),
-              if (!_estimate)
-                ListTile(
-                  leading: const Icon(Icons.copy_outlined),
-                  title: Text(tr('copyInvoice')),
-                  onTap: () => Navigator.pop(sheetContext, 'copy'),
-                ),
+              ListTile(
+                leading: Icon(Icons.copy_outlined,
+                  color: _estimate ? BriskersColors.estimates
+                      : BriskersColors.invoices),
+                title: Text(_estimate ? 'Copy Estimate' : tr('copyInvoice')),
+                onTap: () => Navigator.pop(sheetContext, 'copy'),
+              ),
               if (!_estimate)
                 ListTile(
                   leading: const Icon(Icons.car_repair_outlined),
@@ -6645,7 +6804,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       case 'edit':
         await _editDocumentHeader();
       case 'copy':
-        await _copyInvoice();
+        await _copyDocument();
       case 'findings':
         await _showInvoiceFindings();
       case 'expenses':
@@ -6892,8 +7051,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             ],
           ),
         ),
-        bottomNavigationBar: SafeArea(
+        bottomNavigationBar: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [SafeArea(
           top: false,
+          bottom: widget.sharedBottomNavigationBar == null,
           child: Container(
             decoration: const BoxDecoration(
               color: Colors.white,
@@ -6974,6 +7136,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ],
             ),
           ),
+        ),          if (widget.sharedBottomNavigationBar != null)
+            widget.sharedBottomNavigationBar!,
+          ],
         ),
       ),
     );
