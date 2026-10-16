@@ -6707,6 +6707,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              const _DocumentActionSectionLabel('Edit and copy'),
               if (!_readOnly)
                 ListTile(
                   leading: Icon(
@@ -6733,12 +6734,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 title: Text(_estimate ? 'Copy Estimate' : tr('copyInvoice')),
                 onTap: () => Navigator.pop(sheetContext, 'copy'),
               ),
-              if (!_estimate)
+              if (!_estimate) ...[
+                const Divider(height: 1),
+                const _DocumentActionSectionLabel('Repair'),
                 ListTile(
                   leading: const Icon(Icons.car_repair_outlined),
                   title: Text(tr('vehicleFindings')),
                   onTap: () => Navigator.pop(sheetContext, 'findings'),
                 ),
+              ],
+              if (!_estimate && _canManageInvoiceExpenses) ...[
+                const Divider(height: 1),
+                const _DocumentActionSectionLabel('Expenses'),
+              ],
               if (!_estimate && _canManageInvoiceExpenses)
                 ListTile(
                   leading: const Icon(Icons.payments_outlined),
@@ -6771,6 +6779,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ],
               if (widget.isOwner && (!_estimate || !_converted)) ...[
                 const Divider(height: 1),
+                const _DocumentActionSectionLabel('Delete'),
                 ListTile(
                   leading: Icon(
                     Icons.delete_outline,
@@ -8252,3 +8261,16 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
   }
 }
 
+
+class _DocumentActionSectionLabel extends StatelessWidget {
+  const _DocumentActionSectionLabel(this.label);
+  final String label;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+    child: Align(alignment: Alignment.centerLeft,
+      child: Text(label.toUpperCase(), style: Theme.of(context).textTheme.labelSmall?.copyWith(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        letterSpacing: 0.8, fontWeight: FontWeight.w700))),
+  );
+}
