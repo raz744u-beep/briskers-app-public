@@ -8,7 +8,6 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
-import 'local_job_deletion_v3.dart';
 import 'offline_job_purge.dart';
 
 typedef MediaDirectoryProvider = Future<Directory> Function();

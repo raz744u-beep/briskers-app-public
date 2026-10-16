@@ -752,7 +752,7 @@ class OfflineDocumentDraftService {
     };
     await _database.transaction(() async {
       await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
-      await OfflineJobPurge.recordNewIntent(_database, businessId, [invoiceId, operationId, if (provisionalJobId != null) provisionalJobId]);
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [invoiceId, operationId, ?provisionalJobId]);
       if (provisionalJobId != null) {
         await _database.customStatement(
           '''INSERT INTO local_jobs (id,business_id,access_scope,job_number,title,

@@ -274,7 +274,7 @@ class LocalJobDeletionV3 {
         'SELECT actor_id,state FROM local_job_deletion_v3_scope WHERE business_id=?',
         variables: [Variable<String>(businessId)]).get();
     if (actor == null || rows.isEmpty || rows.single.read<String>('actor_id') != actor ||
-        rows.single.read<String>('state') == 'scope_verification_required') {
+        rows.single.read<String>('state') == 'scope_verification_required' || provider() != actor) {
       throw StateError('Authenticated cache scope has not been verified for this actor');
     }
   }
@@ -291,10 +291,16 @@ class LocalJobDeletionV3 {
   static Future<int> captureVisibilityGeneration(BriskersLocalDatabase db,
       String businessId) async {
     await ensureSchema(db);
-    await assertVisibilityActor(db, businessId);
+    final provider = currentActorIdProvider;
+    final actor = provider?.call();
     final rows = await db.customSelect(
-        'SELECT generation FROM local_job_deletion_v3_scope WHERE business_id=?',
+        'SELECT actor_id,state,generation FROM local_job_deletion_v3_scope WHERE business_id=?',
         variables: [Variable<String>(businessId)]).get();
+    if (provider != null && (actor == null || rows.isEmpty ||
+        rows.single.read<String>('actor_id') != actor ||
+        rows.single.read<String>('state') == 'scope_verification_required' || provider() != actor)) {
+      throw StateError('Authenticated cache scope changed during this request');
+    }
     return rows.isEmpty ? 0 : rows.single.read<int>('generation');
   }
 

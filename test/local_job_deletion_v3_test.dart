@@ -683,4 +683,62 @@ void main() {
     }),throwsFormatException);
     expect(await LocalJobRetirement.isDocumentBlocked(db,business,'local-invoice-$job'),isFalse);
   });
+  test('summary readers reject an actor switch during their awaited read', () async {
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: job, visibilityScope: 'staff', readerScope: 'staff');
+    final documents = LocalDocumentRepository(database: db);
+    final jobs = LocalJobRepository(database: db);
+    final readers = <Future<Object?> Function()>[
+      () => documents.createdAtForDocument(business, invoice),
+      () => documents.pendingCloseAttention(business),
+      () => documents.openInvoiceCount(business),
+      () => jobs.jobCount(business),
+      () => jobs.unassignedOpenJobs(business),
+      () => jobs.unassignedOpenJobCount(business),
+      () => jobs.activeJobCount(business),
+      () => jobs.jobStatusCounts(business),
+    ];
+    for (final read in readers) {
+      var checks = 0;
+      LocalJobDeletionV3.currentActorIdProvider = () => checks++ < 2 ? job : other;
+      await expectLater(read(), throwsStateError);
+    }
+    expect(await count(db, 'local_jobs'), 1);
+    expect(await count(db, 'local_documents'), 3);
+  });
+
+  test('count streams recheck actor before emitting their awaited result', () async {
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: job, visibilityScope: 'staff', readerScope: 'staff');
+    final documents = LocalDocumentRepository(database: db);
+    final jobs = LocalJobRepository(database: db);
+    final readers = <Stream<int> Function()>[
+      () => documents.watchOpenInvoiceCount(business),
+      () => jobs.watchJobCount(business),
+      () => jobs.watchActiveJobCount(business),
+    ];
+    for (final read in readers) {
+      var checks = 0;
+      LocalJobDeletionV3.currentActorIdProvider = () => checks++ < 2 ? job : other;
+      await expectLater(read().first, throwsStateError);
+    }
+  });
+
+  test('central scope guards recheck actor after their final database await', () async {
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: job, visibilityScope: 'staff', readerScope: 'staff');
+    for (final read in <Future<void> Function()>[
+      () async { await LocalJobDeletionV3.captureVisibilityGeneration(db, business); },
+      () => LocalJobDeletionV3.assertVisibilityActor(db, business),
+    ]) {
+      var checks = 0;
+      LocalJobDeletionV3.currentActorIdProvider = () => checks++ == 0 ? job : other;
+      await expectLater(read(), throwsStateError);
+      expect(checks, 2);
+    }
+    LocalJobDeletionV3.currentActorIdProvider = () => job;
+    await LocalJobDeletionV3.lockKnownRoleChange(db, business);
+    await expectLater(LocalJobDeletionV3.captureVisibilityGeneration(db, business), throwsStateError);
+  });
+
 }

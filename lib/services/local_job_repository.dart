@@ -519,7 +519,7 @@ class LocalJobRepository {
     JobListView view = JobListView.all,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
-    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final filters = _filters(
       businessId,
       status: status,
@@ -532,12 +532,13 @@ class LocalJobRepository {
           variables: filters.variables,
         )
         .getSingle();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return row.read<int>('count');
   }
 
   Stream<int> watchJobCount(String businessId, {String? status}) async* {
     await LocalJobRetirement.ensureSchema(_database);
-    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final where = <String>['j.business_id = ?', _visibleJobSql('j')];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
     if (status != null && status.isNotEmpty) {
@@ -552,7 +553,10 @@ class LocalJobRepository {
           readsFrom: {_database.localJobs},
         )
         .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .asyncMap((row) async {
+          await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+          return row.read<int>('count');
+        });
   }
 
   Future<List<Map<String, dynamic>>> unassignedOpenJobs(
@@ -560,7 +564,7 @@ class LocalJobRepository {
     int limit = 25,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
-    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final rows = await _database
         .customSelect(
           '''
@@ -577,6 +581,7 @@ class LocalJobRepository {
         )
         .get();
 
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return rows
         .map(
           (row) => <String, dynamic>{
@@ -594,7 +599,7 @@ class LocalJobRepository {
 
   Future<int> unassignedOpenJobCount(String businessId) async {
     await LocalJobRetirement.ensureSchema(_database);
-    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final row = await _database
         .customSelect(
           '''
@@ -608,12 +613,13 @@ class LocalJobRepository {
           variables: [Variable<String>(businessId)],
         )
         .getSingle();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return row.read<int>('count');
   }
 
   Future<int> activeJobCount(String businessId) async {
     await LocalJobRetirement.ensureSchema(_database);
-    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final row = await _database
         .customSelect(
           '''
@@ -626,12 +632,13 @@ class LocalJobRepository {
           variables: [Variable<String>(businessId)],
         )
         .getSingle();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return row.read<int>('count');
   }
 
   Stream<int> watchActiveJobCount(String businessId) async* {
     await LocalJobRetirement.ensureSchema(_database);
-    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     yield* _database
         .customSelect(
           '''
@@ -645,7 +652,10 @@ class LocalJobRepository {
           readsFrom: {_database.localJobs},
         )
         .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .asyncMap((row) async {
+          await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+          return row.read<int>('count');
+        });
   }
 
   Future<Map<String, int>> jobStatusCounts(
@@ -653,7 +663,7 @@ class LocalJobRepository {
     JobListView view = JobListView.all,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
-    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final rows = await _database
         .customSelect(
           '''
@@ -667,6 +677,7 @@ class LocalJobRepository {
           variables: [Variable<String>(businessId)],
         )
         .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return {
       for (final row in rows)
         row.read<String>('status'): row.read<int>('count'),

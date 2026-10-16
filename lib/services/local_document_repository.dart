@@ -279,7 +279,7 @@ class LocalDocumentRepository {
     String documentId,
   ) async {
     await LocalJobRetirement.ensureSchema(_database);
-    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final rows = await _database
         .customSelect(
           '''
@@ -294,6 +294,7 @@ class LocalDocumentRepository {
           ],
         )
         .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     if (rows.isEmpty) return null;
     return _isoFromDb(rows.first.data['created_at']);
   }
@@ -401,7 +402,7 @@ class LocalDocumentRepository {
     int limit = 25,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
-    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final where =
         '''
       d.business_id = ? AND d.kind = 'invoice'
@@ -435,6 +436,7 @@ class LocalDocumentRepository {
           variables: [Variable<String>(businessId), Variable<int>(limit)],
         )
         .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return {
       'count': countRow.read<int>('count'),
       'items': [
@@ -453,7 +455,7 @@ class LocalDocumentRepository {
 
   Future<int> openInvoiceCount(String businessId) async {
     await LocalJobRetirement.ensureSchema(_database);
-    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final row = await _database
         .customSelect(
           '''
@@ -468,12 +470,13 @@ class LocalDocumentRepository {
           variables: [Variable<String>(businessId)],
         )
         .getSingle();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return row.read<int>('count');
   }
 
   Stream<int> watchOpenInvoiceCount(String businessId) async* {
     await LocalJobRetirement.ensureSchema(_database);
-    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     yield* _database
         .customSelect(
           '''
@@ -489,7 +492,10 @@ class LocalDocumentRepository {
           readsFrom: {_database.localDocuments},
         )
         .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .asyncMap((row) async {
+          await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+          return row.read<int>('count');
+        });
   }
 
   Future<List<Map<String, dynamic>>> search(

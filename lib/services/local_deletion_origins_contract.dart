@@ -34,7 +34,7 @@ Map<String, Map<String,dynamic>> validateLocalDeletionOrigins(
       if(alias is! Map || alias.length != 2 || !alias.containsKey('entity_kind') ||
           !alias.containsKey('entity_id') || alias['entity_id'] is! String ||
           !const ['job','invoice','estimate'].contains(alias['entity_kind']) ||
-          !kinds.add(alias['entity_kind'] as String)) throw const FormatException('Invalid local alias identity.');
+          !kinds.add(alias['entity_kind'] as String)) { throw const FormatException('Invalid local alias identity.'); }
       final kind = alias['entity_kind'];
       final id = alias['entity_id'] as String;
       final valid = kind == 'job'

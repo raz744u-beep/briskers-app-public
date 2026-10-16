@@ -271,7 +271,7 @@ class OfflineJobPurge {
     if (value is Map) {
       if (value['server_updated_at'] != null || value['_server_document_id'] != null ||
           value['server_payment_id'] != null || value['server_transaction_id'] != null ||
-          value['storage_key'] != null || value['storage_bucket'] != null) return true;
+          value['storage_key'] != null || value['storage_bucket'] != null) { return true; }
       return value.values.any(_hasServerEvidence);
     }
     return value is List && value.any(_hasServerEvidence);
@@ -473,11 +473,11 @@ class OfflineJobPurge {
       if (value is! Map) _stop('A document cache has unknown ownership.');
       final owned = graph.ids.contains(key.substring(prefix.length));
       if (!owned && !_mentions(value, graph.ids)) continue;
-      if (!owned || value is! Map || _hasServerEvidence(value)) _stop('A cached document has shared or server-owned content.');
+      if (!owned || _hasServerEvidence(value)) _stop('A cached document has shared or server-owned content.');
       final sourceCache = key.substring(prefix.length) == conversionSource;
       if ((!sourceCache && value['job_id'] != job) ||
           (sourceCache && value['job_id'] != null && value['job_id'] != '') ||
-          value['id'] != key.substring(prefix.length)) _stop('A cached document link changed.');
+          value['id'] != key.substring(prefix.length)) { _stop('A cached document link changed.'); }
       if (sourceCache && value['converted_invoice_id'] != origin['entity_id']) _stop('The source estimate conversion relationship changed.');
       _assertOwnedReferences(value, job, graph.ids);
       graph.preferences[key] = raw!;
