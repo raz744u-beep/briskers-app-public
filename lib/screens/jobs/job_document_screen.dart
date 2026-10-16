@@ -4410,6 +4410,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }).statusLabel;
 
   Color _statusColor(String label, {String? code}) {
+    if (!_estimate && code != null &&
+        const {'open','pending_close','paid','closed','reopened'}.contains(code)) {
+      return invoiceStatusDefaultColor(code);
+    }
     if (!_estimate && code != null) {
       final style = _invoiceStyle(code);
       if (style != null) {
