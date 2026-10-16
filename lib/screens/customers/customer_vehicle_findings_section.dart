@@ -26,6 +26,7 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
     required this.vehicles,
     this.canManage = false,
     this.canDelete = false,
+    this.initiallyExpanded = false,
   });
 
   final String businessId;
@@ -33,6 +34,7 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
   final List<dynamic> vehicles;
   final bool canManage;
   final bool canDelete;
+  final bool initiallyExpanded;
 
   @override
   State<CustomerVehicleFindingsSection> createState() =>
@@ -61,6 +63,7 @@ class _CustomerVehicleFindingsSectionState
   @override
   void initState() {
     super.initState();
+    _expanded = widget.initiallyExpanded;
     _listenForQuarantine();
     _findingsFuture = _allFindings();
     _findingChanges = VehicleFindingActionsService.changes.listen((businessId) {
@@ -1295,7 +1298,7 @@ class _CustomerVehicleFindingsSectionState
         return Card(
           clipBehavior: Clip.antiAlias,
           child: ExpansionTile(
-            initiallyExpanded: false,
+            initiallyExpanded: widget.initiallyExpanded,
             onExpansionChanged: (value) => setState(() => _expanded = value),
             tilePadding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
             childrenPadding: EdgeInsets.zero,
