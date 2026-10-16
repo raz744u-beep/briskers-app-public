@@ -119,11 +119,12 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Icon(item.icon, color: selected ? item.color : const Color(0xFF667085), size: 23),
+                      Icon(item.icon, color: item.color, size: 25),
                       const SizedBox(height: 2),
                       Text(item.label, maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 10.5, fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
-                          color: selected ? item.color : const Color(0xFF667085))),
+                        style: TextStyle(fontSize: 11.5,
+                          fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                          color: item.color)),
                     ]),
                   ),
                 ));
