@@ -73,4 +73,53 @@ void main() {
     ).getSingle()).read<int>('n'), 0);
     await db.close();
   });
+
+  test('pending invoice header edits remain local and retain creation queue',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final cache = LocalDocumentDetailCache(database: db);
+    final drafts = OfflineDocumentDraftService(
+      database: db, cache: cache,
+      documents: LocalDocumentRepository(database: db),
+    );
+    final id = await drafts.createQuickInvoice(
+      'shop', customerId: 'customer-a', customerName: 'Barbara',
+      vehicleId: 'car-a', vehicleLabel: 'Mercedes SLK300',
+      initialLines: [
+        {'name': 'Oil Change', 'line_kind': 'service',
+          'quantity': 1, 'unit_price': 160, 'tax_rate': 0.0925},
+      ],
+    );
+    await drafts.updatePendingInvoiceDetails(
+      'shop', id, documentDate: DateTime(2026, 10, 16),
+      mileage: '123456', claimNumber: 'ABC-12',
+    );
+    final saved = (await cache.load('shop', id))!;
+    expect(saved['document_date'], '2026-10-16');
+    expect(saved['odometer_in'], 123456);
+    expect(saved['claim_number'], 'ABC-12');
+    expect(saved['customer_id'], 'customer-a');
+    expect(saved['total_amount'], 174.8);
+    expect((await db.customSelect(
+      'SELECT document_date FROM local_documents WHERE id=?',
+      variables: [Variable<String>(id)],
+    ).getSingle()).read<String>('document_date'), '2026-10-16');
+
+    // A sync attempt means the server may already own this invoice; edits
+    // must fail closed instead of mutating the snapshot mid-replay.
+    await db.customStatement(
+      'UPDATE sync_outbox SET attempt_count=1 WHERE entity_id=?',
+      [id],
+    );
+    await expectLater(
+      drafts.updatePendingInvoiceDetails(
+        'shop', id, documentDate: DateTime(2026, 10, 17),
+      ),
+      throwsStateError,
+    );
+    expect((await cache.load('shop', id))!['document_date'], '2026-10-16');
+    await db.close();
+  });
+
 }
