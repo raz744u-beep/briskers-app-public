@@ -297,7 +297,8 @@ void main() {
   });
   test('server deleted cannot regress while local cleanup waits', () async {
     gateway.onExecute = (op, confirmation) async {
-      await db.customStatement("INSERT INTO local_financial_cache (business_id,cache_key,payload_json,updated_at) VALUES (?,'transactions_snapshot','{',0)", [business]);
+      await db.customStatement('CREATE TABLE IF NOT EXISTS local_job_recovery_receipts (id INTEGER PRIMARY KEY,business_id TEXT,outbox_id INTEGER,response_json TEXT)');
+      await db.customStatement("INSERT INTO local_job_recovery_receipts (business_id,outbox_id,response_json) VALUES (?,NULL,'malformed response')", [business]);
       return receipt(op, confirmation);
     };
     final preview = await service.preview(business, job, actorId: actor, isOwner: true);
