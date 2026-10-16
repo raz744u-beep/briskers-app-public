@@ -72,6 +72,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   bool get _canManageQuickActions => canManageCustomerActions(widget.roleCode);
   final GlobalKey _notesSectionKey = GlobalKey();
   bool _expandQuickNotes = false;
+  int _customerTab = 0; // Overview, Info, Vehicles, Notes.
 
   Future<Map<String, dynamic>> _loadOfflineSections() async {
     final visibility = _jobVisibility;
