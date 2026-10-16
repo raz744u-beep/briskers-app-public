@@ -18,8 +18,11 @@ import '../../services/local_job_quarantine.dart';
 import '../../services/local_job_retirement.dart';
 import '../../local/local_database_provider.dart';
 import 'job_quarantine_view_guard.dart';
-import 'owner_job_delete_dialog.dart';
-import '../../services/owner_job_retirement_service.dart';
+import 'owner_job_delete_v3_dialog.dart';
+import '../../services/owner_job_deletion_service_v3.dart';
+import '../../services/owner_local_job_purge_service.dart';
+import 'offline_job_purge_dialog.dart';
+import '../../services/owner_job_deletion_v3_contract.dart';
 import '../../core/supabase_config.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
@@ -32,6 +35,7 @@ import '../../services/invoice_labor_work_summary.dart';
 import 'invoice_payment_navigation.dart';
 import '../../services/local_document_repository.dart';
 import '../../services/local_document_detail_cache.dart';
+import '../../services/job_document_link_recovery.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_document_draft_service.dart';
@@ -85,7 +89,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   final LocalDocumentDetailCache _documentDetailCache =
       const LocalDocumentDetailCache();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
-  final OwnerJobRetirementService _jobRetirement = OwnerJobRetirementService();
+  final OwnerJobDeletionServiceV3 _jobRetirement = OwnerJobDeletionServiceV3();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
 
@@ -231,41 +235,15 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       ),
     ];
 
-    final repaired = <Map<String, dynamic>>[];
-    for (final row in candidates) {
-      if (row['job_id']?.toString() == widget.jobId) {
-        repaired.add(row);
-        continue;
-      }
-
-      final id = row['id']?.toString() ?? '';
-      if (id.isEmpty) continue;
-      final detail = await _documentDetailCache.load(
-        widget.businessId,
-        id,
-      );
-      if (detail?['job_id']?.toString() != widget.jobId) continue;
-
-      final merged = <String, dynamic>{
-        ...row,
-        ...detail!,
-        'total_amount':
-            detail['total_amount'] ?? row['total_amount'] ?? 0,
-        '_local_snapshot': true,
-      };
-      repaired.add(merged);
-
-      try {
-        await _localDocuments.upsertFromServer(
-          widget.businessId,
-          [detail],
-        );
-      } catch (_) {
-        // Showing the recovered document is more important than index repair.
-      }
-    }
-
-    return repaired;
+    return recoverLegacyJobDocuments(
+      requestedJobId: widget.jobId,
+      candidates: candidates,
+      readDetail: (id) => _documentDetailCache.load(widget.businessId, id),
+      readCurrentIndex: () async => [
+        ...await _localDocuments.listByKind(widget.businessId, kind: 'estimate'),
+        ...await _localDocuments.listByKind(widget.businessId, kind: 'invoice'),
+      ],
+    );
   }
 
   void _scheduleInitialAction() {
@@ -3442,6 +3420,28 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       _error = null;
     });
     try {
+      final localService = OwnerLocalJobPurgeService();
+      final localPreview = await localService.eligiblePreview(widget.businessId,
+        widget.jobId, actorId: actorId, isOwner: _owner);
+      if (localPreview != null) {
+        if (!mounted || _contentBlocked) return;
+        final jobItems = localPreview.items.where((item) => item['kind'] == 'local_jobs');
+        final label = jobItems.isEmpty ? 'this Job' : jobItems.first['label']?.toString() ?? 'this Job';
+        final confirmed = await showOfflineJobPurgeConfirmation(context,
+          jobLabel: label, items: localPreview.items);
+        if (!confirmed || !mounted || _contentBlocked) return;
+        if (!_owner || supabase.auth.currentUser?.id != actorId) {
+          throw StateError('Your access changed. Reopen Delete Job to review.');
+        }
+        final cleanup = await localService.confirm(localPreview,
+          actorId: actorId, isOwner: _owner,
+          online: !BriskersConnectionModeController.instance.forceOffline);
+        messenger.showSnackBar(SnackBar(content: Text(cleanup.completed
+          ? 'Deleted from this device and queued uploads cancelled. Deletion markers will be verified with the server when connected.'
+          : 'Deletion is committed on this device. Local file cleanup and server marker verification are still pending.')));
+        if (mounted) Navigator.pop(context, true);
+        return;
+      }
       final preview = await _jobRetirement.preview(
         widget.businessId,
         widget.jobId,
@@ -3450,12 +3450,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         online: !offline,
       );
       if (!mounted || _contentBlocked) return;
-      final confirmed = await showOwnerJobDeleteConfirmation(
+      final confirmed = await showOwnerJobDeleteV3Confirmation(
         context,
-        snapshot: preview.snapshot,
-        canRetire: preview.canRetire,
-        blockedReasons: preview.blockedReasons,
-        offline: offline || preview.fromCache,
+        preview: preview,
       );
       if (!confirmed || !mounted || _contentBlocked) return;
       // Recheck identity after the dialog. Neither a cached role nor a preview
@@ -3471,14 +3468,14 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       );
       messenger.showSnackBar(SnackBar(content: Text(result.message)));
       if (!mounted) return;
-      if (result.status != OwnerJobRetirementStatus.rejected) {
+      if (result.state != 'rejected') {
         Navigator.pop(context, true);
       } else {
         await _load();
       }
     } catch (error) {
       messenger.showSnackBar(
-        SnackBar(content: Text('Unable to delete Job: $error')),
+        SnackBar(content: Text(deletionV3FailureMessage(error))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -4646,7 +4643,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         final localDocuments = await _localDocumentsForJob(
           recoverLegacy: true,
         );
-        if (mounted) {
+        if (mounted && !_onlineReady) {
           setState(() => _documents = localDocuments);
         }
       } catch (_) {
@@ -5305,7 +5302,6 @@ class _JobCategoryTile extends StatelessWidget {
     );
   }
 }
-
 class _JobDrawerSurface extends StatelessWidget {
   const _JobDrawerSurface({
     required this.color,
