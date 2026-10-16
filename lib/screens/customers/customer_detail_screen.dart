@@ -1062,7 +1062,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   void _openCustomerNoteComposer() {
-    setState(() => _expandQuickNotes = true);
+    setState(() { _expandQuickNotes = true; _customerTab = 3; });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final target = _notesSectionKey.currentContext;
       if (mounted && target != null) {
