@@ -21,6 +21,9 @@ class LocalDocumentRepository {
         AND ((r.entity_kind = 'invoice' AND r.entity_id = $alias.id)
           OR ($alias.kind = 'invoice' AND r.entity_kind = 'job'
             AND r.entity_id = $alias.job_id)))
+    AND NOT EXISTS (SELECT 1 FROM local_job_deletion_v3_fences v3
+      WHERE v3.business_id=$alias.business_id AND v3.entity_kind=$alias.kind
+        AND v3.entity_id=$alias.id)
   """;
 
   Future<bool> _serverDocumentBlocked(
@@ -581,3 +584,4 @@ class LocalDocumentRepository {
   int? _unix(DateTime? value) =>
       value == null ? null : value.toUtc().millisecondsSinceEpoch ~/ 1000;
 }
+

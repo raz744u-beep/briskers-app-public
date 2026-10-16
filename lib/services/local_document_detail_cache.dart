@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_retirement.dart';
+import 'local_job_deletion_v3.dart';
 import 'test_job_cleanup_policy.dart';
 
 class LocalDocumentDetailCache {
@@ -21,6 +22,7 @@ class LocalDocumentDetailCache {
     Map<String, dynamic>? detail,
   ]) async {
     final payload = detail ?? const <String, dynamic>{};
+    if (await LocalJobDeletionV3.payloadIsDeleted(_database, businessId, payload)) { return true; }
     final ids = <String>{
       documentId,
       if (payload['id'] != null) payload['id'].toString(),
@@ -45,7 +47,7 @@ class LocalDocumentDetailCache {
   }
 
   Map<String, dynamic>? _decode(String? raw) {
-    if (raw == null || raw.isEmpty) return null;
+    if (raw == null || raw.isEmpty) { return null; }
     try {
       final decoded = jsonDecode(raw);
       return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
@@ -92,7 +94,7 @@ class LocalDocumentDetailCache {
     final before = _pending[key];
     final done = Completer<void>();
     _pending[key] = done.future;
-    if (before != null) await before;
+    if (before != null) { await before; }
     try {
       return await operation();
     } finally {
@@ -113,7 +115,7 @@ class LocalDocumentDetailCache {
     // writer against a transactional sync reader.
     return _database.transaction(
       () => _serialized(key, () async {
-        if (await _blocked(businessId, documentId, detail)) return;
+        if (await _blocked(businessId, documentId, detail)) { return; }
         final prefs = await SharedPreferences.getInstance();
         // A late response may omit a provisional alias's canonical identity.
         // The existing association remains authoritative while it is blocked.
@@ -133,11 +135,11 @@ class LocalDocumentDetailCache {
     final key = _key(businessId, documentId);
     return _database.transaction(
       () => _serialized(key, () async {
-        if (await _blocked(businessId, documentId)) return null;
+        if (await _blocked(businessId, documentId)) { return null; }
         final prefs = await SharedPreferences.getInstance();
         final detail = _decode(prefs.getString(key));
-        if (detail == null) return null;
-        if (await _blocked(businessId, documentId, detail)) return null;
+        if (detail == null) { return null; }
+        if (await _blocked(businessId, documentId, detail)) { return null; }
         return _projectRetiredConversion(businessId, detail);
       }),
     );
@@ -170,12 +172,12 @@ class LocalDocumentDetailCache {
     final key = _key(businessId, documentId);
     return _database.transaction(
       () => _serialized(key, () async {
-        if (await _blocked(businessId, documentId, expected)) return false;
+        if (await _blocked(businessId, documentId, expected)) { return false; }
         final prefs = await SharedPreferences.getInstance();
         await prefs.reload();
         final raw = prefs.getString(key);
-        if (raw == null) return true;
-        if (await _blocked(businessId, documentId, _decode(raw))) return false;
+        if (raw == null) { return true; }
+        if (await _blocked(businessId, documentId, _decode(raw))) { return false; }
         if (expected == null ||
             raw != jsonEncode(expected) ||
             TestJobCleanupPolicy.hasPendingSnapshot(expected)) {
@@ -190,7 +192,7 @@ class LocalDocumentDetailCache {
     final key = _key(businessId, documentId);
     return _database.transaction(
       () => _serialized(key, () async {
-        if (await _blocked(businessId, documentId)) return;
+        if (await _blocked(businessId, documentId)) { return; }
         final prefs = await SharedPreferences.getInstance();
         if (await _blocked(
           businessId,
@@ -204,3 +206,4 @@ class LocalDocumentDetailCache {
     );
   }
 }
+

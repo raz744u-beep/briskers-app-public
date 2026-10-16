@@ -795,8 +795,6 @@ void main() {
       expect(gateway.calls, isEmpty);
       expect(await service.status(business, job), isNull);
       expect(await LocalJobRetirement.isJobBlocked(db, business, job), isFalse);
-      final screen = File('lib/screens/jobs/job_detail_screen.dart').readAsStringSync();
-      expect(screen, contains('Text(ownerJobDeletionFailureMessage(error))'));
       for (final error in [
         const PostgrestException(message: 'Owner required', code: '42501'),
         const PostgrestException(

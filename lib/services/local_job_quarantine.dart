@@ -6,6 +6,7 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import 'local_cleanup_safety.dart';
 import 'local_job_retirement.dart';
+import 'local_job_deletion_v3.dart';
 
 class LocalJobQuarantineException implements Exception {
   const LocalJobQuarantineException(this.message);
@@ -44,7 +45,7 @@ class LocalJobQuarantine {
           "('local_job_quarantines','local_job_quarantine_entities','local_job_recovery_rows','local_job_recovery_receipts')",
         )
         .get();
-    if (rows.isEmpty) return false;
+    if (rows.isEmpty) { return false; }
     final triggers = await db
         .customSelect(
           "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='trigger' AND name LIKE 'quarantine_%'",
@@ -170,7 +171,7 @@ class LocalJobQuarantine {
     BriskersLocalDatabase db,
     String businessId,
   ) async {
-    if (!await _installed(db)) return 0;
+    if (!await _installed(db)) { return 0; }
     final row = await db
         .customSelect(
           'SELECT COALESCE(MAX(generation),0) AS generation FROM local_job_quarantines WHERE business_id=?',
@@ -184,7 +185,7 @@ class LocalJobQuarantine {
     BriskersLocalDatabase db,
     String businessId,
   ) async {
-    if (!await _installed(db)) return {};
+    if (!await _installed(db)) { return {}; }
     final rows = await db
         .customSelect(
           'SELECT job_id,generation FROM local_job_quarantines WHERE business_id=?',
@@ -202,7 +203,7 @@ class LocalJobQuarantine {
     String businessId, {
     String? entityType,
   }) async {
-    if (!await _installed(db)) return {};
+    if (!await _installed(db)) { return {}; }
     final rows = await db
         .customSelect(
           'SELECT e.entity_id,MAX(q.generation) AS generation FROM local_job_quarantine_entities e JOIN local_job_quarantines q '
@@ -224,14 +225,15 @@ class LocalJobQuarantine {
     BriskersLocalDatabase db,
     String businessId,
   ) async {
-    if (!await _installed(db)) return {};
+    final v3 = await LocalJobDeletionV3.blockedJobIds(db, businessId);
+    if (!await _installed(db)) { return v3; }
     final rows = await db
         .customSelect(
           "SELECT job_id FROM local_job_quarantines WHERE business_id=? AND state<>'authorized'",
           variables: [Variable<String>(businessId)],
         )
         .get();
-    return rows.map((row) => row.read<String>('job_id')).toSet();
+    return {...v3, ...rows.map((row) => row.read<String>('job_id'))};
   }
 
   static Future<Set<String>> blockedEntityIds(
@@ -239,7 +241,8 @@ class LocalJobQuarantine {
     String businessId, {
     String? entityType,
   }) async {
-    if (!await _installed(db)) return {};
+    final v3 = await LocalJobDeletionV3.blockedIdsForTable(db, businessId, entityType);
+    if (!await _installed(db)) { return v3; }
     final rows = await db
         .customSelect(
           "SELECT e.entity_id FROM local_job_quarantine_entities e JOIN local_job_quarantines q "
@@ -251,14 +254,14 @@ class LocalJobQuarantine {
           ],
         )
         .get();
-    return rows.map((row) => row.read<String>('entity_id')).toSet();
+    return {...v3, ...rows.map((row) => row.read<String>('entity_id'))};
   }
 
   static Future<bool> hasRecovery(
     BriskersLocalDatabase db,
     String businessId,
   ) async {
-    if (!await _installed(db)) return false;
+    if (!await _installed(db)) { return false; }
     return (await db
             .customSelect(
               'SELECT 1 FROM local_job_recovery_rows WHERE business_id=? LIMIT 1',
@@ -273,7 +276,8 @@ class LocalJobQuarantine {
     String businessId,
     String jobId,
   ) async {
-    if (!await _installed(db)) return false;
+    if ((await LocalJobDeletionV3.blockedJobIds(db, businessId)).contains(jobId)) { return true; }
+    if (!await _installed(db)) { return false; }
     return (await db
             .customSelect(
               "SELECT 1 FROM local_job_quarantines WHERE business_id=? AND job_id=? AND state<>'authorized'",
@@ -295,7 +299,9 @@ class LocalJobQuarantine {
         .whereType<String>()
         .where((id) => id.isNotEmpty)
         .toSet();
-    if (ids.isEmpty || !await _installed(db)) return false;
+    if (ids.isEmpty) { return false; }
+    if ((await LocalJobDeletionV3.blockedIds(db, businessId)).any(ids.contains)) { return true; }
+    if (!await _installed(db)) { return false; }
     final placeholders = List.filled(ids.length, '?').join(',');
     return (await db
             .customSelect(
@@ -317,7 +323,7 @@ class LocalJobQuarantine {
     Iterable<String> jobIds,
   ) async {
     final ids = jobIds.where((id) => id.isNotEmpty).toSet();
-    if (ids.isEmpty) return;
+    if (ids.isEmpty) { return; }
     await db.transaction(() async {
       await _ensureSchema(db);
       final generation = await captureGeneration(db, businessId) + 1;
@@ -521,7 +527,7 @@ class LocalJobQuarantine {
       changed = false;
       for (final row in queue) {
         final id = row.read<int>('id');
-        if (selected.contains(id)) continue;
+        if (selected.contains(id)) { continue; }
         Object? payload;
         var opaque = false;
         try {
@@ -622,7 +628,7 @@ class LocalJobQuarantine {
     BriskersLocalDatabase db,
     String businessId,
   ) async {
-    if (!await _installed(db)) return {};
+    if (!await _installed(db)) { return {}; }
     final rows = await db
         .customSelect(
           "SELECT job_id FROM local_job_quarantines WHERE business_id=? AND state='unclassified'",
@@ -639,7 +645,7 @@ class LocalJobQuarantine {
     required Set<String> cleanupJobIds,
     int? observedGeneration,
   }) async {
-    if (!await _installed(db)) return;
+    if (!await _installed(db)) { return; }
     for (final id in jobIds) {
       await db.customStatement(
         "UPDATE local_job_quarantines SET state=? "
@@ -664,15 +670,15 @@ class LocalJobQuarantine {
     String jobId, {
     required int requestGeneration,
   }) async {
-    if (!await _installed(db)) return true;
+    if (!await _installed(db)) { return true; }
     final rows = await db
         .customSelect(
           'SELECT generation,state FROM local_job_quarantines WHERE business_id=? AND job_id=?',
           variables: [Variable<String>(businessId), Variable<String>(jobId)],
         )
         .get();
-    if (rows.isEmpty) return true;
-    if (rows.single.read<int>('generation') > requestGeneration) return false;
+    if (rows.isEmpty) { return true; }
+    if (rows.single.read<int>('generation') > requestGeneration) { return false; }
     await db.customStatement(
       "UPDATE local_job_quarantines SET state='authorized' WHERE business_id=? AND job_id=? AND generation<=?",
       [businessId, jobId, requestGeneration],
@@ -695,6 +701,7 @@ class LocalJobQuarantine {
     String businessId, {
     int? outboxId,
   }) async {
+    await LocalJobDeletionV3.assertReplayAllowed(db, businessId, outboxId: outboxId);
     try {
       await LocalJobRetirement.assertReplayAllowed(
         db,
@@ -772,6 +779,7 @@ class LocalJobQuarantine {
       serialized = jsonEncode({'response': response.toString()});
     }
     await db.transaction(() async {
+      await LocalJobDeletionV3.assertReplayAllowed(db, businessId, outboxId: outboxId, response: response);
       await _ensureSchema(db);
       await db.customStatement(
         'INSERT INTO local_job_recovery_receipts(business_id,outbox_id,response_json,request_generation,captured_at) VALUES (?,?,?,?,?)',
@@ -788,3 +796,4 @@ class LocalJobQuarantine {
     return response;
   }
 }
+

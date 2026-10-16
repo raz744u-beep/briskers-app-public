@@ -52,6 +52,9 @@ class LocalJobRepository {
       WHERE r.business_id = $alias.business_id AND r.entity_kind = 'job'
         AND r.entity_id = $alias.id
         AND r.state IN ('pending','accepted','locally_cancelled'))
+    AND NOT EXISTS (SELECT 1 FROM local_job_deletion_v3_fences v3
+      WHERE v3.business_id=$alias.business_id AND v3.entity_kind='job'
+        AND v3.entity_id=$alias.id)
   """;
 
   static const _finishedStatuses = "('completed','cancelled','closed')";
@@ -1091,3 +1094,4 @@ class LocalJobRepository {
     return DateTime.tryParse(value.toString())?.toUtc().toIso8601String();
   }
 }
+

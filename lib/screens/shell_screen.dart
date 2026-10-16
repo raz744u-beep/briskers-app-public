@@ -15,6 +15,7 @@ import '../services/document_index_sync_service.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/job_sync_service.dart';
 import '../services/owner_job_retirement_service.dart';
+import '../services/owner_job_deletion_service_v3.dart';
 import '../services/local_appointment_repository.dart';
 import '../services/local_customer_repository.dart';
 import '../services/local_document_repository.dart';
@@ -212,6 +213,14 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     if (actorId == null) return;
     _retirementSyncing = true;
     try {
+      final deletionV3 = OwnerJobDeletionServiceV3();
+      await deletionV3.pullTombstones(businessId);
+      if (widget.roleCode == 'owner' && mounted && _foreground &&
+          widget.businessId == businessId &&
+          !BriskersConnectionModeController.instance.forceOffline &&
+          supabase.auth.currentUser?.id == actorId) {
+        await deletionV3.flush(businessId);
+      }
       final service = OwnerJobRetirementService();
       await service.pullTombstones(businessId);
       if (!mounted || !_foreground || widget.businessId != businessId ||
@@ -671,4 +680,3 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     );
   }
 }
-

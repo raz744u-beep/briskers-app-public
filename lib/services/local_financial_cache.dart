@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
+import 'local_job_deletion_v3.dart';
 
 class LocalFinancialCache {
   LocalFinancialCache({BriskersLocalDatabase? database})
@@ -36,7 +37,7 @@ class LocalFinancialCache {
     String? counterpartyId,
   }) async {
     final raw = await _load(businessId, _transactionsKey);
-    if (raw == null || raw.isEmpty) return const [];
+    if (raw == null || raw.isEmpty) { return const []; }
 
     List<Map<String, dynamic>> rows;
     try {
@@ -72,8 +73,8 @@ class LocalFinancialCache {
       );
       if (date != null) {
         final day = DateTime(date.year, date.month, date.day);
-        if (startDate != null && day.isBefore(startDate)) return false;
-        if (endDate != null && day.isAfter(endDate)) return false;
+        if (startDate != null && day.isBefore(startDate)) { return false; }
+        if (endDate != null && day.isAfter(endDate)) { return false; }
       }
 
       if (needle.isNotEmpty) {
@@ -89,7 +90,7 @@ class LocalFinancialCache {
           row['amount'],
           row['transaction_date'],
         ].whereType<Object>().map((v) => v.toString().toLowerCase()).join(' ');
-        if (!haystack.contains(needle)) return false;
+        if (!haystack.contains(needle)) { return false; }
       }
 
       return true;
@@ -135,7 +136,7 @@ class LocalFinancialCache {
         (row['id']?.toString().startsWith('local-') ?? false) &&
         (row['job_id'] != null || row['document_id'] != null)));
 
-    if (raw == null && rows.isEmpty) return null;
+    if (raw == null && rows.isEmpty) { return null; }
     return rows.where((row) =>
         (jobId == null || row['job_id']?.toString() == jobId) &&
         (documentId == null ||
@@ -162,7 +163,7 @@ class LocalFinancialCache {
       businessId,
       'transaction_detail_$transactionId',
     );
-    if (raw == null || raw.isEmpty) return null;
+    if (raw == null || raw.isEmpty) { return null; }
     try {
       final decoded = jsonDecode(raw);
       return decoded is Map
@@ -182,7 +183,7 @@ class LocalFinancialCache {
 
   Future<Map<String, dynamic>> loadOptions(String businessId) async {
     final raw = await _load(businessId, _optionsKey);
-    if (raw == null || raw.isEmpty) return const {};
+    if (raw == null || raw.isEmpty) { return const {}; }
     try {
       final decoded = jsonDecode(raw);
       return decoded is Map
@@ -198,6 +199,16 @@ class LocalFinancialCache {
     String key,
     String payload,
   ) async {
+    await LocalJobDeletionV3.ensureSchema(_database);
+    final ids = await LocalJobDeletionV3.blockedIds(_database, businessId);
+    final decoded = jsonDecode(payload);
+    if (decoded is List) {
+      payload = jsonEncode(decoded.where((row) => !LocalJobDeletionV3.referencesAny(row, ids)).toList());
+    } else if (LocalJobDeletionV3.referencesAny(decoded, ids)) {
+      return;
+    }
+    if (key.startsWith('transaction_detail_') &&
+        ids.contains(key.substring('transaction_detail_'.length))) { return; }
     await _database.customStatement(
       '''
       INSERT INTO local_financial_cache (
@@ -229,7 +240,18 @@ class LocalFinancialCache {
         Variable<String>(key),
       ],
     ).get();
-    if (rows.isEmpty) return null;
-    return rows.first.read<String>('payload_json');
+    if (rows.isEmpty) { return null; }
+    final raw = rows.first.read<String>('payload_json');
+    final ids = await LocalJobDeletionV3.blockedIds(_database, businessId);
+    if (key.startsWith('transaction_detail_') &&
+        ids.contains(key.substring('transaction_detail_'.length))) { return null; }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        return jsonEncode(decoded.where((row) => !LocalJobDeletionV3.referencesAny(row, ids)).toList());
+      }
+      return LocalJobDeletionV3.referencesAny(decoded, ids) ? null : raw;
+    } catch (_) { return null; }
   }
 }
+

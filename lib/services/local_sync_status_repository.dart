@@ -126,6 +126,33 @@ class LocalSyncStatusRepository {
         '${held.read<int>('n')} preserved operation(s) require review after Job deletion',
       );
     }
+    var pendingV3 = 0;
+    final v3Exists = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_job_deletion_v3_requests'").get();
+    if (v3Exists.isNotEmpty) {
+      final requests = await _database.customSelect(
+        "SELECT state,last_error FROM local_job_deletion_v3_requests WHERE business_id=? AND state IN ('queued','pending','purging','rejected')",
+        variables: [Variable<String>(businessId)]).get();
+      for (final row in requests) {
+        final state = row.read<String>('state');
+        if (state != 'rejected') pendingV3++;
+        issues.add(switch (state) {
+          'purging' => 'Job deletion accepted; attachment or device cleanup pending',
+          'rejected' => row.readNullable<String>('last_error') ?? 'Job deletion requires renewed review',
+          _ => 'Job deletion awaiting verified server confirmation',
+        });
+      }
+    }
+    final cleanupExists = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_job_deletion_v3_cleanup'").get();
+    if (cleanupExists.isNotEmpty) {
+      final cleanup = await _database.customSelect(
+        "SELECT COUNT(*) AS n FROM local_job_deletion_v3_cleanup WHERE business_id=? AND state<>'complete'",
+        variables: [Variable<String>(businessId)]).getSingle();
+      if (cleanup.read<int>('n') > 0) {
+        issues.add('${cleanup.read<int>('n')} deleted Job cleanup(s) still need completion or review');
+      }
+    }
     final prefs = await SharedPreferences.getInstance();
     final manualFailures =
         _manualFailures[businessId] ??
@@ -139,7 +166,7 @@ class LocalSyncStatusRepository {
     return LocalSyncStatusSnapshot(
       lastSuccessfulPull: latest,
       issues: List<String>.unmodifiable(issues),
-      pendingUploads: uploads.read<int>('pending') + pendingRetirements,
+      pendingUploads: uploads.read<int>('pending') + pendingRetirements + pendingV3,
     );
   }
 }
