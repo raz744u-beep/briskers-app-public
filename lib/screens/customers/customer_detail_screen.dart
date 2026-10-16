@@ -1302,12 +1302,28 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     enabled: _canEditLocal,
                   ),
                   const SizedBox(height: 18),
-                  if (_customerTab == 2) CustomerVehicleFindingsSection(
-                    businessId: widget.businessId,
-                    customerId: widget.customerId,
-                    vehicles: vehicles,
-                    canManage: _canManageQuickActions,
-                    canDelete: widget.roleCode == 'owner',
+                  if (_customerTab == 2) Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.car_repair_outlined, color: BriskersColors.vehicles),
+                      title: const Text('All Vehicle Findings',
+                        style: TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: const Text('View open and resolved findings across vehicles'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.push<void>(
+                        context,
+                        MaterialPageRoute(builder: (_) => Scaffold(
+                          appBar: AppBar(title: const Text('All Vehicle Findings')),
+                          body: ListView(children: [CustomerVehicleFindingsSection(
+                            businessId: widget.businessId,
+                            customerId: widget.customerId,
+                            vehicles: vehicles,
+                            canManage: _canManageQuickActions,
+                            canDelete: widget.roleCode == 'owner',
+                            initiallyExpanded: true,
+                          )]),
+                        )),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 18),
                   if (_customerTab == 3) Container(
