@@ -4885,6 +4885,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   customer.isEmpty ? 'Customer' : customer,
                   bold: true,
                   maxLines: 2,
+                  onTap: (_detail?['customer_id']?.toString().isNotEmpty ?? false)
+                      ? _openInvoiceCustomer : null,
+                  valueColor: BriskersColors.invoices,
+                  underline: true,
                   problemFlag: _detail?['customer_problem_flag'] == true,
                 ),
                 if (phone.isNotEmpty) ...[
