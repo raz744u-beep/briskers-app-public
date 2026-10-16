@@ -891,7 +891,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                           'Linked local jobs: ${operation['linked_jobs']}',
                           if ((operation['error'] as String).isNotEmpty)
                             'Error: ${operation['error']}',
-                        ].join('\\n')),
+                        ].join('\n')),
                       ),
                     )),
                     const Text(
