@@ -150,6 +150,7 @@ class JobDocumentScreen extends StatefulWidget {
     this.canManageExpenses = false,
     this.initialAction,
     this.initialTab = 'items',
+    this.sharedBottomNavigationBar,
   });
 
   final String businessId;
@@ -159,6 +160,7 @@ class JobDocumentScreen extends StatefulWidget {
   final bool canManageExpenses;
   final String? initialAction;
   final String initialTab;
+  final Widget? sharedBottomNavigationBar;
 
   @visibleForTesting
   static Widget historicalReopenDialogForTesting(
@@ -7049,8 +7051,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             ],
           ),
         ),
-        bottomNavigationBar: SafeArea(
+        bottomNavigationBar: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [SafeArea(
           top: false,
+          bottom: widget.sharedBottomNavigationBar == null,
           child: Container(
             decoration: const BoxDecoration(
               color: Colors.white,
@@ -7131,7 +7136,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ],
             ),
           ),
-        ),
+        ),          if (widget.sharedBottomNavigationBar != null)
+            widget.sharedBottomNavigationBar!,
+        ],
+
       ),
     );
   }
