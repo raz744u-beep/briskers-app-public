@@ -432,20 +432,6 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
 
   String get _roleLabel => roleLabel(widget.roleCode);
 
-  Widget _navIcon(
-    IconData icon,
-    String countKey,
-  ) {
-    final count = int.tryParse(_navCounts[countKey]?.toString() ?? '') ?? 0;
-    if (count <= 0) return Icon(icon);
-    return Badge(
-      label: Text('$count'),
-      smallSize: 16,
-      largeSize: 18,
-      child: Icon(icon),
-    );
-  }
-
   Widget _shellNavigationBar({bool nested = false}) => BriskersModuleDock(
     selectedIndex: _index,
     destinations: [
