@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:drift/drift.dart' show Variable;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -251,6 +252,38 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       }
     }
 
+    Color statusColor(String status, Color fallback) {
+      final key = status.toLowerCase().trim();
+      if (key.contains('pending close') || key.contains('waiting') ||
+          key.contains('draft') || key.contains('pending approval')) {
+        return const Color(0xFFC77700);
+      }
+      if (key.contains('closed') || key.contains('completed') ||
+          key.contains('paid') || key.contains('accepted') ||
+          key.contains('converted')) {
+        return const Color(0xFF2E7D32);
+      }
+      if (key.contains('recheck') || key.contains('void') ||
+          key.contains('cancel')) {
+        return const Color(0xFFC62828);
+      }
+      if (key.contains('open') || key.contains('progress') ||
+          key.contains('sent')) {
+        return const Color(0xFF1976D2);
+      }
+      return fallback;
+    }
+    final documentList = title == 'Invoices' || title == 'Estimates';
+    final financialRows = records.where((record) =>
+      title == 'Invoices' ? record['type'] == 'invoice'
+        : record['type'] == 'estimate').toList();
+    final knownAmounts = financialRows.where((record) =>
+      record['total'] is num).toList();
+    final totalValue = knownAmounts.fold<double>(0, (total, record) =>
+      total + (record['total'] as num).toDouble());
+    final money = NumberFormat.currency(locale: 'en_US', symbol: '\$');
+    final missingAmounts = financialRows.length - knownAmounts.length;
+
     final sheetColor = title == 'Jobs' || title == 'Visits'
         ? BriskersColors.jobs
         : title == 'Estimates'
@@ -285,6 +318,37 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 ),
               ),
             ),
+            if (documentList)
+              Container(
+                margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                decoration: BoxDecoration(
+                  color: sheetColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(children: [
+                  Icon(Icons.account_balance_wallet_outlined,
+                    color: sheetColor, size: 21),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title == 'Invoices'
+                          ? 'Total Invoices' : 'Total Estimates',
+                        style: TextStyle(color: sheetColor,
+                          fontWeight: FontWeight.w800, fontSize: 16)),
+                      Text(
+                        '${financialRows.length} records'
+                        '${missingAmounts > 0 ? ' • $missingAmounts amounts unavailable' : ''}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  )),
+                  Text(money.format(totalValue),
+                    style: TextStyle(color: sheetColor,
+                      fontSize: 18, fontWeight: FontWeight.w800)),
+                ]),
+              ),
             Expanded(child: records.isEmpty
               ? const Center(child: Text('No records found on this device.'))
               : ListView.builder(
@@ -296,6 +360,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     final number = item['number']?.toString().trim() ?? '';
                     final status = item['status']?.toString().trim() ?? '';
                     final color = moduleColor(type);
+                    final stateColor = statusColor(status, color);
+                    final amount = item['total'] is num
+                        ? money.format(item['total']) : null;
                     final recordTitle = number.isEmpty
                         ? (item['title']?.toString().trim().isNotEmpty == true
                             ? item['title'].toString()
@@ -316,10 +383,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     return Card(
                       elevation: 0,
                       margin: const EdgeInsets.only(bottom: 9),
-                      color: color.withValues(alpha: 0.09),
+                      color: stateColor.withValues(alpha: 0.075),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(15),
-                        side: BorderSide(color: color.withValues(alpha: 0.16)),
+                        side: BorderSide(color: stateColor.withValues(alpha: 0.14)),
                       ),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(15),
@@ -331,11 +398,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 13),
                           child: Row(children: [
-                            CircleAvatar(
-                              radius: 22,
-                              backgroundColor: color.withValues(alpha: 0.14),
-                              child: Icon(moduleIcon(type), color: color, size: 25),
-                            ),
+                            Icon(moduleIcon(type), color: color, size: 20),
                             const SizedBox(width: 12),
                             Expanded(child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -357,19 +420,24 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 9, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: color.withValues(alpha: 0.15),
+                                      color: stateColor.withValues(alpha: 0.15),
                                       borderRadius: BorderRadius.circular(20),
                                     ),
                                     child: Text(status,
-                                      style: TextStyle(color: color,
+                                      style: TextStyle(color: stateColor,
                                         fontSize: 12.5,
                                         fontWeight: FontWeight.w700)),
                                   ),
                                 ],
                               ],
                             )),
-                            const SizedBox(width: 6),
-                            Icon(Icons.chevron_right, color: color, size: 24),
+                            if (documentList && amount != null) ...[
+                              const SizedBox(width: 6),
+                              Text(amount, style: const TextStyle(
+                                fontSize: 15.5, fontWeight: FontWeight.w800)),
+                            ],
+                            const SizedBox(width: 5),
+                            Icon(Icons.chevron_right, color: color, size: 21),
                           ]),
                         ),
                       ),
