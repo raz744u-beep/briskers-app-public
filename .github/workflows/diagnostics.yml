@@ -2,6 +2,8 @@ name: Briskers Diagnostics
 
 on:
   workflow_dispatch:
+  push:
+    branches: [hotfix/oct16-restore-data-listing]
   pull_request:
     paths:
       - 'lib/**'
