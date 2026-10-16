@@ -9,6 +9,7 @@ import '../local/briskers_local_database.dart' show BriskersLocalDatabase;
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
+import 'offline_job_purge.dart';
 import 'local_financial_cache.dart';
 import 'local_job_deletion_v3.dart';
 
@@ -108,6 +109,7 @@ class OfflineFinancialWriteService {
       );
       final photoOperationId = _operationId('financial-photo');
       final localPhotoId = 'local-receipt-$photoOperationId';
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [localPhotoId, photoOperationId]);
 
       attachments.add({
         'attachment_id': localPhotoId,
@@ -188,6 +190,7 @@ class OfflineFinancialWriteService {
     await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     final operationId = _operationId('financial-create');
     final localId = 'local-transaction-$operationId';
+    await OfflineJobPurge.recordNewIntent(_database, businessId, [localId, operationId]);
     final attachments = <Map<String, dynamic>>[];
 
     await _database.transaction(() async {

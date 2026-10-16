@@ -9,6 +9,7 @@ import '../core/supabase_config.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_deletion_v3.dart';
+import 'local_deletion_origins_contract.dart';
 import 'local_job_retirement.dart';
 import 'local_sync_status_repository.dart';
 import 'owner_job_deletion_v3_contract.dart';
@@ -37,6 +38,12 @@ class JobDeletionV3Gateway {
       Map<String, dynamic>.from(await networkSupabase.rpc(
         'briskers_job_delete_status_v3', params: {
           'p_business_id': business, 'p_operation_id': operation,
+        },
+      ) as Map);
+  Future<Map<String, dynamic>> localOrigins(String business, List<String> operations) async =>
+      Map<String, dynamic>.from(await networkSupabase.rpc(
+        'briskers_job_delete_local_origins_v3', params: {
+          'p_business_id': business, 'p_operation_ids': operations,
         },
       ) as Map);
   Future<Map<String, dynamic>> tombstones(String business, int cursor) async =>
@@ -302,7 +309,12 @@ class OwnerJobDeletionServiceV3 {
       cursor INTEGER NOT NULL, observed INTEGER NOT NULL DEFAULT 0)''');
     final saved = await _db.customSelect('SELECT * FROM local_job_deletion_v3_feed WHERE business_id=?',
       variables: [Variable<String>(business)]).get();
-    var cursor = saved.isEmpty ? 0 : saved.single.read<int>('cursor');
+    await _db.customStatement('CREATE TABLE IF NOT EXISTS local_job_deletion_origins_feed_version (business_id TEXT PRIMARY KEY)');
+    final originsVersion = await _db.customSelect('SELECT business_id FROM local_job_deletion_origins_feed_version WHERE business_id=?',
+      variables: [Variable<String>(business)]).get();
+    // Older draft clients advanced UUID-only feeds. Replay once to learn
+    // authoritative aliases too; existing UUID fences make this idempotent.
+    var cursor = saved.isEmpty || originsVersion.isEmpty ? 0 : saved.single.read<int>('cursor');
     String? scope = saved.isEmpty ? null : saved.single.read<String>('visibility_scope');
     var scopeChanges = 0;
     while (true) {
@@ -376,12 +388,19 @@ class OwnerJobDeletionServiceV3 {
       if ((entries.isNotEmpty && prior != next) || (entries.isEmpty && next != cursor)) {
         throw const FormatException('Unverified deletion cursor.');
       }
+      final origins = entries.isEmpty ? <String,Map<String,dynamic>>{} : validateLocalDeletionOrigins(
+        await _gateway.localOrigins(business, entries.map((e) => (e as Map)['operation_id'] as String).toList()).timeout(_timeout),
+        businessId: business, actorId: page['actor_id'] as String, visibilityScope: nextScope,
+        operations: entries.map((e) => Map<String,dynamic>.from(e as Map)).toList());
+      _gateway.assertActor(page['actor_id'] as String);
       // Each operation commits its permanent fences before filesystem cleanup.
       // Do not wrap that cleanup in an outer transaction that could roll back
       // the markers after irreversible file removal.
       for (final raw in entries) {
         _gateway.assertActor(page['actor_id'] as String);
         await LocalJobDeletionV3.applyVerifiedTombstone(_db, Map<String, dynamic>.from(raw as Map));
+        await LocalJobDeletionV3.applyVerifiedLocalOrigin(_db, businessId: business,
+          origin: origins[raw['operation_id']]!);
         await _db.customStatement('''UPDATE local_job_deletion_v3_requests SET state='superseded',last_error=NULL
           WHERE business_id=? AND job_id=? AND operation_id<>? AND state IN ('queued','pending')''',
           [business, raw['job_id'], raw['operation_id']]);
@@ -400,7 +419,10 @@ class OwnerJobDeletionServiceV3 {
         bootstrapped=1,last_error=NULL''', [business, next, _clock().toUtc().millisecondsSinceEpoch ~/ 1000]);
       LocalSyncStatusRepository.notifyStateChanged(business);
       cursor = next;
-      if (page['has_more'] != true) break;
+      if (page['has_more'] != true) {
+        await _db.customStatement('INSERT OR IGNORE INTO local_job_deletion_origins_feed_version(business_id) VALUES (?)',[business]);
+        break;
+      }
     }
     await LocalJobDeletionV3.resumePendingCleanup(_db, business);
   }

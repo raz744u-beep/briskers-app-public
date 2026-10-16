@@ -27,6 +27,9 @@ class LocalDocumentRepository {
         AND v3.entity_id=$alias.id)
   """;
 
+  static const _visibleJoinedJobSql = "NOT EXISTS(SELECT 1 FROM local_job_deletion_v3_fences hidden_job "
+      "WHERE hidden_job.business_id=j.business_id AND hidden_job.entity_kind='job' AND hidden_job.entity_id=j.id)";
+
   Future<bool> _serverDocumentBlocked(
     String businessId,
     Map<String, dynamic> document,
@@ -38,7 +41,7 @@ class LocalDocumentRepository {
     final jobId = document['job_id']?.toString() ?? '';
     return (document['kind']?.toString() ?? 'invoice') == 'invoice' &&
         jobId.isNotEmpty &&
-        await LocalJobRetirement.isJobBlocked(_database, businessId, jobId);
+        (await LocalJobRetirement.blockedJobIds(_database, businessId, includeVisibilityScope: false)).contains(jobId);
   }
 
   Future<void> replaceFromServer(
@@ -182,6 +185,7 @@ class LocalDocumentRepository {
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
+        AND $_visibleJoinedJobSql
       LEFT JOIN local_customers c ON c.business_id=d.business_id
         AND c.id=d.customer_id
       WHERE d.business_id = ? AND d.kind = ?
@@ -307,6 +311,7 @@ class LocalDocumentRepository {
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
+        AND $_visibleJoinedJobSql
       WHERE d.business_id = ? AND d.job_id = ?
         AND ${_visibleDocumentSql('d')}
       ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
@@ -420,7 +425,7 @@ class LocalDocumentRepository {
              coalesce(j.vehicle_label,'') AS vehicle
       FROM local_documents d
       LEFT JOIN local_jobs j ON j.business_id = d.business_id
-        AND j.id = d.job_id
+        AND j.id = d.job_id AND $_visibleJoinedJobSql
       LEFT JOIN local_customers c ON c.business_id = d.business_id
         AND c.id = d.customer_id
       WHERE $where
@@ -505,6 +510,7 @@ class LocalDocumentRepository {
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
+        AND $_visibleJoinedJobSql
       WHERE d.business_id = ?
         AND ${_visibleDocumentSql('d')}
         AND (

@@ -74,7 +74,7 @@ class LocalJobDeletionV3 {
   static Future<void> ensureSchema(BriskersLocalDatabase db) async {
     if (_installed[db] == true && (await db.customSelect(
         "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='deletion_v3_scope_outbox_delete'").get()).isNotEmpty &&
-        (await db.customSelect('SELECT 1 FROM local_job_deletion_v3_schema WHERE singleton=1 AND version=5').get()).isNotEmpty) { return; }
+        (await db.customSelect('SELECT 1 FROM local_job_deletion_v3_schema WHERE singleton=1 AND version=6').get()).isNotEmpty) { return; }
     await db.transaction(() async {
       await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_schema (
         singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL)''');
@@ -94,6 +94,10 @@ class LocalJobDeletionV3 {
       await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_entities (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL,
         operation_id TEXT NOT NULL, entity_kind TEXT NOT NULL, entity_id TEXT NOT NULL,
+        PRIMARY KEY(business_id,entity_kind,entity_id))''');
+      await db.customStatement('''CREATE TABLE IF NOT EXISTS local_offline_job_purge_entities (
+        business_id TEXT NOT NULL, job_id TEXT NOT NULL, operation_id TEXT NOT NULL,
+        entity_kind TEXT NOT NULL, entity_id TEXT NOT NULL,
         PRIMARY KEY(business_id,entity_kind,entity_id))''');
       await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_pending (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL, operation_id TEXT NOT NULL,
@@ -124,7 +128,8 @@ class LocalJobDeletionV3 {
         SELECT business_id,job_id,operation_id,entity_kind,entity_id FROM local_job_deletion_v3_entities
         UNION ALL SELECT business_id,job_id,operation_id,entity_kind,entity_id FROM local_job_deletion_v3_pending
         UNION ALL SELECT business_id,job_id,operation_id,entity_kind,entity_id FROM local_job_deletion_v3_aliases
-        UNION ALL SELECT business_id,'','',entity_kind,entity_id FROM local_job_deletion_v3_scope_entities''');
+        UNION ALL SELECT business_id,'','',entity_kind,entity_id FROM local_job_deletion_v3_scope_entities
+        UNION ALL SELECT business_id,job_id,operation_id,entity_kind,entity_id FROM local_offline_job_purge_entities''');
       await db.customStatement('''CREATE TRIGGER IF NOT EXISTS deletion_v3_scope_outbox_update
         BEFORE UPDATE ON sync_outbox
         WHEN EXISTS(SELECT 1 FROM local_job_deletion_v3_scope_outbox s
@@ -140,6 +145,9 @@ class LocalJobDeletionV3 {
         WHEN EXISTS(SELECT 1 FROM local_job_deletion_v3_scope_outbox s
           WHERE s.business_id=OLD.business_id AND s.outbox_id=OLD.id)
         BEGIN SELECT RAISE(ABORT,'Retained queued work requires authorized reconciliation'); END''');
+      await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_origins (
+        business_id TEXT NOT NULL, operation_id TEXT NOT NULL, job_id TEXT NOT NULL, root_origin TEXT NOT NULL,
+        PRIMARY KEY(business_id,operation_id))''');
       await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_cleanup (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL, operation_id TEXT NOT NULL,
         graph_hash TEXT NOT NULL, state TEXT NOT NULL, issue_code TEXT, inventory_generation INTEGER NOT NULL DEFAULT 0,
@@ -247,7 +255,7 @@ class LocalJobDeletionV3 {
             BEGIN SELECT RAISE(ABORT,'Verified deletion blocks stale payload replay'); END''');
         }
       }
-      await db.customStatement('INSERT INTO local_job_deletion_v3_schema(singleton,version) VALUES (1,5) '
+      await db.customStatement('INSERT INTO local_job_deletion_v3_schema(singleton,version) VALUES (1,6) '
           'ON CONFLICT(singleton) DO UPDATE SET version=excluded.version');
     });
     _installed[db] = true;
@@ -586,7 +594,7 @@ class LocalJobDeletionV3 {
       String businessId, {String? kind, bool includeVisibilityScope = true}) async {
     await ensureSchema(db);
     final source = includeVisibilityScope ? 'local_job_deletion_v3_fences' :
-        '(SELECT * FROM local_job_deletion_v3_entities UNION ALL SELECT * FROM local_job_deletion_v3_pending UNION ALL SELECT * FROM local_job_deletion_v3_aliases)';
+        '(SELECT * FROM local_job_deletion_v3_entities UNION ALL SELECT * FROM local_job_deletion_v3_pending UNION ALL SELECT * FROM local_job_deletion_v3_aliases UNION ALL SELECT * FROM local_offline_job_purge_entities)';
     return (await db.customSelect('SELECT entity_id FROM $source '
         'WHERE business_id=?${kind == null ? '' : ' AND entity_kind=?'}',
         variables: [Variable<String>(businessId), if (kind != null) Variable<String>(kind)])
@@ -763,6 +771,87 @@ class LocalJobDeletionV3 {
     final entities = _validateReceipt(normalized, requireJob: false);
     return _acceptVerified(db, {...normalized, 'graph_hash': ''}, entities, strict: false,
         mediaDirectoryProvider: mediaDirectoryProvider);
+  }
+
+  /// The caller authenticates the separate local-origin envelope and matches
+  /// its scope to the complete accepted tombstone group before invoking this.
+  /// Only explicit server-projected aliases are accepted; graph shape is never
+  /// used to invent conversion or financial identities.
+  static Future<LocalDeletionCleanupResult> applyVerifiedLocalOrigin(
+      BriskersLocalDatabase db, {required String businessId,
+      required Map<String, dynamic> origin,
+      Future<Directory> Function()? mediaDirectoryProvider}) async {
+    await ensureSchema(db);
+    final visibilityGeneration = await captureVisibilityGeneration(db, businessId);
+    final operation = origin['operation_id'];
+    final job = origin['job_id'];
+    final root = origin['root_origin'];
+    final rawAliases = origin['local_aliases'];
+    if (operation is! String || job is! String || rawAliases is! List ||
+        !const {null, 'job_create', 'quick_invoice', 'standalone_estimate_conversion'}.contains(root)) {
+      throw const FormatException('Unverified local cancellation origin');
+    }
+    return _serialized(db, '$businessId:$operation', () async {
+      await db.transaction(() async {
+        await assertVisibilityGeneration(db, businessId, visibilityGeneration);
+        final accepted = await db.customSelect(
+            'SELECT job_id FROM local_job_deletion_v3_cleanup WHERE business_id=? AND operation_id=?',
+            variables: [Variable<String>(businessId), Variable<String>(operation)]).get();
+        if (accepted.isEmpty || accepted.single.read<String>('job_id') != job) {
+          throw StateError('Local origin requires its accepted operation and root');
+        }
+        if (root == null && rawAliases.isNotEmpty) {
+          throw const FormatException('Remote deletion cannot assert local origin aliases');
+        }
+        final inventory = await _inventory(db, businessId, operation);
+        final seen = <String>{};
+        final aliases = <Map<String, String>>[];
+        for (final raw in rawAliases) {
+          if (raw is! Map || raw.length != 2 || raw['entity_kind'] is! String || raw['entity_id'] is! String) {
+            throw const FormatException('Exact local cancellation alias required');
+          }
+          final kind = raw['entity_kind'] as String;
+          final id = raw['entity_id'] as String;
+          final valid = (kind == 'job' &&
+              id == (root == 'standalone_estimate_conversion' ? 'local-conversion-job-$job' : 'local-job-$job') &&
+              _has(inventory, 'job', job)) ||
+              (kind == 'invoice' && const {'quick_invoice', 'standalone_estimate_conversion'}.contains(root) &&
+               id == 'local-invoice-$job') ||
+              (kind == 'estimate' && root == 'standalone_estimate_conversion' && id.startsWith('local-estimate-') &&
+               _has(inventory, 'estimate', id.substring('local-estimate-'.length)));
+          if (root == null || !valid || !seen.add('$kind:$id')) {
+            throw const FormatException('Local alias is not bound to this visible cancellation inventory');
+          }
+          aliases.add({'entity_kind': kind, 'entity_id': id});
+        }
+        final previous = await db.customSelect(
+            'SELECT job_id,root_origin FROM local_job_deletion_v3_origins WHERE business_id=? AND operation_id=?',
+            variables: [Variable<String>(businessId), Variable<String>(operation)]).get();
+        if (previous.isNotEmpty && (previous.single.read<String>('job_id') != job ||
+            previous.single.read<String>('root_origin') != (root ?? 'remote'))) {
+          throw StateError('Accepted local origin cannot change');
+        }
+        await db.customStatement('INSERT OR IGNORE INTO local_job_deletion_v3_origins '
+            '(business_id,operation_id,job_id,root_origin) VALUES (?,?,?,?)',
+            [businessId, operation, job, root ?? 'remote']);
+        var expanded = false;
+        for (final alias in aliases) {
+          final exists = await db.customSelect('SELECT 1 FROM local_job_deletion_v3_aliases '
+              'WHERE business_id=? AND entity_kind=? AND entity_id=?',
+              variables: [Variable<String>(businessId), Variable<String>(alias['entity_kind']!), Variable<String>(alias['entity_id']!)]).get();
+          await db.customStatement('INSERT OR IGNORE INTO local_job_deletion_v3_aliases '
+              '(business_id,job_id,operation_id,entity_kind,entity_id) VALUES (?,?,?,?,?)',
+              [businessId, job, operation, alias['entity_kind'], alias['entity_id']]);
+          expanded = expanded || exists.isEmpty;
+        }
+        await assertVisibilityGeneration(db, businessId, visibilityGeneration);
+        if (expanded) {
+          await db.customStatement("UPDATE local_job_deletion_v3_cleanup SET state='cleanup_pending',issue_code=NULL,"
+              'inventory_generation=inventory_generation+1 WHERE business_id=? AND operation_id=?', [businessId, operation]);
+        }
+      });
+      return _cleanup(db, businessId, job, operation, mediaDirectoryProvider: mediaDirectoryProvider);
+    });
   }
 
   static final _serialWork = Expando<Map<String, Future<void>>>('deletion_v3_work');
@@ -1272,6 +1361,18 @@ class LocalJobDeletionV3 {
     }
     return false;
   }
+
+  /// Local-only purge callers must first prove exclusive local ownership and
+  /// commit their minimal fences. This helper enforces app-owned bytes only.
+  static Future<bool> cleanupProvenLocalMedia(BriskersLocalDatabase db,
+      String business, String operation, {Future<Directory> Function()? mediaDirectoryProvider}) async {
+    await ensureSchema(db);
+    return db.transaction(() => _purgeMedia(db, business, operation,
+        mediaDirectoryProvider ?? getApplicationSupportDirectory));
+  }
+
+  static void notifyLocalPurge(BriskersLocalDatabase db, String business, String job) =>
+      _notify(db, business, job);
 
   static Future<bool> _purgeMedia(BriskersLocalDatabase db, String business,
       String operation, Future<Directory> Function() provider) async {

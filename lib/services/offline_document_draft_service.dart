@@ -7,6 +7,8 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
+import 'local_job_deletion_v3.dart';
+import 'offline_job_purge.dart';
 import 'local_document_detail_cache.dart';
 import 'local_document_repository.dart';
 import 'local_job_repository.dart';
@@ -59,6 +61,7 @@ class OfflineDocumentDraftService {
     String? vehicleId,
     String? vehicleLabel,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     if (customerId.isEmpty) {
       throw StateError('Select a saved customer before creating an invoice.');
     }
@@ -102,6 +105,8 @@ class OfflineDocumentDraftService {
     };
 
     await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [id, operationId, provisionalJobId, 'local-visit-$operationId']);
       // Keep a visible local Job linked to the offline invoice. Both
       // placeholders are replaced only after one idempotent server operation.
       await _database.customStatement(
@@ -156,7 +161,7 @@ class OfflineDocumentDraftService {
         ],
       );
     });
-    await _cache.save(businessId,id,detail);
+    await _cache.save(businessId,id,detail, visibilityGeneration: visibilityGeneration);
     return id;
   }
 
@@ -441,6 +446,7 @@ class OfflineDocumentDraftService {
     String? vehicleId,
     String? vehicleLabel,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     if (customerId.isEmpty) {
       throw StateError('Select a saved customer before creating an estimate.');
     }
@@ -465,6 +471,8 @@ class OfflineDocumentDraftService {
       'sync_state':'pending','_local_snapshot':true,'_local_draft':true,
     };
     await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [id, operationId]);
       await _database.customStatement(
         '''
         INSERT INTO local_documents(
@@ -496,7 +504,7 @@ class OfflineDocumentDraftService {
         ],
       );
     });
-    await _cache.save(businessId,id,detail);
+    await _cache.save(businessId,id,detail, visibilityGeneration: visibilityGeneration);
     return id;
   }
 
@@ -504,6 +512,7 @@ class OfflineDocumentDraftService {
     String businessId,
     String jobId,
   ) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final rows = await _database.customSelect(
       '''
       SELECT id, job_number, title, customer_id, customer_name,
@@ -566,6 +575,8 @@ class OfflineDocumentDraftService {
     };
 
     await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [id]);
       await _database.customStatement(
         '''
         INSERT INTO local_documents (
@@ -606,7 +617,7 @@ class OfflineDocumentDraftService {
       );
     });
 
-    await _cache.save(businessId, id, detail);
+    await _cache.save(businessId, id, detail, visibilityGeneration: visibilityGeneration);
     return id;
   }
 
@@ -688,6 +699,7 @@ class OfflineDocumentDraftService {
   /// Converts a cached estimate without creating another Job. The server
   /// conversion is deferred until the source estimate has a permanent ID.
   Future<String> convertEstimateOffline(String businessId, String estimateId) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final estimate = await _cache.load(businessId, estimateId);
     if (estimate == null) {
       throw StateError('Open the estimate once while online to cache it.');
@@ -739,6 +751,8 @@ class OfflineDocumentDraftService {
       'sync_state': 'pending',
     };
     await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [invoiceId, operationId, if (provisionalJobId != null) provisionalJobId]);
       if (provisionalJobId != null) {
         await _database.customStatement(
           '''INSERT INTO local_jobs (id,business_id,access_scope,job_number,title,
@@ -781,8 +795,8 @@ class OfflineDocumentDraftService {
         }), _unixNow()],
       );
     });
-    await _cache.save(businessId, invoiceId, detail);
-    await _cache.save(businessId, estimateId, modifiedEstimate);
+    await _cache.save(businessId, invoiceId, detail, visibilityGeneration: visibilityGeneration);
+    await _cache.save(businessId, estimateId, modifiedEstimate, visibilityGeneration: visibilityGeneration);
     return invoiceId;
   }
 
@@ -1443,4 +1457,5 @@ class OfflineDocumentDraftService {
     }
   }
 }
+
 

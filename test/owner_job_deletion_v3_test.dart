@@ -50,6 +50,7 @@ Map<String, dynamic> fixture() {
 class Gateway extends JobDeletionV3Gateway {
   String signedInActor = actor;
   Object? previewError;
+  Object? originsError;
   Future<Map<String, dynamic>> Function(String)? onStatus;
   final calls = <String>[];
   final feedCalls = <int>[];
@@ -66,6 +67,13 @@ class Gateway extends JobDeletionV3Gateway {
   }
   @override
   Future<Map<String, dynamic>> status(String business, String operation) async => onStatus!(operation);
+  @override
+  Future<Map<String,dynamic>> localOrigins(String business, List<String> operations) async {
+    if (originsError != null) throw originsError!;
+    return {'schema_version':1,'protocol_version':'owner-local-cancellation-1.0',
+      'business_id':business,'actor_id':actor,'visibility_scope':hash,
+      'origins':[for(final op in operations) {'operation_id':op,'job_id':job,'root_origin':null,'local_aliases':[]}]};
+  }
   @override
   Future<Map<String, dynamic>> tombstones(String business, int cursor) async {
     feedCalls.add(cursor);
@@ -300,6 +308,20 @@ void main() {
         'deleted_entities': [{'entity_kind': 'job', 'entity_id': job}]}]};
     await expectLater(service.pullTombstones(business), throwsFormatException);
     expect(await db.customSelect('SELECT * FROM local_job_deletion_v3_feed').get(), isEmpty);
+  });
+  test('missing origin companion cannot advance cursor and same page retries', () async {
+    gateway.onFeed = (_) async => {'schema_version':3,'protocol_version':ownerDeletionV3Protocol,
+      'business_id':business,'actor_id':actor,'reader_scope':'staff','visibility_scope':hash,
+      'cursor':1,'has_more':false,'tombstones':[{'cursor':1,'business_id':business,'job_id':job,
+        'operation_id':nonce,'scope_complete':true,'status':'deleted','storage_cleanup':'not_required',
+        'status_version':1,'deleted_entities':[{'entity_kind':'job','entity_id':job}]}]};
+    gateway.originsError = StateError('Companion unavailable');
+    await expectLater(service.pullTombstones(business),throwsStateError);
+    expect(await db.customSelect('SELECT * FROM local_job_deletion_v3_feed').get(),isEmpty);
+    gateway.originsError = null;
+    await service.pullTombstones(business);
+    expect((await db.customSelect('SELECT cursor FROM local_job_deletion_v3_feed').getSingle()).read<int>('cursor'),1);
+    expect(gateway.feedCalls,[0,0]);
   });
   test('verified receipt scrubs preview and never stores payment originals', () async {
     gateway.onExecute = (op, confirmation) async => receipt(op, confirmation);

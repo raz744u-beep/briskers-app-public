@@ -16,6 +16,7 @@ import '../services/appointment_sync_service.dart';
 import '../services/job_sync_service.dart';
 import '../services/owner_job_retirement_service.dart';
 import '../services/owner_job_deletion_service_v3.dart';
+import '../services/owner_local_job_purge_service.dart';
 import '../services/local_job_deletion_v3.dart';
 import '../local/local_database_provider.dart';
 import '../services/local_appointment_repository.dart';
@@ -238,6 +239,8 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
           !BriskersConnectionModeController.instance.forceOffline &&
           supabase.auth.currentUser?.id == actorId) {
         await deletionV3.flush(businessId);
+        await OwnerLocalJobPurgeService().flushRegistrations(businessId,
+          actorId: actorId, isOwner: true);
       }
       final service = OwnerJobRetirementService();
       await service.pullTombstones(businessId);

@@ -19,6 +19,8 @@ import '../../local/local_database_provider.dart';
 import 'job_quarantine_view_guard.dart';
 import 'owner_job_delete_v3_dialog.dart';
 import '../../services/owner_job_deletion_service_v3.dart';
+import '../../services/owner_local_job_purge_service.dart';
+import 'offline_job_purge_dialog.dart';
 import '../../services/owner_job_deletion_v3_contract.dart';
 import '../../core/supabase_config.dart';
 import '../../services/local_attachment_cache.dart';
@@ -3392,6 +3394,28 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       _error = null;
     });
     try {
+      final localService = OwnerLocalJobPurgeService();
+      final localPreview = await localService.eligiblePreview(widget.businessId,
+        widget.jobId, actorId: actorId, isOwner: _owner);
+      if (localPreview != null) {
+        if (!mounted || _contentBlocked) return;
+        final jobItems = localPreview.items.where((item) => item['kind'] == 'local_jobs');
+        final label = jobItems.isEmpty ? 'this Job' : jobItems.first['label']?.toString() ?? 'this Job';
+        final confirmed = await showOfflineJobPurgeConfirmation(context,
+          jobLabel: label, items: localPreview.items);
+        if (!confirmed || !mounted || _contentBlocked) return;
+        if (!_owner || supabase.auth.currentUser?.id != actorId) {
+          throw StateError('Your access changed. Reopen Delete Job to review.');
+        }
+        final cleanup = await localService.confirm(localPreview,
+          actorId: actorId, isOwner: _owner,
+          online: !BriskersConnectionModeController.instance.forceOffline);
+        messenger.showSnackBar(SnackBar(content: Text(cleanup.completed
+          ? 'Deleted from this device and queued uploads cancelled. Deletion markers will be verified with the server when connected.'
+          : 'Deletion is committed on this device. Local file cleanup and server marker verification are still pending.')));
+        if (mounted) Navigator.pop(context, true);
+        return;
+      }
       final preview = await _jobRetirement.preview(
         widget.businessId,
         widget.jobId,

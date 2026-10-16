@@ -576,7 +576,7 @@ void main() {
     await LocalJobDeletionV3.ensureSchema(db);
     await db.customStatement("UPDATE local_documents SET status='allowed replacement' WHERE id=?", [other]);
     await expectLater(db.customStatement('DELETE FROM local_customers WHERE business_id=?', [business]), throwsA(isA<Exception>()));
-    expect((await db.customSelect('SELECT version FROM local_job_deletion_v3_schema').getSingle()).read<int>('version'), 5);
+    expect((await db.customSelect('SELECT version FROM local_job_deletion_v3_schema').getSingle()).read<int>('version'), 6);
   });
   test('scope-dirty financial key rejects direct replace and update without identity fields', () async {
     await db.customStatement("INSERT INTO local_financial_cache(business_id,cache_key,payload_json,updated_at) VALUES (?,'unknown',?,0)", [business, jsonEncode('only unknown work')]);
@@ -614,5 +614,73 @@ void main() {
     final listed = await LocalJobRepository(database:db).listJobs(business);
     expect(listed.single['open_findings'], 0);
     expect(await count(db,'local_findings'), 1);
+  });
+  test('document-only authorization never exposes hidden parent decorations or search links', () async {
+    await db.customStatement("UPDATE local_jobs SET job_number='SECRET-JOB',title='secret title',customer_name='secret customer',vehicle_label='secret vehicle' WHERE id=?", [job]);
+    await db.customStatement("UPDATE local_documents SET document_number='VISIBLE-INVOICE' WHERE id=?", [invoice]);
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: other, visibilityScope: 'invoice-only', readerScope: 'customer');
+    final generation = await LocalJobDeletionV3.captureVisibilityGeneration(db,business);
+    await db.transaction(() async {
+      await LocalJobDeletionV3.authorizeScopedEntities(db,business,generation,[entity('invoice',invoice)]);
+      await db.customStatement("UPDATE local_documents SET status='fresh' WHERE id=?", [invoice]);
+    });
+    final repository=LocalDocumentRepository(database:db);
+    final rows=await repository.listByKind(business,kind:'invoice');
+    expect(rows.single['id'],invoice);
+    expect(rows.single['job_number'],isNull);
+    expect(rows.single['job_title'],isNull);
+    expect(rows.single['customer_name'],isNot('secret customer'));
+    expect(rows.single['vehicle'],isNot('secret vehicle'));
+    expect(await repository.search(business,'SECRET-JOB'),isEmpty);
+  });
+  test('trusted local origins fence exact aliases before restored queue arrives', () async {
+    await LocalJobDeletionV3.applyVerifiedReceipt(db, receipt: receipt());
+    final result = await LocalJobDeletionV3.applyVerifiedLocalOrigin(db, businessId: business, origin: {
+      'operation_id': operation, 'job_id': job, 'root_origin': 'standalone_estimate_conversion',
+      'local_aliases': [entity('job','local-conversion-job-$job'),entity('invoice','local-invoice-$job'),entity('estimate','local-estimate-$estimate')],
+    });
+    expect(result.complete,isTrue);
+    expect(await LocalJobRetirement.isJobBlocked(db,business,'local-conversion-job-$job'),isTrue);
+    expect(await LocalJobRetirement.isDocumentBlocked(db,business,'local-invoice-$job'),isTrue);
+    await expectLater(enqueue(db,'document_draft_create','local-invoice-$job',{'operation_id':job,'estimate_id':'local-estimate-$estimate'},action:'convert_invoice'),throwsA(isA<Exception>()));
+    expect((await db.customSelect('SELECT inventory_generation FROM local_job_deletion_v3_cleanup').getSingle()).read<int>('inventory_generation'),2);
+    await LocalJobDeletionV3.applyVerifiedLocalOrigin(db,businessId:business,origin:{
+      'operation_id':operation,'job_id':job,'root_origin':'standalone_estimate_conversion',
+      'local_aliases':[entity('job','local-conversion-job-$job')],
+    });
+    expect((await db.customSelect('SELECT inventory_generation FROM local_job_deletion_v3_cleanup').getSingle()).read<int>('inventory_generation'),2);
+  });
+
+  test('origin aliases require matching accepted operation and never infer financial identities', () async {
+    await expectLater(LocalJobDeletionV3.applyVerifiedLocalOrigin(db,businessId:business,origin:{
+      'operation_id':operation,'job_id':job,'root_origin':null,'local_aliases':[],
+    }),throwsStateError);
+    await LocalJobDeletionV3.applyVerifiedReceipt(db,receipt:receipt());
+    await LocalJobDeletionV3.applyVerifiedLocalOrigin(db,businessId:business,origin:{
+      'operation_id':operation,'job_id':job,'root_origin':'quick_invoice',
+      'local_aliases':[entity('job','local-job-$job')],
+    });
+    expect(await LocalJobRetirement.isDocumentBlocked(db,business,'local-invoice-$job'),isFalse);
+    await LocalJobDeletionV3.applyVerifiedLocalOrigin(db,businessId:business,origin:{
+      'operation_id':operation,'job_id':job,'root_origin':'quick_invoice',
+      'local_aliases':[entity('job','local-job-$job'),entity('invoice','local-invoice-$job')],
+    });
+    expect(await LocalJobRetirement.isDocumentBlocked(db,business,'local-invoice-$job'),isTrue);
+    await expectLater(LocalJobDeletionV3.applyVerifiedLocalOrigin(db,businessId:business,origin:{
+      'operation_id':operation,'job_id':job,'root_origin':'quick_invoice',
+      'local_aliases':[entity('invoice','local-invoice-$other')],
+    }),throwsFormatException);
+  });
+  test('verified remote origin is empty and cannot assert local financial aliases', () async {
+    await LocalJobDeletionV3.applyVerifiedReceipt(db,receipt:receipt());
+    expect((await LocalJobDeletionV3.applyVerifiedLocalOrigin(db,businessId:business,origin:{
+      'operation_id':operation,'job_id':job,'root_origin':null,'local_aliases':[],
+    })).complete,isTrue);
+    await expectLater(LocalJobDeletionV3.applyVerifiedLocalOrigin(db,businessId:business,origin:{
+      'operation_id':operation,'job_id':job,'root_origin':null,
+      'local_aliases':[entity('invoice','local-invoice-$job')],
+    }),throwsFormatException);
+    expect(await LocalJobRetirement.isDocumentBlocked(db,business,'local-invoice-$job'),isFalse);
   });
 }

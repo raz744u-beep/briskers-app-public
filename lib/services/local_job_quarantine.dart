@@ -7,6 +7,7 @@ import '../local/briskers_local_database.dart';
 import 'local_cleanup_safety.dart';
 import 'local_job_retirement.dart';
 import 'local_job_deletion_v3.dart';
+import 'offline_job_purge.dart';
 
 class LocalJobQuarantineException implements Exception {
   const LocalJobQuarantineException(this.message);
@@ -768,6 +769,7 @@ class LocalJobQuarantine {
     }
     final requestGeneration = await captureGeneration(db, businessId);
     await assertReplayAllowed(db, businessId, outboxId: outboxId);
+    await OfflineJobPurge.recordDispatch(db, businessId, outboxId: outboxId);
     final response = await request();
     // Persist every returned acknowledgement before a later await can let
     // quarantine retire the queue. The next caller-side guard may then throw

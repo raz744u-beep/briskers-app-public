@@ -8,6 +8,8 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
+import 'local_job_deletion_v3.dart';
+import 'offline_job_purge.dart';
 
 typedef MediaDirectoryProvider = Future<Directory> Function();
 
@@ -183,6 +185,7 @@ class OfflinePreInspectionService {
 
       final localId = existing?.read<String>('id') ??
           'local-inspection-${_operationId('inspection')}';
+      if (existing == null) await OfflineJobPurge.recordNewIntent(_database, businessId, [localId]);
       final baseVersion = existing?.readNullable<int>('row_version');
       final inspectedAt = existing?.data['inspected_at'] ??
           _unix(DateTime.now().toUtc());
@@ -248,6 +251,7 @@ class OfflinePreInspectionService {
 
     try {
       await _database.transaction(() async {
+        await OfflineJobPurge.recordNewIntent(_database, businessId, [localPhotoId, operationId]);
         var inspection = await _inspectionRow(businessId, jobId);
         if (inspection != null &&
             inspection.read<String>('sync_state') == 'conflict') {
@@ -260,6 +264,7 @@ class OfflinePreInspectionService {
         if (inspection == null) {
           final localInspectionId =
               'local-inspection-${_operationId('inspection')}';
+          await OfflineJobPurge.recordNewIntent(_database, businessId, [localInspectionId]);
           await _database.customStatement(
             '''
             INSERT INTO local_pre_inspections (
@@ -826,6 +831,7 @@ class OfflinePreInspectionService {
       }
     } else {
       operationId = _operationId('inspection');
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [operationId]);
     }
 
     final payload = jsonEncode({
@@ -930,3 +936,4 @@ class OfflinePreInspectionService {
     return DateTime.tryParse(value.toString())?.toUtc().toIso8601String();
   }
 }
+

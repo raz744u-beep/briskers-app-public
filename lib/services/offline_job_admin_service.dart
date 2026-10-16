@@ -8,6 +8,8 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
+import 'local_job_deletion_v3.dart';
+import 'offline_job_purge.dart';
 
 class OfflineJobAdminService {
   OfflineJobAdminService({
@@ -66,10 +68,13 @@ class OfflineJobAdminService {
     String? employeeId,
     String? employeeName,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     if (title.trim().isEmpty) throw StateError('Job title is required.');
     final id = _newJobId();
     final now = DateTime.now().toUtc();
     await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [id, 'job-create-$id']);
       await _database.customStatement(
         """INSERT INTO local_jobs
           (id,business_id,access_scope,job_number,title,requested_work,
@@ -393,6 +398,8 @@ class OfflineJobAdminService {
       );
 
       if (employeeId != null && employeeId.isNotEmpty) {
+        final assignmentId = 'local-admin-${_newJobId()}';
+        await OfflineJobPurge.recordNewIntent(_database, businessId, [assignmentId]);
         await _database.customStatement(
           '''
           INSERT INTO local_job_assignments (
@@ -401,7 +408,7 @@ class OfflineJobAdminService {
           ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 'offline_admin')
           ''',
           [
-            'local-admin-$jobId',
+            assignmentId,
             businessId,
             jobId,
             employeeId,
@@ -647,3 +654,4 @@ class OfflineJobAdminService {
     }
   }
 }
+
