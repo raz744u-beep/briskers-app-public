@@ -22,10 +22,12 @@ class BriskersDockDestination {
     required this.label,
     required this.icon,
     required this.color,
+    this.count = 0,
   });
   final String label;
   final IconData icon;
   final Color color;
+  final int count;
 }
 
 class _BriskersModuleDockState extends State<BriskersModuleDock> {
@@ -119,7 +121,11 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Icon(item.icon, color: item.color, size: 25),
+                      Badge(
+                        isLabelVisible: item.count > 0,
+                        label: Text('${item.count}'),
+                        child: Icon(item.icon, color: item.color, size: 25),
+                      ),
                       const SizedBox(height: 2),
                       Text(item.label, maxLines: 1, overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 11.5,
