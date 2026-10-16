@@ -19,12 +19,18 @@ String invoiceLaborWorkSummary(Map<String, dynamic> invoice) {
     for (final key in ['line_kind', 'item_type', 'type', 'category']) {
       final value = line[key]?.toString().trim().toLowerCase();
       if (value == 'labor' || value == 'labour') return true;
-      if (value == 'part' || value == 'parts' ||
-          value == 'discount' || value == 'item') {
+      // Imported and locally-created invoices sometimes persist a Labor
+      // named row with the generic 'item' discriminator. Do not return
+      // false until checking its explicit display name below.
+      if (value == 'part' || value == 'parts' || value == 'discount') {
         return false;
       }
     }
-    return false;
+    // Verified invoice #6345 fixture: line_kind='item', name='Labor',
+    // description contains work text. Match the exact item name, never
+    // guess from price or a free-form description.
+    final name = line['name']?.toString().trim().toLowerCase();
+    return name == 'labor' || name == 'labour';
   }
   return lines
       .whereType<Map>()
