@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/local/briskers_local_database.dart' hide LocalFinancialCache;
 import 'package:briskers_app/services/local_document_detail_cache.dart';
 import 'package:briskers_app/services/local_financial_cache.dart';
 import 'package:briskers_app/services/local_job_deletion_v3.dart';
