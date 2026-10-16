@@ -4861,6 +4861,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                       ),
                     ),
                   ),
+                  if (widget.bottomNavigationBar != null &&
+                      const <String>{'history', 'documents', 'expenses', 'profit'}
+                          .contains(key))
+                    widget.bottomNavigationBar!,
                 ],
               ),
             );
