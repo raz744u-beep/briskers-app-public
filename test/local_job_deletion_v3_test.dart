@@ -532,4 +532,58 @@ void main() {
     expect(await count(db, 'sync_outbox'), 1);
     expect(await cache.load(business, invoice), isNull);
   });
+  test('structurally invalid scope snapshots remain inaccessible and cannot be overwritten', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('briskers_document_detail_${business}_$invoice', jsonEncode(['unknown document work']));
+    await db.customStatement("INSERT INTO local_financial_cache(business_id,cache_key,payload_json,updated_at) VALUES (?,'transactions_snapshot',?,0)",
+      [business, jsonEncode('unknown financial work')]);
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: other, visibilityScope: 'restricted', readerScope: 'customer');
+    final generation = await LocalJobDeletionV3.captureVisibilityGeneration(db, business);
+    final cache = LocalDocumentDetailCache(database: db);
+    expect(await cache.load(business, invoice), isNull);
+    await expectLater(cache.save(business, invoice, {'id': invoice, 'kind': 'invoice'},
+      visibilityGeneration: generation), throwsStateError);
+    final financial = LocalFinancialCache(database: db);
+    expect(await financial.loadTransactions(business), isEmpty);
+    await expectLater(financial.saveTransactions(business, [{'id': transaction}],
+      visibilityGeneration: generation), throwsStateError);
+    expect(prefs.getString('briskers_document_detail_${business}_$invoice'), contains('unknown document work'));
+    expect((await db.customSelect("SELECT payload_json FROM local_financial_cache").getSingle()).read<String>('payload_json'), contains('unknown financial work'));
+  });
+  test('generic replace-child sync cannot discard scope-dirty synced-looking child', () async {
+    await db.customStatement('INSERT INTO local_job_visits(id,business_id,job_id,visit_number) VALUES (?,?,?,1)', [other, business, job]);
+    await enqueue(db, 'job_visit_update', other, {'visit_id': other, 'notes': 'unconfirmed child edit'});
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: other, visibilityScope: 'changed-role', readerScope: 'staff');
+    final generation = await LocalJobDeletionV3.captureVisibilityGeneration(db, business);
+    await expectLater(db.transaction(() async {
+      await LocalJobDeletionV3.authorizeScopedEntities(db, business, generation, [entity('job', job)]);
+      await db.customStatement('DELETE FROM local_job_visits WHERE business_id=? AND job_id=?', [business, job]);
+    }), throwsA(isA<Exception>()));
+    expect(await count(db, 'local_job_visits'), 1);
+    expect(await count(db, 'sync_outbox'), 1);
+    expect(await LocalJobRetirement.isJobBlocked(db, business, job), isTrue);
+    // Replaceable clean scope rows still permit ordinary cache invalidation.
+    await db.customStatement('DELETE FROM local_documents WHERE business_id=? AND id=?', [business, estimate]);
+  });
+  test('owned v3 trigger upgrade replaces draft guards without touching unrelated triggers', () async {
+    await LocalJobDeletionV3.ensureSchema(db);
+    await db.customStatement('DROP TRIGGER deletion_v3_local_documents_update');
+    await db.customStatement("CREATE TRIGGER deletion_v3_local_documents_update BEFORE UPDATE ON local_documents BEGIN SELECT RAISE(ABORT,'obsolete draft guard'); END");
+    await db.customStatement("CREATE TRIGGER unrelated_guard BEFORE DELETE ON local_customers BEGIN SELECT RAISE(ABORT,'unrelated protection'); END");
+    await db.customStatement('UPDATE local_job_deletion_v3_schema SET version=2 WHERE singleton=1');
+    await LocalJobDeletionV3.ensureSchema(db);
+    await db.customStatement("UPDATE local_documents SET status='allowed replacement' WHERE id=?", [other]);
+    await expectLater(db.customStatement('DELETE FROM local_customers WHERE business_id=?', [business]), throwsA(isA<Exception>()));
+    expect((await db.customSelect('SELECT version FROM local_job_deletion_v3_schema').getSingle()).read<int>('version'), 4);
+  });
+  test('scope-dirty financial key rejects direct replace and update without identity fields', () async {
+    await db.customStatement("INSERT INTO local_financial_cache(business_id,cache_key,payload_json,updated_at) VALUES (?,'unknown',?,0)", [business, jsonEncode('only unknown work')]);
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: other, visibilityScope: 'restricted', readerScope: 'customer');
+    await expectLater(db.customStatement("INSERT OR REPLACE INTO local_financial_cache(business_id,cache_key,payload_json,updated_at) VALUES (?,'unknown','{}',0)", [business]), throwsA(isA<Exception>()));
+    await expectLater(db.customStatement("UPDATE local_financial_cache SET cache_key='new-key',payload_json='{}' WHERE business_id=?", [business]), throwsA(isA<Exception>()));
+    expect((await db.customSelect('SELECT payload_json FROM local_financial_cache').getSingle()).read<String>('payload_json'), contains('only unknown work'));
+  });
 }

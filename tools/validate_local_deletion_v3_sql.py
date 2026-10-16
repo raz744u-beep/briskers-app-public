@@ -45,6 +45,9 @@ refs = read_refs('refs')
 old_refs = read_refs('oldRefs')
 
 row_template = next(t for t in templates if 'deletion_v3_${entry.key}' in t)
+dirty_template = next(t for t in templates if 'deletion_v3_scope_dirty_${entry.key}' in t)
+for table in refs:
+    db.execute(dirty_template.replace('${entry.key}',table).replace('${oldRefs[entry.key]}',old_refs[table]))
 for table, ref in refs.items():
     for action in ['INSERT', 'UPDATE']:
         old = (f' OR EXISTS(SELECT 1 FROM local_job_deletion_v3_fences e '
@@ -91,3 +94,23 @@ blocked('INSERT INTO local_jobs (business_id,id) VALUES (?,?)', ['b','next'])
 db.execute("DELETE FROM local_job_deletion_v3_pending WHERE operation_id='pending'")
 db.execute('INSERT INTO local_jobs (business_id,id) VALUES (?,?)', ['b','next'])
 print(f'PASS: {len(refs)*2+4+6} exact-source generated SQLite trigger/schema checks; INSERT/UPDATE templates parse; late UUID/payment/operation replay rejected; unrelated work preserved; reversible pending fences checked.')
+
+# Scope quarantine is reversible only for replaceable identities. Retained
+# dirty children cannot disappear through generic sync's DELETE-before-replace.
+db.execute("INSERT INTO local_job_visits(id,business_id,job_id) VALUES ('dirty-visit','scope','job')")
+db.execute("INSERT INTO local_job_deletion_v3_scope_entities VALUES ('scope','job_visit','dirty-visit',1,1)")
+blocked("DELETE FROM local_job_visits WHERE business_id='scope' AND id='dirty-visit'")
+db.execute("DELETE FROM local_job_deletion_v3_scope_entities WHERE business_id='scope' AND dirty=0")
+assert db.execute("SELECT COUNT(*) FROM local_job_deletion_v3_scope_entities WHERE business_id='scope'").fetchone()[0] == 1
+db.execute("INSERT INTO local_documents(id,business_id,kind) VALUES ('clean-invoice','scope','invoice')")
+db.execute("INSERT INTO local_job_deletion_v3_scope_entities VALUES ('scope','invoice','clean-invoice',1,0)")
+blocked("UPDATE local_documents SET kind='invoice' WHERE business_id='scope' AND id='clean-invoice'")
+db.execute("DELETE FROM local_job_deletion_v3_scope_entities WHERE business_id='scope' AND entity_id='clean-invoice' AND dirty=0")
+db.execute("UPDATE local_documents SET kind='invoice' WHERE business_id='scope' AND id='clean-invoice'")
+db.execute("INSERT INTO local_financial_cache(business_id,cache_key,payload_json) VALUES ('scope','old','{}')")
+db.execute("INSERT INTO local_job_deletion_v3_cache_scope VALUES ('scope','financial:old',0,1)")
+blocked("DELETE FROM local_financial_cache WHERE business_id='scope' AND cache_key='old'")
+print('PASS: 5 additional exact-source scope checks; dirty child/cache DELETE blocked; clean identity requires explicit release; dirty release refused.')
+blocked("INSERT OR REPLACE INTO local_financial_cache(business_id,cache_key,payload_json) VALUES ('scope','old','{}')")
+blocked("UPDATE local_financial_cache SET cache_key='new',payload_json='{}' WHERE business_id='scope' AND cache_key='old'")
+print('PASS: 2 dirty financial-key overwrite checks; REPLACE and rename/update cannot erase key-only unknown work.')

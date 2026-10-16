@@ -73,8 +73,24 @@ class LocalJobDeletionV3 {
 
   static Future<void> ensureSchema(BriskersLocalDatabase db) async {
     if (_installed[db] == true && (await db.customSelect(
-        "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='deletion_v3_scope_outbox_update'").get()).isNotEmpty) { return; }
+        "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='deletion_v3_scope_dirty_financial_update'").get()).isNotEmpty &&
+        (await db.customSelect('SELECT 1 FROM local_job_deletion_v3_schema WHERE singleton=1 AND version=4').get()).isNotEmpty) { return; }
     await db.transaction(() async {
+      await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_schema (
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL)''');
+      // Replace only our owned triggers, atomically. Installed draft candidates
+      // must not retain obsolete CREATE IF NOT EXISTS guard semantics.
+      final ownedTriggers = <String>{
+        'deletion_v3_marker_no_delete', 'deletion_v3_marker_no_update', 'deletion_v3_marker_no_replace',
+        'deletion_v3_alias_no_delete', 'deletion_v3_alias_no_update', 'deletion_v3_alias_no_replace',
+        'deletion_v3_scope_outbox_update', 'deletion_v3_scope_dirty_financial_delete',
+        'deletion_v3_scope_dirty_financial_insert', 'deletion_v3_scope_dirty_financial_update',
+        for (final table in {..._tables.values.map((entry) => entry.$1), 'local_finding_photos'})
+          'deletion_v3_scope_dirty_${table}_delete',
+        for (final table in {..._tables.values.map((entry) => entry.$1), 'local_finding_photos', 'sync_outbox', 'local_financial_cache'})
+          for (final action in const ['insert', 'update']) 'deletion_v3_${table}_$action',
+      };
+      for (final name in ownedTriggers) { await db.customStatement('DROP TRIGGER IF EXISTS $name'); }
       await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_entities (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL,
         operation_id TEXT NOT NULL, entity_kind TEXT NOT NULL, entity_id TEXT NOT NULL,
@@ -168,6 +184,11 @@ class LocalJobDeletionV3 {
       await db.customStatement('DROP TRIGGER IF EXISTS deletion_v3_local_finding_photos_insert');
       await db.customStatement('DROP TRIGGER IF EXISTS deletion_v3_local_finding_photos_update');
       for (final entry in refs.entries) {
+        await db.customStatement('''CREATE TRIGGER IF NOT EXISTS deletion_v3_scope_dirty_${entry.key}_delete
+          BEFORE DELETE ON ${entry.key}
+          WHEN EXISTS(SELECT 1 FROM local_job_deletion_v3_scope_entities e
+            WHERE e.business_id=OLD.business_id AND e.dirty=1 AND (${oldRefs[entry.key]}))
+          BEGIN SELECT RAISE(ABORT,'Retained work requires authorized reconciliation'); END''');
         for (final action in const ['INSERT', 'UPDATE']) {
           final old = action == 'UPDATE'
               ? ' OR EXISTS(SELECT 1 FROM local_job_deletion_v3_fences e '
@@ -179,6 +200,22 @@ class LocalJobDeletionV3 {
             BEGIN SELECT RAISE(ABORT,'Verified deletion blocks stale recreation'); END''');
         }
       }
+      await db.customStatement('''CREATE TRIGGER IF NOT EXISTS deletion_v3_scope_dirty_financial_delete
+        BEFORE DELETE ON local_financial_cache
+        WHEN EXISTS(SELECT 1 FROM local_job_deletion_v3_cache_scope s
+          WHERE s.business_id=OLD.business_id AND s.cache_key='financial:'||OLD.cache_key AND s.dirty=1)
+        BEGIN SELECT RAISE(ABORT,'Retained financial work requires authorized reconciliation'); END''');
+      await db.customStatement('''CREATE TRIGGER IF NOT EXISTS deletion_v3_scope_dirty_financial_insert
+        BEFORE INSERT ON local_financial_cache
+        WHEN EXISTS(SELECT 1 FROM local_job_deletion_v3_cache_scope s
+          WHERE s.business_id=NEW.business_id AND s.cache_key='financial:'||NEW.cache_key AND s.dirty=1)
+        BEGIN SELECT RAISE(ABORT,'Retained financial work cannot be replaced'); END''');
+      await db.customStatement('''CREATE TRIGGER IF NOT EXISTS deletion_v3_scope_dirty_financial_update
+        BEFORE UPDATE ON local_financial_cache
+        WHEN EXISTS(SELECT 1 FROM local_job_deletion_v3_cache_scope s WHERE s.dirty=1 AND
+          ((s.business_id=NEW.business_id AND s.cache_key='financial:'||NEW.cache_key) OR
+           (s.business_id=OLD.business_id AND s.cache_key='financial:'||OLD.cache_key)))
+        BEGIN SELECT RAISE(ABORT,'Retained financial work cannot be overwritten'); END''');
       // Unknown malformed payloads fail closed for replay, but cleanup never
       // deletes them on that basis. Shared/unknown work remains recoverable.
       for (final table in const ['sync_outbox', 'local_financial_cache']) {
@@ -200,6 +237,8 @@ class LocalJobDeletionV3 {
             BEGIN SELECT RAISE(ABORT,'Verified deletion blocks stale payload replay'); END''');
         }
       }
+      await db.customStatement('INSERT INTO local_job_deletion_v3_schema(singleton,version) VALUES (1,4) '
+          'ON CONFLICT(singleton) DO UPDATE SET version=excluded.version');
     });
     _installed[db] = true;
   }
@@ -380,7 +419,7 @@ class LocalJobDeletionV3 {
         for (final row in pendingRows) {
           dirtyIds.add(row.read<String>('entity_id'));
           final payload = _decode(row.data['payload_json']);
-          unknownOutbox = unknownOutbox || payload == null;
+          unknownOutbox = unknownOutbox || payload is! Map;
           gather(payload);
         }
         Future<void> fence(String kind, String id, bool dirty) async {
@@ -432,7 +471,9 @@ class LocalJobDeletionV3 {
           }
         }
         Future<void> cache(String key, Object? value) async {
-          final dirty = value == null || unknownOutbox || referencesAny(value, dirtyIds) || _hasUnconfirmedContent(value);
+          final structurallyValid = key.startsWith('briskers_document_detail_')
+              ? value is Map : value is Map || value is List;
+          final dirty = !structurallyValid || unknownOutbox || referencesAny(value, dirtyIds) || _hasUnconfirmedContent(value);
           dirtyFound = dirtyFound || dirty;
           await db.customStatement('INSERT INTO local_job_deletion_v3_cache_scope '
               '(business_id,cache_key,generation,dirty) VALUES (?,?,?,?) '
@@ -467,7 +508,7 @@ class LocalJobDeletionV3 {
             if (value is Map && value['_server_document_id'] is String) value['_server_document_id'] as String};
           for (final id in ids) {
             for (final k in kind == null ? const ['invoice', 'estimate'] : [kind]) {
-              await fence(k, id, value == null || _hasUnconfirmedContent(value));
+              await fence(k, id, value is! Map || _hasUnconfirmedContent(value));
             }
           }
         }
