@@ -24,7 +24,7 @@ class DocumentIdentityAppBar extends StatelessWidget
   final VoidCallback? onLongPress;
 
   @override
-  Size get preferredSize => Size.fromHeight(
+  Size get preferredSize => const Size.fromHeight(
     kToolbarHeight,
   );
 
