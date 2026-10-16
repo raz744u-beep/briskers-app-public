@@ -259,12 +259,25 @@ class CustomerVehicleSyncService {
         }
       }
 
-      await _writeSyncState(
-        businessId,
-        cursor: bootstrapCursor ?? 0,
-        bootstrapped: true,
-        error: null,
-      );
+      await _database.transaction(() async {
+        await _writeSyncState(
+          businessId,
+          cursor: bootstrapCursor ?? 0,
+          bootstrapped: true,
+          error: null,
+        );
+        // A complete bootstrap is a historical baseline, including repair or
+        // re-import after a cache reset. Persist a revision in the existing
+        // sync-state table so notification readers cannot mistake it for a
+        // burst of new creation events. This is device metadata, not a server
+        // mutation, and commits atomically with bootstrap completion.
+        await _database.customStatement(
+          "INSERT INTO local_sync_states (business_id,scope,last_server_cursor,bootstrapped) "
+          "VALUES (?,'customer_notification_baseline',?,1) "
+          "ON CONFLICT(business_id,scope) DO UPDATE SET last_server_cursor=excluded.last_server_cursor",
+          [businessId, DateTime.now().toUtc().microsecondsSinceEpoch],
+        );
+      });
     } catch (error) {
       await _database.transaction(() async {
         await _clearCache(businessId);

@@ -102,6 +102,7 @@ class _FakeApi extends BriskersApi {
     required String attachmentId,
     required String mimeType,
     required Uint8List bytes,
+    AttachmentReplayGuard? replayGuard,
   }) async {
     uploadCount++;
     expect(bytes, isNotEmpty);

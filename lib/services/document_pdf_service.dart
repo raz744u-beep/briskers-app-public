@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../core/formatters.dart';
+import '../core/warranty_payment_amounts.dart';
 
 class DocumentPdfService {
   const DocumentPdfService._();
@@ -325,17 +326,18 @@ class DocumentPdfService {
         detail['warranty_company_name']?.toString().trim() ?? '';
     final warrantyApproved =
         num.tryParse(detail['approved_amount']?.toString() ?? '') ?? 0;
-    final warrantyTerminal =
-        num.tryParse(detail['terminal_amount']?.toString() ?? '') ?? 0;
+    final warrantyReceipt = WarrantyPaymentAmounts.receipt(detail,
+      List<dynamic>.from(detail['payments'] ?? const []).whereType<Map>()
+        .map((raw) => Map<String, dynamic>.from(raw)));
+    final warrantyTerminal = warrantyReceipt == null
+      ? (num.tryParse(detail['terminal_amount']?.toString() ?? '') ?? 0)
+      : (num.tryParse(warrantyReceipt['amount']?.toString() ?? '') ?? 0);
     final warrantyProcessorFee =
         num.tryParse(detail['processor_fee']?.toString() ?? '') ?? 0;
-    final warrantyNetApplied =
-        num.tryParse(detail['net_applied']?.toString() ?? '') ?? 0;
-    final customerResponsibility =
-        num.tryParse(
-          detail['customer_responsibility']?.toString() ?? '',
-        ) ??
-        0;
+    final warrantyBreakdown = WarrantyPaymentAmounts.fromReceipt(
+      gross: warrantyTerminal, processorFee: warrantyProcessorFee);
+    final customerAllocation = WarrantyPaymentAllocation.fromWarranty(
+      invoiceTotal: detail['total_amount'], warranty: detail);
     final disclaimers = List<dynamic>.from(
       detail['disclaimers'] ?? const [],
     ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
@@ -561,9 +563,11 @@ class DocumentPdfService {
               company: warrantyCompany,
               approved: warrantyApproved,
               terminal: warrantyTerminal,
-              processorFee: warrantyProcessorFee,
-              netApplied: warrantyNetApplied,
-              customerResponsibility: customerResponsibility,
+              processorFee: customerAllocation.requiresReview ? null : warrantyProcessorFee,
+              retained: warrantyReceipt == null ? null : warrantyBreakdown?.retained,
+              actualReceipt: warrantyReceipt != null,
+              customerResponsibility: customerAllocation.customerTotal,
+              customerAllocationNeedsReview: customerAllocation.requiresReview,
             ),
           ],
           if (warrantyMessage.isNotEmpty) ...[
@@ -579,7 +583,7 @@ class DocumentPdfService {
             ...disclaimers.expand(
               (item) => [
                 _fullWidthSection(
-                  'Customer Acknowledgment — '
+                  'Customer Acknowledgment - '
                   '${item['title']?.toString().trim() ?? 'Disclaimer'}',
                   item['body']?.toString().trim() ?? '',
                   minHeight: 42,
@@ -689,8 +693,8 @@ class DocumentPdfService {
   }) {
     return pw.Table(
       border: pw.TableBorder.all(
-        color: PdfColors.grey500,
-        width: 0.45,
+        color: PdfColors.grey700,
+        width: 0.75,
       ),
       columnWidths: const {
         0: pw.FlexColumnWidth(0.55),
@@ -705,7 +709,7 @@ class DocumentPdfService {
           children: [
             _headerCell('#', align: pw.TextAlign.center),
             _headerCell('Description'),
-            _headerCell(quantityHeading, align: pw.TextAlign.center),
+            _quantityHeadingCell(quantityHeading),
             _headerCell('Unit Price', align: pw.TextAlign.right),
             _headerCell('Amount', align: pw.TextAlign.right),
           ],
@@ -717,48 +721,44 @@ class DocumentPdfService {
   }
 
   static pw.Widget _laborTable(List<Map<String, dynamic>> lines) {
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+    // One bordered table keeps vertical separators continuous through the
+    // labor heading and every row instead of a separate full-width banner.
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.grey700, width: 0.75),
+      columnWidths: const {
+        0: pw.FlexColumnWidth(0.55),
+        1: pw.FlexColumnWidth(4.2),
+        2: pw.FlexColumnWidth(1.0),
+        3: pw.FlexColumnWidth(1.45),
+        4: pw.FlexColumnWidth(1.55),
+      },
       children: [
-        pw.Container(
-          padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          decoration: pw.BoxDecoration(
-            color: PdfColors.grey200,
-            border: pw.Border.all(color: PdfColors.grey500, width: 0.45),
-          ),
-          child: pw.Text(
-            'Labor',
-            style: const pw.TextStyle(
-              fontSize: 9.5,
-              fontWeight: pw.FontWeight.bold,
-            ),
-          ),
-        ),
-        pw.Table(
-          border: const pw.TableBorder(
-            left: pw.BorderSide(color: PdfColors.grey500, width: 0.45),
-            right: pw.BorderSide(color: PdfColors.grey500, width: 0.45),
-            bottom: pw.BorderSide(color: PdfColors.grey500, width: 0.45),
-            verticalInside:
-                pw.BorderSide(color: PdfColors.grey500, width: 0.45),
-            horizontalInside:
-                pw.BorderSide(color: PdfColors.grey500, width: 0.45),
-          ),
-          columnWidths: const {
-            0: pw.FlexColumnWidth(0.55),
-            1: pw.FlexColumnWidth(4.2),
-            2: pw.FlexColumnWidth(1.0),
-            3: pw.FlexColumnWidth(1.45),
-            4: pw.FlexColumnWidth(1.55),
-          },
+        pw.TableRow(
+          decoration: const pw.BoxDecoration(color: PdfColors.grey200),
           children: [
-            for (var index = 0; index < lines.length; index++)
-              _lineRow(lines[index], index + 1),
+            _headerCell('#', align: pw.TextAlign.center),
+            _headerCell('Labor'),
+            _quantityHeadingCell('Qty'),
+            _headerCell('Unit Price', align: pw.TextAlign.right),
+            _headerCell('Amount', align: pw.TextAlign.right),
           ],
         ),
+        for (var index = 0; index < lines.length; index++)
+          _lineRow(lines[index], index + 1),
       ],
     );
   }
+
+  static pw.Widget _quantityHeadingCell(String text) => pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 5),
+    child: pw.Row(children: [
+      pw.Expanded(flex: 3, child: pw.Text(text,
+        textAlign: pw.TextAlign.center,
+        style: const pw.TextStyle(fontSize: 8.2,
+          fontWeight: pw.FontWeight.bold))),
+      pw.Expanded(flex: 2, child: pw.SizedBox()),
+    ]),
+  );
 
   /// Keep the number centered independently of a left-aligned unit label.
   /// This affects PDF presentation only, never the stored quantity or math.
@@ -995,11 +995,13 @@ class DocumentPdfService {
     required String company,
     required num approved,
     required num terminal,
-    required num processorFee,
-    required num netApplied,
+    required num? processorFee,
+    required num? retained,
+    required bool actualReceipt,
     required num customerResponsibility,
+    required bool customerAllocationNeedsReview,
   }) {
-    pw.Widget row(String label, num value, {bool bold = false}) {
+    pw.Widget row(String label, num? value, {bool bold = false}) {
       return pw.Padding(
         padding: const pw.EdgeInsets.only(bottom: 3),
         child: pw.Row(
@@ -1015,7 +1017,7 @@ class DocumentPdfService {
               ),
             ),
             pw.Text(
-              _money(value),
+              value == null ? 'Review required' : _money(value),
               style: pw.TextStyle(
                 fontSize: bold ? 10 : 8.8,
                 fontWeight:
@@ -1043,7 +1045,7 @@ class DocumentPdfService {
             child: pw.Text(
               company.isEmpty
                   ? 'Extended Warranty Payment Allocation'
-                  : 'Extended Warranty — $company',
+                  : 'Extended Warranty - $company',
               style: const pw.TextStyle(
                 fontSize: 9.5,
                 fontWeight: pw.FontWeight.bold,
@@ -1055,14 +1057,22 @@ class DocumentPdfService {
             child: pw.Column(
               children: [
                 row('Approved warranty amount', approved),
-                row('Run warranty card for', terminal, bold: true),
-                row('Processor surcharge (not shop revenue)', processorFee),
-                row('Warranty applied to invoice', netApplied),
+                row('Warranty Card Payment Amount', terminal),
+                row('Credit Card Processing Fee\n(Customer Responsibility)', processorFee),
                 pw.Divider(height: 8, color: PdfColors.grey500),
                 row(
-                  'Customer responsibility',
-                  customerResponsibility,
+                  'Total Customer Responsibility',
+                  customerAllocationNeedsReview ? null : customerResponsibility,
                   bold: true,
+                ),
+                pw.SizedBox(height: 3),
+                pw.Text(
+                  'Saved payment allocation. Payments are credited separately; see invoice balance for amount due.',
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+                ),
+                if (customerAllocationNeedsReview) pw.Text(
+                  'The saved allocation needs review before use.',
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                 ),
               ],
             ),

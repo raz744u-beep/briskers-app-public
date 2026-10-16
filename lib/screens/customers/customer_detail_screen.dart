@@ -7,12 +7,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
+import '../../core/briskers_i18n.dart';
+import '../../core/document_presentation.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/customer_detail_cache.dart';
-import '../../services/local_document_detail_cache.dart';
+import '../../services/customer_document_summary_service.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/local_customer_repository.dart';
+import '../../services/job_summary_visibility.dart';
 import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../appointments/appointment_create_screen.dart';
 import '../jobs/job_create_screen.dart';
@@ -37,11 +40,13 @@ class CustomerDetailScreen extends StatefulWidget {
     required this.businessId,
     required this.customerId,
     required this.roleCode,
+    this.onReviewed,
   });
 
   final String businessId;
   final String customerId;
   final String roleCode;
+  final VoidCallback? onReviewed;
 
   @override
   State<CustomerDetailScreen> createState() => _CustomerDetailScreenState();
@@ -57,6 +62,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   final OfflineCustomerVehicleAdminService _offlineAdmin =
       OfflineCustomerVehicleAdminService();
 
+  late JobSummaryVisibility _jobVisibility;
   Map<String, dynamic>? _data;
   String? _error;
   bool _onlineReady = false;
@@ -68,6 +74,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   bool _expandQuickNotes = false;
 
   Future<Map<String, dynamic>> _loadOfflineSections() async {
+    final visibility = _jobVisibility;
+    final generation = visibility.epoch;
     Future<List<Map<String, dynamic>>> listSection(String key) async {
       final raw = await _sectionCache.load(
         widget.businessId,
@@ -82,7 +90,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           : <Map<String, dynamic>>[];
     }
 
-    final appointments = await listSection('appointments');
+    final appointments = await visibility.filter(
+        await listSection('appointments'), jobIdKey: 'job_id');
 
     final historyRaw = await _sectionCache.load(
       widget.businessId,
@@ -93,6 +102,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ? Map<String, dynamic>.from(historyRaw)
         : <String, dynamic>{};
 
+    history['jobs'] = await visibility.filter(
+      List<dynamic>.from(history['jobs'] ?? const [])
+          .whereType<Map>().map((row) => Map<String, dynamic>.from(row)),
+      cached: true,
+    );
+    if (!visibility.isCurrent(generation)) return const {};
     return <String, dynamic>{
       'appointments': appointments,
       'history': history,
@@ -102,17 +117,20 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
 
 
   Future<List<Map<String, dynamic>>> _activeCustomerItems() async {
+    final visibility = _jobVisibility;
+    final generation = visibility.epoch;
     final vars = <Variable<Object>>[
       Variable<String>(widget.businessId),
       Variable<String>(widget.customerId),
     ];
     final rows = <Map<String, dynamic>>[];
     final appointments = await localDatabase.customSelect(
-      "SELECT id,title,status FROM local_appointments WHERE business_id=? AND customer_id=? "
+      "SELECT id,title,status,job_id FROM local_appointments WHERE business_id=? AND customer_id=? "
       "AND lower(status) NOT IN ('cancelled','canceled','no_show','checked_in','completed')",
       variables: vars).get();
     for (final a in appointments) {
       rows.add({'type':'Appointment','id':a.read<String>('id'),
+        'job_id':a.readNullable<String>('job_id'),
         'title':a.read<String>('title'),
         'status':a.read<String>('status')});
     }
@@ -126,29 +144,34 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       final jobStatus = formattedStatus.isEmpty ? 'Open' :
           formattedStatus[0].toUpperCase() + formattedStatus.substring(1);
       rows.add({'type':'Job','id':j.read<String>('id'),
+        'job_id':j.read<String>('id'),
         'title':j.read<String>('title'),
         'number':j.readNullable<String>('job_number') ?? 'Pending sync',
         'status':jobStatus});
     }
-    final docs = await localDatabase.customSelect(
-      "SELECT id,kind,status,document_number,total FROM local_documents "
-      "WHERE business_id=? AND customer_id=? AND closed_at IS NULL "
-      "AND lower(COALESCE(status,''))<>'void'",
-      variables: vars).get();
-    for (final d in docs) {
-      final id = d.read<String>('id');
-      final detail = await const LocalDocumentDetailCache().load(widget.businessId,id);
-      rows.add({'type':d.read<String>('kind'),'id':id,
-        'title':detail?['title'] ?? detail?['job_title'] ?? d.read<String>('kind'),
-        'status':d.readNullable<String>('status') ?? '',
-        'number':d.readNullable<String>('document_number') ?? 'Pending sync',
-        'total':d.read<double>('total'),
-        'paid':num.tryParse(detail?['paid_amount']?.toString() ?? '')});
+    final docs = await CustomerDocumentSummaryService().forCustomer(
+      widget.businessId, widget.customerId);
+    for (final document in docs) {
+      final presentation = DocumentPresentation(document);
+      rows.add({
+        'type': document['kind'],
+        'id': document['id'],
+        'title': document['title'] ?? document['job_title'] ??
+            (presentation.isInvoice ? tr('invoice') : tr('estimate')),
+        'status': presentation.statusLabel,
+        'number': document['document_number'] ?? tr('pendingSync'),
+        'total': num.tryParse(document['total_amount']?.toString() ?? ''),
+        'balance_due_cents': presentation.balanceDueCents,
+        'pending_cents': presentation.paymentDetailsKnown ? presentation.pendingCents : null,
+        'payment_reconciliation_required': presentation.requiresReconciliation,
+      });
     }
-    return rows;
+    final visibleRows = await visibility.filter(rows, jobIdKey: 'job_id');
+    return visibility.isCurrent(generation) ? visibleRows : [];
   }
 
   Widget _customerOverviewCard() => FutureBuilder<List<Map<String, dynamic>>>(
+    key: ValueKey(('customer-overview', _jobVisibility.epoch)),
     future: _activeCustomerItems(),
     builder: (context, snapshot) {
       final rows = snapshot.data ?? const <Map<String,dynamic>>[];
@@ -156,34 +179,40 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       final invoices = rows.where((x) => x['type'] == 'invoice').toList();
       final estimateTotal = estimates.fold<double>(0,
         (sum, x) => sum + ((x['total'] as num?)?.toDouble() ?? 0));
-      final knownInvoiceBalances = invoices.where((x) => x['paid'] is num).toList();
-      final balance = knownInvoiceBalances.fold<double>(0, (sum, x) {
-        final outstanding = ((x['total'] as num?)?.toDouble() ?? 0) -
-          ((x['paid'] as num?)?.toDouble() ?? 0);
-        return sum + (outstanding > 0 ? outstanding : 0);
-      });
+      final knownInvoiceBalances = invoices.where((x) => x['balance_due_cents'] is int).toList();
+      final balance = knownInvoiceBalances.fold<int>(0,
+        (sum, x) => sum + (x['balance_due_cents'] as int)) / 100;
+      final pending = knownInvoiceBalances.fold<int>(0,
+        (sum, x) => sum + ((x['pending_cents'] as int?) ?? 0)) / 100;
       String money(double value) => '${String.fromCharCode(36)}${value.toStringAsFixed(2)}';
       return Card(child: ExpansionTile(
         initiallyExpanded: false,
         leading: const Icon(Icons.dashboard_outlined, color: BriskersColors.customers),
-        title: const Text('Customer Overview', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(tr('customerOverview'), style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text(snapshot.hasError ? 'Could not read saved activity'
           : snapshot.hasData ? '${rows.length} active records' : 'Loading activity...'),
         children: [
           ListTile(
             dense: true,
             leading: const Icon(Icons.account_balance_wallet_outlined),
-            title: const Text('Invoice balance due (locally verified)'),
+            title: Text(tr('customerInvoiceBalanceDue')),
             trailing: Text(money(balance),
               style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: knownInvoiceBalances.length < invoices.length
-              ? Text('Payment details unavailable for ${invoices.length - knownInvoiceBalances.length} invoice(s)')
-              : const Text('Excludes draft estimates'),
+              ? Text(tr('customerPaymentDetailsUnavailable').replaceAll('{count}', '${invoices.length - knownInvoiceBalances.length}'))
+              : Text(tr('customerBalanceExplanation')),
+          ),
+          if (pending > 0) ListTile(
+            dense: true,
+            leading: const Icon(Icons.schedule_outlined),
+            title: Text(tr('customerPendingReceipts')),
+            trailing: Text(money(pending)),
+            subtitle: Text(tr('customerPendingReceiptsHelp')),
           ),
           ListTile(
             dense: true,
             leading: const Icon(Icons.request_quote_outlined),
-            title: const Text('Active estimate value (not due)'),
+            title: Text(tr('customerActiveEstimates')),
             trailing: Text(money(estimateTotal)),
           ),
           for (final item in rows)
@@ -202,7 +231,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               title: Text(item['title'].toString()),
               subtitle: Text(item['type'] == 'Job'
                 ? 'Job ${item['number']} · ${item['status']}'
-                : "${item['type']} · ${item['status']}"),
+                : "${item['type'] == 'invoice' ? tr('invoice') : item['type'] == 'estimate' ? tr('estimate') : item['type']} ${item['number'] ?? ''} · ${item['status']}"),
               trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                 if (item['total'] is num)
                   Text(
@@ -229,7 +258,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 } else {
                   Navigator.push(context, MaterialPageRoute(builder: (_) =>
                     JobDocumentScreen(businessId:widget.businessId,
-                      documentId:id,isOwner:widget.roleCode=='owner')));
+                      documentId:id,isOwner:widget.roleCode=='owner',roleCode:widget.roleCode)));
                 }
               },
             ),
@@ -289,6 +318,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
 
   Widget _offlineCustomerSections() {
     return FutureBuilder<Map<String, dynamic>>(
+      key: ValueKey(('offline-customer-sections', _jobVisibility.epoch)),
       future: _loadOfflineSections(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -422,10 +452,58 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _listenForQuarantine();
     _load();
   }
 
+  bool _reportedReview = false;
+
+  void _reportReview() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _reportedReview || _data == null ||
+          ModalRoute.of(context)?.isCurrent != true) {
+        return;
+      }
+      _reportedReview = true;
+      widget.onReviewed?.call();
+    });
+  }
+
+  void _listenForQuarantine() {
+    _jobVisibility = JobSummaryVisibility(
+      businessId: widget.businessId,
+      onQuarantine: (_) {
+        if (!mounted) return;
+        // New FutureBuilder keys discard retained activity/history snapshots.
+        // Customer identity, vehicles, and independently readable invoices stay.
+        setState(() {});
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _jobVisibility.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant CustomerDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.customerId != widget.customerId) {
+      _jobVisibility.dispose();
+      _data = null;
+      _reportedReview = false;
+      _onlineReady = false;
+      _listenForQuarantine();
+      _load();
+    }
+  }
+
   Future<void> _load() async {
+    final visibility = _jobVisibility;
+    final generation = visibility.beginLoad();
     var localShown = false;
     final forceOnline =
         BriskersConnectionModeController.instance.forceOnline;
@@ -440,7 +518,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               widget.businessId,
               widget.customerId,
             );
-        if (local != null && mounted) {
+        if (local != null && mounted && visibility.isCurrent(generation)) {
           localShown = true;
           setState(() {
             _data = local;
@@ -448,14 +526,17 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             _onlineReady = false;
             _error = null;
           });
+          _reportReview();
         }
       } catch (_) {
         // The online refresh below can still populate the local cache.
       }
     }
 
+    if (!mounted || !visibility.isCurrent(generation)) return;
+
     if (forceOffline) {
-      if (mounted && localShown) {
+      if (mounted && localShown && visibility.isCurrent(generation)) {
         setState(() {
           _onlineReady = false;
           _showingLocal = true;
@@ -482,6 +563,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           widget.businessId,
           widget.customerId,
         );
+        if (!mounted || !visibility.isCurrent(generation)) return;
         await _saveFullDetail(fullDetail);
         await _sync.refreshCustomer(
           widget.businessId,
@@ -499,7 +581,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             widget.customerId,
           );
 
-      if (!mounted) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _data = local;
         _onlineReady = bootstrapped && local != null;
@@ -510,8 +592,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 : 'Customer access is not available for this account.')
             : null;
       });
+      _reportReview();
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _onlineReady = false;
         if (localShown && !forceOnline) {
@@ -742,6 +825,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           businessId: widget.businessId,
           documentId: invoiceId,
           isOwner: widget.roleCode == 'owner',
+          roleCode: widget.roleCode,
           canManageExpenses: _canManageQuickActions,
           initialAction: 'add_item',
         ),
@@ -774,6 +858,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             businessId:widget.businessId,
             documentId:documentId,
             isOwner:widget.roleCode=='owner',
+            roleCode:widget.roleCode,
             canManageExpenses:_canManageQuickActions,
             initialAction:'add_item',
           ),
@@ -863,6 +948,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             businessId:widget.businessId,
             documentId:documentId,
             isOwner:widget.roleCode=='owner',
+            roleCode:widget.roleCode,
             canManageExpenses:_canManageQuickActions,
             initialAction:'add_item',
           )),
@@ -882,6 +968,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             businessId: widget.businessId,
             documentId: documentId,
             isOwner: widget.roleCode == 'owner',
+            roleCode: widget.roleCode,
             canManageExpenses: _canManageQuickActions,
             initialAction: 'add_item',
           ),
@@ -1122,6 +1209,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     businessId: widget.businessId,
                     customerId: widget.customerId,
                     vehicles: vehicles,
+                    canManage: _canManageQuickActions,
+                    canDelete: widget.roleCode == 'owner',
                   ),
                   const SizedBox(height: 18),
                   Container(
@@ -1145,6 +1234,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                     const SizedBox(height: 18),
                     CustomerServiceHistorySection(
+                  roleCode: widget.roleCode,
                       businessId: widget.businessId,
                       customerId: widget.customerId,
                       vehicles: vehicles,

@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+
+import '../core/module_modal_theme.dart';
+
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
@@ -9,6 +12,7 @@ import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
+import '../services/warranty_receipt_reporting.dart';
 import '../services/local_attachment_cache.dart';
 import '../services/local_financial_cache.dart';
 import '../services/expenseiq_local_photo_sync.dart';
@@ -32,7 +36,10 @@ class ExpensesScreen extends StatefulWidget {
   State<ExpensesScreen> createState() => _ExpensesScreenState();
 }
 
-class _ExpensesScreenState extends State<ExpensesScreen> {
+class _ExpensesScreenState extends State<ExpensesScreen>
+    with ModuleModalState<ExpensesScreen> {
+  @override
+  Color get modalAccent => BriskersColors.expenses;
   static const _api = BriskersApi();
   static const _expenseIqChannel = MethodChannel('com.briskers/expenseiq');
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
@@ -171,8 +178,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
   Future<List<Map<String, dynamic>>> _fetchTransactions({
     required int offset,
-  }) {
-    return _api.transactionsPaged(
+  }) async {
+    final rows = await _api.transactionsPaged(
       widget.businessId,
       limit: _pageSize,
       offset: offset,
@@ -186,14 +193,21 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       categoryId: _categoryFilterId,
       counterpartyId: _counterpartyFilterId,
     );
+    try {
+      return await const WarrantyReceiptReporting().enrich(
+        widget.businessId,
+        rows,
+      );
+    } catch (_) {
+      return rows.map(WarrantyReceiptReporting.unverified).toList();
+    }
   }
 
   Future<void> _prefetchReceiptDetails(
     List<Map<String, dynamic>> snapshot,
   ) async {
     final rows = snapshot.where((row) {
-      final count =
-          int.tryParse(row['receipt_count']?.toString() ?? '') ?? 0;
+      final count = int.tryParse(row['receipt_count']?.toString() ?? '') ?? 0;
       return count > 0 && (row['id']?.toString() ?? '').isNotEmpty;
     }).toList();
 
@@ -201,24 +215,23 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       final batch = rows.skip(index).take(3).map((row) async {
         final id = row['id'].toString();
         try {
-          final detail = await _api.transactionDetail(
-            widget.businessId,
-            id,
-          );
+          final detail = await _api.transactionDetail(widget.businessId, id);
           await _localFinancial.saveTransactionDetail(
             widget.businessId,
             id,
             detail,
           );
-          final attachments = List<dynamic>.from(
-            detail['attachments'] ?? const [],
-          ).whereType<Map>().map((raw) {
-            return Map<String, dynamic>.from(raw);
-          }).toList();
+          final attachments =
+              List<dynamic>.from(detail['attachments'] ?? const [])
+                  .whereType<Map>()
+                  .map((raw) {
+                    return Map<String, dynamic>.from(raw);
+                  })
+                  .toList();
 
           for (final attachment in attachments) {
-            final bucket = attachment['bucket']?.toString() ??
-                'briskers-private';
+            final bucket =
+                attachment['bucket']?.toString() ?? 'briskers-private';
             final key = attachment['key']?.toString() ?? '';
             if (key.isEmpty) continue;
             await _attachmentCache.getOrDownload(bucket, key);
@@ -241,12 +254,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       setState(() => _error = null);
     }
 
-    final forceOnline =
-        BriskersConnectionModeController.instance.forceOnline;
+    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
     if (!forceOnline) {
       try {
-        final localRows = await _localFinancial.loadTransactions(
+        var localRows = await _localFinancial.loadTransactions(
           widget.businessId,
           startDate: _rangeStartDate,
           endDate: _rangeEndDate,
@@ -258,8 +270,14 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           categoryId: _categoryFilterId,
           counterpartyId: _counterpartyFilterId,
         );
-        final localOptions =
-            await _localFinancial.loadOptions(widget.businessId);
+        localRows = await const WarrantyReceiptReporting().enrich(
+          widget.businessId,
+          localRows,
+          refresh: false,
+        );
+        final localOptions = await _localFinancial.loadOptions(
+          widget.businessId,
+        );
 
         if (mounted && (localRows.isNotEmpty || localOptions.isNotEmpty)) {
           setState(() {
@@ -268,9 +286,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             _quickTemplates = List<dynamic>.from(
               localOptions['quick_templates'] ?? const [],
             ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-            _accounts = List<dynamic>.from(
-              localOptions['accounts'] ?? const [],
-            ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+            _accounts = List<dynamic>.from(localOptions['accounts'] ?? const [])
+                .map((raw) => Map<String, dynamic>.from(raw as Map))
+                .toList();
             _categories = List<dynamic>.from(
               localOptions['categories'] ?? const [],
             ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
@@ -308,13 +326,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       ]);
       final rows = List<Map<String, dynamic>>.from(results[0] as List);
       final options = Map<String, dynamic>.from(results[1] as Map);
-      final snapshot =
-          List<Map<String, dynamic>>.from(results[2] as List);
+      final verifiedRows = {for (final row in rows) row['id']?.toString(): row};
+      final snapshot = List<Map<String, dynamic>>.from(results[2] as List)
+          .map((row) => verifiedRows[row['id']?.toString()] ?? row)
+          .toList();
 
-      await _localFinancial.saveTransactions(
-        widget.businessId,
-        snapshot,
-      );
+      await _localFinancial.saveTransactions(widget.businessId, snapshot);
       await _localFinancial.saveOptions(widget.businessId, options);
       unawaited(_prefetchReceiptDetails(snapshot));
 
@@ -325,12 +342,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         _quickTemplates = List<dynamic>.from(
           options['quick_templates'] ?? const [],
         ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-        _accounts = List<dynamic>.from(
-          options['accounts'] ?? const [],
-        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-        _categories = List<dynamic>.from(
-          options['categories'] ?? const [],
-        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        _accounts = List<dynamic>.from(options['accounts'] ?? const [])
+            .map((raw) => Map<String, dynamic>.from(raw as Map))
+            .toList();
+        _categories = List<dynamic>.from(options['categories'] ?? const [])
+            .map((raw) => Map<String, dynamic>.from(raw as Map))
+            .toList();
         _counterparties = List<dynamic>.from(
           options['counterparties'] ?? const [],
         ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
@@ -354,10 +371,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   }
 
   Future<void> _loadMore() async {
-    if (_showingLocal ||
-        _loading ||
-        _loadingMore ||
-        !_hasMore) {
+    if (_showingLocal || _loading || _loadingMore || !_hasMore) {
       return;
     }
     setState(() => _loadingMore = true);
@@ -380,12 +394,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
   void _searchChanged(String _) {
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(
-      const Duration(milliseconds: 350),
-      () {
-        if (mounted) _load(showLoading: false);
-      },
-    );
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) _load(showLoading: false);
+    });
   }
 
   Future<void> _chooseDirection() async {
@@ -403,9 +414,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             ])
               ListTile(
                 title: Text(option.$2),
-                trailing: _filter == option.$1
-                    ? const Icon(Icons.check)
-                    : null,
+                trailing: _filter == option.$1 ? const Icon(Icons.check) : null,
                 onTap: () => Navigator.pop(sheetContext, option.$1),
               ),
             const SizedBox(height: 8),
@@ -429,10 +438,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             const ListTile(
               title: Text(
                 'Select date range',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                ),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
               ),
             ),
             for (final option in const [
@@ -447,13 +453,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               ListTile(
                 title: Text(option.$2),
                 trailing: _dateRange == option.$1
-                    ? const Icon(
-                        Icons.check,
-                        color: BriskersColors.invoices,
-                      )
+                    ? const Icon(Icons.check, color: BriskersColors.invoices)
                     : option.$1 == 'custom'
-                        ? const Icon(Icons.chevron_right)
-                        : null,
+                    ? const Icon(Icons.chevron_right)
+                    : null,
                 onTap: () => Navigator.pop(sheetContext, option.$1),
               ),
             const SizedBox(height: 8),
@@ -471,10 +474,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         firstDate: DateTime(now.year - 10),
         lastDate: now,
         initialDateRange: _customStartDate != null && _customEndDate != null
-            ? DateTimeRange(
-                start: _customStartDate!,
-                end: _customEndDate!,
-              )
+            ? DateTimeRange(start: _customStartDate!, end: _customEndDate!)
             : DateTimeRange(
                 start: now.subtract(const Duration(days: 30)),
                 end: now,
@@ -513,10 +513,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               children: [
                 const Text(
                   'Transaction filters',
-                  style: TextStyle(
-                    fontSize: 21,
-                    fontWeight: FontWeight.w900,
-                  ),
+                  style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
                 ),
                 const SizedBox(height: 14),
                 DropdownButtonFormField<String?>(
@@ -537,8 +534,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       ),
                     ),
                   ],
-                  onChanged: (value) =>
-                      setSheetState(() => accountId = value),
+                  onChanged: (value) => setSheetState(() => accountId = value),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String?>(
@@ -559,8 +555,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       ),
                     ),
                   ],
-                  onChanged: (value) =>
-                      setSheetState(() => categoryId = value),
+                  onChanged: (value) => setSheetState(() => categoryId = value),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String?>(
@@ -606,8 +601,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           backgroundColor: BriskersColors.invoices,
                           foregroundColor: Colors.white,
                         ),
-                        onPressed: () =>
-                            Navigator.pop(sheetContext, true),
+                        onPressed: () => Navigator.pop(sheetContext, true),
                         child: const Text('Apply'),
                       ),
                     ),
@@ -759,7 +753,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         ),
       ),
     );
-    await _load();
+    // Keep the cached list on screen while refreshing in the background.
+    unawaited(_load(showLoading: false));
   }
 
   Future<void> _editTransactionFromList(String transactionId) async {
@@ -791,7 +786,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   }
 
   Future<void> _deleteTransactionFromList(String transactionId) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed =
+        await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
             title: const Text('Delete transaction?'),
@@ -825,18 +821,14 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     }
   }
 
-  Future<void> _showTransactionActions(
-    Map<String, dynamic> transaction,
-  ) async {
+  Future<void> _showTransactionActions(Map<String, dynamic> transaction) async {
     final id = transaction['id']?.toString() ?? '';
     if (id.isEmpty) return;
 
     Map<String, dynamic> detail;
     if (_showingLocal) {
-      detail = await _localFinancial.loadTransactionDetail(
-            widget.businessId,
-            id,
-          ) ??
+      detail =
+          await _localFinancial.loadTransactionDetail(widget.businessId, id) ??
           Map<String, dynamic>.from(transaction);
     } else {
       try {
@@ -849,8 +841,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     if (!mounted) return;
 
     final editable = _showingLocal ? true : detail['editable'] == true;
-    final deletable =
-        !_showingLocal && _owner && detail['deletable'] == true;
+    final deletable = !_showingLocal && _owner && detail['deletable'] == true;
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -879,10 +870,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             if (deletable) ...[
               const Divider(height: 1),
               ListTile(
-                leading: const Icon(
-                  Icons.delete_outline,
-                  color: Colors.red,
-                ),
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
                 title: const Text(
                   'Delete transaction',
                   style: TextStyle(color: Colors.red),
@@ -917,8 +905,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   /// Safe to restart: the server excludes expenses with finalized photos.
   /// The source photos are never moved or deleted.
   Future<void> _refreshPhotoCounts({bool force = false}) async {
-    if (!_owner || !Platform.isAndroid ||
-        _photoCountsReading || (_importing && !force)) {
+    if (!_owner ||
+        !Platform.isAndroid ||
+        _photoCountsReading ||
+        (_importing && !force)) {
       return;
     }
     _photoCountsReading = true;
@@ -972,7 +962,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Android will upload when network and battery conditions allow.'),
+            content: Text(
+              'Android will upload when network and battery conditions allow.',
+            ),
           ),
         );
       }
@@ -987,7 +979,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     if (_importing || !_owner || !Platform.isAndroid) return;
     if (BriskersConnectionModeController.instance.forceOffline) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connect once to index the photo mappings.')),
+        const SnackBar(
+          content: Text('Connect once to index the photo mappings.'),
+        ),
       );
       return;
     }
@@ -1002,7 +996,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     if (!mounted) return;
     if (candidates.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All mapped ExpenseIQ receipts are already uploaded.')),
+        const SnackBar(
+          content: Text('All mapped ExpenseIQ receipts are already uploaded.'),
+        ),
       );
       return;
     }
@@ -1013,16 +1009,27 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         'pickExpenseIqFolder',
       );
     } catch (error) {
-      if (mounted) setState(() => _error = 'Could not scan ExpenseIQ folder: $error');
+      if (mounted) {
+        setState(() => _error = 'Could not scan ExpenseIQ folder: $error');
+      }
       return;
     }
     if (picked == null || !mounted) return;
-    final files = picked.whereType<Map>()
-        .map((x) => Map<String, dynamic>.from(x)).toList();
-    final fileKeys = files.map((x) => _photoKey(x['name']?.toString() ?? ''))
-        .where((key) => key.isNotEmpty).toSet();
-    final matches = candidates.where((candidate) => fileKeys.contains(
-        candidate['photo_id']?.toString().trim().toLowerCase() ?? '')).length;
+    final files = picked
+        .whereType<Map>()
+        .map((x) => Map<String, dynamic>.from(x))
+        .toList();
+    final fileKeys = files
+        .map((x) => _photoKey(x['name']?.toString() ?? ''))
+        .where((key) => key.isNotEmpty)
+        .toSet();
+    final matches = candidates
+        .where(
+          (candidate) => fileKeys.contains(
+            candidate['photo_id']?.toString().trim().toLowerCase() ?? '',
+          ),
+        )
+        .length;
     final missing = candidates.length - matches;
 
     final approved = await showDialog<bool>(
@@ -1104,8 +1111,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         .where((x) => x['direction']?.toString() == 'income')
         .fold<num>(
           0,
-          (sum, item) =>
-              sum + (num.tryParse(item['amount']?.toString() ?? '') ?? 0),
+          (sum, item) => sum + WarrantyReceiptReporting.amount(item),
         );
     final expenses = _transactions
         .where((x) => x['direction']?.toString() != 'income')
@@ -1116,15 +1122,16 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         );
 
     final visible = _transactions;
+    final feesUnverified = _transactions.any(
+      (row) =>
+          row['direction'] == 'income' && row['reporting_status'] != 'verified',
+    );
 
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 68,
         backgroundColor: const Color(0xFFC62828).withValues(alpha: 0.08),
-        title: BriskersPageTitle(
-          title: tr('expensesIncome'),
-          logoHeight: 40,
-        ),
+        title: BriskersPageTitle(title: tr('expensesIncome'), logoHeight: 40),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -1226,8 +1233,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
-                        childrenPadding:
-                            const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        childrenPadding: const EdgeInsets.fromLTRB(
+                          16,
+                          0,
+                          16,
+                          12,
+                        ),
                         children: [
                           const Align(
                             alignment: Alignment.centerLeft,
@@ -1273,23 +1284,27 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
-                        childrenPadding:
-                            const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                        childrenPadding: const EdgeInsets.fromLTRB(
+                          16,
+                          4,
+                          16,
+                          12,
+                        ),
                         children: [
                           Text(
                             _importing
                                 ? 'Indexing locally: $_indexProcessed '
-                                    'of $_indexExpected references saved'
+                                      'of $_indexExpected references saved'
                                 : _photoQueueError != null
-                                    ? 'Local photo queue error: $_photoQueueError'
-                                    : _photoCounts == null
-                                        ? 'Reading local photo queue...'
-                                        : 'Indexed: ${_photoCounts!.indexed}  •  '
-                                            'Uploaded: ${_photoCounts!.uploaded}  •  '
-                                            'Waiting: ${_photoCounts!.pending}\n'
-                                            'Uploading: ${_photoCounts!.uploading}  •  '
-                                            'Failed: ${_photoCounts!.failed}  •  '
-                                            'Unmatched: ${_photoCounts!.missing}',
+                                ? 'Local photo queue error: $_photoQueueError'
+                                : _photoCounts == null
+                                ? 'Reading local photo queue...'
+                                : 'Indexed: ${_photoCounts!.indexed}  •  '
+                                      'Uploaded: ${_photoCounts!.uploaded}  •  '
+                                      'Waiting: ${_photoCounts!.pending}\n'
+                                      'Uploading: ${_photoCounts!.uploading}  •  '
+                                      'Failed: ${_photoCounts!.failed}  •  '
+                                      'Unmatched: ${_photoCounts!.missing}',
                           ),
                           if (_importing && _indexExpected > 0) ...[
                             const SizedBox(height: 8),
@@ -1302,10 +1317,13 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                             dense: true,
                             contentPadding: EdgeInsets.zero,
                             title: const Text('Automatic background sync'),
-                            subtitle: const Text('Android uploads in small batches'),
+                            subtitle: const Text(
+                              'Android uploads in small batches',
+                            ),
                             value: _photoCounts?.enabled ?? true,
                             onChanged: _importing || _photoCounts == null
-                                ? null : _togglePhotoSync,
+                                ? null
+                                : _togglePhotoSync,
                           ),
                           SwitchListTile(
                             dense: true,
@@ -1313,14 +1331,16 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                             title: const Text('Wi-Fi only'),
                             value: _photoCounts?.wifiOnly ?? true,
                             onChanged: _importing || _photoCounts == null
-                                ? null : _toggleWifiOnly,
+                                ? null
+                                : _toggleWifiOnly,
                           ),
                           Row(
                             children: [
                               Expanded(
                                 child: OutlinedButton.icon(
                                   onPressed: _importing
-                                      ? null : _importExpenseIqReceipts,
+                                      ? null
+                                      : _importExpenseIqReceipts,
                                   icon: _importing
                                       ? const SizedBox.square(
                                           dimension: 16,
@@ -1330,22 +1350,27 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                         )
                                       : const Icon(Icons.folder_outlined),
                                   label: Text(
-                                    _importing ? 'Indexing...' : 'Index locally',
+                                    _importing
+                                        ? 'Indexing...'
+                                        : 'Index locally',
                                   ),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: FilledButton.icon(
-                                  onPressed: _requestingPhotoSync ||
+                                  onPressed:
+                                      _requestingPhotoSync ||
                                           _photoCounts == null ||
                                           _photoCounts?.enabled == false ||
                                           _photoCounts?.pending == 0
-                                      ? null : _requestPhotoSync,
+                                      ? null
+                                      : _requestPhotoSync,
                                   icon: const Icon(Icons.cloud_upload_outlined),
                                   label: Text(
                                     _requestingPhotoSync
-                                        ? 'Scheduling...' : 'Sync now',
+                                        ? 'Scheduling...'
+                                        : 'Sync now',
                                   ),
                                 ),
                               ),
@@ -1382,8 +1407,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           _filter == 'all'
                               ? tr('all')
                               : _filter == 'income'
-                                  ? 'Income'
-                                  : tr('expenses'),
+                              ? 'Income'
+                              : tr('expenses'),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1401,7 +1426,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         onPressed: _showAdvancedFilters,
                         icon: Icon(
                           Icons.filter_alt_outlined,
-                          color: _accountFilterId != null ||
+                          color:
+                              _accountFilterId != null ||
                                   _categoryFilterId != null ||
                                   _counterpartyFilterId != null
                               ? BriskersColors.invoices
@@ -1411,50 +1437,52 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  Row(children: [
-                    Expanded(
-                      child: SearchBar(
-                        controller: _searchController,
-                        hintText: 'Search transactions…',
-                        leading: const Icon(Icons.search),
-                        elevation: const WidgetStatePropertyAll<double>(3),
-                        shadowColor: const WidgetStatePropertyAll<Color>(
-                          Colors.black26,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SearchBar(
+                          controller: _searchController,
+                          hintText: 'Search transactions…',
+                          leading: const Icon(Icons.search),
+                          elevation: const WidgetStatePropertyAll<double>(3),
+                          shadowColor: const WidgetStatePropertyAll<Color>(
+                            Colors.black26,
+                          ),
+                          onChanged: (value) {
+                            setState(() {});
+                            _searchChanged(value);
+                          },
+                          onSubmitted: (_) {
+                            _searchDebounce?.cancel();
+                            _load(showLoading: false);
+                          },
+                          trailing: [
+                            if (_searchController.text.isNotEmpty)
+                              IconButton(
+                                tooltip: 'Clear search',
+                                onPressed: () {
+                                  _searchDebounce?.cancel();
+                                  _searchController.clear();
+                                  setState(() {});
+                                  _load(showLoading: false);
+                                },
+                                icon: const Icon(Icons.close),
+                              ),
+                          ],
                         ),
-                        onChanged: (value) {
-                          setState(() {});
-                          _searchChanged(value);
-                        },
-                        onSubmitted: (_) {
-                          _searchDebounce?.cancel();
-                          _load(showLoading: false);
-                        },
-                        trailing: [
-                          if (_searchController.text.isNotEmpty)
-                            IconButton(
-                              tooltip: 'Clear search',
-                              onPressed: () {
-                                _searchDebounce?.cancel();
-                                _searchController.clear();
-                                setState(() {});
-                                _load(showLoading: false);
-                              },
-                              icon: const Icon(Icons.close),
-                            ),
-                        ],
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton.filled(
-                      tooltip: 'Add transaction',
-                      style: IconButton.styleFrom(
-                        backgroundColor: BriskersColors.expenses,
-                        foregroundColor: Colors.white,
+                      const SizedBox(width: 8),
+                      IconButton.filled(
+                        tooltip: 'Add transaction',
+                        style: IconButton.styleFrom(
+                          backgroundColor: BriskersColors.expenses,
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: _importing ? null : _showAddMenu,
+                        icon: const Icon(Icons.add),
                       ),
-                      onPressed: _importing ? null : _showAddMenu,
-                      icon: const Icon(Icons.add),
-                    ),
-                  ]),
+                    ],
+                  ),
                   if (_searchController.text.trim().isNotEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 5, left: 4),
@@ -1470,11 +1498,19 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     const SizedBox(height: 10),
                     Text(
                       _error!,
-                      style:
-                          TextStyle(color: Theme.of(context).colorScheme.error),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
                     ),
                   ],
                   const SizedBox(height: 12),
+                  if (feesUnverified)
+                    const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Text(
+                        'Processor fees are unverified for some receipts. Gross amounts remain shown for those rows; sync invoice details and refresh before relying on this income total.',
+                      ),
+                    ),
                   if (visible.isEmpty)
                     const Card(
                       child: Padding(
@@ -1488,7 +1524,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           transaction['direction']?.toString() == 'income';
                       final counterparty =
                           transaction['counterparty']?.toString() ??
-                              (incomeRow ? 'Income' : 'Expense');
+                          (incomeRow ? 'Income' : 'Expense');
                       final category =
                           transaction['category']?.toString() ?? '';
                       final date =
@@ -1498,9 +1534,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       final jobTitle =
                           transaction['job_title']?.toString().trim() ?? '';
                       final customerName =
-                          transaction['job_customer_name']?.toString().trim() ?? '';
+                          transaction['job_customer_name']?.toString().trim() ??
+                          '';
                       final documentNumber =
-                          transaction['document_number']?.toString().trim() ?? '';
+                          transaction['document_number']?.toString().trim() ??
+                          '';
                       final remarks =
                           transaction['remarks']?.toString().trim() ?? '';
                       final contextLine = <String>[
@@ -1513,7 +1551,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         if (documentNumber.isNotEmpty)
                           'Invoice #$documentNumber',
                       ].join(' • ');
-                      final receiptCount = int.tryParse(
+                      final receiptCount =
+                          int.tryParse(
                             transaction['receipt_count']?.toString() ?? '',
                           ) ??
                           0;
@@ -1535,8 +1574,9 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                               children: [
                                 CircleAvatar(
                                   radius: 20,
-                                  backgroundColor:
-                                      directionColor.withValues(alpha: 0.10),
+                                  backgroundColor: directionColor.withValues(
+                                    alpha: 0.10,
+                                  ),
                                   child: Icon(
                                     incomeRow
                                         ? Icons.south_west
@@ -1593,13 +1633,31 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
                                     Text(
-                                      '${incomeRow ? '+' : '-'}${_money(transaction['amount'])}',
+                                      '${incomeRow ? '+' : '-'}${_money(WarrantyReceiptReporting.amount(transaction))}',
                                       style: TextStyle(
                                         fontSize: 17.5,
                                         fontWeight: FontWeight.w900,
                                         color: directionColor,
                                       ),
                                     ),
+                                    if ((num.tryParse(
+                                              transaction['reporting_processor_fee']
+                                                      ?.toString() ??
+                                                  '',
+                                            ) ??
+                                            0) >
+                                        0)
+                                      Text(
+                                        'Net · fee ${_money(transaction['reporting_processor_fee'])}',
+                                        style: const TextStyle(fontSize: 11),
+                                      ),
+                                    if (incomeRow &&
+                                        transaction['reporting_status'] !=
+                                            'verified')
+                                      const Text(
+                                        'Gross · fee unverified',
+                                        style: TextStyle(fontSize: 11),
+                                      ),
                                     const SizedBox(height: 8),
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
@@ -1637,9 +1695,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                   if (_loadingMore)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 18),
-                      child: Center(
-                        child: CircularProgressIndicator(),
-                      ),
+                      child: Center(child: CircularProgressIndicator()),
                     )
                   else if (!_hasMore && visible.isNotEmpty)
                     const Padding(
@@ -1647,9 +1703,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       child: Center(
                         child: Text(
                           'No more transactions',
-                          style: TextStyle(
-                            color: Color(0xFF667085),
-                          ),
+                          style: TextStyle(color: Color(0xFF667085)),
                         ),
                       ),
                     ),

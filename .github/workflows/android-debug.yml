@@ -7,11 +7,19 @@ on:
     paths-ignore:
       - '.github/workflows/**'
 
+# Build/test commands never transmit Flutter or Dart analytics.
+env:
+  CI: 'true'
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
+
 permissions:
   contents: read
 
 jobs:
   build:
+    # This integration branch is code-only; keep APK builds paused here.
+    if: github.ref != 'refs/heads/feat/combined-118-20261014'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -668,6 +676,9 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           CERTS="$("$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk)"
           printf '%s\n' "$CERTS"
+          EXPECTED_CERT="82075a34ef748541a270af4172dd3ddc37f3e464d9ac9f20eeef7f40a029ff08"
+          python3 ../tools/tests/test_apk_certificate_verification.py
+          printf '%s\n' "$CERTS" | python3 ../tools/verify_apk_certificate.py --expected "$EXPECTED_CERT"
           if printf '%s\n' "$CERTS" | grep -q "CN=Android Debug"; then
             echo "ERROR: APK was signed with a temporary Android Debug certificate."
             exit 1
@@ -678,12 +689,30 @@ jobs:
         run: |
           VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
           BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
-          cp build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/Briskers-v${VERSION}-b${BUILD_NUMBER}.apk"
+          APK="build/app/outputs/flutter-apk/Briskers-v${VERSION}-b${BUILD_NUMBER}.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$APK"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          printf '%s\n' "$BADGING" | head -1
+          printf '%s\n' "$BADGING" | grep -q "package: name='com.briskers.briskers_app' versionCode='$BUILD_NUMBER' versionName='$VERSION'" || { echo "Unexpected APK identity"; exit 1; }
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          {
+            echo "source_commit=$GITHUB_SHA"
+            echo "run_url=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "filename=$(basename "$APK")"
+            echo "bytes=$(stat -c%s "$APK")"
+            sha256sum "$APK"
+            "$APKSIGNER" verify --verbose --print-certs "$APK"
+            printf '%s\n' "$BADGING" | head -1
+          } > "${APK%.apk}.verification.txt"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: briskers-android-debug
-          path: generated/build/app/outputs/flutter-apk/Briskers-v*.apk
+          path: |
+            generated/build/app/outputs/flutter-apk/Briskers-v*.apk
+            generated/build/app/outputs/flutter-apk/Briskers-v*.verification.txt
           if-no-files-found: error
           retention-days: 30
+

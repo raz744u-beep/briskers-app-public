@@ -7,6 +7,8 @@ import 'package:path_provider/path_provider.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_quarantine.dart';
+import 'offline_job_purge.dart';
 
 typedef MediaDirectoryProvider = Future<Directory> Function();
 
@@ -182,6 +184,7 @@ class OfflinePreInspectionService {
 
       final localId = existing?.read<String>('id') ??
           'local-inspection-${_operationId('inspection')}';
+      if (existing == null) await OfflineJobPurge.recordNewIntent(_database, businessId, [localId]);
       final baseVersion = existing?.readNullable<int>('row_version');
       final inspectedAt = existing?.data['inspected_at'] ??
           _unix(DateTime.now().toUtc());
@@ -247,6 +250,7 @@ class OfflinePreInspectionService {
 
     try {
       await _database.transaction(() async {
+        await OfflineJobPurge.recordNewIntent(_database, businessId, [localPhotoId, operationId]);
         var inspection = await _inspectionRow(businessId, jobId);
         if (inspection != null &&
             inspection.read<String>('sync_state') == 'conflict') {
@@ -259,6 +263,7 @@ class OfflinePreInspectionService {
         if (inspection == null) {
           final localInspectionId =
               'local-inspection-${_operationId('inspection')}';
+          await OfflineJobPurge.recordNewIntent(_database, businessId, [localInspectionId]);
           await _database.customStatement(
             '''
             INSERT INTO local_pre_inspections (
@@ -428,6 +433,9 @@ class OfflinePreInspectionService {
       final entityType = row.read<String>('entity_type');
 
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: id,
+        );
         final payload = Map<String, dynamic>.from(
           jsonDecode(row.read<String>('payload_json')) as Map,
         );
@@ -443,6 +451,7 @@ class OfflinePreInspectionService {
           continue;
         }
       } catch (error) {
+        if (error is LocalJobQuarantineException) rethrow;
         await _markOutboxFailure(id, error);
         break;
       }
@@ -469,17 +478,25 @@ class OfflinePreInspectionService {
     final jobId = payload['job_id']?.toString() ?? '';
     final operationId = payload['operation_id']?.toString() ?? '';
 
-    final response = await _api.syncSavePreInspection(
+    final response = await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      jobId,
-      operationId: operationId,
-      expectedRowVersion: row.readNullable<int>('base_row_version'),
-      notes: payload['notes']?.toString(),
-      odometer: payload['odometer'] as num?,
+      () => _api.syncSavePreInspection(
+        businessId,
+        jobId,
+        operationId: operationId,
+        expectedRowVersion: row.readNullable<int>('base_row_version'),
+        notes: payload['notes']?.toString(),
+        odometer: payload['odometer'] as num?,
+      ),
+      outboxId: outboxId,
     );
 
     if (response['status']?.toString() == 'conflict') {
       await _database.transaction(() async {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: outboxId,
+        );
         await _database.customStatement(
           '''
           UPDATE local_pre_inspections
@@ -513,6 +530,9 @@ class OfflinePreInspectionService {
     }
 
     await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: outboxId,
+      );
       await _reconcileInspection(
         businessId,
         jobId,
@@ -545,18 +565,27 @@ class OfflinePreInspectionService {
       throw StateError('Queued inspection photo is missing from local storage.');
     }
 
-    final registration = await _api.syncRegisterPreInspectionPhoto(
+    await _assertPhotoReplayTarget(businessId, jobId, localPhotoId);
+    final registration = await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      jobId,
-      operationId: operationId,
-      filename: filename,
-      mimeType: mimeType,
-      note: payload['note']?.toString(),
+      () => _api.syncRegisterPreInspectionPhoto(
+        businessId,
+        jobId,
+        operationId: operationId,
+        filename: filename,
+        mimeType: mimeType,
+        note: payload['note']?.toString(),
+      ),
+      outboxId: outboxId,
     );
 
     final rawInspection = registration['inspection'];
     if (rawInspection is Map) {
       await _database.transaction(() async {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: outboxId,
+        );
         await _reconcileInspection(
           businessId,
           jobId,
@@ -575,22 +604,41 @@ class OfflinePreInspectionService {
       throw StateError('Server returned incomplete photo registration.');
     }
 
-    await _api.uploadRegisteredAttachment(
+    await _assertPhotoReplayTarget(businessId, jobId, localPhotoId);
+    await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      bucket: bucket,
-      key: key,
-      attachmentId: attachmentId,
-      mimeType: mimeType,
-      bytes: bytes,
+      () => _api.uploadRegisteredAttachment(
+        businessId,
+        bucket: bucket,
+        key: key,
+        attachmentId: attachmentId,
+        mimeType: mimeType,
+        bytes: bytes,
+        replayGuard: <T>(Future<T> Function() operation) =>
+            LocalJobQuarantine.guardReplay<T>(
+          _database, businessId, operation, outboxId: outboxId,
+        ),
+      ),
+      outboxId: outboxId,
     );
 
-    await _api.updateJobPreInspectionPhotoNote(
+    await _assertPhotoReplayTarget(businessId, jobId, localPhotoId);
+    await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      photoId,
-      payload['note']?.toString() ?? '',
+      () => _api.updateJobPreInspectionPhotoNote(
+        businessId,
+        photoId,
+        payload['note']?.toString() ?? '',
+      ),
+      outboxId: outboxId,
     );
 
     await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: outboxId,
+      );
       final inspection = await _inspectionRow(businessId, jobId);
       if (inspection == null) {
         throw StateError('Local pre-inspection disappeared during upload.');
@@ -626,6 +674,25 @@ class OfflinePreInspectionService {
         [outboxId],
       );
     });
+  }
+
+  Future<void> _assertPhotoReplayTarget(
+    String businessId, String jobId, String localPhotoId,
+  ) async {
+    final photo = await _database.customSelect(
+      '''SELECT p.id FROM local_pre_inspection_photos p
+         JOIN local_pre_inspections i
+           ON i.business_id = p.business_id AND i.id = p.inspection_id
+         WHERE p.business_id = ? AND p.id = ? AND i.job_id = ?''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(localPhotoId),
+        Variable<String>(jobId),
+      ],
+    ).getSingleOrNull();
+    if (photo == null) {
+      throw StateError('Queued inspection photo is no longer active locally.');
+    }
   }
 
   Future<void> _reconcileInspection(
@@ -763,6 +830,7 @@ class OfflinePreInspectionService {
       }
     } else {
       operationId = _operationId('inspection');
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [operationId]);
     }
 
     final payload = jsonEncode({
@@ -867,3 +935,4 @@ class OfflinePreInspectionService {
     return DateTime.tryParse(value.toString())?.toUtc().toIso8601String();
   }
 }
+

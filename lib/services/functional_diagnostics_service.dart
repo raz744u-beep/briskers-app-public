@@ -2,6 +2,12 @@
 
 import 'dart:convert';
 
+import '../core/standard_note_rules.dart';
+import '../core/job_list_options.dart';
+import 'local_job_access_history.dart';
+import 'test_job_cleanup_policy.dart';
+import 'work_finding_merge.dart';
+
 import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,6 +25,7 @@ import 'offline_invoice_payment_ledger.dart';
 import 'offline_estimate_invoice_service.dart';
 import 'offline_financial_write_service.dart';
 import 'offline_job_admin_service.dart';
+import 'local_job_repository.dart';
 import 'weather_service.dart';
 import 'historical_photo_matcher.dart';
 import '../screens/customers/customer_quick_actions.dart';
@@ -248,6 +255,36 @@ class BriskersFunctionalDiagnosticsService {
       action: _checkOfflineCustomerVehicleAppointment,
     );
 
+    await _scenario(
+      checks,
+      id: 'FUNC-022',
+      title: 'Jobs sorting and pagination',
+      success: 'Recent access, separate modification order, Active status groups, completed visibility and paging checked in local database.',
+      action: _checkJobSorting,
+    );
+
+    await _scenario(
+      checks,
+      id: 'FUNC-023',
+      title: 'Standard Note ordering and color defaults',
+      success: 'Saved ranks are stable, General stays last, and legacy colors have a safe default.',
+      action: _checkStandardNotePresentation,
+    );
+    await _scenario(
+      checks,
+      id: 'FUNC-024',
+      title: 'Test Job cleanup permission and preview guards',
+      success: 'Owner confirmation, preview expiry, unknown contracts, and protected real records are enforced without deleting data.',
+      action: _checkTestJobCleanupGuards,
+    );
+    await _scenario(
+      checks,
+      id: 'FUNC-025',
+      title: 'Finding reconciliation preserves pending work',
+      success: 'Stale temporary IDs are removed while pending notes/photos and newer server repair state survive repeated merges.',
+      action: _checkFindingReconciliation,
+    );
+
     return FunctionalDiagnosticsReport(
       startedAt: startedAt,
       finishedAt: DateTime.now().toUtc(),
@@ -298,6 +335,181 @@ class BriskersFunctionalDiagnosticsService {
       await _cleanupPreferences(businessId);
       await database.close();
     }
+  }
+
+  Future<void> _checkStandardNotePresentation(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final ordered = orderStandardNotes([
+      {'id': 'general', 'name': ' General ', 'sort_order': -100},
+      {'id': 'warranty', 'name': 'Warranty', 'sort_order': 20},
+      {'id': 'maintenance', 'name': 'Maintenance', 'sort_order': 10},
+    ]);
+    _require(ordered.first['id'] == 'maintenance', 'Saved note order changed.');
+    _require(ordered.last['id'] == 'general', 'General is not last.');
+    _require(standardNoteColorHex(null) == standardNoteDefaultColor,
+        'Legacy note color does not have a safe default.');
+    _require(standardNoteColorHex('#00796b') == '#00796B',
+        'Saved note color was not retained.');
+  }
+
+  Future<void> _checkTestJobCleanupGuards(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final now = DateTime.now();
+    final fixture = <String, dynamic>{
+      'schema_version': 1, 'business_id': businessId, 'job_id': 'sandbox-job',
+      'job_number': 'J-8', 'can_delete': true, 'rollout_enabled': true,
+      'blocked_reasons': <String>[],
+      'documents': <Map<String, dynamic>>[], 'dependencies': <String, int>{},
+      'fingerprint': 'isolated-sandbox',
+    };
+    final plan = TestJobCleanupPlan.fromJson(fixture,
+        businessId: businessId, jobId: 'sandbox-job', receivedAt: now);
+    TestJobCleanupPolicy.requireExecutable(plan, roleCode: 'owner',
+        confirmation: 'DELETE TEST J-8', now: now);
+    bool rejected(void Function() action) {
+      try { action(); return false; } catch (_) { return true; }
+    }
+    _require(rejected(() => TestJobCleanupPolicy.requireExecutable(plan,
+        roleCode: 'office', confirmation: 'DELETE TEST J-8', now: now)),
+        'A non-owner was allowed to execute cleanup.');
+    _require(rejected(() => TestJobCleanupPolicy.requireExecutable(plan,
+        roleCode: 'owner', confirmation: 'DELETE TEST J-9', now: now)),
+        'Confirmation did not bind to the selected Job.');
+    _require(rejected(() => TestJobCleanupPolicy.requireExecutable(plan,
+        roleCode: 'owner', confirmation: 'DELETE TEST J-8',
+        now: now.add(const Duration(minutes: 3)))), 'Expired preview accepted.');
+    for (final number in ['J-7', 'J11', 'J-12']) {
+      final protected = TestJobCleanupPlan.fromJson(
+          {...fixture, 'job_number': number},
+          businessId: businessId, jobId: 'sandbox-job', receivedAt: now);
+      _require(!protected.canDelete, 'Protected real Job was allowed.');
+    }
+    final rolloutHeld = TestJobCleanupPlan.fromJson(
+        {...fixture, 'rollout_enabled': false}, businessId: businessId,
+        jobId: 'sandbox-job');
+    _require(!rolloutHeld.canDelete, 'Cleanup bypassed safe-device rollout.');
+    _require(rejected(() => TestJobCleanupPlan.fromJson(
+        {...fixture, 'schema_version': 0}, businessId: businessId,
+        jobId: 'sandbox-job')), 'Unknown cleanup contract accepted.');
+  }
+
+  Future<void> _checkFindingReconciliation(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final local = <Map<String, dynamic>>[
+      {'id': 'finding-1', 'row_version': 1, 'body': 'Unsent repair note',
+       'status': 'open', 'sync_state': 'pending',
+       'attachments': [
+         {'id': 'local-finding-photo-pending', 'upload_state': 'pending',
+          'local_file_path': '/sandbox/photo.jpg'},
+       ]},
+    ];
+    final merged = mergeWorkFindings([
+      {'id': 'local-finding-retired', 'body': 'Old provisional row'},
+      {'id': 'finding-1', 'row_version': 2, 'body': 'Server note',
+       'status': 'repaired', 'repair_job_id': 'repair-job',
+       'attachments': [
+         {'id': 'remote-photo', 'upload_state': 'synced'},
+       ]},
+    ], local);
+    _require(merged.length == 1, 'Stale finding identity was resurrected.');
+    final finding = merged.single;
+    _require(finding['body'] == 'Unsent repair note', 'Pending note was lost.');
+    _require(finding['repair_job_id'] == 'repair-job',
+        'Newer server repair state was lost.');
+    _require((finding['attachments'] as List).length == 2,
+        'Server or pending local photo was lost.');
+    final repeated = mergeWorkFindings(merged, local);
+    _require(repeated.length == 1 &&
+        (repeated.single['attachments'] as List).length == 2,
+        'Repeated finding refresh duplicated or lost data.');
+  }
+
+  Future<void> _checkJobSorting(
+    BriskersLocalDatabase database,
+    String businessId,
+  ) async {
+    final jobs = LocalJobRepository(database: database);
+    await database.customStatement(
+      'INSERT INTO local_job_statuses(business_id,code,name,sort_order) '
+      "VALUES (?, 'open', 'Open', 20), (?, 'in_progress', 'In progress', 10)",
+      [businessId, businessId],
+    );
+    for (final item in [
+      ['j8', 'J-8', 'Zoe', 'open', 100, 100],
+      ['j11', 'J-11', 'Alice', 'in_progress', 200, 400],
+      ['j12', 'J-12', 'Bob', 'open', 300, 200],
+    ]) {
+      await database.customStatement(
+        'INSERT INTO local_jobs '
+        '(id,business_id,access_scope,job_number,title,status,customer_name,'
+        'created_at,server_updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          item[0],
+          businessId,
+          'full',
+          item[1],
+          'Test',
+          item[3],
+          item[2],
+          item[4],
+          item[5],
+        ],
+      );
+    }
+    Future<String> first({
+      JobListView view = JobListView.recent,
+      JobListSort sort = JobListSort.lastAccessed,
+      int offset = 0,
+    }) async => (await jobs.listJobs(
+      businessId,
+      view: view,
+      sort: sort,
+      userId: 'diagnostic-user',
+      offset: offset,
+      limit: 1,
+    )).single['job_number'].toString();
+    _require(
+      await first(sort: JobListSort.lastModified) == 'J-11',
+      'Modified order must be global before paging.',
+    );
+    _require(
+      await first(view: JobListView.all, offset: 1) == 'J-12',
+      'All history pagination is inconsistent.',
+    );
+    await LocalJobAccessHistory(database: database).recordAccess(
+      businessId,
+      'j8',
+      userId: 'diagnostic-user',
+      at: DateTime.fromMillisecondsSinceEpoch(500000, isUtc: true),
+    );
+    _require(await first() == 'J-8', 'Recent must prefer user access history.');
+    _require(
+      await first(sort: JobListSort.lastModified) == 'J-11',
+      'Access must not change modification order.',
+    );
+    _require(
+      await first(view: JobListView.active) == 'J-11',
+      'Active must use status groups.',
+    );
+    await database.customStatement(
+      "UPDATE local_jobs SET status='completed' WHERE business_id=? AND id='j8'",
+      [businessId],
+    );
+    _require(
+      await first() == 'J-8',
+      'Completed accessed Job disappeared from Recent.',
+    );
+    final active = await jobs.listJobs(businessId, view: JobListView.active);
+    _require(
+      active.every((row) => row['id'] != 'j8'),
+      'Completed Job must leave Active.',
+    );
   }
 
   Future<void> _checkAppointmentActionPolicy(
@@ -699,7 +911,7 @@ class BriskersFunctionalDiagnosticsService {
         '$table still contains records for the canceled invoice.',
       );
     }
-    final cache = await const LocalDocumentDetailCache().load(businessId,id);
+    final cache = await LocalDocumentDetailCache(database:database).load(businessId,id);
     _require(cache == null, 'Deleted invoice still has a cached detail.');
   }
 
@@ -854,7 +1066,7 @@ class BriskersFunctionalDiagnosticsService {
     BriskersLocalDatabase database,
     String businessId,
   ) async {
-    final cache = const LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database:database);
     final drafts = OfflineDocumentDraftService(
       database: database,
       cache: cache,
@@ -965,7 +1177,7 @@ class BriskersFunctionalDiagnosticsService {
       '''
       INSERT INTO local_customers (
         id, business_id, display_name, sync_state
-      ) VALUES ('customer-1', ?, 'Richard Goff', 'synced')
+      ) VALUES ('customer-1', ?, 'Synthetic Diagnostic Customer', 'synced')
       ''',
       [businessId],
     );
@@ -993,7 +1205,7 @@ class BriskersFunctionalDiagnosticsService {
         vehicle_id, vehicle_label, planned_hours, is_unassigned, sync_state
       ) VALUES (
         'job-1', ?, 'all', 'J-5', 'Oil leak', 'Oil leak',
-        'in_progress', 'In progress', 'customer-1', 'Richard Goff',
+        'in_progress', 'In progress', 'customer-1', 'Synthetic Diagnostic Customer',
         'vehicle-1', '2012 Hyundai Equus', 1.0, 1, 'synced'
       )
       ''',
@@ -1006,7 +1218,7 @@ class BriskersFunctionalDiagnosticsService {
     String businessId,
   ) async {
     await _seedCustomerVehicleJob(database, businessId);
-    const cache = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database:database);
     final service = OfflineDocumentDraftService(
       database: database,
       cache: cache,
@@ -1111,13 +1323,13 @@ class BriskersFunctionalDiagnosticsService {
       [businessId],
     );
 
-    const cache = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database:database);
     await cache.save(businessId, 'estimate-1', {
       'id': 'estimate-1',
       'kind': 'estimate',
       'status': 'draft',
       'customer_id': 'customer-1',
-      'customer_name': 'Richard Goff',
+      'customer_name': 'Synthetic Diagnostic Customer',
       'job_id': 'job-1',
       'job_number': 'J-5',
       'job_title': 'Oil leak',
@@ -1145,7 +1357,7 @@ class BriskersFunctionalDiagnosticsService {
       'document_number': '4',
       'status': 'issued',
       'customer_id': 'customer-1',
-      'customer_name': 'Richard Goff',
+      'customer_name': 'Synthetic Diagnostic Customer',
       'job_id': 'job-1',
       'job_number': 'J-5',
       'job_title': 'Oil leak',
@@ -1179,7 +1391,7 @@ class BriskersFunctionalDiagnosticsService {
     _require(
       eligible.single['same_job'] == true &&
           eligible.single['same_vehicle'] == true &&
-          eligible.single['customer_name'] == 'Richard Goff',
+          eligible.single['customer_name'] == 'Synthetic Diagnostic Customer',
       'Invoice eligibility context is incorrect.',
     );
 
@@ -1229,9 +1441,9 @@ class BriskersFunctionalDiagnosticsService {
     await service.queueCustomerProfile(
       businessId,
       'customer-1',
-      name: 'Richard Goff Updated',
-      phone: '5045551212',
-      email: 'richard@example.com',
+      name: 'Synthetic Diagnostic Customer Updated',
+      phone: '2025550100',
+      email: 'qa-customer@example.invalid',
       billingAddress: const {'city': 'Gretna'},
     );
     await service.queueProblemFlag(
@@ -1262,7 +1474,7 @@ class BriskersFunctionalDiagnosticsService {
       variables: [Variable<String>(businessId)],
     ).getSingle();
     _require(
-      customer.read<String>('display_name') == 'Richard Goff Updated' &&
+      customer.read<String>('display_name') == 'Synthetic Diagnostic Customer Updated' &&
           customer.read<int>('problem_flag') == 1 &&
           customer.read<String>('sync_state') == 'pending',
       'Customer offline update was not retained.',
@@ -1485,7 +1697,7 @@ class BriskersFunctionalDiagnosticsService {
       forceOffline: () => false,
       businessSettingsLoader: (_) async => {
         'address': {
-          'formatted': '1400 Stumpf Blvd, Gretna, LA, 70053',
+          'formatted': '100 Example Street, Gretna, LA, 70053',
         },
         'latitude': null,
         'longitude': null,
@@ -1607,3 +1819,4 @@ class BriskersFunctionalDiagnosticsService {
     );
   }
 }
+

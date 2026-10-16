@@ -8,6 +8,10 @@ import 'package:path_provider/path_provider.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_quarantine.dart';
+import 'local_job_deletion_v3.dart';
+import 'offline_job_purge.dart';
+import 'vehicle_finding_actions_service.dart';
 
 typedef WorkFindingMediaDirectoryProvider = Future<Directory> Function();
 
@@ -25,6 +29,14 @@ class OfflineWorkFindingsService {
   final BriskersLocalDatabase _database;
   final WorkFindingMediaDirectoryProvider _mediaDirectoryProvider;
   final Random _random = Random.secure();
+  static final Expando<Map<String, Future<void>>> _activeFlushes = Expando();
+  // Only live UI operations can still hold a provisional ID after remapping.
+  // Share aliases across service instances, without retaining closed databases.
+  static final Expando<Map<String, String>> _findingAliases = Expando();
+
+  String _canonicalFindingId(String businessId, String findingId) =>
+      _findingAliases[_database]?['$businessId:$findingId'] ?? findingId;
+
 
   Future<void> seedCurrentVisitIfClean(
     String businessId,
@@ -116,6 +128,7 @@ class OfflineWorkFindingsService {
         }
         final localVisitId = 'local-work-visit-${_operationId('visit')}';
         final now = DateTime.now().toUtc();
+        await OfflineJobPurge.recordNewIntent(_database, businessId, [localVisitId]);
         await _database.customStatement(
           """INSERT INTO local_job_visits(
             id,business_id,job_id,visit_number,work_summary,opened_at,
@@ -164,37 +177,117 @@ class OfflineWorkFindingsService {
     String vehicleId,
     List<Map<String, dynamic>> serverFindings,
   ) async {
-    if (await _hasDirtyFindings(businessId, vehicleId)) return;
-
     await _database.transaction(() async {
-      await _database.customStatement(
-        '''
-        DELETE FROM local_finding_photos
-        WHERE business_id = ?
-          AND finding_id IN (
-            SELECT id
-            FROM local_findings
-            WHERE business_id = ? AND vehicle_id = ?
-          )
-        ''',
-        [businessId, businessId, vehicleId],
-      );
-      await _database.customStatement(
-        '''
-        DELETE FROM local_findings
-        WHERE business_id = ? AND vehicle_id = ?
-        ''',
-        [businessId, vehicleId],
-      );
+      final current = await loadLocalFindings(businessId, vehicleId);
+      final incoming = <String, Map<String, dynamic>>{
+        for (final finding in serverFindings)
+          if ((finding['id']?.toString() ?? '').isNotEmpty)
+            finding['id'].toString(): finding,
+      };
 
-      for (final finding in serverFindings) {
-        await _insertServerFinding(
-          businessId,
-          vehicleId,
-          finding,
+      for (final local in current) {
+        final id = local['id'].toString();
+        final dirty = local['sync_state'] != 'synced';
+        final photos = (local['attachments'] as List).cast<Map>();
+        final pendingPhoto = photos.any(
+          (photo) => photo['upload_state'] != 'synced',
         );
+        final server = incoming.remove(id);
+        if (server == null) {
+          if (!dirty && !pendingPhoto) {
+            await _database.customStatement(
+              'DELETE FROM local_finding_photos WHERE business_id=? AND finding_id=?',
+              [businessId, id],
+            );
+            await _database.customStatement(
+              'DELETE FROM local_findings WHERE business_id=? AND id=?',
+              [businessId, id],
+            );
+          }
+          continue;
+        }
+        // A fetch started before a completed push must not roll it back.
+        if ((_int(server['row_version']) ?? -1) <
+            (_int(local['row_version']) ?? -1)) {
+          continue;
+        }
+        await _replaceServerPhotos(businessId, id, server);
+        await _insertServerFinding(businessId, vehicleId, server);
+        if (dirty) {
+          // row_version tracks the newest observed server metadata. The edit's
+          // original concurrency base lives separately in the durable outbox.
+          await _database.customStatement(
+            '''
+            UPDATE local_findings
+            SET body=?, sync_state=?
+            WHERE business_id=? AND id=?
+            ''',
+            [local['body'], local['sync_state'], businessId, id],
+          );
+          await _rememberServerFinding(businessId, id, server);
+        }
+      }
+      for (final finding in incoming.values) {
+        await _insertServerFinding(businessId, vehicleId, finding);
       }
     });
+  }
+
+  Future<void> _rememberServerFinding(
+    String businessId,
+    String findingId,
+    Map<String, dynamic> server,
+  ) async {
+    final rows = await _database.customSelect(
+      '''
+      SELECT id, payload_json FROM sync_outbox
+      WHERE business_id=? AND entity_id=? AND entity_type='finding_update'
+        AND state IN ('pending', 'conflict')
+      ''',
+      variables: [Variable<String>(businessId), Variable<String>(findingId)],
+    ).get();
+    for (final row in rows) {
+      final payload = _payload(row);
+      final previous = payload['latest_server_finding'];
+      if (previous is Map &&
+          (_int(previous['row_version']) ?? -1) >
+              (_int(server['row_version']) ?? -1)) {
+        continue;
+      }
+      payload['latest_server_finding'] = server;
+      await _database.customStatement(
+        'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+        [jsonEncode(payload), row.read<int>('id')],
+      );
+    }
+  }
+
+  Future<void> _replaceServerPhotos(
+    String businessId,
+    String findingId,
+    Map<String, dynamic> server,
+  ) async {
+    // An omitted attachment list is a partial RPC response, not a deletion.
+    if (server['attachments'] is! List) return;
+    final incomingIds = (server['attachments'] as List)
+        .whereType<Map>()
+        .map((photo) => photo['attachment_id']?.toString() ?? '')
+        .toSet();
+    final rows = await _database.customSelect(
+      '''
+      SELECT id, attachment_id FROM local_finding_photos
+      WHERE business_id=? AND finding_id=? AND upload_state='synced'
+      ''',
+      variables: [Variable<String>(businessId), Variable<String>(findingId)],
+    ).get();
+    for (final row in rows) {
+      if (!incomingIds.contains(row.read<String>('attachment_id'))) {
+        await _database.customStatement(
+          'DELETE FROM local_finding_photos WHERE business_id=? AND id=?',
+          [businessId, row.read<String>('id')],
+        );
+      }
+    }
   }
 
   Future<List<Map<String, dynamic>>> loadLocalFindings(
@@ -274,7 +367,8 @@ class OfflineWorkFindingsService {
       });
     }
 
-    return result;
+    return VehicleFindingActionsService(api: _api, database: _database)
+        .project(businessId, result);
   }
 
   Future<Map<String, dynamic>> createLocalFinding(
@@ -284,11 +378,14 @@ class OfflineWorkFindingsService {
     required String body,
     bool includeOnInvoice = false,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final operationId = _operationId('finding-create');
     final localId = 'local-finding-$operationId';
     final now = DateTime.now().toUtc();
 
     await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [localId, operationId]);
       await _database.customStatement(
         '''
         INSERT INTO local_findings (
@@ -339,6 +436,7 @@ class OfflineWorkFindingsService {
     });
 
     final local = await _findingRow(businessId, localId);
+    VehicleFindingActionsService.notifyChanged(businessId);
     return _findingMapFromRow(local!);
   }
 
@@ -349,6 +447,7 @@ class OfflineWorkFindingsService {
     required String body,
   }) async {
     await _database.transaction(() async {
+      findingId = _canonicalFindingId(businessId, findingId);
       final finding = await _findingRow(businessId, findingId);
       if (finding == null) {
         throw StateError('Finding is not available in the local cache.');
@@ -379,7 +478,7 @@ class OfflineWorkFindingsService {
           SELECT id, payload_json
           FROM sync_outbox
           WHERE business_id = ?
-            AND entity_type = 'finding_create'
+            AND entity_type IN ('finding_create', 'customer_finding_create')
             AND entity_id = ?
             AND state = 'pending'
           ORDER BY id
@@ -420,6 +519,7 @@ class OfflineWorkFindingsService {
     });
 
     final local = await _findingRow(businessId, findingId);
+    VehicleFindingActionsService.notifyChanged(businessId);
     return _findingMapFromRow(local!);
   }
 
@@ -431,6 +531,8 @@ class OfflineWorkFindingsService {
     required String mimeType,
     required Uint8List bytes,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    findingId = _canonicalFindingId(businessId, findingId);
     final finding = await _findingRow(businessId, findingId);
     if (finding == null) {
       throw StateError('Finding is not available in the local cache.');
@@ -457,6 +559,17 @@ class OfflineWorkFindingsService {
 
     try {
       await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [localPhotoId, operationId]);
+        // The picker/directory/file write can outlive the create response.
+        findingId = _canonicalFindingId(businessId, findingId);
+        final current = await _findingRow(businessId, findingId);
+        if (current == null) {
+          throw StateError('Finding is no longer available in the local cache.');
+        }
+        if (current.read<String>('sync_state') == 'conflict') {
+          throw StateError('Resolve this Finding sync conflict before adding photos.');
+        }
         await _database.customStatement(
           '''
           INSERT INTO local_finding_photos (
@@ -514,6 +627,7 @@ class OfflineWorkFindingsService {
       rethrow;
     }
 
+    VehicleFindingActionsService.notifyChanged(businessId);
     return {
       'attachment_id': localPhotoId,
       'id': localPhotoId,
@@ -526,35 +640,41 @@ class OfflineWorkFindingsService {
   }
 
   Future<void> flush(String businessId) async {
-    final rows = await _database.customSelect(
-      '''
-      SELECT *
-      FROM sync_outbox
-      WHERE business_id = ? AND state = 'pending'
-      ORDER BY id
-      ''',
-      variables: [Variable<String>(businessId)],
-    ).get();
+    final active = _activeFlushes[_database] ??= <String, Future<void>>{};
+    final previous = active[businessId];
+    if (previous != null) return previous;
+    final work = _flushQueue(businessId);
+    active[businessId] = work;
+    try {
+      await work;
+      await VehicleFindingActionsService(api: _api, database: _database).flush(businessId);
+      VehicleFindingActionsService.notifyChanged(businessId);
+    } finally {
+      if (identical(active[businessId], work)) active.remove(businessId);
+    }
+  }
 
+  Future<void> _flushQueue(String businessId) async {
     var pushedAny = false;
-
-    for (final queuedRow in rows) {
-      final freshRows = await _database.customSelect(
+    while (true) {
+      final rows = await _database.customSelect(
         '''
-        SELECT *
-        FROM sync_outbox
-        WHERE id = ? AND state = 'pending'
-        LIMIT 1
+        SELECT * FROM sync_outbox
+        WHERE business_id = ? AND state = 'pending'
+          AND entity_type IN (
+            'work_summary', 'finding_create', 'finding_update', 'finding_photo'
+          )
+        ORDER BY id LIMIT 1
         ''',
-        variables: [
-          Variable<int>(queuedRow.read<int>('id')),
-        ],
+        variables: [Variable<String>(businessId)],
       ).get();
-      if (freshRows.isEmpty) continue;
-
-      final row = freshRows.first;
+      if (rows.isEmpty) break;
+      final row = rows.single;
       final type = row.read<String>('entity_type');
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: row.read<int>('id'),
+        );
         bool handled = true;
         if (type == 'work_summary') {
           if (!await _flushWorkSummary(row)) break;
@@ -563,6 +683,7 @@ class OfflineWorkFindingsService {
         } else if (type == 'finding_update') {
           if (!await _flushFindingUpdate(row)) break;
         } else if (type == 'finding_photo') {
+          if ((_payload(row)['finding_id']?.toString() ?? '').startsWith('local-finding-')) break;
           await _flushFindingPhoto(row);
         } else {
           handled = false;
@@ -570,6 +691,7 @@ class OfflineWorkFindingsService {
 
         if (handled) pushedAny = true;
       } catch (error) {
+        if (error is LocalJobQuarantineException) rethrow;
         await _markOutboxFailure(row.read<int>('id'), error);
         break;
       }
@@ -594,20 +716,33 @@ class OfflineWorkFindingsService {
     final isNewVisit = (payload['visit_id']?.toString() ?? '')
         .startsWith('local-work-visit-');
     final response = isNewVisit
-        ? await _api.createMissingWorkVisit(
+        ? await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => _api.createMissingWorkVisit(
             businessId,jobId,
             operationId:payload['operation_id']?.toString() ?? '',
             workSummary:payload['work_summary']?.toString() ?? '',
-          )
-        : await _api.syncSaveWorkSummary(
+          ),
+          outboxId: row.read<int>('id'),
+        )
+        : await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => _api.syncSaveWorkSummary(
             businessId,jobId,
             operationId:payload['operation_id']?.toString() ?? '',
             expectedRowVersion:row.readNullable<int>('base_row_version'),
             workSummary:payload['work_summary']?.toString() ?? '',
-          );
+          ),
+          outboxId: row.read<int>('id'),
+        );
 
     if (response['status']?.toString() == 'conflict') {
       await _database.transaction(() async {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: row.read<int>('id'),
+        );
         await _database.customStatement(
           '''
           UPDATE local_job_visits
@@ -629,6 +764,9 @@ class OfflineWorkFindingsService {
       throw StateError('Server did not return the saved work visit.');
     }
     await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: row.read<int>('id'),
+      );
       await _reconcileVisit(
         businessId,
         Map<String, dynamic>.from(raw),
@@ -653,12 +791,17 @@ class OfflineWorkFindingsService {
     final jobId = payload['job_id']?.toString() ?? '';
     final localId = payload['local_finding_id']?.toString() ?? '';
 
-    final response = await _api.syncCreateFinding(
+    final response = await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      jobId,
-      operationId: payload['operation_id']?.toString() ?? '',
-      body: payload['body']?.toString() ?? '',
-      includeOnInvoice: payload['include_on_invoice'] == true,
+      () => _api.syncCreateFinding(
+        businessId,
+        jobId,
+        operationId: payload['operation_id']?.toString() ?? '',
+        body: payload['body']?.toString() ?? '',
+        includeOnInvoice: payload['include_on_invoice'] == true,
+      ),
+      outboxId: row.read<int>('id'),
     );
 
     final raw = response['finding'];
@@ -666,13 +809,41 @@ class OfflineWorkFindingsService {
       throw StateError('Server did not return the created Finding.');
     }
 
-    await _database.transaction(() async {
-      final server = Map<String, dynamic>.from(raw);
-      final serverId = server['id']?.toString() ?? '';
-      if (serverId.isEmpty) {
-        throw StateError('Server Finding is missing its ID.');
-      }
+    _validateFindingAcknowledgement(raw);
+    final serverId = raw['id'].toString();
+    if (serverId.startsWith('local-finding-')) {
+      throw StateError('Server did not assign a permanent Finding ID.');
+    }
+    if (raw['found_job_id'] != null && raw['found_job_id'].toString() != jobId) {
+      throw StateError('Server returned a Finding for a different Job.');
+    }
+    if (raw['business_id'] != null &&
+        raw['business_id'].toString() != businessId) {
+      throw StateError('Server returned a Finding for a different business.');
+    }
 
+    await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: row.read<int>('id'),
+      );
+      final current = await _findingRow(businessId, localId);
+      if (current == null) {
+        throw StateError('Queued Finding is no longer available locally.');
+      }
+      final vehicleId = current.readNullable<String>('vehicle_id');
+      if (raw['vehicle_id'] != null && raw['vehicle_id'].toString() != vehicleId) {
+        throw StateError('Server returned a Finding for a different vehicle.');
+      }
+      var server = <String, dynamic>{
+        ...await _findingMapFromRow(current),
+        ...Map<String, dynamic>.from(raw),
+      };
+      final observed = await _findingRow(businessId, serverId);
+      if (observed != null &&
+          (observed.readNullable<int>('row_version') ?? -1) >
+              (_int(raw['row_version']) ?? -1)) {
+        server = {...server, ...await _findingMapFromRow(observed)};
+      }
       await _database.customStatement(
         '''
         UPDATE local_finding_photos
@@ -715,13 +886,18 @@ class OfflineWorkFindingsService {
         );
       }
 
+      await VehicleFindingActionsService(api: _api, database: _database)
+          .remap(businessId, localId, serverId);
+
+      final desiredBody = current.read<String>('body');
       await _database.customStatement(
         'DELETE FROM local_findings WHERE business_id = ? AND id = ?',
         [businessId, localId],
       );
       await _insertServerFinding(
         businessId,
-        server['vehicle_id']?.toString() ?? '',
+        server['vehicle_id']?.toString() ??
+            current.readNullable<String>('vehicle_id') ?? '',
         server,
       );
 
@@ -729,7 +905,16 @@ class OfflineWorkFindingsService {
         'DELETE FROM sync_outbox WHERE id = ?',
         [row.read<int>('id')],
       );
+      await _preserveUnacknowledgedFindingBody(
+        businessId,
+        jobId,
+        Map<String, dynamic>.from(raw),
+        desiredBody,
+        latestServer: server,
+      );
     });
+    final aliases = _findingAliases[_database] ??= <String, String>{};
+    aliases['$businessId:$localId'] = serverId;
   }
 
   Future<bool> _flushFindingUpdate(QueryRow row) async {
@@ -737,17 +922,25 @@ class OfflineWorkFindingsService {
     final businessId = row.read<String>('business_id');
     final findingId = payload['finding_id']?.toString() ?? '';
 
-    final response = await _api.syncUpdateFinding(
+    final response = await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      findingId,
-      operationId: payload['operation_id']?.toString() ?? '',
-      expectedRowVersion:
-          row.readNullable<int>('base_row_version'),
-      body: payload['body']?.toString() ?? '',
+      () => _api.syncUpdateFinding(
+        businessId,
+        findingId,
+        operationId: payload['operation_id']?.toString() ?? '',
+        expectedRowVersion:
+            row.readNullable<int>('base_row_version'),
+        body: payload['body']?.toString() ?? '',
+      ),
+      outboxId: row.read<int>('id'),
     );
 
     if (response['status']?.toString() == 'conflict') {
       await _database.transaction(() async {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: row.read<int>('id'),
+        );
         await _database.customStatement(
           '''
           UPDATE local_findings
@@ -769,11 +962,33 @@ class OfflineWorkFindingsService {
       throw StateError('Server did not return the updated Finding.');
     }
 
+    _validateFindingAcknowledgement(raw);
+    if (raw['id']?.toString() != findingId) {
+      throw StateError('Server returned a different Finding for this edit.');
+    }
+
     await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: row.read<int>('id'),
+      );
       final old = await _findingRow(businessId, findingId);
       final vehicleId =
           old?.readNullable<String>('vehicle_id') ??
               (raw['vehicle_id']?.toString() ?? '');
+      final desiredBody = old?.read<String>('body');
+      var server = <String, dynamic>{
+        if (old != null) ...await _findingMapFromRow(old),
+        ...Map<String, dynamic>.from(raw),
+      };
+      final queued = await _database.customSelect(
+        'SELECT payload_json FROM sync_outbox WHERE id=?',
+        variables: [Variable<int>(row.read<int>('id'))],
+      ).getSingleOrNull();
+      final latest = queued == null ? null : _payload(queued)['latest_server_finding'];
+      if (latest is Map &&
+          (_int(latest['row_version']) ?? -1) > (_int(raw['row_version']) ?? -1)) {
+        server = {...server, ...Map<String, dynamic>.from(latest)};
+      }
       await _database.customStatement(
         'DELETE FROM local_findings WHERE business_id = ? AND id = ?',
         [businessId, findingId],
@@ -781,22 +996,65 @@ class OfflineWorkFindingsService {
       await _insertServerFinding(
         businessId,
         vehicleId,
-        Map<String, dynamic>.from(raw),
-        preservePhotos: true,
+        server,
       );
       await _database.customStatement(
         'DELETE FROM sync_outbox WHERE id = ?',
         [row.read<int>('id')],
+      );
+      await _preserveUnacknowledgedFindingBody(
+        businessId,
+        payload['job_id']?.toString() ?? '',
+        Map<String, dynamic>.from(raw),
+        desiredBody,
+        latestServer: server,
       );
     });
 
     return true;
   }
 
+  void _validateFindingAcknowledgement(Map<dynamic, dynamic> finding) {
+    if ((finding['id']?.toString() ?? '').isEmpty ||
+        finding['body'] is! String ||
+        (_int(finding['row_version']) ?? 0) <= 0) {
+      throw StateError('Server Finding acknowledgement is incomplete.');
+    }
+  }
+
+  Future<void> _preserveUnacknowledgedFindingBody(
+    String businessId,
+    String jobId,
+    Map<String, dynamic> server,
+    String? desiredBody, {
+    required Map<String, dynamic> latestServer,
+  }) async {
+    if (desiredBody == null || desiredBody == server['body']?.toString()) return;
+    final findingId = server['id'].toString();
+    await _database.customStatement(
+      "UPDATE local_findings SET body=?, sync_state='pending' WHERE business_id=? AND id=?",
+      [desiredBody, businessId, findingId],
+    );
+    // The acknowledged operation ID is spent. The newer edit needs its own
+    // idempotency key and the acknowledged server version as its new base.
+    await _upsertFindingUpdateOutbox(
+      businessId,
+      jobId,
+      findingId,
+      baseRowVersion: _int(server['row_version']),
+      body: desiredBody,
+    );
+    if ((_int(latestServer['row_version']) ?? -1) >
+        (_int(server['row_version']) ?? -1)) {
+      await _rememberServerFinding(businessId, findingId, latestServer);
+    }
+  }
+
   Future<void> _flushFindingPhoto(QueryRow row) async {
     final payload = _payload(row);
     final businessId = row.read<String>('business_id');
     final findingId = payload['finding_id']?.toString() ?? '';
+    final localPhotoId = payload['local_photo_id']?.toString() ?? '';
     if (findingId.startsWith('local-finding-')) {
       throw StateError(
         'Finding photo dependency has not been synced yet.',
@@ -809,12 +1067,18 @@ class OfflineWorkFindingsService {
       throw StateError('Queued Finding photo is missing locally.');
     }
 
-    final registration = await _api.syncRegisterFindingPhoto(
+    await _assertPhotoReplayTarget(businessId, findingId, localPhotoId);
+    final registration = await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      findingId,
-      operationId: payload['operation_id']?.toString() ?? '',
-      filename: payload['filename']?.toString() ?? 'finding.jpg',
-      mimeType: payload['mime_type']?.toString() ?? 'image/jpeg',
+      () => _api.syncRegisterFindingPhoto(
+        businessId,
+        findingId,
+        operationId: payload['operation_id']?.toString() ?? '',
+        filename: payload['filename']?.toString() ?? 'finding.jpg',
+        mimeType: payload['mime_type']?.toString() ?? 'image/jpeg',
+      ),
+      outboxId: row.read<int>('id'),
     );
 
     final attachmentId =
@@ -826,16 +1090,35 @@ class OfflineWorkFindingsService {
     }
 
     final bytes = await file.readAsBytes();
-    await _api.uploadRegisteredAttachment(
+    await _assertPhotoReplayTarget(businessId, findingId, localPhotoId);
+    await LocalJobQuarantine.guardReplay(
+      _database,
       businessId,
-      bucket: bucket,
-      key: key,
-      attachmentId: attachmentId,
-      mimeType: payload['mime_type']?.toString() ?? 'image/jpeg',
-      bytes: bytes,
+      () => _api.uploadRegisteredAttachment(
+        businessId,
+        bucket: bucket,
+        key: key,
+        attachmentId: attachmentId,
+        mimeType: payload['mime_type']?.toString() ?? 'image/jpeg',
+        bytes: bytes,
+        replayGuard: <T>(Future<T> Function() operation) =>
+            LocalJobQuarantine.guardReplay<T>(
+          _database, businessId, operation, outboxId: row.read<int>('id'),
+        ),
+      ),
+      outboxId: row.read<int>('id'),
     );
 
     await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: row.read<int>('id'),
+      );
+      // A concurrent refresh may already have cached the registered server
+      // attachment. Retain the staged copy and its offline bytes exactly once.
+      await _database.customStatement(
+        'DELETE FROM local_finding_photos WHERE business_id=? AND id=? AND id<>?',
+        [businessId, attachmentId, payload['local_photo_id']?.toString() ?? ''],
+      );
       await _database.customStatement(
         '''
         UPDATE local_finding_photos
@@ -863,6 +1146,25 @@ class OfflineWorkFindingsService {
         [row.read<int>('id')],
       );
     });
+  }
+
+  Future<void> _assertPhotoReplayTarget(
+    String businessId, String findingId, String localPhotoId,
+  ) async {
+    final photo = await _database.customSelect(
+      '''SELECT p.id FROM local_finding_photos p
+         JOIN local_findings f
+           ON f.business_id = p.business_id AND f.id = p.finding_id
+         WHERE p.business_id = ? AND p.id = ? AND p.finding_id = ?''',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(localPhotoId),
+        Variable<String>(findingId),
+      ],
+    ).getSingleOrNull();
+    if (photo == null) {
+      throw StateError('Queued Finding photo is no longer active locally.');
+    }
   }
 
   Future<void> _reconcileVisit(
@@ -907,11 +1209,12 @@ class OfflineWorkFindingsService {
   Future<void> _insertServerFinding(
     String businessId,
     String vehicleId,
-    Map<String, dynamic> finding, {
-    bool preservePhotos = false,
-  }) async {
+    Map<String, dynamic> finding,
+  ) async {
     final findingId = finding['id']?.toString() ?? '';
     if (findingId.isEmpty) return;
+    finding = (await VehicleFindingActionsService(api: _api, database: _database)
+        .project(businessId, [finding])).single;
 
     await _database.customStatement(
       '''
@@ -920,7 +1223,7 @@ class OfflineWorkFindingsService {
         body, status, include_on_invoice, created_at, resolved_at,
         created_by, can_edit, can_delete, server_updated_at,
         row_version, sync_state
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ''',
       [
         findingId,
@@ -938,10 +1241,9 @@ class OfflineWorkFindingsService {
         finding['can_delete'] == true ? 1 : 0,
         _unixNullable(_date(finding['updated_at'])),
         _int(finding['row_version']),
+        finding['_pending_finding_action'] == true ? 'pending' : 'synced',
       ],
     );
-
-    if (preservePhotos) return;
 
     final attachments = List<dynamic>.from(
       finding['attachments'] ?? const <dynamic>[],
@@ -955,7 +1257,7 @@ class OfflineWorkFindingsService {
 
       await _database.customStatement(
         '''
-        INSERT OR REPLACE INTO local_finding_photos (
+        INSERT INTO local_finding_photos (
           id, business_id, finding_id, attachment_id,
           local_file_path, storage_bucket, storage_key, filename,
           mime_type, byte_size, captured_at, can_delete,
@@ -963,6 +1265,14 @@ class OfflineWorkFindingsService {
         ) VALUES (
           ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'synced', NULL
         )
+        ON CONFLICT(id) DO UPDATE SET
+          storage_bucket=excluded.storage_bucket,
+          storage_key=excluded.storage_key,
+          filename=excluded.filename,
+          mime_type=excluded.mime_type,
+          byte_size=excluded.byte_size,
+          captured_at=excluded.captured_at,
+          can_delete=excluded.can_delete
         ''',
         [
           attachmentId,
@@ -1077,42 +1387,6 @@ class OfflineWorkFindingsService {
     return rows.isEmpty ? null : rows.first;
   }
 
-  Future<bool> _hasDirtyFindings(
-    String businessId,
-    String vehicleId,
-  ) async {
-    final row = await _database.customSelect(
-      '''
-      SELECT
-        EXISTS(
-          SELECT 1
-          FROM local_findings
-          WHERE business_id = ?
-            AND vehicle_id = ?
-            AND sync_state IN ('pending','conflict')
-        )
-        OR EXISTS(
-          SELECT 1
-          FROM local_finding_photos p
-          JOIN local_findings f
-            ON f.business_id = p.business_id
-           AND f.id = p.finding_id
-          WHERE f.business_id = ?
-            AND f.vehicle_id = ?
-            AND p.upload_state <> 'synced'
-        ) AS dirty
-      ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(vehicleId),
-        Variable<String>(businessId),
-        Variable<String>(vehicleId),
-      ],
-    ).getSingle();
-
-    return row.read<int>('dirty') == 1;
-  }
-
   Future<void> _upsertWorkOutbox(
     String businessId,
     String jobId, {
@@ -1149,6 +1423,7 @@ class OfflineWorkFindingsService {
     });
 
     if (rows.isEmpty) {
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [operationId]);
       await _database.customStatement(
         '''
         INSERT INTO sync_outbox (
@@ -1217,6 +1492,7 @@ class OfflineWorkFindingsService {
         : _operationIdFromPayload(rows.first) ??
             _operationId('finding-update');
     final payload = jsonEncode({
+      if (rows.isNotEmpty) ..._payload(rows.first),
       'operation_id': operationId,
       'job_id': jobId,
       'finding_id': findingId,
@@ -1224,6 +1500,7 @@ class OfflineWorkFindingsService {
     });
 
     if (rows.isEmpty) {
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [operationId]);
       await _database.customStatement(
         '''
         INSERT INTO sync_outbox (
@@ -1248,7 +1525,6 @@ class OfflineWorkFindingsService {
         '''
         UPDATE sync_outbox
         SET payload_json = ?,
-            base_row_version = ?,
             attempt_count = 0,
             last_attempt_at = NULL,
             last_error = NULL
@@ -1256,7 +1532,6 @@ class OfflineWorkFindingsService {
         ''',
         [
           payload,
-          baseRowVersion,
           rows.first.read<int>('id'),
         ],
       );
@@ -1372,3 +1647,4 @@ class OfflineWorkFindingsService {
     return DateTime.tryParse(value.toString())?.toUtc().toIso8601String();
   }
 }
+

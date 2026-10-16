@@ -7,18 +7,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_quarantine.dart';
+import 'local_job_deletion_v3.dart';
+import 'offline_job_purge.dart';
 
 class OfflineJobAdminService {
   OfflineJobAdminService({
     BriskersApi api = const BriskersApi(),
     BriskersLocalDatabase? database,
-  })  : _api = api,
-        _database = database ?? localDatabase;
+  }) : _api = api,
+       _database = database ?? localDatabase;
 
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
 
-  String _employeesKey(String businessId) => 'briskers_job_employees_$businessId';
+  String _employeesKey(String businessId) =>
+      'briskers_job_employees_$businessId';
 
   Future<List<Map<String, dynamic>>> refreshEmployees(String businessId) async {
     final rows = await _api.assignableEmployees(businessId);
@@ -46,8 +50,8 @@ class OfflineJobAdminService {
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     final h = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-    return '${h.substring(0,8)}-${h.substring(8,12)}-${h.substring(12,16)}-'
-        '${h.substring(16,20)}-${h.substring(20)}';
+    return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-'
+        '${h.substring(16, 20)}-${h.substring(20)}';
   }
 
   /// Save a new Job before contacting the network. The stable UUID is also
@@ -64,10 +68,13 @@ class OfflineJobAdminService {
     String? employeeId,
     String? employeeName,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     if (title.trim().isEmpty) throw StateError('Job title is required.');
     final id = _newJobId();
     final now = DateTime.now().toUtc();
     await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [id, 'job-create-$id']);
       await _database.customStatement(
         """INSERT INTO local_jobs
           (id,business_id,access_scope,job_number,title,requested_work,
@@ -75,80 +82,157 @@ class OfflineJobAdminService {
            planned_hours,assigned_employee_id,assigned_employee_name,
            is_unassigned,created_at,sync_state)
           VALUES (?,?,'full','Pending sync',?,?,'open','Open',?,?,?,?,?,?,?,?,?,'pending')""",
-        [id,businessId,title.trim(),requestedWork,customerId,customerName,
-         vehicleId,vehicleLabel,plannedHours.toDouble(),
-         employeeId,employeeName,employeeId == null ? 1 : 0,
-         now.millisecondsSinceEpoch ~/ 1000],
+        [
+          id,
+          businessId,
+          title.trim(),
+          requestedWork,
+          customerId,
+          customerName,
+          vehicleId,
+          vehicleLabel,
+          plannedHours.toDouble(),
+          employeeId,
+          employeeName,
+          employeeId == null ? 1 : 0,
+          now.millisecondsSinceEpoch ~/ 1000,
+        ],
       );
       await _database.customStatement(
         """INSERT INTO sync_outbox
           (business_id,entity_type,entity_id,operation,payload_json,
            state,attempt_count,created_at)
           VALUES (?,'job_create',?,'create',?,'pending',0,?)""",
-        [businessId,id,jsonEncode({
-          'operation_id':'job-create-$id','job_id':id,
-          'customer_id':customerId,'vehicle_id':vehicleId,'title':title.trim(),
-          'requested_work':requestedWork,'planned_hours':plannedHours.toDouble(),
-          'employee_id':employeeId,'employee_name':employeeName,
-        }),now.millisecondsSinceEpoch ~/ 1000],
+        [
+          businessId,
+          id,
+          jsonEncode({
+            'operation_id': 'job-create-$id',
+            'job_id': id,
+            'customer_id': customerId,
+            'vehicle_id': vehicleId,
+            'title': title.trim(),
+            'requested_work': requestedWork,
+            'planned_hours': plannedHours.toDouble(),
+            'employee_id': employeeId,
+            'employee_name': employeeName,
+          }),
+          now.millisecondsSinceEpoch ~/ 1000,
+        ],
       );
     });
     return id;
   }
 
   Future<void> flushCreates(String businessId) async {
-    final rows = await _database.customSelect(
-      """SELECT id,entity_id,payload_json FROM sync_outbox
+    final rows = await _database
+        .customSelect(
+          """SELECT id,entity_id,payload_json FROM sync_outbox
          WHERE business_id=? AND entity_type='job_create' AND state='pending'
          ORDER BY id""",
-      variables: [Variable<String>(businessId)],
-    ).get();
+          variables: [Variable<String>(businessId)],
+        )
+        .get();
     for (final row in rows) {
       final outboxId = row.read<int>('id');
       final id = row.read<String>('entity_id');
-      final data = Map<String,dynamic>.from(
-          jsonDecode(row.read<String>('payload_json')) as Map);
+      final data = Map<String, dynamic>.from(
+        jsonDecode(row.read<String>('payload_json')) as Map,
+      );
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database,
+          businessId,
+          outboxId: outboxId,
+        );
         final customerId = data['customer_id']?.toString() ?? '';
         final vehicleId = data['vehicle_id']?.toString();
         if (customerId.startsWith('local-') ||
             (vehicleId != null && vehicleId.startsWith('local-'))) {
           continue;
         }
+        // Durably mark the attempt before any network send. Cancellation can
+        // prove never-sent only while this counter remains zero.
+        await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database,
+            businessId,
+            outboxId: outboxId,
+          );
+          await _database.customStatement(
+            'UPDATE sync_outbox SET attempt_count=attempt_count+1,last_attempt_at=? WHERE business_id=? AND id=?',
+            [
+              DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+              businessId,
+              outboxId,
+            ],
+          );
+        });
         try {
-          await _api.createJob(businessId,
-            id:id,customerId:customerId,
-            vehicleId:data['vehicle_id']?.toString(),
-            title:data['title']?.toString() ?? 'New Job',
-            description:data['requested_work']?.toString());
+          await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.createJob(
+              businessId,
+              id: id,
+              customerId: customerId,
+              vehicleId: data['vehicle_id']?.toString(),
+              title: data['title']?.toString() ?? 'New Job',
+              description: data['requested_work']?.toString(),
+            ),
+            outboxId: outboxId,
+          );
         } catch (error) {
+          if (error is LocalJobQuarantineException) rethrow;
           // A prior request may have committed even if its response was lost.
           // Verify the same UUID and customer before treating it as replayed.
-          final existing = await _api.jobDetail(businessId,id);
+          final existing = await _api.jobDetail(businessId, id);
           if (existing['id']?.toString() != id ||
               existing['customer_id']?.toString() != customerId) {
             rethrow;
           }
         }
-        await _api.updateJob(businessId,id,
-          customerId:customerId,
-          vehicleId:data['vehicle_id']?.toString(),
-          title:data['title']?.toString() ?? 'New Job',
-          requestedWork:data['requested_work']?.toString(),
-          plannedHours:num.tryParse(data['planned_hours']?.toString() ?? '') ?? 0);
+        await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => _api.updateJob(
+            businessId,
+            id,
+            customerId: customerId,
+            vehicleId: data['vehicle_id']?.toString(),
+            title: data['title']?.toString() ?? 'New Job',
+            requestedWork: data['requested_work']?.toString(),
+            plannedHours:
+                num.tryParse(data['planned_hours']?.toString() ?? '') ?? 0,
+          ),
+          outboxId: outboxId,
+        );
         final employeeId = data['employee_id']?.toString();
         if (employeeId != null && employeeId.isNotEmpty) {
-          await _api.setPrimaryJobEmployee(businessId,id,employeeId);
+          await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.setPrimaryJobEmployee(businessId, id, employeeId),
+            outboxId: outboxId,
+          );
         }
         await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database,
+            businessId,
+            outboxId: outboxId,
+          );
           await _database.customStatement(
             "DELETE FROM sync_outbox WHERE id=? AND entity_type='job_create'",
-            [outboxId]);
+            [outboxId],
+          );
           await _database.customStatement(
             "UPDATE local_jobs SET sync_state='synced' WHERE business_id=? AND id=?",
-            [businessId,id]);
+            [businessId, id],
+          );
         });
-      } catch (_) {
+      } catch (error) {
+        if (error is LocalJobQuarantineException) rethrow;
         // Keep the identical operation ID and payload for a safe later retry.
       }
     }
@@ -165,18 +249,17 @@ class OfflineJobAdminService {
     bool replaceRequestedWork = false,
     num? plannedHours,
   }) async {
-    final rows = await _database.customSelect(
-      '''
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT customer_id, vehicle_id, title, requested_work, planned_hours
       FROM local_jobs
       WHERE business_id = ? AND id = ?
       LIMIT 1
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(jobId),
-      ],
-    ).get();
+          variables: [Variable<String>(businessId), Variable<String>(jobId)],
+        )
+        .get();
     if (rows.isEmpty) {
       throw StateError('The job is not available in the local database.');
     }
@@ -191,7 +274,8 @@ class OfflineJobAdminService {
     final nextRequestedWork = replaceRequestedWork
         ? requestedWork
         : requestedWork ?? current.readNullable<String>('requested_work');
-    final nextPlannedHours = plannedHours ??
+    final nextPlannedHours =
+        plannedHours ??
         (num.tryParse(current.data['planned_hours']?.toString() ?? '') ?? 0);
 
     await _database.transaction(() async {
@@ -217,18 +301,14 @@ class OfflineJobAdminService {
         ],
       );
 
-      await _mergeOutbox(
-        businessId,
-        jobId,
-        {
-          'core_changed': true,
-          'customer_id': nextCustomerId,
-          'vehicle_id': nextVehicleId,
-          'title': nextTitle,
-          'requested_work': nextRequestedWork,
-          'planned_hours': nextPlannedHours.toDouble(),
-        },
-      );
+      await _mergeOutbox(businessId, jobId, {
+        'core_changed': true,
+        'customer_id': nextCustomerId,
+        'vehicle_id': nextVehicleId,
+        'title': nextTitle,
+        'requested_work': nextRequestedWork,
+        'planned_hours': nextPlannedHours.toDouble(),
+      });
     });
   }
 
@@ -236,12 +316,7 @@ class OfflineJobAdminService {
     String businessId,
     String jobId,
     num plannedHours,
-  ) =>
-      queueCore(
-        businessId,
-        jobId,
-        plannedHours: plannedHours,
-      );
+  ) => queueCore(businessId, jobId, plannedHours: plannedHours);
 
   Future<void> queueStatus(
     String businessId,
@@ -260,6 +335,12 @@ class OfflineJobAdminService {
             status_name = ?,
             status_color = ?,
             status_icon = ?,
+            completed_at = CASE
+              WHEN lower(?) = 'completed' THEN
+                CASE WHEN lower(status) = 'completed' THEN completed_at ELSE ? END
+              WHEN lower(?) NOT IN ('completed', 'cancelled', 'closed') THEN NULL
+              ELSE completed_at
+            END,
             sync_state = 'pending'
         WHERE business_id = ? AND id = ?
         ''',
@@ -268,19 +349,18 @@ class OfflineJobAdminService {
           name,
           colorHex,
           iconKey,
+          code,
+          DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+          code,
           businessId,
           jobId,
         ],
       );
-      await _mergeOutbox(
-        businessId,
-        jobId,
-        {
-          'status_changed': true,
-          'status_code': code,
-          'status_note': note,
-        },
-      );
+      await _mergeOutbox(businessId, jobId, {
+        'status_changed': true,
+        'status_code': code,
+        'status_note': note,
+      });
     });
   }
 
@@ -318,6 +398,8 @@ class OfflineJobAdminService {
       );
 
       if (employeeId != null && employeeId.isNotEmpty) {
+        final assignmentId = 'local-admin-${_newJobId()}';
+        await OfflineJobPurge.recordNewIntent(_database, businessId, [assignmentId]);
         await _database.customStatement(
           '''
           INSERT INTO local_job_assignments (
@@ -326,7 +408,7 @@ class OfflineJobAdminService {
           ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, 'offline_admin')
           ''',
           [
-            'local-admin-$jobId',
+            assignmentId,
             businessId,
             jobId,
             employeeId,
@@ -337,16 +419,12 @@ class OfflineJobAdminService {
         );
       }
 
-      await _mergeOutbox(
-        businessId,
-        jobId,
-        {
-          'assignment_changed': true,
-          'employee_id': employeeId,
-          'employee_name': employeeName,
-          'position': position,
-        },
-      );
+      await _mergeOutbox(businessId, jobId, {
+        'assignment_changed': true,
+        'employee_id': employeeId,
+        'employee_name': employeeName,
+        'position': position,
+      });
     });
   }
 
@@ -355,8 +433,9 @@ class OfflineJobAdminService {
     String jobId,
     Map<String, dynamic> changes,
   ) async {
-    final existing = await _database.customSelect(
-      '''
+    final existing = await _database
+        .customSelect(
+          '''
       SELECT id, payload_json
       FROM sync_outbox
       WHERE business_id = ?
@@ -366,11 +445,9 @@ class OfflineJobAdminService {
       ORDER BY id DESC
       LIMIT 1
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(jobId),
-      ],
-    ).get();
+          variables: [Variable<String>(businessId), Variable<String>(jobId)],
+        )
+        .get();
 
     final payload = <String, dynamic>{};
     if (existing.isNotEmpty) {
@@ -383,6 +460,9 @@ class OfflineJobAdminService {
       } catch (_) {}
     }
     payload.addAll(changes);
+    // Keep the queue's original identity/time, but order Jobs by the latest edit.
+    payload['_activity_at'] =
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
 
     if (existing.isNotEmpty) {
       await _database.customStatement(
@@ -413,8 +493,9 @@ class OfflineJobAdminService {
 
   Future<void> flush(String businessId) async {
     await flushCreates(businessId);
-    final rows = await _database.customSelect(
-      '''
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT id, entity_id, payload_json
       FROM sync_outbox
       WHERE business_id = ?
@@ -422,8 +503,9 @@ class OfflineJobAdminService {
         AND state = 'pending'
       ORDER BY id
       ''',
-      variables: [Variable<String>(businessId)],
-    ).get();
+          variables: [Variable<String>(businessId)],
+        )
+        .get();
 
     for (final row in rows) {
       final outboxId = row.read<int>('id');
@@ -438,47 +520,60 @@ class OfflineJobAdminService {
         continue;
       }
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database,
+          businessId,
+          outboxId: outboxId,
+        );
         final payload = Map<String, dynamic>.from(
           jsonDecode(row.read<String>('payload_json')) as Map,
         );
 
         if (payload['core_changed'] == true ||
             payload.containsKey('planned_hours')) {
-          final jobRows = await _database.customSelect(
-            '''
+          final jobRows = await _database
+              .customSelect(
+                '''
             SELECT customer_id, vehicle_id, title, requested_work, planned_hours
             FROM local_jobs
             WHERE business_id = ? AND id = ?
             LIMIT 1
             ''',
-            variables: [
-              Variable<String>(businessId),
-              Variable<String>(jobId),
-            ],
-          ).get();
+                variables: [
+                  Variable<String>(businessId),
+                  Variable<String>(jobId),
+                ],
+              )
+              .get();
           if (jobRows.isNotEmpty) {
             final job = jobRows.first;
-            await _api.updateJob(
+            await LocalJobQuarantine.guardReplay(
+              _database,
               businessId,
-              jobId,
-              customerId:
-                  payload['customer_id']?.toString() ??
-                  job.readNullable<String>('customer_id') ??
-                  '',
-              vehicleId: payload.containsKey('vehicle_id')
-                  ? payload['vehicle_id']?.toString()
-                  : job.readNullable<String>('vehicle_id'),
-              title:
-                  payload['title']?.toString() ?? job.read<String>('title'),
-              requestedWork: payload.containsKey('requested_work')
-                  ? payload['requested_work']?.toString()
-                  : job.readNullable<String>('requested_work'),
-              plannedHours: num.tryParse(
-                    payload['planned_hours']?.toString() ??
-                        job.data['planned_hours']?.toString() ??
-                        '',
-                  ) ??
-                  0,
+              () => _api.updateJob(
+                businessId,
+                jobId,
+                customerId:
+                    payload['customer_id']?.toString() ??
+                    job.readNullable<String>('customer_id') ??
+                    '',
+                vehicleId: payload.containsKey('vehicle_id')
+                    ? payload['vehicle_id']?.toString()
+                    : job.readNullable<String>('vehicle_id'),
+                title:
+                    payload['title']?.toString() ?? job.read<String>('title'),
+                requestedWork: payload.containsKey('requested_work')
+                    ? payload['requested_work']?.toString()
+                    : job.readNullable<String>('requested_work'),
+                plannedHours:
+                    num.tryParse(
+                      payload['planned_hours']?.toString() ??
+                          job.data['planned_hours']?.toString() ??
+                          '',
+                    ) ??
+                    0,
+              ),
+              outboxId: outboxId,
             );
           }
         }
@@ -486,11 +581,16 @@ class OfflineJobAdminService {
         if (payload['status_changed'] == true) {
           final statusCode = payload['status_code']?.toString() ?? '';
           if (statusCode.isNotEmpty) {
-            await _api.changeJobStatus(
+            await LocalJobQuarantine.guardReplay(
+              _database,
               businessId,
-              jobId,
-              statusCode,
-              note: payload['status_note']?.toString(),
+              () => _api.changeJobStatus(
+                businessId,
+                jobId,
+                statusCode,
+                note: payload['status_note']?.toString(),
+              ),
+              outboxId: outboxId,
             );
           }
         }
@@ -498,25 +598,43 @@ class OfflineJobAdminService {
         if (payload['assignment_changed'] == true) {
           final employeeId = payload['employee_id']?.toString();
           if (employeeId == null || employeeId.isEmpty) {
-            await _api.clearJobAssignments(businessId, jobId);
+            await LocalJobQuarantine.guardReplay(
+              _database,
+              businessId,
+              () => _api.clearJobAssignments(businessId, jobId),
+              outboxId: outboxId,
+            );
           } else {
-            await _api.setPrimaryJobEmployee(businessId, jobId, employeeId);
+            await LocalJobQuarantine.guardReplay(
+              _database,
+              businessId,
+              () => _api.setPrimaryJobEmployee(businessId, jobId, employeeId),
+              outboxId: outboxId,
+            );
           }
         }
 
-        await _database.customStatement(
-          'DELETE FROM sync_outbox WHERE id = ?',
-          [outboxId],
-        );
-        await _database.customStatement(
-          '''
-          UPDATE local_jobs
-          SET sync_state = 'synced'
-          WHERE business_id = ? AND id = ?
-          ''',
-          [businessId, jobId],
-        );
+        await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database,
+            businessId,
+            outboxId: outboxId,
+          );
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE id = ?',
+            [outboxId],
+          );
+          await _database.customStatement(
+            '''
+            UPDATE local_jobs
+            SET sync_state = 'synced'
+            WHERE business_id = ? AND id = ?
+            ''',
+            [businessId, jobId],
+          );
+        });
       } catch (error) {
+        if (error is LocalJobQuarantineException) rethrow;
         await _database.customStatement(
           '''
           UPDATE sync_outbox
@@ -536,3 +654,4 @@ class OfflineJobAdminService {
     }
   }
 }
+

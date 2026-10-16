@@ -685,6 +685,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: documentId,
           isOwner: widget.roleCode == 'owner',
@@ -856,7 +857,8 @@ class _HomeScreenState extends State<HomeScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => JobDocumentScreen(
-            businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          businessId: widget.businessId,
             documentId: invoiceId,
             isOwner: widget.roleCode == 'owner',
             canManageExpenses: _canManage,

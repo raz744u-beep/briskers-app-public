@@ -11,6 +11,7 @@ import '../../services/catalog_sync_service.dart';
 import '../../services/document_index_sync_service.dart';
 import '../../services/linked_expense_sync_service.dart';
 import '../../services/job_sync_service.dart';
+import '../../services/local_sync_status_repository.dart';
 import '../../services/import_cache_repair_service.dart';
 import '../../services/kiosk_registration_service.dart';
 import '../../services/offline_preinspection_service.dart';
@@ -541,6 +542,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     });
 
     final failures = <String>[];
+    final failedStages = <String>[];
 
     Future<void> attempt(
       String label,
@@ -551,6 +553,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         await action();
       } catch (error) {
         failures.add('$label: $error');
+        failedStages.add(label);
       } finally {
         if (mounted) setState(() => _syncStep += 1);
       }
@@ -643,6 +646,15 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       'Invoice status styles',
       () => _invoiceStatusStyles.refresh(widget.businessId),
     );
+
+    try {
+      await LocalSyncStatusRepository.recordManualRefreshResult(
+        widget.businessId, failedStages,
+      );
+    } catch (error) {
+      // The in-memory warning remains available even if preferences fail.
+      failures.add('Saving sync status: $error');
+    }
 
     await _load();
     if (!mounted) return;

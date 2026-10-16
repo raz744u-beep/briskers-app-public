@@ -7,6 +7,14 @@ on:
       - 'lib/**'
       - 'test/**'
       - '.github/workflows/diagnostics.yml'
+      - 'tools/tests/test_apk_certificate_verification.py'
+      - 'tools/audit_ui_actions.py'
+
+# Build/test commands never transmit Flutter or Dart analytics.
+env:
+  CI: 'true'
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
 
 permissions:
   contents: read
@@ -19,6 +27,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Flutter stable
         uses: subosito/flutter-action@v2
@@ -49,6 +59,9 @@ jobs:
       - name: Audit UI action placeholders
         run: python3 tools/audit_ui_actions.py
 
+      - name: Verify release certificate output parser
+        run: python3 tools/tests/test_apk_certificate_verification.py
+
       - name: Analyze Dart
         working-directory: generated
         run: flutter analyze
@@ -56,3 +69,12 @@ jobs:
       - name: Run diagnostic and regression tests
         working-directory: generated
         run: flutter test
+
+      - name: Upload synthetic PDF visual fixtures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-pdf-quantity-qa
+          path: generated/build/pdf-qa/*.pdf
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,6 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
+
+import '../core/module_modal_theme.dart';
+
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
@@ -9,11 +12,15 @@ import '../core/invoice_status_style.dart';
 import '../core/briskers_i18n.dart';
 import '../core/document_search.dart';
 import '../core/document_future_date.dart';
+import '../core/document_presentation.dart';
 import '../services/briskers_api.dart';
+import '../services/local_job_retirement.dart';
+import '../local/local_database_provider.dart';
 import '../services/local_financial_cache.dart';
 import '../services/local_document_repository.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
+import '../services/invoice_finalization_guard.dart';
 import '../widgets/briskers_page_header.dart';
 import '../widgets/connection_header_toggle.dart';
 import 'jobs/blank_invoice_setup_screen.dart';
@@ -21,6 +28,50 @@ import 'shell_screen.dart';
 import 'jobs/job_document_screen.dart';
 import 'jobs/invoice_deletion_choice.dart';
 import 'expenses/expense_detail_screen.dart';
+
+/// Stable, language-independent values shared by filters, counts and cards.
+/// Estimate statuses retain their independent workflow and display names.
+String documentListStage(Map<String, dynamic> row, {required bool estimate}) {
+  if (estimate) return row['display_status']?.toString() ?? '';
+  final presentation = DocumentPresentation({...row, 'kind': 'invoice'});
+  switch (presentation.statusCode) {
+    case 'closed':
+      return 'Closed';
+    case 'pending_close':
+      return 'Paid · Pending Close';
+    case 'void':
+      return 'Void';
+    default:
+      return 'Open';
+  }
+}
+
+const invoiceListStatusFilters = [
+  'Open',
+  'Paid · Pending Close',
+  'Closed',
+  'Void',
+];
+const estimateListStatusFilters = [
+  'Draft',
+  'Issued',
+  'Accepted',
+  'Declined',
+  'Expired',
+  'Void',
+];
+
+/// The local index supplies placeholder zeroes, not payment aggregates. Keep
+/// unavailable financial details unknown so they cannot contradict a server
+/// display hint or be mistaken for a verified outstanding balance.
+Map<String, dynamic> documentListIndexPresentation(Map<String, dynamic> row) {
+  final result = Map<String, dynamic>.from(row);
+  if (row['_local_snapshot'] == true) {
+    result.remove('paid_amount');
+    result.remove('pending_payment');
+  }
+  return result;
+}
 
 class DocumentsScreen extends StatefulWidget {
   const DocumentsScreen({
@@ -50,15 +101,24 @@ class DocumentsScreen extends StatefulWidget {
   State<DocumentsScreen> createState() => _DocumentsScreenState();
 }
 
-class _DocumentsScreenState extends State<DocumentsScreen> {
+class _DocumentsScreenState extends State<DocumentsScreen>
+    with ModuleModalState<DocumentsScreen> {
+  @override
+  Color get modalAccent =>
+      _estimate ? BriskersColors.estimates : BriskersColors.invoices;
   static const _api = BriskersApi();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
-  final OfflineDocumentDraftService _offlineDrafts = OfflineDocumentDraftService();
+  final OfflineDocumentDraftService _offlineDrafts =
+      OfflineDocumentDraftService();
   final LocalInvoiceStatusStylesCache _localInvoiceStyles =
       LocalInvoiceStatusStylesCache();
   static final Map<String, List<Map<String, dynamic>>> _styleCache = {};
+  final InvoiceFinalizationGuard _finalizationGuard =
+      InvoiceFinalizationGuard();
 
   List<Map<String, dynamic>>? _rows;
+  int _loadEpoch = 0;
+  StreamSubscription<({String businessId, Set<String> jobIds})>? _retirement;
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
   bool _futureDatedOnly = false;
@@ -68,34 +128,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   bool get _estimate => widget.kind == 'estimate';
 
-  String _invoiceStage(Map<String, dynamic> row) {
-    if (_estimate) return row['display_status']?.toString() ?? '';
-    final existing = (row['display_status']?.toString() ?? '').toLowerCase();
-    final code = (row['display_status_code']?.toString() ?? '').toLowerCase();
-    if (existing == 'closed' || code == 'closed' ||
-        row['closed_at'] != null) {
-      return 'Closed';
-    }
-    final total = num.tryParse(row['total_amount']?.toString() ?? '');
-    final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
-    final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
-    // Some legacy/list RPCs provide only server-computed status, not amounts.
-    if (total != null && total > 0 && paid + pending >= total - 0.005) {
-      return 'Paid · Pending Close';
-    }
-    if (const {'paid', 'pending close'}.contains(existing) ||
-        const {'paid', 'pending_close'}.contains(code)) {
-      return 'Paid · Pending Close';
-    }
-    return 'Open';
-  }
+  String _invoiceStage(Map<String, dynamic> row) =>
+      documentListStage(row, estimate: _estimate);
 
-  List<String> get _statuses {
-    if (_estimate) {
-      return const ['Draft', 'Issued', 'Accepted', 'Declined', 'Expired', 'Void'];
-    }
-    return const ['Open', 'Paid · Pending Close', 'Closed'];
-  }
+  List<String> get _statuses =>
+      _estimate ? estimateListStatusFilters : invoiceListStatusFilters;
 
   String get _title => _estimate ? tr('estimates') : tr('invoices');
 
@@ -105,7 +142,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         return tr('invoiceOpen');
       case 'Pending Close':
       case 'Paid · Pending Close':
-        return 'Paid · Pending Close';
+        return tr('invoicePaidPendingClose');
       case 'Paid':
         return tr('invoicePaid');
       case 'Closed':
@@ -128,6 +165,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         return status;
     }
   }
+
   Map<String, dynamic>? _invoiceStyleByName(String status) {
     for (final item in _invoiceStyles) {
       if (item['name']?.toString() == status) return item;
@@ -174,7 +212,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     return Icons.circle;
   }
 
-
   @override
   void initState() {
     super.initState();
@@ -182,27 +219,46 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     if (!_estimate && cachedStyles != null) {
       _invoiceStyles = List<Map<String, dynamic>>.from(cachedStyles);
     }
+    _retirement = LocalJobRetirement.events.listen((event) {
+      if (event.businessId == widget.businessId && mounted) {
+        // Invalidate any response captured before the durable tombstone.
+        _loadEpoch++;
+        unawaited(_load());
+      }
+    });
     unawaited(_load());
   }
 
   @override
+  void didUpdateWidget(covariant DocumentsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.kind != widget.kind) {
+      _loadEpoch++;
+      _rows = null;
+      _invoiceStyles = const [];
+      _error = null;
+      unawaited(_load());
+    }
+  }
+
+  @override
   void dispose() {
+    _retirement?.cancel();
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
+    final epoch = ++_loadEpoch;
     var localShown = false;
-    final forceOnline =
-        BriskersConnectionModeController.instance.forceOnline;
-    final forceOffline =
-        BriskersConnectionModeController.instance.forceOffline;
+    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
+    final forceOffline = BriskersConnectionModeController.instance.forceOffline;
 
     if (!_estimate && !forceOnline) {
       try {
-        final cachedStyles =
-            await _localInvoiceStyles.load(widget.businessId);
+        final cachedStyles = await _localInvoiceStyles.load(widget.businessId);
         if (mounted && cachedStyles.isNotEmpty) {
           setState(() => _invoiceStyles = cachedStyles);
         }
@@ -215,10 +271,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           widget.businessId,
           kind: widget.kind,
         );
-        if (mounted) {
+        if (mounted && epoch == _loadEpoch) {
           localShown = true;
           setState(() {
-            _rows = local;
+            _rows = local.map(documentListIndexPresentation).toList();
             _error = null;
           });
         }
@@ -226,7 +282,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
 
     if (forceOffline) {
-      if (mounted && !localShown) {
+      if (mounted && epoch == _loadEpoch && !localShown) {
         setState(() {
           _rows ??= const [];
           _error = null;
@@ -237,17 +293,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     try {
       final results = await Future.wait<dynamic>([
-        _api.documents(
-          widget.businessId,
-          kind: widget.kind,
-        ),
+        _api.documents(widget.businessId, kind: widget.kind),
         if (!_estimate)
           _api.invoiceStatusStyles(widget.businessId)
         else
           Future.value(const <Map<String, dynamic>>[]),
       ]);
 
-      final rows = List<Map<String, dynamic>>.from(results[0] as List);
+      final blocked = await LocalJobRetirement.blockedDocumentIds(
+        localDatabase,
+        widget.businessId,
+      );
+      final rows = List<Map<String, dynamic>>.from(results[0] as List)
+          .where((row) => !blocked.contains('${row['id'] ?? ''}'))
+          .toList();
+      if (!mounted || epoch != _loadEpoch) return;
       final styles = List<Map<String, dynamic>>.from(results[1] as List);
 
       // A complete server snapshot must evict stale synced MobileBiz rows.
@@ -258,19 +318,20 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         kind: widget.kind,
       );
       if (!_estimate) {
-        _styleCache[widget.businessId] =
-            List<Map<String, dynamic>>.from(styles);
+        _styleCache[widget.businessId] = List<Map<String, dynamic>>.from(
+          styles,
+        );
         await _localInvoiceStyles.save(widget.businessId, styles);
       }
 
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() {
         _rows = rows;
         _invoiceStyles = styles;
         _error = null;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || epoch != _loadEpoch) return;
       setState(() {
         _rows ??= const [];
         _error = (_rows!.isEmpty && !localShown)
@@ -303,9 +364,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       isFutureDatedDocument(row);
 
   int get _futureDatedCount =>
-      (_rows ?? const <Map<String, dynamic>>[])
-          .where(_hasFutureDateTag)
-          .length;
+      (_rows ?? const <Map<String, dynamic>>[]).where(_hasFutureDateTag).length;
 
   List<Map<String, dynamic>> get _visibleRows {
     final rows = List<Map<String, dynamic>>.from(
@@ -314,12 +373,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     var filtered = _selectedStatus == null
         ? rows
-        : rows
-            .where(
-              (row) =>
-                  _invoiceStage(row) == _selectedStatus,
-            )
-            .toList();
+        : rows.where((row) => _invoiceStage(row) == _selectedStatus).toList();
 
     if (_futureDatedOnly) {
       filtered = filtered.where(_hasFutureDateTag).toList();
@@ -327,7 +381,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     final query = _search.text.trim().toLowerCase();
     if (query.isNotEmpty) {
-      filtered = filtered.where((row) => matchesDocumentSearch(row, query)).toList();
+      filtered = filtered
+          .where((row) => matchesDocumentSearch(row, query))
+          .toList();
     }
 
     if (!_estimate) {
@@ -363,17 +419,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     filtered.sort((a, b) {
       final statusCompare = _estimateStatusRank(
         a['display_status']?.toString() ?? '',
-      ).compareTo(
-        _estimateStatusRank(
-          b['display_status']?.toString() ?? '',
-        ),
-      );
+      ).compareTo(_estimateStatusRank(b['display_status']?.toString() ?? ''));
       if (statusCompare != 0) return statusCompare;
 
-      final aDate =
-          DateTime.tryParse(a['document_date']?.toString() ?? '');
-      final bDate =
-          DateTime.tryParse(b['document_date']?.toString() ?? '');
+      final aDate = DateTime.tryParse(a['document_date']?.toString() ?? '');
+      final bDate = DateTime.tryParse(b['document_date']?.toString() ?? '');
       if (aDate != null && bDate != null) {
         return bDate.compareTo(aDate);
       }
@@ -387,9 +437,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   int _statusCount(String status) {
     final rows = _rows ?? const <Map<String, dynamic>>[];
-    return rows
-        .where((row) => _invoiceStage(row) == status)
-        .length;
+    return rows.where((row) => _invoiceStage(row) == status).length;
   }
 
   Widget _menuCount(int count, {bool alwaysShow = false}) {
@@ -406,14 +454,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     );
   }
 
-  Future<void> _open(
-    Map<String, dynamic> row, {
-    String? initialAction,
-  }) async {
+  Future<void> _open(Map<String, dynamic> row, {String? initialAction}) async {
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: row['id'].toString(),
           isOwner: widget.isOwner,
@@ -431,8 +477,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     final isEstimate = row['kind']?.toString() == 'estimate';
     final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
-    final pending =
-        num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
+    final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
 
     if (!isEstimate && paid > 0) {
       await showDialog<void>(
@@ -482,9 +527,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     if (!isEstimate && !localDraft) {
       if (BriskersConnectionModeController.instance.forceOffline) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Reconnect to delete an already-synced invoice.'),
-          ));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Reconnect to delete an already-synced invoice.'),
+            ),
+          );
         }
         return;
       }
@@ -492,14 +539,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       final jobId = row['job_id']?.toString() ?? '';
       if (jobId.isNotEmpty) {
         try {
-          plan = await _api.jobDeletionPlan(widget.businessId,jobId);
+          plan = await _api.jobDeletionPlan(widget.businessId, jobId);
         } catch (_) {
           // Invoice-only remains available; the RPC will verify permission.
         }
       }
       if (!mounted) return;
       final choice = await showInvoiceDeletionChoice(
-        context, invoiceNumber: number,jobPlan: plan,
+        context,
+        invoiceNumber: number,
+        jobPlan: plan,
       );
       if (choice == null) return;
       deleteJob = choice;
@@ -545,8 +594,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             builder: (context, message, child) => Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(width: 24, height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
                 const SizedBox(width: 16),
                 Flexible(child: Text(message)),
               ],
@@ -562,10 +614,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           row['id'].toString(),
         );
       } else if (isEstimate) {
-        await _api.deleteEstimate(
-          widget.businessId,
-          row['id'].toString(),
-        );
+        await _api.deleteEstimate(widget.businessId, row['id'].toString());
       } else {
         await _api.deleteInvoiceManaged(
           widget.businessId,
@@ -581,8 +630,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            deleteJob ? 'Invoice and Job deleted.' :
-                '${isEstimate ? 'Estimate' : 'Invoice'} deleted.',
+            deleteJob
+                ? 'Invoice and Job deleted.'
+                : '${isEstimate ? 'Estimate' : 'Invoice'} deleted.',
           ),
         ),
       );
@@ -627,7 +677,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final total = num.tryParse(row['total_amount']?.toString() ?? '') ?? 0;
     final paid = num.tryParse(row['paid_amount']?.toString() ?? '') ?? 0;
     final pending = num.tryParse(row['pending_payment']?.toString() ?? '') ?? 0;
-    final canPayment = !_estimate && status != 'Paid' && total - paid - pending > 0.005;
+    final canPayment =
+        !_estimate &&
+        status == 'Open' &&
+        !DocumentPresentation(row).requiresReconciliation &&
+        total - paid - pending > 0.005;
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -666,47 +720,71 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     color: BriskersColors.invoices,
                   ),
                   title: const Text('Add to Existing Invoice'),
-                  onTap: () =>
-                      Navigator.pop(sheetContext, 'add_to_invoice'),
+                  onTap: () => Navigator.pop(sheetContext, 'add_to_invoice'),
                 ),
               ],
               if (!_estimate)
                 ListTile(
-                  leading: const Icon(Icons.copy_outlined, color: BriskersColors.invoices),
+                  leading: const Icon(
+                    Icons.copy_outlined,
+                    color: BriskersColors.invoices,
+                  ),
                   title: Text(tr('copyInvoice')),
                   onTap: () => Navigator.pop(sheetContext, 'copy'),
                 ),
               if (canExpenses)
                 ListTile(
-                  leading: const Icon(Icons.add_card_outlined, color: BriskersColors.expenses),
+                  leading: const Icon(
+                    Icons.add_card_outlined,
+                    color: BriskersColors.expenses,
+                  ),
                   title: Text(tr('addExpense')),
                   onTap: () => Navigator.pop(sheetContext, 'add_expense'),
                 ),
               if (canExpenses)
                 ListTile(
-                  leading: const Icon(Icons.payments_outlined, color: BriskersColors.expenses),
+                  leading: const Icon(
+                    Icons.payments_outlined,
+                    color: BriskersColors.expenses,
+                  ),
                   title: Text(tr('viewExpenses')),
                   onTap: () => Navigator.pop(sheetContext, 'expenses'),
                 ),
               if (canPayment)
                 ListTile(
-                  leading: const Icon(Icons.credit_card_outlined, color: BriskersColors.invoices),
+                  leading: const Icon(
+                    Icons.credit_card_outlined,
+                    color: BriskersColors.invoices,
+                  ),
                   title: Text(tr('addPayment')),
                   onTap: () => Navigator.pop(sheetContext, 'payment'),
                 ),
               if (!_estimate)
                 ListTile(
-                  leading: const Icon(Icons.warning_amber_rounded, color: Color(0xFFC62828)),
+                  leading: const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Color(0xFFC62828),
+                  ),
                   title: Text(tr('vehicleFindings')),
                   onTap: () => Navigator.pop(sheetContext, 'findings'),
                 ),
               ListTile(
-                leading: Icon(Icons.visibility_outlined, color: _estimate ? BriskersColors.estimates : BriskersColors.invoices),
+                leading: Icon(
+                  Icons.visibility_outlined,
+                  color: _estimate
+                      ? BriskersColors.estimates
+                      : BriskersColors.invoices,
+                ),
                 title: Text(tr('preview')),
                 onTap: () => Navigator.pop(sheetContext, 'preview'),
               ),
               ListTile(
-                leading: Icon(Icons.outbox_outlined, color: _estimate ? BriskersColors.estimates : BriskersColors.invoices),
+                leading: Icon(
+                  Icons.outbox_outlined,
+                  color: _estimate
+                      ? BriskersColors.estimates
+                      : BriskersColors.invoices,
+                ),
                 title: Text(tr('send')),
                 onTap: () => Navigator.pop(sheetContext, 'send'),
               ),
@@ -714,7 +792,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.delete_outline, color: Colors.red),
-                  title: Text(_estimate ? tr('deleteEstimate') : tr('deleteInvoice'), style: const TextStyle(color: Colors.red)),
+                  title: Text(
+                    _estimate ? tr('deleteEstimate') : tr('deleteInvoice'),
+                    style: const TextStyle(color: Colors.red),
+                  ),
                   onTap: () => Navigator.pop(sheetContext, 'delete'),
                 ),
               ],
@@ -734,12 +815,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       await _open(row, initialAction: action);
     }
   }
+
   Future<void> _showCloseInvoices() async {
     if (_estimate || !widget.isOwner) return;
 
     final eligible = (_rows ?? const <Map<String, dynamic>>[])
-        .where((row) => <String>{'Pending Close', 'Paid'}
-            .contains(row['display_status']?.toString() ?? ''))
+        .where((row) => _invoiceStage(row) == 'Paid · Pending Close')
         .toList();
 
     if (eligible.isEmpty) {
@@ -923,7 +1004,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     if (confirmed != true || selected.isEmpty || !mounted) return;
 
-    final ok = await showDialog<bool>(
+    final ok =
+        await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
             title: const Text('Close selected invoices?'),
@@ -947,11 +1029,24 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           ),
         ) ??
         false;
-    if (!ok) return;
+    if (!ok || !mounted) return;
 
     try {
+      // Check the entire selection before closing any invoice, then recheck
+      // each RPC so a later receipt or connection-mode change cannot bypass it.
+      await _finalizationGuard.check(
+        businessId: widget.businessId,
+        invoiceIds: selected,
+        isOwner: widget.isOwner,
+      );
       for (final id in selected) {
-        await _api.closeInvoice(widget.businessId, id);
+        if (!mounted) return;
+        await _finalizationGuard.run(
+          businessId: widget.businessId,
+          invoiceIds: [id],
+          isOwner: widget.isOwner,
+          action: () => _api.closeInvoice(widget.businessId, id),
+        );
       }
       await _load();
       if (!mounted) return;
@@ -974,11 +1069,17 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       final cached = await LocalFinancialCache().loadLinkedExpenses(
         widget.businessId,
       );
-      final related = cached?.where((item) =>
-        item['document_id']?.toString() == row['id'].toString() ||
-        (row['job_id']?.toString() != null &&
-          item['job_id']?.toString() == row['job_id']?.toString())
-      ).toList() ?? const <Map<String, dynamic>>[];
+      final related =
+          cached
+              ?.where(
+                (item) =>
+                    item['document_id']?.toString() == row['id'].toString() ||
+                    (row['job_id']?.toString() != null &&
+                        item['job_id']?.toString() ==
+                            row['job_id']?.toString()),
+              )
+              .toList() ??
+          const <Map<String, dynamic>>[];
       final expenses = offline
           ? related
           : await _api.documentExpenses(
@@ -1058,21 +1159,17 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     itemBuilder: (context, index) {
                       final expense = expenses[index];
                       final id = expense['id']?.toString() ?? '';
-                      final vendor =
-                          expense['vendor']?.toString() ?? 'Expense';
-                      final category =
-                          expense['category']?.toString() ?? '';
+                      final vendor = expense['vendor']?.toString() ?? 'Expense';
+                      final category = expense['category']?.toString() ?? '';
                       final date =
                           expense['transaction_date']?.toString() ?? '';
-                      final scope =
-                          expense['scope']?.toString() ?? 'invoice';
-                      final jobNumber =
-                          expense['job_number']?.toString() ?? '';
+                      final scope = expense['scope']?.toString() ?? 'invoice';
+                      final jobNumber = expense['job_number']?.toString() ?? '';
                       final scopeLabel = scope == 'invoice'
                           ? tr('invoiceLinked')
                           : (jobNumber.isEmpty
-                              ? tr('jobExpense')
-                              : '${tr('jobLabel')} $jobNumber');
+                                ? tr('jobExpense')
+                                : '${tr('jobLabel')} $jobNumber');
                       final income =
                           expense['direction']?.toString() == 'income';
 
@@ -1082,8 +1179,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
                       return ListTile(
                         leading: CircleAvatar(
-                          backgroundColor:
-                              expenseColor.withValues(alpha: 0.14),
+                          backgroundColor: expenseColor.withValues(alpha: 0.14),
                           child: Icon(
                             income ? Icons.south_west : Icons.north_east,
                             color: expenseColor,
@@ -1147,6 +1243,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                     builder: (_) => ExpenseDetailScreen(
                                       businessId: widget.businessId,
                                       transactionId: id,
+                                      cachedDetail: offline
+                                          ? Map<String, dynamic>.from(expense)
+                                          : null,
                                     ),
                                   ),
                                 );
@@ -1165,15 +1264,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       if (mounted) setState(() => _error = error.toString());
     }
   }
+
   Future<void> _createBlankInvoice() async {
     if (_estimate || !(widget.isOwner || widget.canManageExpenses)) return;
 
     final invoiceId = await Navigator.push<String>(
       context,
       MaterialPageRoute(
-        builder: (_) => BlankInvoiceSetupScreen(
-          businessId: widget.businessId,
-        ),
+        builder: (_) => BlankInvoiceSetupScreen(businessId: widget.businessId),
       ),
     );
     if (!mounted || invoiceId == null || invoiceId.isEmpty) return;
@@ -1182,6 +1280,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: invoiceId,
           isOwner: widget.isOwner,
@@ -1210,6 +1309,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => JobDocumentScreen(
+            roleCode: widget.roleCode,
             businessId: widget.businessId,
             documentId: documentId,
             isOwner: widget.isOwner,
@@ -1227,9 +1327,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final selectedLabel = _futureDatedOnly
         ? 'Future-dated'
         : (_selectedStatus == null
-            ? tr('all')
-            : _localizedStatusLabel(_selectedStatus!));
-    final accent = _estimate ? BriskersColors.estimates : BriskersColors.invoices;
+              ? tr('all')
+              : _localizedStatusLabel(_selectedStatus!));
+    final accent = _estimate
+        ? BriskersColors.estimates
+        : BriskersColors.invoices;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -1250,50 +1352,83 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 if (widget.isOwner)
                   const Padding(
                     padding: EdgeInsets.only(right: 12),
-                    child: Center(child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: Color(0xFFF6EAD5),
-                        borderRadius: BorderRadius.all(Radius.circular(999)),
+                    child: Center(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Color(0xFFF6EAD5),
+                          borderRadius: BorderRadius.all(Radius.circular(999)),
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 5,
+                          ),
+                          child: Text(
+                            'OWNER',
+                            style: TextStyle(
+                              color: Color(0xFFC47A12),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
                       ),
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                        child: Text('OWNER', style: TextStyle(
-                          color: Color(0xFFC47A12), fontWeight: FontWeight.w700,
-                          fontSize: 11)),
-                      ),
-                    )),
+                    ),
                   ),
               ],
             )
           : null,
       bottomNavigationBar: widget.showAppBar && _estimate
-          ? (widget.sharedBottomNavigationBar ?? NavigationBar(
-              selectedIndex: 5,
-              labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-              onDestinationSelected: (index) {
-                final selectDestination = widget.onPrimaryDestinationSelected;
-                if (selectDestination != null) {
-                  selectDestination(index);
-                  return;
-                }
-                Navigator.of(context).pushReplacement(MaterialPageRoute(
-                  builder: (_) => ShellScreen(
-                    businessId: widget.businessId,
-                    businessName: widget.businessName,
-                    roleCode: widget.roleCode,
-                    initialIndex: index,
-                  ),
-                ));
-              },
-              destinations: const [
-                NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Home'),
-                NavigationDestination(icon: Icon(Icons.people_outline), label: 'Customers'),
-                NavigationDestination(icon: Icon(Icons.calendar_month_outlined), label: 'Schedule'),
-                NavigationDestination(icon: Icon(Icons.build_outlined), label: 'Jobs'),
-                NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Invoices'),
-                NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
-              ],
-            ))
+          ? (widget.sharedBottomNavigationBar ??
+                NavigationBar(
+                  selectedIndex: 5,
+                  labelBehavior:
+                      NavigationDestinationLabelBehavior.onlyShowSelected,
+                  onDestinationSelected: (index) {
+                    final selectDestination =
+                        widget.onPrimaryDestinationSelected;
+                    if (selectDestination != null) {
+                      selectDestination(index);
+                      return;
+                    }
+                    Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(
+                        builder: (_) => ShellScreen(
+                          businessId: widget.businessId,
+                          businessName: widget.businessName,
+                          roleCode: widget.roleCode,
+                          initialIndex: index,
+                        ),
+                      ),
+                    );
+                  },
+                  destinations: const [
+                    NavigationDestination(
+                      icon: Icon(Icons.dashboard_outlined),
+                      label: 'Home',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.people_outline),
+                      label: 'Customers',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.calendar_month_outlined),
+                      label: 'Schedule',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.build_outlined),
+                      label: 'Jobs',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.receipt_long_outlined),
+                      label: 'Invoices',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.more_horiz),
+                      label: 'More',
+                    ),
+                  ],
+                ))
           : null,
       body: RefreshIndicator(
         onRefresh: _load,
@@ -1305,10 +1440,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 if (!_estimate) ...[
                   Text(
                     _title,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: accent,
-                        ),
+                    style: Theme.of(context).textTheme.headlineSmall
+                        ?.copyWith(fontWeight: FontWeight.w800, color: accent),
                   ),
                   const SizedBox(width: 8),
                 ],
@@ -1318,8 +1451,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     _futureDatedOnly = value == '__future__';
                     _selectedStatus =
                         value == '__all__' || value == '__future__'
-                            ? null
-                            : value;
+                        ? null
+                        : value;
                   }),
                   itemBuilder: (_) => [
                     PopupMenuItem<String>(
@@ -1329,10 +1462,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                           const Icon(Icons.all_inclusive),
                           const SizedBox(width: 10),
                           Expanded(child: Text(tr('all'))),
-                          _menuCount(
-                            _rows?.length ?? 0,
-                            alwaysShow: true,
-                          ),
+                          _menuCount(_rows?.length ?? 0, alwaysShow: true),
                         ],
                       ),
                     ),
@@ -1347,10 +1477,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                             ),
                             const SizedBox(width: 10),
                             const Expanded(child: Text('Future-dated')),
-                            _menuCount(
-                              _futureDatedCount,
-                              alwaysShow: true,
-                            ),
+                            _menuCount(_futureDatedCount, alwaysShow: true),
                           ],
                         ),
                       ),
@@ -1367,9 +1494,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                             ),
                             const SizedBox(width: 10),
                             Expanded(
-                              child: Text(
-                                _localizedStatusLabel(status),
-                              ),
+                              child: Text(_localizedStatusLabel(status)),
                             ),
                             _menuCount(count),
                           ],
@@ -1385,19 +1510,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(999),
                       border: Border.all(
-                        color: (_futureDatedOnly
-                                ? const Color(0xFFB26A00)
-                                : (_selectedStatus == null
-                                    ? accent
-                                    : _statusColor(_selectedStatus!)))
-                            .withValues(alpha: 0.50),
+                        color:
+                            (_futureDatedOnly
+                                    ? const Color(0xFFB26A00)
+                                    : (_selectedStatus == null
+                                          ? accent
+                                          : _statusColor(_selectedStatus!)))
+                                .withValues(alpha: 0.50),
                       ),
-                      color: (_futureDatedOnly
-                              ? const Color(0xFFB26A00)
-                              : (_selectedStatus == null
-                                  ? accent
-                                  : _statusColor(_selectedStatus!)))
-                          .withValues(alpha: 0.08),
+                      color:
+                          (_futureDatedOnly
+                                  ? const Color(0xFFB26A00)
+                                  : (_selectedStatus == null
+                                        ? accent
+                                        : _statusColor(_selectedStatus!)))
+                              .withValues(alpha: 0.08),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -1408,8 +1535,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                             color: _futureDatedOnly
                                 ? const Color(0xFFB26A00)
                                 : (_selectedStatus == null
-                                    ? accent
-                                    : _statusColor(_selectedStatus!)),
+                                      ? accent
+                                      : _statusColor(_selectedStatus!)),
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -1420,8 +1547,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                           color: _futureDatedOnly
                               ? const Color(0xFFB26A00)
                               : (_selectedStatus == null
-                                  ? accent
-                                  : _statusColor(_selectedStatus!)),
+                                    ? accent
+                                    : _statusColor(_selectedStatus!)),
                         ),
                       ],
                     ),
@@ -1458,25 +1585,25 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               children: [
                 Expanded(
                   child: SearchBar(
-              key: const ValueKey('persistent-document-search'),
-              controller: _search,
-              focusNode: _searchFocus,
-              hintText: _estimate
-                  ? 'Search estimate #, customer, job or vehicle'
-                  : 'Search invoice #, customer, job or vehicle',
-              leading: const Icon(Icons.search),
-              trailing: [
-                if (_search.text.isNotEmpty)
-                  IconButton(
-                    tooltip: 'Clear',
-                    onPressed: () {
-                      _search.clear();
-                      setState(() {});
-                    },
-                    icon: const Icon(Icons.close),
-                  ),
-              ],
-              onChanged: (_) => setState(() {}),
+                    key: const ValueKey('persistent-document-search'),
+                    controller: _search,
+                    focusNode: _searchFocus,
+                    hintText: _estimate
+                        ? 'Search estimate #, customer, job or vehicle'
+                        : 'Search invoice #, customer, job or vehicle',
+                    leading: const Icon(Icons.search),
+                    trailing: [
+                      if (_search.text.isNotEmpty)
+                        IconButton(
+                          tooltip: 'Clear',
+                          onPressed: () {
+                            _search.clear();
+                            setState(() {});
+                          },
+                          icon: const Icon(Icons.close),
+                        ),
+                    ],
+                    onChanged: (_) => setState(() {}),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1516,31 +1643,34 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(18),
-                  child: Text(_futureDatedOnly
-                      ? 'No future-dated invoices found. Refresh to check for updates.'
-                      : 'No ${_title.toLowerCase()} in this status.'),
+                  child: Text(
+                    _futureDatedOnly
+                        ? 'No future-dated invoices found. Refresh to check for updates.'
+                        : 'No ${_title.toLowerCase()} in this status.',
+                  ),
                 ),
               )
             else
               ...visible.map((row) {
-                final status = row['display_status']?.toString() ?? '';
+                final status = _invoiceStage(row);
                 final statusLabel = _localizedStatusLabel(status);
                 final color = _statusColor(status);
                 final number = row['document_number']?.toString() ?? '';
                 final customer = row['customer_name']?.toString() ?? '';
-                final documentTitle = (row['title'] ?? row['job_title'])?.toString().trim() ?? '';
+                final documentTitle =
+                    (row['title'] ?? row['job_title'])?.toString().trim() ?? '';
                 final vehicle = row['vehicle']?.toString() ?? '';
                 final jobNumber = row['job_number']?.toString() ?? '';
                 final documentDate = _shortDate(row['document_date']);
                 final displayNumber = number.isEmpty
                     ? ''
                     : (_estimate
-                        ? (number.toUpperCase().startsWith('E-')
-                            ? number
-                            : 'E-$number')
-                        : (number.toUpperCase().startsWith('I-')
-                            ? number
-                            : 'I-$number'));
+                          ? (number.toUpperCase().startsWith('E-')
+                                ? number
+                                : 'E-$number')
+                          : (number.toUpperCase().startsWith('I-')
+                                ? number
+                                : 'I-$number'));
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 9),
@@ -1584,7 +1714,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                         ),
                                       ),
                                     ),
-                                    if (row['customer_problem_flag'] == true) ...[
+                                    if (row['customer_problem_flag'] ==
+                                        true) ...[
                                       const SizedBox(width: 5),
                                       const Icon(
                                         Icons.flag,
@@ -1596,9 +1727,15 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                 ),
                                 if (documentTitle.isNotEmpty) ...[
                                   const SizedBox(height: 3),
-                                  Text(documentTitle, maxLines: 1,
+                                  Text(
+                                    documentTitle,
+                                    maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                 ],
                                 const SizedBox(height: 3),
                                 if (vehicle.isNotEmpty)
@@ -1643,8 +1780,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                     <String>[
                                       if (jobNumber.isNotEmpty)
                                         '${tr('jobLabel')} $jobNumber',
-                                      if (documentDate.isNotEmpty)
-                                        documentDate,
+                                      if (documentDate.isNotEmpty) documentDate,
                                     ].join(' • '),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,

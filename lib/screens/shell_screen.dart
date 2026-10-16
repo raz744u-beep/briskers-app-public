@@ -1,16 +1,24 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/supabase_config.dart';
 import '../core/connection_mode.dart';
 import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
 import '../services/customer_vehicle_sync_service.dart';
+import '../services/customer_notification_service.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/job_sync_service.dart';
+import '../services/owner_job_retirement_service.dart';
+import '../services/owner_job_deletion_service_v3.dart';
+import '../services/owner_local_job_purge_service.dart';
+import '../services/local_job_deletion_v3.dart';
+import '../local/local_database_provider.dart';
 import '../services/local_appointment_repository.dart';
 import '../services/local_customer_repository.dart';
 import '../services/local_document_repository.dart';
@@ -19,9 +27,11 @@ import '../services/local_payment_methods_cache.dart';
 import '../services/local_standard_notes_service.dart';
 import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
+import '../widgets/auth_visibility_shield.dart';
 import '../widgets/connection_header_toggle.dart';
 import 'appointments_screen.dart';
 import 'customers/customers_screen.dart';
+import 'customers/new_customers_screen.dart';
 import 'home_screen.dart';
 import 'jobs_screen.dart';
 import 'more_screen.dart';
@@ -45,9 +55,13 @@ class ShellScreen extends StatefulWidget {
   State<ShellScreen> createState() => _ShellScreenState();
 }
 
-class _ShellScreenState extends State<ShellScreen> {
+class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   static const _api = BriskersApi();
   bool _preparingOfflineChoices = false;
+  bool _retirementSyncing = false;
+  bool _foreground = true;
+  Timer? _retirementRetry;
+  StreamSubscription<String>? _retirementChanges;
   static const _sectionColors = [
     BriskersColors.today,
     BriskersColors.customers,
@@ -57,8 +71,15 @@ class _ShellScreenState extends State<ShellScreen> {
     BriskersColors.more,
   ];
 
+  StreamSubscription<dynamic>? _scopeAuthSubscription;
+  String? _scopeActor;
+  bool _scopeLocked = false;
   int _index = 0;
   int _customersRefreshToken = 0;
+  int _customerNavigationRequest = 0;
+  List<String>? _focusedCustomerIds;
+  CustomerNotificationService? _customerNotifications;
+  StreamSubscription<String>? _customerReviewsSubscription;
   int _jobsRefreshToken = 0;
   int _homeAttentionRefreshToken = 0;
   Map<String, dynamic> _navCounts = const {
@@ -91,6 +112,38 @@ class _ShellScreenState extends State<ShellScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _scopeActor = supabase.auth.currentUser?.id;
+    _scopeAuthSubscription = supabase.auth.onAuthStateChange.listen((event) {
+      if (!mounted || event.session?.user.id == _scopeActor) return;
+      setState(() {
+        _scopeLocked = true;
+        _lazyPages.clear();
+        _navCounts = const {};
+        _homeJobsCount = 0;
+        _homeEstimatesOpenCount = 0;
+        _homeInvoicesOpenCount = 0;
+      });
+    });
+    _retirementRetry = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_foreground) unawaited(_syncRetirements());
+    });
+    _retirementChanges = OwnerJobRetirementService.statusEvents.listen((businessId) {
+      if (mounted && businessId == widget.businessId) {
+        _refreshHomeJobsCount();
+        _refreshHomeEstimatesCount();
+        _refreshHomeInvoicesCount();
+      }
+    });
+    unawaited(_syncRetirements());
+    final userId = supabase.auth.currentUser?.id;
+    if (userId != null) {
+      _customerNotifications = CustomerNotificationService(
+        businessId: widget.businessId, userId: userId);
+    }
+    _customerReviewsSubscription = CustomerNotificationService.changes.listen((businessId) {
+      if (businessId == widget.businessId) _refreshHomeCustomersCount();
+    });
     _businessName = widget.businessName;
     _index = widget.initialIndex.clamp(0, 5);
     BriskersConnectionModeController.instance.addListener(_connectionChanged);
@@ -147,14 +200,63 @@ class _ShellScreenState extends State<ShellScreen> {
     });
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    if (_foreground) {
+      _refreshHomeCustomersCount();
+      unawaited(_syncRetirements());
+    }
+  }
+
   void _connectionChanged() {
     if (!mounted) return;
     unawaited(_prepareOfflineChoices());
+    unawaited(_syncRetirements());
+    _refreshHomeCustomersCount();
     setState(() {
       _lazyPages.clear();
       _customersRefreshToken++;
       _jobsRefreshToken++;
     });
+  }
+
+  Future<void> _syncRetirements() async {
+    if (!OwnerJobRetirementService.isTombstoneReaderRole(widget.roleCode) ||
+        !mounted || !_foreground || _retirementSyncing ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
+    final businessId = widget.businessId;
+    final actorId = supabase.auth.currentUser?.id;
+    if (actorId == null) return;
+    _retirementSyncing = true;
+    try {
+      final deletionV3 = OwnerJobDeletionServiceV3();
+      await deletionV3.pullTombstones(businessId);
+      if (widget.roleCode == 'owner' && mounted && _foreground &&
+          widget.businessId == businessId &&
+          !BriskersConnectionModeController.instance.forceOffline &&
+          supabase.auth.currentUser?.id == actorId) {
+        await deletionV3.flush(businessId);
+        await OwnerLocalJobPurgeService().flushRegistrations(businessId,
+          actorId: actorId, isOwner: true);
+      }
+      final service = OwnerJobRetirementService();
+      await service.pullTombstones(businessId);
+      if (!mounted || !_foreground || widget.businessId != businessId ||
+          BriskersConnectionModeController.instance.forceOffline ||
+          supabase.auth.currentUser?.id != actorId) {
+        return;
+      }
+      await service.flush(businessId,
+        actorId: actorId, isOwner: widget.roleCode == 'owner');
+    } catch (_) {
+      // The persisted sync diagnostics explain any block; uncertainty never
+      // clears a fence. Foreground retries and app restart resume the request.
+    } finally {
+      _retirementSyncing = false;
+    }
   }
 
   /// Preload the shop's actual payment method IDs for future offline use.
@@ -176,6 +278,20 @@ class _ShellScreenState extends State<ShellScreen> {
       }
     } catch (_) {
       // An unavailable network must not prevent local app use.
+    }
+    try {
+      // Warranty company choice should be available in the same form offline.
+      // IDs come from actual shop configuration, never fabricated defaults.
+      final companies = await _api.warrantyCompanies(widget.businessId);
+      if (companies.isNotEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(
+          'briskers_warranty_companies_${widget.businessId}',
+          jsonEncode(companies),
+        );
+      }
+    } catch (_) {
+      // Retain the last known shop-scoped warranty company list.
     }
     try {
       await LocalStandardNotesService().available(
@@ -240,13 +356,8 @@ class _ShellScreenState extends State<ShellScreen> {
 
   Future<void> _refreshHomeCustomersCount() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final rawSince = prefs.getString(_customersViewedKey);
-      final since = rawSince == null ? null : DateTime.tryParse(rawSince);
-      final count = await _localCustomers.newCustomerCount(
-        widget.businessId,
-        since: since,
-      );
+      final ids = await _customerNotifications?.unreadCustomerIds() ?? const <String>[];
+      final count = ids.length;
       _applyHomeCustomersCount(count);
     } catch (_) {}
   }
@@ -276,7 +387,42 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant ShellScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.roleCode != widget.roleCode || oldWidget.businessId != widget.businessId) {
+      _scopeLocked = true;
+      _lazyPages.clear();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) { authVisibilityEpoch.value++; }
+      });
+      unawaited(_refreshKnownAccessChange());
+    }
+  }
+
+  Future<void> _refreshKnownAccessChange() async {
+    final business = widget.businessId;
+    final role = widget.roleCode;
+    try {
+      await LocalJobDeletionV3.lockKnownRoleChange(localDatabase, business);
+      if (BriskersConnectionModeController.instance.forceOffline) return;
+      await OwnerJobDeletionServiceV3().pullTombstones(business);
+      await LocalJobDeletionV3.assertVisibilityActor(localDatabase, business);
+      if (mounted && widget.businessId == business && widget.roleCode == role &&
+          supabase.auth.currentUser?.id == _scopeActor) {
+        setState(() { _scopeLocked = false; });
+      }
+    } catch (_) {
+      // Keep prior-scope screens hidden until verified access is available.
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _scopeAuthSubscription?.cancel();
+    _retirementRetry?.cancel();
+    _retirementChanges?.cancel();
+    _customerReviewsSubscription?.cancel();
     BriskersConnectionModeController.instance.removeListener(_connectionChanged);
     _homeJobsCountSubscription?.cancel();
     _homeJobsSyncSubscription?.cancel();
@@ -290,29 +436,55 @@ class _ShellScreenState extends State<ShellScreen> {
     super.dispose();
   }
 
-  String get _customersViewedKey =>
-      'briskers_customers_viewed_${widget.businessId}';
+  Future<void> _openCustomers(int request) async {
+    List<String> ids;
+    try {
+      ids = await _customerNotifications?.unreadCustomerIds() ?? const <String>[];
+    } catch (_) {
+      // A read failure must not consume the inbox or pretend the badge is zero.
+      if (!mounted || request != _customerNavigationRequest) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr('newCustomersLoadError'))));
+      return;
+    }
+    if (!mounted || request != _customerNavigationRequest) return;
+    setState(() {
+      _focusedCustomerIds = ids.isEmpty ? null : List.unmodifiable(ids);
+      _index = 1;
+      _customersRefreshToken++;
+    });
+    _applyHomeCustomersCount(ids.length);
+  }
 
-  Future<void> _markCustomersViewed() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _customersViewedKey,
-      DateTime.now().toUtc().toIso8601String(),
-    );
-    _applyHomeCustomersCount(0);
+  Future<void> _reviewCustomer(String id) async {
+    try {
+      await _customerNotifications?.markReviewed([id]);
+    } catch (_) {
+      // Retain the badge on storage failure; never optimistically clear it.
+    }
+  }
+
+  void _viewAllCustomers() {
+    _customerNavigationRequest++;
+    setState(() {
+      _focusedCustomerIds = null;
+      _index = 1;
+      _customersRefreshToken++;
+    });
   }
 
   void _goTo(int index) {
     FocusManager.instance.primaryFocus?.unfocus();
+    final request = ++_customerNavigationRequest;
+    if (index == 1) {
+      unawaited(_openCustomers(request));
+      return;
+    }
     setState(() {
       _index = index;
-      if (index == 1) _customersRefreshToken++;
       if (index == 3) _jobsRefreshToken++;
       if (index == 0) _homeAttentionRefreshToken++;
     });
-    if (index == 1) {
-      _markCustomersViewed();
-    }
   }
 
   String get _roleLabel => roleLabel(widget.roleCode);
@@ -365,6 +537,9 @@ class _ShellScreenState extends State<ShellScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_scopeLocked || supabase.auth.currentUser?.id != _scopeActor) {
+      return const Scaffold(body: Center(child: Text('Your account access changed. Reopen this shop to refresh.')));
+    }
     final activeColor = _sectionColors[_index];
     final isHome = _index == 0;
     final roleStyle = employeeRoleStyle(_roleLabel);
@@ -387,26 +562,42 @@ class _ShellScreenState extends State<ShellScreen> {
           attentionRefreshToken: _homeAttentionRefreshToken,
         );
       }
+      if (index == 1) {
+        final focused = _focusedCustomerIds;
+        if (focused != null && _customerNotifications != null) {
+          return NewCustomersScreen(
+            key: ValueKey('customer-review-$_customersRefreshToken'),
+            businessId: widget.businessId,
+            roleCode: widget.roleCode,
+            customerIds: focused,
+            notifications: _customerNotifications!,
+            onViewAll: _viewAllCustomers,
+          );
+        }
+        return CustomersScreen(
+          businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          refreshToken: _customersRefreshToken,
+          onCustomerReviewed: (id) => unawaited(_reviewCustomer(id)),
+        );
+      }
+      if (index == 3) {
+        // Deliver a fresh refreshToken even when Jobs is already selected.
+        // Reusing the cached Widget bypasses JobsScreen.didUpdateWidget.
+        return JobsScreen(
+          businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          refreshToken: _jobsRefreshToken,
+          onJobsChanged: _refreshHomeJobsCount,
+          jobDetailBottomNavigationBar: _shellNavigationBar(),
+        );
+      }
       return _lazyPages.putIfAbsent(index, () {
         switch (index) {
-          case 1:
-            return CustomersScreen(
-              businessId: widget.businessId,
-              roleCode: widget.roleCode,
-              refreshToken: _customersRefreshToken,
-            );
           case 2:
             return AppointmentsScreen(
               businessId: widget.businessId,
               roleCode: widget.roleCode,
-            );
-          case 3:
-            return JobsScreen(
-              businessId: widget.businessId,
-              roleCode: widget.roleCode,
-              refreshToken: _jobsRefreshToken,
-              onJobsChanged: _refreshHomeJobsCount,
-              jobDetailBottomNavigationBar: _shellNavigationBar(),
             );
           case 4:
             return DocumentsScreen(
@@ -414,6 +605,7 @@ class _ShellScreenState extends State<ShellScreen> {
               businessId: widget.businessId,
               kind: 'invoice',
               isOwner: widget.roleCode == 'owner',
+              canManageExpenses: <String>{'owner', 'manager', 'office'}.contains(widget.roleCode),
               showAppBar: false,
             );
           default:

@@ -12,6 +12,7 @@ import '../services/customer_vehicle_sync_service.dart';
 import '../services/catalog_sync_service.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/job_sync_service.dart';
+import '../services/owner_job_retirement_service.dart';
 import '../services/local_financial_cache.dart';
 import '../services/linked_expense_sync_service.dart';
 import '../services/offline_preinspection_service.dart';
@@ -236,6 +237,29 @@ class _BusinessGateState extends State<BusinessGate> {
       // only one local outbox/pull loop on the public terminal.
       return;
     }
+    // Reconcile durable deletions before any older queued edit can replay.
+    // Individual replay paths also enforce the persistent retirement fences.
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    if (OwnerJobRetirementService.isTombstoneReaderRole(roleCode)) {
+      final retirement = OwnerJobRetirementService();
+      try {
+        await retirement.pullTombstones(businessId);
+      } catch (_) {
+        // Unknown deletion state is not permission to replay stale work.
+        return;
+      }
+      final actorId = supabase.auth.currentUser?.id;
+      if (actorId == null) return;
+      try {
+        await retirement.flush(
+          businessId,
+          actorId: actorId,
+          isOwner: roleCode == 'owner',
+        );
+      } catch (_) {
+        // Pending deletion remains durable and blocks its related writes.
+      }
+    }
     try {
       await _offlineInspection.flush(businessId);
     } catch (_) {
@@ -454,3 +478,4 @@ class _BusinessGateState extends State<BusinessGate> {
     );
   }
 }
+

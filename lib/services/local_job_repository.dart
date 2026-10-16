@@ -2,8 +2,12 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 
+import '../core/job_list_options.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
+import 'local_job_access_history.dart';
+import 'local_job_retirement.dart';
+import 'local_job_deletion_v3.dart';
 
 class LocalJobDetailSnapshot {
   const LocalJobDetailSnapshot({
@@ -20,55 +24,192 @@ class LocalJobDetailSnapshot {
 }
 
 class LocalJobRepository {
-  LocalJobRepository({
-    BriskersLocalDatabase? database,
-  }) : _database = database ?? localDatabase;
+  LocalJobRepository({BriskersLocalDatabase? database})
+    : _database = database ?? localDatabase;
 
   final BriskersLocalDatabase _database;
 
   Future<bool> hasJobBootstrap(String businessId) async {
-    final rows = await _database.customSelect(
-      '''
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT bootstrapped
       FROM local_sync_states
       WHERE business_id = ? AND scope = 'jobs'
       LIMIT 1
       ''',
-      variables: [Variable<String>(businessId)],
-    ).get();
+          variables: [Variable<String>(businessId)],
+        )
+        .get();
 
-    return rows.isNotEmpty &&
-        rows.first.read<int>('bootstrapped') == 1;
+    return rows.isNotEmpty && rows.first.read<int>('bootstrapped') == 1;
   }
 
-  Future<List<Map<String, dynamic>>> listJobs(
+  // Retirement is a durable visibility decision. Keep the retained rows for
+  // reconciliation, but exclude them before sorting, paging, or aggregating.
+  static String _visibleJobSql(String alias) =>
+      """
+    NOT EXISTS (SELECT 1 FROM local_job_retirement_entities r
+      WHERE r.business_id = $alias.business_id AND r.entity_kind = 'job'
+        AND r.entity_id = $alias.id
+        AND r.state IN ('pending','accepted','locally_cancelled'))
+    AND NOT EXISTS (SELECT 1 FROM local_job_deletion_v3_fences v3
+      WHERE v3.business_id=$alias.business_id AND v3.entity_kind='job'
+        AND v3.entity_id=$alias.id)
+  """;
+
+  static String _visibleChildSql(String alias, String kindSql, {String idColumn = 'id'}) =>
+      "NOT EXISTS(SELECT 1 FROM local_job_deletion_v3_fences hidden "
+      "WHERE hidden.business_id=$alias.business_id AND hidden.entity_kind=$kindSql "
+      "AND hidden.entity_id=$alias.$idColumn)";
+
+  static const _finishedStatuses = "('completed','cancelled','closed')";
+
+  // Import time is not business activity. MB jobs with no reliable historical
+  // date sort last; a later edit still counts. Job number only breaks ties.
+  static final _jobActivitySql = """
+    MAX(
+      COALESCE(j.completed_at, 0),
+      CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
+        THEN CASE WHEN j.server_updated_at > j.created_at
+          THEN j.server_updated_at ELSE 0 END
+        ELSE MAX(COALESCE(j.server_updated_at, 0),
+                 COALESCE(j.created_at, 0)) END,
+      COALESCE((SELECT MAX(MAX(
+        COALESCE(v.closed_at, 0),
+        CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
+          AND v.server_updated_at <= j.created_at THEN 0
+          ELSE COALESCE(v.server_updated_at, 0) END
+      )) FROM local_job_visits v
+        WHERE v.business_id = j.business_id AND v.job_id = j.id
+          AND ${_visibleChildSql('v', "'job_visit'")}), 0),
+      COALESCE((SELECT MAX(MAX(
+        COALESCE(CAST(strftime('%s', d.document_date) AS INTEGER), 0),
+        COALESCE(d.closed_at, 0),
+        CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
+          THEN CASE WHEN d.server_updated_at > d.created_at
+            THEN d.server_updated_at ELSE 0 END
+          ELSE MAX(COALESCE(d.server_updated_at, 0),
+                   COALESCE(d.created_at, 0)) END
+      )) FROM local_documents d
+        WHERE d.business_id = j.business_id AND d.job_id = j.id
+          AND ${_visibleChildSql('d', 'd.kind')}), 0),
+      COALESCE((SELECT MAX(MAX(
+        COALESCE(i.inspected_at, 0),
+        CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
+          AND i.server_updated_at <= j.created_at THEN 0
+          ELSE COALESCE(i.server_updated_at, 0) END
+      )) FROM local_pre_inspections i
+        WHERE i.business_id = j.business_id AND i.job_id = j.id
+          AND ${_visibleChildSql('i', "'pre_inspection'")}), 0),
+      COALESCE((SELECT MAX(MAX(
+        COALESCE(f.resolved_at, 0),
+        CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
+          AND f.created_at = j.created_at THEN 0
+          ELSE COALESCE(f.created_at, 0) END,
+        CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
+          AND f.server_updated_at <= j.created_at THEN 0
+          ELSE COALESCE(f.server_updated_at, 0) END
+      )) FROM local_findings f
+        WHERE f.business_id = j.business_id
+          AND ${_visibleChildSql('f', "'finding'")}
+          AND (f.found_job_id = j.id OR f.repair_job_id = j.id)), 0),
+      COALESCE((SELECT MAX(p.captured_at)
+        FROM local_pre_inspection_photos p
+        JOIN local_pre_inspections i ON i.business_id = p.business_id
+          AND i.id = p.inspection_id
+          AND ${_visibleChildSql('p', "'pre_inspection_photo'")}
+          AND ${_visibleChildSql('p', "'attachment'", idColumn: 'attachment_id')}
+        WHERE i.business_id = j.business_id AND i.job_id = j.id
+          AND ${_visibleChildSql('i', "'pre_inspection'")}), 0),
+      COALESCE((SELECT MAX(p.captured_at)
+        FROM local_finding_photos p
+        JOIN local_findings f ON f.business_id = p.business_id
+          AND f.id = p.finding_id
+          AND ${_visibleChildSql('p', "'finding_photo'")}
+          AND ${_visibleChildSql('p', "'attachment'", idColumn: 'attachment_id')}
+        WHERE f.business_id = j.business_id
+          AND ${_visibleChildSql('f', "'finding'")}
+          AND (f.found_job_id = j.id OR f.repair_job_id = j.id)), 0),
+      COALESCE((SELECT MAX(MAX(COALESCE(o.created_at, 0),
+        CASE WHEN json_valid(o.payload_json)
+          THEN COALESCE(CAST(json_extract(o.payload_json, '\$._activity_at') AS INTEGER), 0)
+          ELSE 0 END)) FROM sync_outbox o
+        WHERE o.business_id = j.business_id AND o.state = 'pending'
+          AND NOT EXISTS(SELECT 1 FROM local_job_deletion_v3_scope_outbox hidden_outbox
+            WHERE hidden_outbox.business_id=o.business_id AND hidden_outbox.outbox_id=o.id)
+          AND ((o.entity_id = j.id AND o.entity_type IN
+            ('job_create', 'job_admin', 'work_summary', 'preinspection'))
+          OR (o.entity_type IN ('invoice_payment_received', 'document_edit',
+            'document_draft_create', 'estimate_add_to_invoice') AND EXISTS (
+            SELECT 1 FROM local_documents pd
+            WHERE pd.business_id = j.business_id AND pd.job_id = j.id
+              AND pd.id = o.entity_id AND ${_visibleChildSql('pd', 'pd.kind')}
+          ))
+          OR (o.entity_type IN ('finding_create', 'finding_update',
+            'finding_action') AND EXISTS (
+            SELECT 1 FROM local_findings pf
+            WHERE pf.business_id = j.business_id
+              AND (pf.found_job_id = j.id OR pf.repair_job_id = j.id)
+              AND pf.id = o.entity_id AND ${_visibleChildSql('pf', "'finding'")}
+          )))), 0)
+    )
+  """;
+
+  // A historical date is a separate presentation choice, never a rewrite of
+  // server modification history. Completion/document/visit dates are evidence
+  // of the work itself. Invoice settlement and visit container creation may be
+  // later administrative activity. An undated MB import must not use its import
+  // timestamp.
+  static final _jobDateSql = """
+    COALESCE(NULLIF(j.completed_at, 0),
+      (SELECT MIN(CAST(strftime('%s', d.document_date) AS INTEGER))
+        FROM local_documents d
+        WHERE d.business_id = j.business_id AND d.job_id = j.id
+          AND ${_visibleChildSql('d', 'd.kind')}),
+      (SELECT MIN(NULLIF(v.closed_at, 0)) FROM local_job_visits v
+        WHERE v.business_id = j.business_id AND v.job_id = j.id
+          AND ${_visibleChildSql('v', "'job_visit'")}),
+      CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
+        THEN 0 ELSE COALESCE(j.created_at, 0) END)
+  """;
+
+  static const _numberOrderSql = """
+    CASE WHEN substr(j.job_number, instr(j.job_number, '-') + 1)
+      GLOB '[0-9]*'
+    THEN CAST(substr(j.job_number, instr(j.job_number, '-') + 1) AS INTEGER)
+    ELSE -1 END DESC
+  """;
+
+  ({String sql, List<Variable<Object>> variables}) _filters(
     String businessId, {
     String? status,
     String? search,
-    int limit = 50,
-    int offset = 0,
-  }) async {
-    final where = <String>['j.business_id = ?'];
+    JobListView view = JobListView.all,
+  }) {
+    final where = <String>['j.business_id = ?', _visibleJobSql('j')];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
+    if (view == JobListView.active) {
+      where.add('lower(j.status) NOT IN $_finishedStatuses');
+    }
     if (status == 'paid_still_open') {
-      // Only jobs explicitly reported paid by the job snapshot are listed.
-      // Never assume a partial or merely pending payment means paid.
+      // Payment state is never evidence that repair work is completed.
       where.add("lower(COALESCE(j.payment_state, '')) = 'paid'");
-      where.add("lower(j.status) NOT IN ('completed','cancelled','closed')");
+      where.add('lower(j.status) NOT IN $_finishedStatuses');
     } else if (status != null && status.isNotEmpty) {
       where.add('j.status = ?');
       variables.add(Variable<String>(status));
     }
     final query = search?.trim().toLowerCase() ?? '';
     if (RegExp(r'^[0-9]+$').hasMatch(query)) {
-      where.add(
-        "(j.job_number = ? OR j.job_number = ? OR j.job_number = ?)",
-      );
-      variables.add(Variable<String>(query));
-      variables.add(Variable<String>('J-$query'));
-      variables.add(Variable<String>('MB-$query'));
+      where.add('(j.job_number = ? OR j.job_number = ? OR j.job_number = ?)');
+      variables.addAll([
+        Variable<String>(query),
+        Variable<String>('J-$query'),
+        Variable<String>('MB-$query'),
+      ]);
     } else if (query.isNotEmpty) {
-      where.add('''
+      where.add("""
         (lower(COALESCE(j.job_number, '')) LIKE ?
          OR lower(COALESCE(j.customer_name, '')) LIKE ?
          OR lower(COALESCE(j.vehicle_label, '')) LIKE ?
@@ -77,161 +218,372 @@ class LocalJobRepository {
          OR lower(j.title) LIKE ?
          OR EXISTS (
            SELECT 1 FROM local_customers c
-           WHERE c.business_id = j.business_id
-             AND c.id = j.customer_id
-             AND (
-               lower(COALESCE(c.email, '')) LIKE ?
+           WHERE c.business_id = j.business_id AND c.id = j.customer_id
+             AND (lower(COALESCE(c.display_name, '')) LIKE ?
+               OR lower(COALESCE(c.email, '')) LIKE ?
                OR lower(COALESCE(c.phone, '')) LIKE ?
                OR lower(COALESCE(c.list_email, '')) LIKE ?
-               OR lower(COALESCE(c.list_phone, '')) LIKE ?
-             )
-         ))
-      ''');
-      final like = '%$query%';
-      for (var i = 0; i < 10; i++) {
-        variables.add(Variable<String>(like));
+               OR lower(COALESCE(c.list_phone, '')) LIKE ?)))
+      """);
+      for (var i = 0; i < 11; i++) {
+        variables.add(Variable<String>('%$query%'));
       }
     }
-    variables.add(Variable<int>(limit));
-    variables.add(Variable<int>(offset));
+    return (sql: where.join(' AND '), variables: variables);
+  }
 
-    final rows = await _database.customSelect(
-      '''
-      SELECT
-        j.*,
+  Future<List<Map<String, dynamic>>> listJobs(
+    String businessId, {
+    String? status,
+    String? search,
+    JobListView view = JobListView.all,
+    JobListSort sort = JobListSort.lastModified,
+    String? userId,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    await LocalJobAccessHistory(database: _database).ensureTable();
+    // Activity is sorted before paging. Keep related lookups indexed even on
+    // older installed databases so a large imported history stays usable.
+    await _database.customStatement(
+      'CREATE INDEX IF NOT EXISTS '
+      'idx_jobs_view_visits ON local_job_visits (business_id, job_id)',
+    );
+    await _database.customStatement(
+      'CREATE INDEX IF NOT EXISTS '
+      'idx_jobs_view_outbox ON sync_outbox (business_id, entity_id, state)',
+    );
+    await _database.customStatement(
+      'CREATE INDEX IF NOT EXISTS '
+      'idx_jobs_view_findings ON local_findings (business_id, vehicle_id, status)',
+    );
+    for (final index in const [
+      'idx_jobs_view_inspections ON local_pre_inspections (business_id, job_id)',
+      'idx_jobs_view_found_job ON local_findings (business_id, found_job_id)',
+      'idx_jobs_view_repair_job ON local_findings (business_id, repair_job_id)',
+      'idx_jobs_view_inspection_photos ON local_pre_inspection_photos (business_id, inspection_id)',
+      'idx_jobs_view_finding_photos ON local_finding_photos (business_id, finding_id)',
+    ]) {
+      await _database.customStatement('CREATE INDEX IF NOT EXISTS $index');
+    }
+    final filters = _filters(
+      businessId,
+      status: status,
+      search: search,
+      view: view,
+    );
+    // Completed means the work was completed, regardless of a later payment,
+    // import correction or note. Missing dates fall back to meaningful activity.
+    final order = status?.toLowerCase() == 'completed'
+        ? 'COALESCE(NULLIF(j.completed_at, 0), j.activity_at) DESC, '
+              'j.activity_at DESC,'
+        : view == JobListView.active
+        ? """
+          COALESCE(s.sort_order, 9999), lower(j.status),
+          CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
+            THEN COALESCE((SELECT MIN(CAST(strftime('%s', d.document_date) AS INTEGER))
+              FROM local_documents d
+              WHERE d.business_id = j.business_id AND d.job_id = j.id
+          AND ${_visibleChildSql('d', 'd.kind')}), 0)
+            ELSE COALESCE(j.created_at, 0) END DESC,
+        """
+        : view == JobListView.all || sort == JobListSort.lastModified
+        ? 'j.activity_at DESC,'
+        : view == JobListView.recent && sort == JobListSort.lastAccessed
+        // Accesses always precede unopened Jobs, even if a later import/edit
+        // has a newer server timestamp. Never borrow another user's history.
+        ? 'CASE WHEN a.last_accessed_at IS NULL THEN 1 ELSE 0 END, '
+              'a.last_accessed_at DESC, j.job_date_at DESC,'
+        : 'j.job_date_at DESC,';
+    // Only legacy callers keep the old provisional pin. The Jobs screen's All
+    // list is strictly newest activity first, including pending local Jobs.
+    final legacyPin =
+        view == JobListView.all || status?.toLowerCase() == 'completed'
+        ? ''
+        : """
+          CASE WHEN (j.job_number = 'Pending sync' OR upper(j.job_number) LIKE 'TEMP-%')
+            THEN 0 ELSE 1 END,
+          CASE WHEN (j.job_number = 'Pending sync' OR upper(j.job_number) LIKE 'TEMP-%')
+            THEN j.created_at END DESC,
+        """;
+    final rows = await _database
+        .customSelect(
+          """
+      WITH job_activity AS (
+        SELECT j.*, $_jobActivitySql AS activity_at,
+          $_jobDateSql AS job_date_at FROM local_jobs j
+        WHERE ${filters.sql}
+      )
+      SELECT j.*, a.last_accessed_at,
         COALESCE(s.sort_order, 9999) AS status_sort_order,
-        (
-          SELECT COUNT(*)
-          FROM local_findings f
-          WHERE f.business_id = j.business_id
-            AND f.vehicle_id = j.vehicle_id
-            AND f.status = 'open'
-        ) AS open_findings
-      FROM local_jobs j
+        (SELECT COUNT(*) FROM local_findings f
+          WHERE f.business_id = j.business_id AND f.vehicle_id = j.vehicle_id
+            AND f.status = 'open' AND ${_visibleChildSql('f', "'finding'")}) AS open_findings
+      FROM job_activity j
       LEFT JOIN local_job_statuses s
         ON s.business_id = j.business_id AND s.code = j.status
-      WHERE ${where.join(' AND ')}
+      LEFT JOIN local_job_accesses a
+        ON a.business_id = j.business_id AND a.job_id = j.id AND a.user_id = ?
       ORDER BY
-        -- New local-only jobs must be visible immediately before historical jobs.
-        CASE WHEN j.sync_state = 'pending' AND j.job_number = 'Pending sync'
-             THEN 0 ELSE 1 END,
-        CASE WHEN j.sync_state = 'pending' AND j.job_number = 'Pending sync'
-             THEN j.created_at END DESC,
-        CASE WHEN j.status IN ('completed','cancelled') THEN 1 ELSE 0 END,
-        COALESCE(s.sort_order, 9999),
-        -- Imported MobileBiz created_at records when the import ran, not
-        -- when jobs were originally opened. Use the sequential job number.
-        CASE
-          WHEN substr(j.job_number, instr(j.job_number, '-') + 1)
-               GLOB '[0-9]*'
-          THEN CAST(
-            substr(j.job_number, instr(j.job_number, '-') + 1) AS INTEGER
-          )
-          ELSE -1
-        END DESC,
-        j.created_at DESC, j.id
+        $legacyPin
+        $order
+        $_numberOrderSql, j.id
       LIMIT ? OFFSET ?
-      ''',
-      variables: variables,
-    ).get();
+      """,
+          variables: [
+            ...filters.variables,
+            Variable<String>(userId ?? ''),
+            Variable<int>(limit),
+            Variable<int>(offset),
+          ],
+        )
+        .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return rows.map(_jobListMap).toList();
+  }
+
+  Future<String?> jobNumberForJob(String businessId, String jobId) async {
+    if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
+      return null;
+    }
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    final rows = await _database
+        .customSelect(
+          "SELECT job_number FROM local_jobs j WHERE business_id = ? AND id = ? "
+          "AND ${_visibleJobSql('j')}",
+          variables: [Variable<String>(businessId), Variable<String>(jobId)],
+        )
+        .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+    if (rows.isEmpty) return null;
+    final number = rows.single.readNullable<String>('job_number')?.trim();
+    return number == null || number.isEmpty ? null : number;
+  }
+
+  /// Replace an invoice's provisional Job identity without leaving a hole in
+  /// the Jobs list while the authoritative Job bundle is still downloading.
+  /// A previously cached real Job always takes precedence over the placeholder.
+  Future<String?> remapProvisionalJob(
+    String businessId,
+    String provisionalJobId,
+    String serverJobId, {
+    String? jobNumber,
+  }) async {
+    if (serverJobId.trim().isEmpty || serverJobId.startsWith('local-')) {
+      throw StateError('The synced invoice did not return its linked Job.');
+    }
+    final number = jobNumber?.trim();
+    return _database.transaction(() async {
+      if (await LocalJobRetirement.isJobBlocked(
+            _database,
+            businessId,
+            provisionalJobId,
+          ) ||
+          await LocalJobRetirement.isJobBlocked(
+            _database,
+            businessId,
+            serverJobId,
+          )) {
+        throw StateError(
+          'The linked Job is pending deletion or retired. '
+          'Its provisional work has been preserved.',
+        );
+      }
+      final source =
+          await (_database.select(_database.localJobs)..where(
+                (row) =>
+                    row.businessId.equals(businessId) &
+                    row.id.equals(provisionalJobId),
+              ))
+              .getSingleOrNull();
+      if (source != null) {
+        await _database
+            .into(_database.localJobs)
+            .insert(
+              source.copyWith(
+                id: serverJobId,
+                jobNumber: Value<String?>(
+                  number == null || number.isEmpty ? source.jobNumber : number,
+                ),
+                syncState: 'synced',
+              ),
+              mode: InsertMode.insertOrIgnore,
+            );
+      }
+      final real =
+          await (_database.select(_database.localJobs)..where(
+                (row) =>
+                    row.businessId.equals(businessId) &
+                    row.id.equals(serverJobId),
+              ))
+              .getSingleOrNull();
+      if (real == null) {
+        throw StateError('The linked Job is not saved locally yet.');
+      }
+      final currentNumber = real.jobNumber?.trim() ?? '';
+      if (number != null &&
+          number.isNotEmpty &&
+          (currentNumber.isEmpty ||
+              currentNumber == 'Pending sync' ||
+              currentNumber.toUpperCase().startsWith('TEMP-'))) {
+        await (_database.update(_database.localJobs)..where(
+              (row) =>
+                  row.businessId.equals(businessId) &
+                  row.id.equals(serverJobId),
+            ))
+            .write(LocalJobsCompanion(jobNumber: Value<String?>(number)));
+      }
+      if (provisionalJobId != serverJobId) {
+        // The blank visit made with a Quick Invoice has no server identity.
+        // Preserve actual work and its outbox instead of deleting user edits.
+        await _database.customStatement(
+          "DELETE FROM local_job_visits WHERE business_id = ? AND job_id = ? "
+          "AND id LIKE 'local-visit-%' AND trim(COALESCE(work_summary, '')) = '' "
+          "AND NOT EXISTS (SELECT 1 FROM sync_outbox WHERE business_id = ? "
+          "AND entity_type = 'work_summary' AND entity_id = ?)",
+          [businessId, provisionalJobId, businessId, provisionalJobId],
+        );
+        for (final table in const [
+          'local_documents',
+          'local_job_visits',
+          'local_job_assignments',
+          'local_pre_inspections',
+          'local_appointments',
+        ]) {
+          await _database.customStatement(
+            'UPDATE $table SET job_id = ? WHERE business_id = ? AND job_id = ?',
+            [serverJobId, businessId, provisionalJobId],
+          );
+        }
+        for (final column in const ['found_job_id', 'repair_job_id']) {
+          await _database.customStatement(
+            'UPDATE local_findings SET $column = ? '
+            'WHERE business_id = ? AND $column = ?',
+            [serverJobId, businessId, provisionalJobId],
+          );
+        }
+        final queued = await _database
+            .customSelect(
+              'SELECT id, entity_id, payload_json FROM sync_outbox WHERE business_id = ?',
+              variables: [Variable<String>(businessId)],
+            )
+            .get();
+        for (final row in queued) {
+          final payload = _jsonMap(row.read<String>('payload_json'));
+          var changed = false;
+          for (final key in const ['job_id', 'found_job_id', 'repair_job_id']) {
+            if (payload[key] == provisionalJobId) {
+              payload[key] = serverJobId;
+              changed = true;
+            }
+          }
+          final patch = payload['patch'];
+          if (patch is Map) {
+            for (final key in const [
+              'job_id',
+              'found_job_id',
+              'repair_job_id',
+            ]) {
+              if (patch[key] == provisionalJobId) {
+                patch[key] = serverJobId;
+                changed = true;
+              }
+            }
+          }
+          final entityId = row.read<String>('entity_id');
+          if (!changed && entityId != provisionalJobId) continue;
+          await _database.customStatement(
+            'UPDATE sync_outbox SET entity_id = ?, payload_json = ? WHERE id = ?',
+            [
+              entityId == provisionalJobId ? serverJobId : entityId,
+              changed ? jsonEncode(payload) : row.read<String>('payload_json'),
+              row.read<int>('id'),
+            ],
+          );
+        }
+        await LocalJobAccessHistory(database: _database)
+            .remapJob(businessId, provisionalJobId, serverJobId);
+        await _database.customStatement(
+          'DELETE FROM local_jobs WHERE business_id = ? AND id = ?',
+          [businessId, provisionalJobId],
+        );
+      }
+      return jobNumberForJob(businessId, serverJobId);
+    });
   }
 
   Future<int> jobCount(
     String businessId, {
     String? status,
     String? search,
+    JobListView view = JobListView.all,
   }) async {
-    final where = <String>['business_id = ?'];
-    final variables = <Variable<Object>>[Variable<String>(businessId)];
-    if (status == 'paid_still_open') {
-      where.add("lower(COALESCE(payment_state, '')) = 'paid'");
-      where.add("lower(status) NOT IN ('completed','cancelled','closed')");
-    } else if (status != null && status.isNotEmpty) {
-      where.add('status = ?');
-      variables.add(Variable<String>(status));
-    }
-    final query = search?.trim().toLowerCase() ?? '';
-    if (RegExp(r'^[0-9]+$').hasMatch(query)) {
-      where.add(
-        "(job_number = ? OR job_number = ? OR job_number = ?)",
-      );
-      variables.add(Variable<String>(query));
-      variables.add(Variable<String>('J-$query'));
-      variables.add(Variable<String>('MB-$query'));
-    } else if (query.isNotEmpty) {
-      where.add('''
-        (lower(COALESCE(job_number, '')) LIKE ?
-         OR lower(COALESCE(customer_name, '')) LIKE ?
-         OR lower(COALESCE(vehicle_label, '')) LIKE ?
-         OR lower(COALESCE(vehicle_vin, '')) LIKE ?
-         OR lower(COALESCE(vehicle_plate, '')) LIKE ?
-         OR lower(title) LIKE ?
-         OR EXISTS (
-           SELECT 1 FROM local_customers c
-           WHERE c.business_id = local_jobs.business_id
-             AND c.id = local_jobs.customer_id
-             AND (
-               lower(COALESCE(c.email, '')) LIKE ?
-               OR lower(COALESCE(c.phone, '')) LIKE ?
-               OR lower(COALESCE(c.list_email, '')) LIKE ?
-               OR lower(COALESCE(c.list_phone, '')) LIKE ?
-             )
-         ))
-      ''');
-      final like = '%$query%';
-      for (var i = 0; i < 10; i++) {
-        variables.add(Variable<String>(like));
-      }
-    }
-    final row = await _database.customSelect(
-      'SELECT COUNT(*) AS count FROM local_jobs WHERE ${where.join(' AND ')}',
-      variables: variables,
-    ).getSingle();
+    await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    final filters = _filters(
+      businessId,
+      status: status,
+      search: search,
+      view: view,
+    );
+    final row = await _database
+        .customSelect(
+          'SELECT COUNT(*) AS count FROM local_jobs j WHERE ${filters.sql}',
+          variables: filters.variables,
+        )
+        .getSingle();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return row.read<int>('count');
   }
 
-  Stream<int> watchJobCount(
-    String businessId, {
-    String? status,
-  }) {
-    final where = <String>['business_id = ?'];
+  Stream<int> watchJobCount(String businessId, {String? status}) async* {
+    await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    final where = <String>['j.business_id = ?', _visibleJobSql('j')];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
     if (status != null && status.isNotEmpty) {
       where.add('status = ?');
       variables.add(Variable<String>(status));
     }
 
-    return _database
+    yield* _database
         .customSelect(
-          'SELECT COUNT(*) AS count FROM local_jobs WHERE ${where.join(' AND ')}',
+          'SELECT COUNT(*) AS count FROM local_jobs j WHERE ${where.join(' AND ')}',
           variables: variables,
           readsFrom: {_database.localJobs},
         )
         .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .asyncMap((row) async {
+          await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+          return row.read<int>('count');
+        });
   }
 
   Future<List<Map<String, dynamic>>> unassignedOpenJobs(
     String businessId, {
     int limit = 25,
   }) async {
-    final rows = await _database.customSelect(
-      '''
+    await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT id, job_number, title, customer_name, vehicle_label, status
-      FROM local_jobs
-      WHERE business_id = ?
+      FROM local_jobs j
+      WHERE j.business_id = ?
+        AND ${_visibleJobSql('j')}
         AND is_unassigned = 1
-        AND status NOT IN ('completed', 'cancelled')
+        AND lower(status) NOT IN $_finishedStatuses
       ORDER BY created_at DESC, id
       LIMIT ?
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<int>(limit),
-      ],
-    ).get();
+          variables: [Variable<String>(businessId), Variable<int>(limit)],
+        )
+        .get();
 
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return rows
         .map(
           (row) => <String, dynamic>{
@@ -248,76 +600,104 @@ class LocalJobRepository {
   }
 
   Future<int> unassignedOpenJobCount(String businessId) async {
-    final row = await _database.customSelect(
-      '''
+    await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    final row = await _database
+        .customSelect(
+          '''
       SELECT COUNT(*) AS count
-      FROM local_jobs
-      WHERE business_id = ?
+      FROM local_jobs j
+      WHERE j.business_id = ?
+        AND ${_visibleJobSql('j')}
         AND is_unassigned = 1
-        AND status NOT IN ('completed', 'cancelled')
+        AND lower(status) NOT IN $_finishedStatuses
       ''',
-      variables: [Variable<String>(businessId)],
-    ).getSingle();
+          variables: [Variable<String>(businessId)],
+        )
+        .getSingle();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return row.read<int>('count');
   }
 
   Future<int> activeJobCount(String businessId) async {
-    final row = await _database.customSelect(
-      '''
+    await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    final row = await _database
+        .customSelect(
+          '''
       SELECT COUNT(*) AS count
-      FROM local_jobs
-      WHERE business_id = ?
-        AND status NOT IN ('completed', 'cancelled')
+      FROM local_jobs j
+      WHERE j.business_id = ?
+        AND ${_visibleJobSql('j')}
+        AND lower(status) NOT IN $_finishedStatuses
       ''',
-      variables: [Variable<String>(businessId)],
-    ).getSingle();
+          variables: [Variable<String>(businessId)],
+        )
+        .getSingle();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return row.read<int>('count');
   }
 
-  Stream<int> watchActiveJobCount(String businessId) {
-    return _database
+  Stream<int> watchActiveJobCount(String businessId) async* {
+    await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    yield* _database
         .customSelect(
           '''
           SELECT COUNT(*) AS count
-          FROM local_jobs
-          WHERE business_id = ?
-            AND status NOT IN ('completed', 'cancelled')
+          FROM local_jobs j
+          WHERE j.business_id = ?
+        AND ${_visibleJobSql('j')}
+            AND lower(status) NOT IN $_finishedStatuses
           ''',
           variables: [Variable<String>(businessId)],
           readsFrom: {_database.localJobs},
         )
         .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .asyncMap((row) async {
+          await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+          return row.read<int>('count');
+        });
   }
 
-  Future<Map<String, int>> jobStatusCounts(String businessId) async {
-    final rows = await _database.customSelect(
-      '''
+  Future<Map<String, int>> jobStatusCounts(
+    String businessId, {
+    JobListView view = JobListView.all,
+  }) async {
+    await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT status, COUNT(*) AS count
-      FROM local_jobs
-      WHERE business_id = ?
+      FROM local_jobs j
+      WHERE j.business_id = ?
+        AND ${_visibleJobSql('j')}
+      ${view == JobListView.active ? 'AND lower(status) NOT IN $_finishedStatuses' : ''}
       GROUP BY status
       ''',
-      variables: [Variable<String>(businessId)],
-    ).get();
+          variables: [Variable<String>(businessId)],
+        )
+        .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return {
       for (final row in rows)
         row.read<String>('status'): row.read<int>('count'),
     };
   }
 
-  Future<List<Map<String, dynamic>>> jobStatuses(
-    String businessId,
-  ) async {
-    final rows = await _database.customSelect(
-      '''
+  Future<List<Map<String, dynamic>>> jobStatuses(String businessId) async {
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT code, name, color_hex, icon_key, sort_order
       FROM local_job_statuses
       WHERE business_id = ?
       ORDER BY sort_order, name, code
       ''',
-      variables: [Variable<String>(businessId)],
-    ).get();
+          variables: [Variable<String>(businessId)],
+        )
+        .get();
 
     return rows
         .map(
@@ -371,7 +751,10 @@ class LocalJobRepository {
     await _database.transaction(() async {
       for (final job in jobs) {
         final id = job['id']?.toString() ?? '';
-        if (id.isEmpty) continue;
+        if (id.isEmpty ||
+            await LocalJobRetirement.isJobBlocked(_database, businessId, id)) {
+          continue;
+        }
         await _database.customStatement(
           '''
           UPDATE local_jobs
@@ -394,82 +777,79 @@ class LocalJobRepository {
     String businessId,
     String jobId,
   ) async {
-    final jobRows = await _database.customSelect(
-      '''
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
+      return null;
+    }
+    final jobRows = await _database
+        .customSelect(
+          '''
       SELECT *
       FROM local_jobs
       WHERE business_id = ? AND id = ?
       LIMIT 1
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(jobId),
-      ],
-    ).get();
+          variables: [Variable<String>(businessId), Variable<String>(jobId)],
+        )
+        .get();
 
     if (jobRows.isEmpty) return null;
     final row = jobRows.first;
 
-    final assignmentRows = await _database.customSelect(
-      '''
+    final assignmentRows = await _database
+        .customSelect(
+          '''
       SELECT *
       FROM local_job_assignments
       WHERE business_id = ? AND job_id = ? AND active = 1
       ORDER BY assigned_at, assignment_id
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(jobId),
-      ],
-    ).get();
+          variables: [Variable<String>(businessId), Variable<String>(jobId)],
+        )
+        .get();
 
+    final blockedAssignments = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_job_assignments');
     final assignments = assignmentRows
+        .where((assignment) => !blockedAssignments.contains(assignment.read<String>('assignment_id')))
         .map(
           (assignment) => <String, dynamic>{
-            'assignment_id':
-                assignment.read<String>('assignment_id'),
+            'assignment_id': assignment.read<String>('assignment_id'),
             'employee_id': assignment.read<String>('employee_id'),
-            'employee_name':
-                assignment.readNullable<String>('employee_name'),
-            'position':
-                assignment.readNullable<String>('position'),
-            'assigned_at':
-                _isoFromDb(assignment.data['assigned_at']),
-            'released_at':
-                _isoFromDb(assignment.data['released_at']),
+            'employee_name': assignment.readNullable<String>('employee_name'),
+            'position': assignment.readNullable<String>('position'),
+            'assigned_at': _isoFromDb(assignment.data['assigned_at']),
+            'released_at': _isoFromDb(assignment.data['released_at']),
             'source': assignment.readNullable<String>('source'),
           },
         )
         .toList();
 
-    final visitRows = await _database.customSelect(
-      '''
+    final visitRows = await _database
+        .customSelect(
+          '''
       SELECT *
       FROM local_job_visits
       WHERE business_id = ? AND job_id = ?
       ORDER BY visit_number DESC, opened_at DESC, id
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(jobId),
-      ],
-    ).get();
+          variables: [Variable<String>(businessId), Variable<String>(jobId)],
+        )
+        .get();
 
+    final blockedVisits = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_job_visits');
     final visits = visitRows
+        .where((visit) => !blockedVisits.contains(visit.read<String>('id')))
         .map(
           (visit) => <String, dynamic>{
             'id': visit.read<String>('id'),
             'visit_number': visit.read<int>('visit_number'),
             'reason': visit.readNullable<String>('reason'),
             'planned_hours': visit.data['planned_hours'],
-            'work_summary':
-                visit.readNullable<String>('work_summary'),
+            'work_summary': visit.readNullable<String>('work_summary'),
             'opened_at': _isoFromDb(visit.data['opened_at']),
             'closed_at': _isoFromDb(visit.data['closed_at']),
-            'updated_at':
-                _isoFromDb(visit.data['server_updated_at']),
-            'row_version':
-                visit.readNullable<int>('row_version'),
+            'updated_at': _isoFromDb(visit.data['server_updated_at']),
+            'row_version': visit.readNullable<int>('row_version'),
             'sync_state': visit.read<String>('sync_state'),
             'mechanics': const <dynamic>[],
           },
@@ -477,16 +857,13 @@ class LocalJobRepository {
         .toList();
 
     final vehicleId = row.readNullable<String>('vehicle_id');
-    final capabilities = _jsonMap(
-      row.read<String>('capabilities_json'),
-    );
+    final capabilities = _jsonMap(row.read<String>('capabilities_json'));
 
     final job = <String, dynamic>{
       'id': row.read<String>('id'),
       'job_number': row.readNullable<String>('job_number'),
       'title': row.read<String>('title'),
-      'requested_work':
-          row.readNullable<String>('requested_work'),
+      'requested_work': row.readNullable<String>('requested_work'),
       'status': row.read<String>('status'),
       'status_name': row.readNullable<String>('status_name'),
       'status_color': row.readNullable<String>('status_color'),
@@ -495,15 +872,14 @@ class LocalJobRepository {
       'odometer_in': row.data['odometer_in'],
       'created_at': _isoFromDb(row.data['created_at']),
       'completed_at': _isoFromDb(row.data['completed_at']),
-      'updated_at':
-          _isoFromDb(row.data['server_updated_at']),
+      'updated_at': _isoFromDb(row.data['server_updated_at']),
       'row_version': row.readNullable<int>('row_version'),
       'customer_id': row.readNullable<String>('customer_id'),
       'customer_name': row.readNullable<String>('customer_name'),
-      'customer_problem_flag':
-          row.read<int>('customer_problem_flag') == 1,
-      'customer_problem_flag_note':
-          row.readNullable<String>('customer_problem_flag_note'),
+      'customer_problem_flag': row.read<int>('customer_problem_flag') == 1,
+      'customer_problem_flag_note': row.readNullable<String>(
+        'customer_problem_flag_note',
+      ),
       'vehicle_id': vehicleId,
       'vehicle': row.readNullable<String>('vehicle_label'),
       'vehicle_vin': row.readNullable<String>('vehicle_vin'),
@@ -517,13 +893,17 @@ class LocalJobRepository {
       '_local_snapshot': true,
     };
 
-    final preInspection =
-        await _preInspection(businessId, jobId);
+    final preInspection = await _preInspection(businessId, jobId);
     final findings = vehicleId == null
         ? <Map<String, dynamic>>[]
         : await _findings(businessId, vehicleId);
     final statuses = await jobStatuses(businessId);
 
+    // A retirement observed while assembling nested rows also hides this load.
+    if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
+      return null;
+    }
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return LocalJobDetailSnapshot(
       job: job,
       preInspection: preInspection,
@@ -533,15 +913,12 @@ class LocalJobRepository {
   }
 
   Map<String, dynamic> _jobListMap(QueryRow row) {
-    final capabilities = _jsonMap(
-      row.read<String>('capabilities_json'),
-    );
+    final capabilities = _jsonMap(row.read<String>('capabilities_json'));
     return <String, dynamic>{
       'id': row.read<String>('id'),
       'job_number': row.readNullable<String>('job_number'),
       'title': row.read<String>('title'),
-      'requested_work':
-          row.readNullable<String>('requested_work'),
+      'requested_work': row.readNullable<String>('requested_work'),
       'status': row.read<String>('status'),
       'status_name': row.readNullable<String>('status_name'),
       'status_color': row.readNullable<String>('status_color'),
@@ -549,19 +926,30 @@ class LocalJobRepository {
       'customer_name': row.readNullable<String>('customer_name'),
       'vehicle': row.readNullable<String>('vehicle_label'),
       'planned_hours': row.data['planned_hours'],
-      'assigned_employee':
-          row.readNullable<String>('assigned_employee_name'),
-      'assigned_employee_id':
-          row.readNullable<String>('assigned_employee_id'),
-      'assigned_position':
-          row.readNullable<String>('assigned_position'),
+      'assigned_employee': row.readNullable<String>('assigned_employee_name'),
+      'assigned_employee_id': row.readNullable<String>('assigned_employee_id'),
+      'assigned_position': row.readNullable<String>('assigned_position'),
       'open_findings': row.read<int>('open_findings'),
-      'pending_requests':
-          row.read<int>('pending_request_count'),
+      'pending_requests': row.read<int>('pending_request_count'),
       'can_request': capabilities['request_job'] == true,
       'created_at': _isoFromDb(row.data['created_at']),
       'completed_at': _isoFromDb(row.data['completed_at']),
       'payment_state': row.readNullable<String>('payment_state'),
+      'updated_at': _isoFromDb(row.data['activity_at']),
+      'job_date': row.data['job_date_at'] == 0
+          ? null
+          : _isoFromDb(row.data['job_date_at']),
+      'last_accessed_at': row.data['last_accessed_at'] == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(
+              row.read<int>('last_accessed_at'),
+              isUtc: true,
+            ).toIso8601String(),
+      '_temporary':
+          row.readNullable<String>('job_number') == 'Pending sync' ||
+          (row.readNullable<String>('job_number') ?? '')
+              .toUpperCase()
+              .startsWith('TEMP-'),
       '_local_snapshot': true,
     };
   }
@@ -570,36 +958,39 @@ class LocalJobRepository {
     String businessId,
     String jobId,
   ) async {
-    final rows = await _database.customSelect(
-      '''
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT *
       FROM local_pre_inspections
       WHERE business_id = ? AND job_id = ?
       LIMIT 1
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(jobId),
-      ],
-    ).get();
+          variables: [Variable<String>(businessId), Variable<String>(jobId)],
+        )
+        .get();
 
     if (rows.isEmpty) return null;
     final row = rows.first;
     final inspectionId = row.read<String>('id');
+    if ((await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_pre_inspections')).contains(inspectionId)) { return null; }
 
-    final photoRows = await _database.customSelect(
-      '''
+    final photoRows = await _database
+        .customSelect(
+          '''
       SELECT *
       FROM local_pre_inspection_photos
       WHERE business_id = ? AND inspection_id = ?
       ORDER BY captured_at, id
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(inspectionId),
-      ],
-    ).get();
+          variables: [
+            Variable<String>(businessId),
+            Variable<String>(inspectionId),
+          ],
+        )
+        .get();
 
+    final blockedPhotos = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_pre_inspection_photos');
     return <String, dynamic>{
       'id': inspectionId,
       'job_id': jobId,
@@ -608,36 +999,28 @@ class LocalJobRepository {
       'odometer': row.data['odometer'],
       'notes': row.readNullable<String>('notes'),
       'created_by': row.readNullable<String>('created_by'),
-      'updated_at':
-          _isoFromDb(row.data['server_updated_at']),
+      'updated_at': _isoFromDb(row.data['server_updated_at']),
       'row_version': row.readNullable<int>('row_version'),
       'sync_state': row.read<String>('sync_state'),
       'photos': photoRows
+          .where((photo) => !blockedPhotos.contains(photo.read<String>('id')))
           .map(
             (photo) => <String, dynamic>{
               'id': photo.read<String>('id'),
-              'attachment_id':
-                  photo.read<String>('attachment_id'),
+              'attachment_id': photo.read<String>('attachment_id'),
               'filename': photo.readNullable<String>('filename'),
-              'bucket':
-                  photo.readNullable<String>('storage_bucket'),
+              'bucket': photo.readNullable<String>('storage_bucket'),
               'key': photo.readNullable<String>('storage_key'),
-              'mime_type':
-                  photo.readNullable<String>('mime_type'),
+              'mime_type': photo.readNullable<String>('mime_type'),
               'byte_size': photo.readNullable<int>('byte_size'),
-              'captured_at':
-                  _isoFromDb(photo.data['captured_at']),
+              'captured_at': _isoFromDb(photo.data['captured_at']),
               'note': photo.readNullable<String>('note'),
-              'created_by':
-                  photo.readNullable<String>('created_by'),
-              'can_edit_note':
-                  photo.read<int>('can_edit_note') == 1,
+              'created_by': photo.readNullable<String>('created_by'),
+              'can_edit_note': photo.read<int>('can_edit_note') == 1,
               'can_delete': false,
-              'local_file_path':
-                  photo.readNullable<String>('local_file_path'),
+              'local_file_path': photo.readNullable<String>('local_file_path'),
               'upload_state': photo.read<String>('upload_state'),
-              'last_error':
-                  photo.readNullable<String>('last_error'),
+              'last_error': photo.readNullable<String>('last_error'),
             },
           )
           .toList(),
@@ -648,8 +1031,9 @@ class LocalJobRepository {
     String businessId,
     String vehicleId,
   ) async {
-    final rows = await _database.customSelect(
-      '''
+    final rows = await _database
+        .customSelect(
+          '''
       SELECT *
       FROM local_findings
       WHERE business_id = ? AND vehicle_id = ?
@@ -662,72 +1046,68 @@ class LocalJobRepository {
         created_at DESC,
         id
       ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(vehicleId),
-      ],
-    ).get();
+          variables: [
+            Variable<String>(businessId),
+            Variable<String>(vehicleId),
+          ],
+        )
+        .get();
 
+    final blockedFindings = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_findings');
+    final blockedPhotos = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_finding_photos');
     final result = <Map<String, dynamic>>[];
     for (final row in rows) {
       final findingId = row.read<String>('id');
-      final photoRows = await _database.customSelect(
-        '''
+      if (blockedFindings.contains(findingId)) { continue; }
+      final photoRows = await _database
+          .customSelect(
+            '''
         SELECT *
         FROM local_finding_photos
         WHERE business_id = ? AND finding_id = ?
         ORDER BY captured_at, id
         ''',
-        variables: [
-          Variable<String>(businessId),
-          Variable<String>(findingId),
-        ],
-      ).get();
+            variables: [
+              Variable<String>(businessId),
+              Variable<String>(findingId),
+            ],
+          )
+          .get();
 
       result.add(<String, dynamic>{
         'id': findingId,
         'body': row.read<String>('body'),
         'status': row.read<String>('status'),
-        'include_on_invoice':
-            row.read<int>('include_on_invoice') == 1,
+        'include_on_invoice': row.read<int>('include_on_invoice') == 1,
         'created_at': _isoFromDb(row.data['created_at']),
         'resolved_at': _isoFromDb(row.data['resolved_at']),
-        'updated_at':
-            _isoFromDb(row.data['server_updated_at']),
+        'updated_at': _isoFromDb(row.data['server_updated_at']),
         'row_version': row.readNullable<int>('row_version'),
         'created_by': row.readNullable<String>('created_by'),
         'vehicle_id': row.readNullable<String>('vehicle_id'),
-        'found_job_id':
-            row.readNullable<String>('found_job_id'),
-        'repair_job_id':
-            row.readNullable<String>('repair_job_id'),
+        'found_job_id': row.readNullable<String>('found_job_id'),
+        'repair_job_id': row.readNullable<String>('repair_job_id'),
         'can_edit': row.read<int>('can_edit') == 1,
         'can_delete': false,
         'sync_state': row.read<String>('sync_state'),
         'attachments': photoRows
+            .where((photo) => !blockedPhotos.contains(photo.read<String>('id')))
             .map(
               (photo) => <String, dynamic>{
                 'id': photo.read<String>('id'),
-                'attachment_id':
-                    photo.read<String>('attachment_id'),
-                'bucket':
-                    photo.readNullable<String>('storage_bucket'),
+                'attachment_id': photo.read<String>('attachment_id'),
+                'bucket': photo.readNullable<String>('storage_bucket'),
                 'key': photo.readNullable<String>('storage_key'),
-                'filename':
-                    photo.readNullable<String>('filename'),
-                'mime_type':
-                    photo.readNullable<String>('mime_type'),
-                'byte_size':
-                    photo.readNullable<int>('byte_size'),
-                'captured_at':
-                    _isoFromDb(photo.data['captured_at']),
+                'filename': photo.readNullable<String>('filename'),
+                'mime_type': photo.readNullable<String>('mime_type'),
+                'byte_size': photo.readNullable<int>('byte_size'),
+                'captured_at': _isoFromDb(photo.data['captured_at']),
                 'can_delete': false,
-                'local_file_path':
-                    photo.readNullable<String>('local_file_path'),
-                'upload_state':
-                    photo.read<String>('upload_state'),
-                'last_error':
-                    photo.readNullable<String>('last_error'),
+                'local_file_path': photo.readNullable<String>(
+                  'local_file_path',
+                ),
+                'upload_state': photo.read<String>('upload_state'),
+                'last_error': photo.readNullable<String>('last_error'),
               },
             )
             .toList(),
@@ -748,8 +1128,7 @@ class LocalJobRepository {
     }
   }
 
-  int? _int(Object? value) =>
-      int.tryParse(value?.toString() ?? '');
+  int? _int(Object? value) => int.tryParse(value?.toString() ?? '');
 
   String? _text(Object? value) {
     final text = value?.toString();
@@ -768,8 +1147,7 @@ class LocalJobRepository {
         isUtc: true,
       ).toIso8601String();
     }
-    return DateTime.tryParse(value.toString())
-        ?.toUtc()
-        .toIso8601String();
+    return DateTime.tryParse(value.toString())?.toUtc().toIso8601String();
   }
 }
+

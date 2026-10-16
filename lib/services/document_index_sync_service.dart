@@ -1,64 +1,151 @@
 import 'dart:async';
 
-
 import '../local/local_database_provider.dart';
+import '../local/briskers_local_database.dart';
 import 'briskers_api.dart';
 import 'local_document_repository.dart';
 import 'local_document_detail_cache.dart';
 import 'document_edit_permission_cache.dart';
+import 'local_cleanup_safety.dart';
+import 'test_job_cleanup_gateway.dart';
+import 'test_job_cleanup_policy.dart';
+import 'local_job_retirement.dart';
+import 'local_job_deletion_v3.dart';
+import 'owner_job_retirement_service.dart';
 
 class DocumentIndexSyncService {
   DocumentIndexSyncService({
     BriskersApi api = const BriskersApi(),
     LocalDocumentRepository? repository,
-  })  : _api = api,
-        _repository = repository ?? LocalDocumentRepository();
+    BriskersLocalDatabase? database,
+    LocalDocumentDetailCache? detailCache,
+    OwnerJobRetirementGateway retirementGateway =
+        const OwnerJobRetirementGateway(),
+    TestJobCleanupGateway cleanupGateway = const TestJobCleanupGateway(),
+  }) : _api = api,
+       _cleanupGateway = cleanupGateway,
+       _database = database ?? localDatabase,
+       _detailCache =
+           detailCache ?? LocalDocumentDetailCache(database: database),
+       _retirement = OwnerJobRetirementService(
+         database: database,
+         gateway: retirementGateway,
+       ),
+       _repository = repository ?? LocalDocumentRepository(database: database);
 
   static const _scope = 'documents';
   static final StreamController<String> _syncEvents =
       StreamController<String>.broadcast();
 
   static Stream<String> get syncEvents => _syncEvents.stream;
+
+  /// Refresh existing listeners after a verified, server-committed cleanup.
+  static void notifyCleanup(String businessId) => _syncEvents.add(businessId);
   final BriskersApi _api;
+  final OwnerJobRetirementService _retirement;
+  final TestJobCleanupGateway _cleanupGateway;
   final LocalDocumentRepository _repository;
-  final LocalDocumentDetailCache _detailCache = const LocalDocumentDetailCache();
+  final LocalDocumentDetailCache _detailCache;
+  final BriskersLocalDatabase _database;
 
   Future<void> pull(String businessId) async {
+    await _retirement.pullTombstones(businessId);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final results = await Future.wait<dynamic>([
       _api.documents(businessId, kind: 'estimate'),
       _api.documents(businessId, kind: 'invoice'),
     ]);
-
-    final estimates =
-        List<Map<String, dynamic>>.from(results[0] as List);
-    final invoices =
-        List<Map<String, dynamic>>.from(results[1] as List);
-    final all = <Map<String, dynamic>>[
-      ...estimates,
-      ...invoices,
-    ];
-
-    await _repository.replaceFromServer(
+    await _retirement.pullTombstones(businessId);
+    final retiredDocuments = await LocalJobRetirement.blockedDocumentIds(
+      _database,
       businessId,
-      estimates,
-      kind: 'estimate',
+      includeVisibilityScope: false,
     );
-    await _repository.replaceFromServer(
+    final retiredJobs = await LocalJobRetirement.blockedJobIds(
+      _database,
       businessId,
-      invoices,
-      kind: 'invoice',
+      includeVisibilityScope: false,
     );
+    // Fetch after document reads so a deletion reflected by those reads cannot
+    // be mistaken for an ordinary missing list row.
+    final cleanup = TestJobCleanupTombstones.fromJson(
+      await _cleanupGateway.tombstones(businessId),
+      businessId,
+    );
+
+    final estimates = List<Map<String, dynamic>>.from(results[0] as List)
+        .where(
+          (row) =>
+              !cleanup.documentIds.contains(row['id']) &&
+              !retiredDocuments.contains(row['id']),
+        )
+        .toList();
+    final invoices = List<Map<String, dynamic>>.from(results[1] as List)
+        .where(
+          (row) =>
+              !cleanup.documentIds.contains(row['id']) &&
+              !retiredDocuments.contains(row['id']) &&
+              !retiredJobs.contains(row['job_id']),
+        )
+        .toList();
+    final all = <Map<String, dynamic>>[...estimates, ...invoices];
+
+    await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await LocalJobDeletionV3.authorizeScopedEntities(_database, businessId, visibilityGeneration,
+        [for (final row in estimates) {'entity_kind': 'estimate', 'entity_id': row['id']},
+         for (final row in invoices) {'entity_kind': 'invoice', 'entity_id': row['id']}]);
+      await LocalCleanupSafety.requireDocumentsRemovable(
+        _database,
+        businessId,
+        cleanup.documentIds,
+      );
+      final snapshots = <String, Map<String, dynamic>?>{};
+      for (final id in cleanup.documentIds) {
+        final snapshot = await _detailCache.load(businessId, id);
+        if (TestJobCleanupPolicy.hasPendingSnapshot(snapshot)) {
+          throw StateError(
+            'A server-deleted document has local edits or '
+            'payment history. Its snapshot has been preserved.',
+          );
+        }
+        snapshots[id] = snapshot;
+      }
+      await _repository.replaceFromServer(
+        businessId,
+        estimates,
+        kind: 'estimate',
+      );
+      await _repository.replaceFromServer(
+        businessId,
+        invoices,
+        kind: 'invoice',
+      );
+      for (final entry in snapshots.entries) {
+        if (!await _detailCache.removeIfUnchanged(
+          businessId,
+          entry.key,
+          entry.value,
+        )) {
+          throw StateError(
+            'A document changed while synchronizing cleanup. '
+            'Its latest snapshot has been preserved; retry after reconciliation.',
+          );
+        }
+      }
+    });
     // A list index alone is not an offline document snapshot.
     // Download details for every synced invoice and estimate, including closed
     // historical documents. Cached details make retries resumable.
-    await localDatabase.customStatement(
+    await _database.customStatement(
       "UPDATE local_sync_states SET bootstrapped = 0 "
       "WHERE business_id = ? AND scope = ?",
       [businessId, _scope],
     );
-    await _prefetchAllDocumentDetails(businessId, all);
+    await _prefetchAllDocumentDetails(businessId, all, visibilityGeneration);
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
 
-    await localDatabase.customStatement(
+    await _database.customStatement(
       '''
       INSERT INTO local_sync_states (
         business_id, scope, last_server_cursor, last_pull_at,
@@ -83,24 +170,27 @@ class DocumentIndexSyncService {
   Future<void> _prefetchAllDocumentDetails(
     String businessId,
     List<Map<String, dynamic>> documents,
+    int visibilityGeneration,
   ) async {
     final missing = <Map<String, dynamic>>[];
     for (final document in documents) {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
       final id = document['id']?.toString() ?? '';
       if (id.isEmpty) continue;
       final cached = await _detailCache.load(businessId, id);
       final expectedKind = document['kind']?.toString() ?? '';
-      final cachedValid = cached != null &&
+      final cachedValid =
+          cached != null &&
           cached['id']?.toString() == id &&
           cached['kind']?.toString() == expectedKind &&
           cached['lines'] is List;
       // Never overwrite pending offline edits. Otherwise refresh server data
       // when its version changed (not on every index synchronization).
-      final hasLocalEdits =
-          cached?['sync_state']?.toString() == 'pending';
+      final hasLocalEdits = cached?['sync_state']?.toString() == 'pending';
       final serverVersion = document['row_version']?.toString();
       final cachedVersion = cached?['row_version']?.toString();
-      final current = cachedValid &&
+      final current =
+          cachedValid &&
           (hasLocalEdits ||
               serverVersion == null ||
               serverVersion == cachedVersion);
@@ -110,7 +200,7 @@ class DocumentIndexSyncService {
         // retaining its historical lines and local offline edits.
         final hydrated = withVerifiedDocumentEditMetadata(document, cached);
         if (hydrated != null) {
-          await _detailCache.save(businessId, id, hydrated);
+          await _detailCache.save(businessId, id, hydrated, visibilityGeneration: visibilityGeneration);
         }
       } else {
         missing.add(document);
@@ -131,11 +221,11 @@ class DocumentIndexSyncService {
         if (id.isEmpty) continue;
         try {
           final detail = await _api.documentDetail(businessId, id);
-          if (detail['id']?.toString() != id ||
-              detail['lines'] is! List) {
+          if (detail['id']?.toString() != id || detail['lines'] is! List) {
             throw StateError('Invalid document detail response');
           }
-          await _detailCache.save(businessId, id, detail);
+          await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+          await _detailCache.save(businessId, id, detail, visibilityGeneration: visibilityGeneration);
         } catch (_) {
           failures++;
           if (examples.length < 5) {
@@ -166,7 +256,7 @@ class DocumentIndexSyncService {
     try {
       await pull(businessId);
     } catch (error) {
-      await localDatabase.customStatement(
+      await _database.customStatement(
         '''
         INSERT INTO local_sync_states (
           business_id, scope, last_error, bootstrapped
@@ -179,3 +269,4 @@ class DocumentIndexSyncService {
     }
   }
 }
+

@@ -4,9 +4,17 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'core/briskers_i18n.dart';
 
 import 'screens/auth_gate.dart';
+import 'core/supabase_config.dart';
+import 'widgets/auth_visibility_shield.dart';
 
-class BriskersApp extends StatelessWidget {
+class BriskersApp extends StatefulWidget {
   const BriskersApp({super.key});
+  @override
+  State<BriskersApp> createState() => _BriskersAppState();
+}
+
+class _BriskersAppState extends State<BriskersApp> {
+  var _authNavigatorKey = GlobalKey<NavigatorState>();
 
   @override
   Widget build(BuildContext context) {
@@ -18,6 +26,7 @@ class BriskersApp extends StatelessWidget {
     return AnimatedBuilder(
       animation: BriskersLanguageController.instance,
       builder: (context, _) => MaterialApp(
+      navigatorKey: _authNavigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'Briskers',
       locale: BriskersLanguageController.instance.locale,
@@ -34,7 +43,12 @@ class BriskersApp extends StatelessWidget {
         final media = MediaQuery.of(context);
         return MediaQuery(
           data: media.copyWith(textScaler: TextScaler.noScaling),
-          child: child ?? const SizedBox.shrink(),
+          child: AuthVisibilityShield(
+            actorId: () => supabase.auth.currentUser?.id,
+            actorChanges: supabase.auth.onAuthStateChange.map((event) => event.session?.user.id),
+            closePreviousScreens: () => setState(() { _authNavigatorKey = GlobalKey<NavigatorState>(); }),
+            child: child ?? const SizedBox.shrink(),
+          ),
         );
       },
       theme: ThemeData(
@@ -66,3 +80,4 @@ class BriskersApp extends StatelessWidget {
     );
   }
 }
+

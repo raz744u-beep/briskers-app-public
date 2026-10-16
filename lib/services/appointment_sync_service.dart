@@ -7,6 +7,7 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_quarantine.dart';
 
 class AppointmentSyncService {
   AppointmentSyncService({
@@ -803,6 +804,9 @@ class AppointmentSyncService {
       throw StateError('A permanent appointment ID is required.');
     }
     await _database.transaction(() async {
+      await LocalJobQuarantine.assertReplayAllowed(
+        _database, businessId, outboxId: queueId,
+      );
       final existing = await _database.customSelect(
         'SELECT id FROM local_appointments WHERE business_id=? AND id=?',
         variables: [Variable<String>(businessId), Variable<String>(serverId)],
@@ -871,22 +875,30 @@ class AppointmentSyncService {
       final data = Map<String,dynamic>.from(
         jsonDecode(row.read<String>('payload_json')) as Map);
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: queueId,
+        );
         if (!await dependenciesReadyForCreate(
             businessId,data['customer_id'].toString(),
             data['vehicle_id']?.toString())) {
           // Keep the create operation untouched for a later sync cycle.
           break;
         }
-        final serverId = await _api.syncOfflineAppointmentCreate(
+        final serverId = await LocalJobQuarantine.guardReplay(
+          _database,
           businessId,
-          operationId: data['operation_id'].toString(),
-          customerId: data['customer_id'].toString(),
-          vehicleId: data['vehicle_id']?.toString(),
-          title: data['title'].toString(),
-          description: data['description']?.toString(),
-          startsAt: DateTime.parse(data['starts_at'].toString()),
-          endsAt: DateTime.parse(data['ends_at'].toString()),
-          employeeId: data['employee_id']?.toString(),
+          () => _api.syncOfflineAppointmentCreate(
+            businessId,
+            operationId: data['operation_id'].toString(),
+            customerId: data['customer_id'].toString(),
+            vehicleId: data['vehicle_id']?.toString(),
+            title: data['title'].toString(),
+            description: data['description']?.toString(),
+            startsAt: DateTime.parse(data['starts_at'].toString()),
+            endsAt: DateTime.parse(data['ends_at'].toString()),
+            employeeId: data['employee_id']?.toString(),
+          ),
+          outboxId: queueId,
         );
         if (serverId.isEmpty) {
           throw StateError('Server did not return appointment identity.');
@@ -895,10 +907,15 @@ class AppointmentSyncService {
         if (data['cancel_after_create'] == true) {
           // A cancelled newly-created appointment has a newer row_version
           // than the initial create; keep that authoritative revision.
-          acceptedVersion = await _api.syncOfflineAppointmentCancel(
-            businessId, serverId,
-            operationId: data['operation_id'].toString(),
-            baseVersion: 1,
+          acceptedVersion = await LocalJobQuarantine.guardReplay(
+            _database,
+            businessId,
+            () => _api.syncOfflineAppointmentCancel(
+              businessId, serverId,
+              operationId: data['operation_id'].toString(),
+              baseVersion: 1,
+            ),
+            outboxId: queueId,
           );
         }
         await acknowledgeCreatedAppointment(
@@ -908,6 +925,7 @@ class AppointmentSyncService {
         // Ensure the new record is fetched on the normal sync pull.
         _syncEvents.add(businessId);
       } catch (error) {
+        if (error is LocalJobQuarantineException) rethrow;
         await _database.customStatement(
           """UPDATE sync_outbox SET attempt_count=attempt_count+1,
             last_attempt_at=?,last_error=? WHERE id=?""",
@@ -932,13 +950,24 @@ class AppointmentSyncService {
       final payload=Map<String,dynamic>.from(
         jsonDecode(row.read<String>('payload_json')) as Map);
       try {
-        final deleted=await _api.syncOfflineAppointmentDelete(
-          businessId,appointmentId,
-          operationId:payload['operation_id'].toString(),
-          baseVersion:row.read<int>('base_row_version'),
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: queueId,
+        );
+        final deleted=await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => _api.syncOfflineAppointmentDelete(
+            businessId,appointmentId,
+            operationId:payload['operation_id'].toString(),
+            baseVersion:row.read<int>('base_row_version'),
+          ),
+          outboxId: queueId,
         );
         if (!deleted) throw StateError('Server did not acknowledge deletion.');
         await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database, businessId, outboxId: queueId,
+          );
           await _database.customStatement(
             'DELETE FROM local_appointments WHERE business_id=? AND id=?',
             [businessId,appointmentId],
@@ -949,6 +978,7 @@ class AppointmentSyncService {
         });
         _syncEvents.add(businessId);
       } catch (error) {
+        if (error is LocalJobQuarantineException) rethrow;
         final message=error.toString();
         final conflict=message.contains('40001') ||
           message.contains('Appointment changed on another device');
@@ -980,12 +1010,23 @@ class AppointmentSyncService {
       final payload=Map<String,dynamic>.from(
         jsonDecode(row.read<String>('payload_json')) as Map);
       try {
-        final version=await _api.syncOfflineAppointmentCancel(
-          businessId,appointmentId,
-          operationId:payload['operation_id'].toString(),
-          baseVersion:row.read<int>('base_row_version'),
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: id,
+        );
+        final version=await LocalJobQuarantine.guardReplay(
+          _database,
+          businessId,
+          () => _api.syncOfflineAppointmentCancel(
+            businessId,appointmentId,
+            operationId:payload['operation_id'].toString(),
+            baseVersion:row.read<int>('base_row_version'),
+          ),
+          outboxId: id,
         );
         await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database, businessId, outboxId: id,
+          );
           await _database.customStatement(
             """UPDATE local_appointments SET row_version=?,sync_state='synced'
                WHERE business_id=? AND id=? AND sync_state='pending'""",
@@ -997,6 +1038,7 @@ class AppointmentSyncService {
         });
         _syncEvents.add(businessId);
       } catch (error) {
+        if (error is LocalJobQuarantineException) rethrow;
         final message=error.toString();
         final conflict=message.contains('40001') ||
           message.contains('Appointment changed on another device');
@@ -1035,10 +1077,16 @@ class AppointmentSyncService {
         jsonDecode(row.read<String>('payload_json')) as Map,
       );
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: outboxId,
+        );
         final changedCustomer = payload['customer_id']?.toString();
         final changedVehicle = payload['vehicle_id']?.toString();
         final version = changedCustomer != null
-            ? await _api.syncOfflineAppointmentReassign(
+            ? await LocalJobQuarantine.guardReplay(
+              _database,
+              businessId,
+              () => _api.syncOfflineAppointmentReassign(
                 businessId,appointmentId,
                 operationId:payload['operation_id'].toString(),
                 baseVersion:row.read<int>('base_row_version'),
@@ -1048,18 +1096,28 @@ class AppointmentSyncService {
                 startsAt:DateTime.parse(payload['starts_at'].toString()),
                 endsAt:DateTime.parse(payload['ends_at'].toString()),
                 employeeId:payload['employee_id']?.toString(),
-              )
-            : await _api.syncOfflineAppointmentEdit(
-          businessId, appointmentId,
-          operationId: payload['operation_id'].toString(),
-          baseVersion: row.read<int>('base_row_version'),
-          title: payload['title'].toString(),
-          description: payload['description']?.toString(),
-          startsAt: DateTime.parse(payload['starts_at'].toString()),
-          endsAt: DateTime.parse(payload['ends_at'].toString()),
-          employeeId: payload['employee_id']?.toString(),
-        );
+              ),
+              outboxId: outboxId,
+            )
+            : await LocalJobQuarantine.guardReplay(
+              _database,
+              businessId,
+              () => _api.syncOfflineAppointmentEdit(
+                businessId, appointmentId,
+                operationId: payload['operation_id'].toString(),
+                baseVersion: row.read<int>('base_row_version'),
+                title: payload['title'].toString(),
+                description: payload['description']?.toString(),
+                startsAt: DateTime.parse(payload['starts_at'].toString()),
+                endsAt: DateTime.parse(payload['ends_at'].toString()),
+                employeeId: payload['employee_id']?.toString(),
+              ),
+              outboxId: outboxId,
+            );
         await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database, businessId, outboxId: outboxId,
+          );
           await _database.customStatement(
             """UPDATE local_appointments SET row_version=?,
                sync_state='synced' WHERE business_id=? AND id=?
@@ -1073,6 +1131,7 @@ class AppointmentSyncService {
         });
         _syncEvents.add(businessId);
       } catch (error) {
+        if (error is LocalJobQuarantineException) rethrow;
         final message = error.toString();
         final conflict = message.contains('40001') ||
             message.contains('Appointment changed on another device');
@@ -1128,22 +1187,33 @@ class AppointmentSyncService {
       final row = fresh.first;
 
       try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database, businessId, outboxId: row.read<int>('id'),
+        );
         final payload = Map<String, dynamic>.from(
           jsonDecode(row.read<String>('payload_json')) as Map,
         );
         final appointmentId =
             payload['appointment_id']?.toString() ?? '';
-        final response = await _api.syncCheckInAppointment(
+        final response = await LocalJobQuarantine.guardReplay(
+          _database,
           businessId,
-          appointmentId,
-          operationId:
-              payload['operation_id']?.toString() ?? '',
-          expectedRowVersion:
-              row.readNullable<int>('base_row_version'),
+          () => _api.syncCheckInAppointment(
+            businessId,
+            appointmentId,
+            operationId:
+                payload['operation_id']?.toString() ?? '',
+            expectedRowVersion:
+                row.readNullable<int>('base_row_version'),
+          ),
+          outboxId: row.read<int>('id'),
         );
 
         if (response['status']?.toString() == 'conflict') {
           await _database.transaction(() async {
+            await LocalJobQuarantine.assertReplayAllowed(
+              _database, businessId, outboxId: row.read<int>('id'),
+            );
             await _database.customStatement(
               '''
               UPDATE local_appointments
@@ -1180,6 +1250,9 @@ class AppointmentSyncService {
 
         final jobId = response['job_id']?.toString() ?? '';
         await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database, businessId, outboxId: row.read<int>('id'),
+          );
           await _applyBundle(
             businessId,
             Map<String, dynamic>.from(rawAppointment),
@@ -1195,6 +1268,7 @@ class AppointmentSyncService {
           appliedJobs[appointmentId] = jobId;
         }
       } catch (error) {
+        if (error is LocalJobQuarantineException) rethrow;
         await _database.customStatement(
           '''
           UPDATE sync_outbox

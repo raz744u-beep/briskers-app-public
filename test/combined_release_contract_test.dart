@@ -1,0 +1,43 @@
+import 'dart:io';
+
+import 'package:briskers_app/core/document_navigation_role.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('invoice navigation preserves exact role without Office escalation', () {
+    for (final role in ['owner', 'office', 'manager', 'mechanic', 'viewer']) {
+      expect(documentNavigationRole(roleCode: role, isOwner: role == 'owner'), role);
+    }
+    expect(documentNavigationRole(isOwner: false), 'viewer');
+    expect(documentNavigationRole(isOwner: true), 'owner');
+    expect(documentNavigationRole(roleCode: 'mechanic', isOwner: true), 'mechanic');
+  });
+
+  test('payment finalization stays Owner-only and independent of Job completion', () {
+    final source = File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
+    final start = source.indexOf('Future<void> _finalizeEnteredPayments()');
+    final end = source.indexOf('Future<void> _enterWarrantyPayment()', start);
+    final finalize = source.substring(start, end);
+    expect(finalize, contains('if (!widget.isOwner) return;'));
+    expect(finalize, contains('_queuedPaymentOperationIds.isNotEmpty'));
+    expect(source, contains('if (widget.isOwner) ...['));
+    expect(source, contains('Future<void> _offerCompleteJobAfterPaymentEntry()'));
+    expect(source, contains('This does not finalize the '));
+  });
+
+  test('local note projections protect refresh, PDF and stale signatures', () {
+    final source = File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
+    expect(source, contains('final memoProjected = await _pendingMemo.project('));
+    expect(source, contains("_notesController.text = projected['memo']"));
+    expect(source, contains("_notesController.text = datedCached['memo']"));
+    final start = source.indexOf('Future<Map<String, dynamic>> _pendingMemoForPdf(');
+    final end = source.indexOf('Future<Map<String, dynamic>?> _preparePdf()', start);
+    final guard = source.substring(start, end);
+    expect(guard, contains("projected['_local_pending_memo'] == true"));
+    for (final field in ['signature_bytes', 'signer_name', 'signed_at']) {
+      expect(guard, contains("projected.remove('$field')"));
+    }
+    expect(guard, contains("projected['signature_current'] = false"));
+    expect(source, contains('return _withPdfUnits(await _pendingMemoForPdf(localDetail))'));
+  });
+}

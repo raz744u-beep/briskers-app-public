@@ -66,7 +66,7 @@ void main() {
     final database = BriskersLocalDatabase(NativeDatabase.memory());
     await _seedCustomerVehicleJob(database);
 
-    const cache = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database: database);
     final service = OfflineDocumentDraftService(
       database: database,
       cache: cache,
@@ -158,7 +158,7 @@ void main() {
       ''',
     );
 
-    const cache = LocalDocumentDetailCache();
+    final cache = LocalDocumentDetailCache(database: database);
     await cache.save('business-1', 'estimate-1', {
       'id': 'estimate-1',
       'kind': 'estimate',
@@ -468,3 +468,4 @@ void main() {
     await database.close();
   });
 }
+

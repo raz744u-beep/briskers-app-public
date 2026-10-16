@@ -1208,6 +1208,21 @@ class QuickTransactionsSettingsScreen extends StatefulWidget {
 
   final String businessId;
 
+  @visibleForTesting
+  static Widget dialogForTesting({
+    required String businessId,
+    required List<Map<String, dynamic>> accounts,
+    required List<Map<String, dynamic>> categories,
+    required List<Map<String, dynamic>> counterparties,
+    Map<String, dynamic>? template,
+  }) => _QuickDialog(
+    businessId: businessId,
+    accounts: accounts,
+    categories: categories,
+    counterparties: counterparties,
+    template: template,
+  );
+
   @override
   State<QuickTransactionsSettingsScreen> createState() =>
       _QuickTransactionsSettingsScreenState();
@@ -1430,6 +1445,20 @@ class _QuickDialogState extends State<_QuickDialog> {
     super.dispose();
   }
 
+  Future<void> _pickCounterparty() async {
+    final selected = await showModalBottomSheet<String?>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (_) => _QuickCounterpartyPicker(
+        counterparties: activeCounterparties,
+      ),
+    );
+    if (!mounted || selected == null) return;
+    setState(() => vendorId = selected == '__none__' ? null : selected);
+  }
+
   Future<void> _save() async {
     if (name.text.trim().isEmpty || accountId == null || categoryId == null) {
       setState(() => error = 'Name, account and category are required.');
@@ -1465,11 +1494,17 @@ class _QuickDialogState extends State<_QuickDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final accent = direction == 'expense' ? Colors.red.shade700 : Colors.green.shade700;
     return AlertDialog(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       title: Text(
         widget.template == null ? 'Add quick transaction' : 'Edit quick transaction',
       ),
-      content: SingleChildScrollView(
+      content: SizedBox(
+        width: MediaQuery.sizeOf(context).width * 0.92,
+        height: MediaQuery.sizeOf(context).height * 0.64,
+        child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1490,33 +1525,34 @@ class _QuickDialogState extends State<_QuickDialog> {
                   : (value) => setState(() => direction = value.first),
             ),
             const SizedBox(height: 10),
-            DropdownButtonFormField<String?>(
-              initialValue: vendorId,
-              decoration: const InputDecoration(labelText: 'Payee / payer'),
-              items: [
-                const DropdownMenuItem<String?>(
-                  value: null,
-                  child: Text('None'),
+            OutlinedButton.icon(
+              onPressed: saving ? null : _pickCounterparty,
+              icon: const Icon(Icons.search),
+              label: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  vendorId == null ? 'Search vendor / payee' :
+                  activeCounterparties
+                    .where((x) => x['id']?.toString() == vendorId)
+                    .map((x) => x['name']?.toString() ?? '')
+                    .firstOrNull ?? 'Search vendor / payee',
                 ),
-                ...activeCounterparties.map(
-                  (x) => DropdownMenuItem<String?>(
-                    value: x['id']?.toString(),
-                    child: Text(x['name']?.toString() ?? ''),
-                  ),
-                ),
-              ],
-              onChanged:
-                  saving ? null : (value) => setState(() => vendorId = value),
+              ),
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue: categoryId,
               decoration: const InputDecoration(labelText: 'Category'),
               items: activeCategories
                   .map(
                     (x) => DropdownMenuItem(
                       value: x['id']?.toString(),
-                      child: Text(x['name']?.toString() ?? ''),
+                      child: Text(
+                        x['name']?.toString() ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   )
                   .toList(),
@@ -1525,14 +1561,19 @@ class _QuickDialogState extends State<_QuickDialog> {
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue: accountId,
-              hint: const Text('Choose account'),
+              hint: const Text('Choose account', maxLines: 1, overflow: TextOverflow.ellipsis),
               decoration: const InputDecoration(labelText: 'Account'),
               items: activeAccounts
                   .map(
                     (x) => DropdownMenuItem(
                       value: x['id']?.toString(),
-                      child: Text(x['name']?.toString() ?? ''),
+                      child: Text(
+                        x['name']?.toString() ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   )
                   .toList(),
@@ -1567,6 +1608,7 @@ class _QuickDialogState extends State<_QuickDialog> {
               ),
           ],
         ),
+        ),
       ),
       actions: [
         TextButton(
@@ -1574,10 +1616,80 @@ class _QuickDialogState extends State<_QuickDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: accent),
           onPressed: saving ? null : _save,
           child: Text(saving ? 'Saving...' : 'Save'),
         ),
       ],
+    );
+  }
+}
+
+// The sheet owns its controller: showModalBottomSheet resolves when popped,
+// while its TextField can still rebuild during the reverse route animation.
+class _QuickCounterpartyPicker extends StatefulWidget {
+  const _QuickCounterpartyPicker({required this.counterparties});
+
+  final List<Map<String, dynamic>> counterparties;
+
+  @override
+  State<_QuickCounterpartyPicker> createState() => _QuickCounterpartyPickerState();
+}
+
+class _QuickCounterpartyPickerState extends State<_QuickCounterpartyPicker> {
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _search.text.trim().toLowerCase();
+    final results = widget.counterparties.where((item) =>
+        (item['name']?.toString() ?? '').toLowerCase().contains(query)).toList()
+      ..sort((a, b) => (a['name']?.toString() ?? '')
+          .compareTo(b['name']?.toString() ?? ''));
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        20, 18, 20, MediaQuery.viewInsetsOf(context).bottom + 16,
+      ),
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.70,
+        child: Column(
+          children: [
+            Text('Search payees and payers',
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _search,
+              autofocus: true,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                labelText: 'Vendor / payee name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                children: [
+                  ListTile(
+                    title: const Text('None'),
+                    onTap: () => Navigator.pop(context, '__none__'),
+                  ),
+                  ...results.map((item) => ListTile(
+                    title: Text(item['name']?.toString() ?? ''),
+                    onTap: () => Navigator.pop(context, item['id']?.toString()),
+                  )),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
