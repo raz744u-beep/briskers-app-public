@@ -830,6 +830,27 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     if (selected != null && mounted) _applyQuickTemplate(selected);
   }
 
+  DateTime _calculatedNextTransaction(String frequency) {
+    final start = DateTime(_date.year, _date.month, _date.day);
+    final today = DateTime.now();
+    final cutoff = DateTime(today.year, today.month, today.day);
+    DateTime occurrence(int n) {
+      if (frequency == 'daily') return DateTime(start.year, start.month, start.day + n);
+      if (frequency == 'weekly') return DateTime(start.year, start.month, start.day + 7 * n);
+      if (frequency == 'biweekly') return DateTime(start.year, start.month, start.day + 14 * n);
+      final months = frequency == 'yearly' ? 12 * n : n;
+      final targetFirst = DateTime(start.year, start.month + months);
+      final end = DateTime(targetFirst.year, targetFirst.month + 1, 0).day;
+      return DateTime(targetFirst.year, targetFirst.month,
+          start.day <= end ? start.day : end);
+    }
+    for (var n = 1; n < 200000; n++) {
+      final next = occurrence(n);
+      if (!next.isBefore(cutoff)) return next;
+    }
+    throw StateError('Cannot calculate next transaction date.');
+  }
+
   Future<void> _pickDate() async {
     _counterpartyFocusNode.unfocus();
     final value = await showDatePicker(
@@ -838,7 +859,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       firstDate: DateTime(2000),
       lastDate: DateTime.now().add(const Duration(days: 3650)),
     );
-    if (value != null && mounted) setState(() => _date = value);
+    if (value != null && mounted) setState(() { _date = value; if (_repeat) _nextDate = _calculatedNextTransaction(_repeatPreset); });
   }
 
   Future<void> _pickNextDate() async {
@@ -1546,7 +1567,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                     value: _repeat,
                     onChanged: _saving
                         ? null
-                        : (value) => setState(() => _repeat = value),
+                        : (value) => setState(() { _repeat = value; if (value) _nextDate = _calculatedNextTransaction(_repeatPreset); }),
                   ),
                   if (_repeat) ...[
                     DropdownButtonFormField<String>(
@@ -1578,7 +1599,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                           ? null
                           : (value) {
                               if (value != null) {
-                                setState(() => _repeatPreset = value);
+                                setState(() { _repeatPreset = value; _nextDate = _calculatedNextTransaction(value); });
                               }
                             },
                     ),
