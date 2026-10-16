@@ -108,6 +108,17 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   bool _onlineReady = false;
   bool _initialActionScheduled = false;
   bool _showingLocal = false;
+  bool _cachedNoticeVisible = false;
+
+  void _showCachedDataNotice(int epoch) {
+    if (!mounted) return;
+    setState(() => _cachedNoticeVisible = true);
+    Future<void>.delayed(const Duration(seconds: 2), () {
+      if (!mounted || epoch != _loadEpoch) return;
+      setState(() => _cachedNoticeVisible = false);
+    });
+  }
+
   String? _error;
   VoidCallback? _modalRefresh;
   int _loadEpoch = 0;
@@ -364,6 +375,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           _showingLocal = true;
           _error = null;
         });
+        _showCachedDataNotice(epoch);
         _modalRefresh?.call();
         // Linked expenses are a secondary tile. Their cache lookup should
         // never delay the first usable Job detail frame.
@@ -5009,33 +5021,11 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       floatingActionButton: (_canEditFindings || _canManage) ? FloatingActionButton.extended(
         onPressed: _busy ? null : _showNewMenu, backgroundColor: BriskersColors.jobs, foregroundColor: Colors.white, icon: const Icon(Icons.add), label: const Text('New', style: TextStyle(fontWeight: FontWeight.w800)),
       ) : null,
-      body: RefreshIndicator(
+      body: Stack(
+        children: [
+          RefreshIndicator(
         onRefresh: _load,
         child: ListView(controller: _scrollController, padding: const EdgeInsets.fromLTRB(10, 5, 10, 74), children: [
-          if (_showingLocal)
-            Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 8,
-              ),
-              decoration: BoxDecoration(
-                color: BriskersColors.jobs.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.cloud_off_outlined, size: 18),
-                  SizedBox(width: 7),
-                  Expanded(
-                    child: Text(
-                      'Showing saved job data • offline-capable work can still be edited',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ],
-              ),
-            ),
           _summaryCard(
             customerName: customerName,
             vehicle: vehicle,
@@ -5201,6 +5191,30 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             ),
           ],
         ]),
+      ),
+          if (_showingLocal && _cachedNoticeVisible)
+            Positioned(
+              top: 0,
+              left: 10,
+              right: 10,
+              child: IgnorePointer(
+                child: Material(
+                  elevation: 3,
+                  borderRadius: BorderRadius.circular(9),
+                  color: const Color(0xFFE5F2FC),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    child: Row(children: [
+                      Icon(Icons.cloud_off_outlined, size: 18),
+                      SizedBox(width: 8),
+                      Expanded(child: Text('Showing saved job data • offline-capable work can still be edited',
+                        style: TextStyle(fontWeight: FontWeight.w700))),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
       ),
     );
