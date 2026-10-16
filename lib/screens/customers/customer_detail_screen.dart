@@ -218,33 +218,161 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _showOverviewList(String title, List<Map<String, dynamic>> records) async {
+    Color moduleColor(String type) {
+      switch (type) {
+        case 'Job':
+        case 'Visit':
+          return BriskersColors.jobs;
+        case 'invoice':
+          return BriskersColors.invoices;
+        case 'estimate':
+          return BriskersColors.estimates;
+        case 'Appointment':
+          return BriskersColors.schedule;
+        default:
+          return BriskersColors.invoices;
+      }
+    }
+
+    IconData moduleIcon(String type) {
+      switch (type) {
+        case 'Job':
+          return Icons.build_outlined;
+        case 'Visit':
+          return Icons.history_outlined;
+        case 'invoice':
+          return Icons.receipt_long_outlined;
+        case 'estimate':
+          return Icons.description_outlined;
+        case 'Appointment':
+          return Icons.calendar_today_outlined;
+        default:
+          return Icons.payments_outlined;
+      }
+    }
+
+    final sheetColor = title == 'Jobs' || title == 'Visits'
+        ? BriskersColors.jobs
+        : title == 'Estimates'
+            ? BriskersColors.estimates
+            : title == 'Appointments'
+                ? BriskersColors.schedule
+                : BriskersColors.invoices;
     await showModalBottomSheet<void>(
-      context: context, showDragHandle: true, isScrollControlled: true,
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
       builder: (sheetContext) => SafeArea(
         child: FractionallySizedBox(
           heightFactor: 0.75,
           child: Column(children: [
-            Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: Text(title, style: Theme.of(context).textTheme.titleLarge)),
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: sheetColor.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 23,
+                  fontWeight: FontWeight.w800,
+                  color: sheetColor,
+                ),
+              ),
+            ),
             Expanded(child: records.isEmpty
               ? const Center(child: Text('No records found on this device.'))
               : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(14, 2, 14, 20),
                   itemCount: records.length,
                   itemBuilder: (context, i) {
                     final item = records[i];
-                    final number = item['number']?.toString() ?? '';
-                    final status = item['status']?.toString() ?? '';
-                    return ListTile(
-                      title: Text(number.isEmpty ? '${item['title'] ?? title}'
-                        : '${item['type']} $number'),
-                      subtitle: Text([item['title'], status, item['vehicle']]
-                        .map((e) => e?.toString().trim() ?? '')
-                        .where((s) => s.isNotEmpty).join(' • ')),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () {
-                        Navigator.pop(sheetContext);
-                        _openOverviewRecord(item);
-                      },
+                    final type = item['type']?.toString() ?? '';
+                    final number = item['number']?.toString().trim() ?? '';
+                    final status = item['status']?.toString().trim() ?? '';
+                    final color = moduleColor(type);
+                    final recordTitle = number.isEmpty
+                        ? (item['title']?.toString().trim().isNotEmpty == true
+                            ? item['title'].toString()
+                            : type)
+                        : type == 'invoice'
+                            ? 'Invoice #$number'
+                            : type == 'estimate'
+                                ? 'Estimate #$number'
+                                : type == 'Job'
+                                    ? 'Job $number'
+                                    : '$type $number';
+                    final description = [
+                      item['title'],
+                      item['vehicle'],
+                    ].map((value) => value?.toString().trim() ?? '')
+                      .where((value) => value.isNotEmpty && value != recordTitle)
+                      .join(' • ');
+                    return Card(
+                      elevation: 0,
+                      margin: const EdgeInsets.only(bottom: 9),
+                      color: color.withValues(alpha: 0.09),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(15),
+                        side: BorderSide(color: color.withValues(alpha: 0.16)),
+                      ),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(15),
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          _openOverviewRecord(item);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 13),
+                          child: Row(children: [
+                            CircleAvatar(
+                              radius: 22,
+                              backgroundColor: color.withValues(alpha: 0.14),
+                              child: Icon(moduleIcon(type), color: color, size: 25),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(recordTitle,
+                                  style: const TextStyle(
+                                    fontSize: 17, fontWeight: FontWeight.w800),
+                                ),
+                                if (description.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(description,
+                                    style: const TextStyle(fontSize: 14.5),
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis),
+                                ],
+                                if (status.isNotEmpty) ...[
+                                  const SizedBox(height: 7),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 9, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: color.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(status,
+                                      style: TextStyle(color: color,
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w700)),
+                                  ),
+                                ],
+                              ],
+                            )),
+                            const SizedBox(width: 6),
+                            Icon(Icons.chevron_right, color: color, size: 24),
+                          ]),
+                        ),
+                      ),
                     );
                   },
                 )),
