@@ -31,6 +31,7 @@ import '../../services/invoice_labor_work_summary.dart';
 import 'invoice_payment_navigation.dart';
 import '../../services/local_document_repository.dart';
 import '../../services/local_document_detail_cache.dart';
+import '../../services/job_document_link_recovery.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/offline_preinspection_service.dart';
 import '../../services/offline_document_draft_service.dart';
@@ -219,41 +220,15 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       ),
     ];
 
-    final repaired = <Map<String, dynamic>>[];
-    for (final row in candidates) {
-      if (row['job_id']?.toString() == widget.jobId) {
-        repaired.add(row);
-        continue;
-      }
-
-      final id = row['id']?.toString() ?? '';
-      if (id.isEmpty) continue;
-      final detail = await _documentDetailCache.load(
-        widget.businessId,
-        id,
-      );
-      if (detail?['job_id']?.toString() != widget.jobId) continue;
-
-      final merged = <String, dynamic>{
-        ...row,
-        ...detail!,
-        'total_amount':
-            detail['total_amount'] ?? row['total_amount'] ?? 0,
-        '_local_snapshot': true,
-      };
-      repaired.add(merged);
-
-      try {
-        await _localDocuments.upsertFromServer(
-          widget.businessId,
-          [detail],
-        );
-      } catch (_) {
-        // Showing the recovered document is more important than index repair.
-      }
-    }
-
-    return repaired;
+    return recoverLegacyJobDocuments(
+      requestedJobId: widget.jobId,
+      candidates: candidates,
+      readDetail: (id) => _documentDetailCache.load(widget.businessId, id),
+      readCurrentIndex: () async => [
+        ...await _localDocuments.listByKind(widget.businessId, kind: 'estimate'),
+        ...await _localDocuments.listByKind(widget.businessId, kind: 'invoice'),
+      ],
+    );
   }
 
   void _scheduleInitialAction() {
@@ -3452,7 +3427,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       }
     } catch (error) {
       messenger.showSnackBar(
-        SnackBar(content: Text('Unable to delete Job: $error')),
+        SnackBar(content: Text(ownerJobDeletionFailureMessage(error))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -4620,7 +4595,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         final localDocuments = await _localDocumentsForJob(
           recoverLegacy: true,
         );
-        if (mounted) {
+        if (mounted && !_onlineReady) {
           setState(() => _documents = localDocuments);
         }
       } catch (_) {
@@ -5297,4 +5272,3 @@ class _JobDrawerSurface extends StatelessWidget {
     );
   }
 }
-

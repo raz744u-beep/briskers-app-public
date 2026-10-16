@@ -44,6 +44,18 @@ class OwnerJobRetirementNotSent extends StateError {
   OwnerJobRetirementNotSent(super.message);
 }
 
+/// A missing server capability is an expected availability state, not a
+/// technical error that the Owner should have to interpret.
+class OwnerJobDeletionUnavailable extends StateError {
+  OwnerJobDeletionUnavailable()
+      : super('Job deletion is temporarily unavailable. Nothing has been deleted.');
+}
+
+String ownerJobDeletionFailureMessage(Object error) =>
+    error is OwnerJobDeletionUnavailable
+        ? error.message
+        : 'Unable to delete Job: $error';
+
 /// Thin, injectable gateway. There is deliberately no legacy delete fallback.
 class OwnerJobRetirementGateway {
   const OwnerJobRetirementGateway();
@@ -406,9 +418,7 @@ class OwnerJobRetirementService {
       } on PostgrestException catch (error) {
         if ({'PGRST202', '42883'}.contains(error.code) &&
             error.message.contains('briskers_job_retirement_preview_v2')) {
-          throw StateError(
-            'Safe Job deletion requires the server update. Nothing has been deleted.',
-          );
+          throw OwnerJobDeletionUnavailable();
         }
         rethrow;
       }
@@ -1031,4 +1041,3 @@ class OwnerJobRetirementService {
     }
   }
 }
-
