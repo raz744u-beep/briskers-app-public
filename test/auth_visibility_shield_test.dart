@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/widgets/auth_visibility_shield.dart';
 
+// Async auth streams deliver in microtasks. Flush delivery without painting,
+// then require protection on the very first frame after the event is known.
+// pump() alone paints first and flushes microtasks afterward.
 void main() {
   testWidgets('actor change hides pushed content without disposing draft', (tester) async {
     var actor = 'owner';
@@ -15,12 +18,12 @@ void main() {
       child: Scaffold(body: TextField(controller: draft)),
     )));
     expect(find.text('private draft'), findsOneWidget);
-    actor = 'customer'; changes.add(actor); await tester.pump();
+    actor = 'customer'; changes.add(actor); await tester.idle(); await tester.pump();
     expect(find.text('private draft'), findsNothing);
     expect(find.text('Close previous screens'), findsOneWidget);
     expect(closes, 0);
     expect(draft.text, 'private draft');
-    actor = 'owner'; changes.add(actor); await tester.pump();
+    actor = 'owner'; changes.add(actor); await tester.idle(); await tester.pump();
     expect(find.text('private draft'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     draft.dispose(); await changes.close();
@@ -34,7 +37,7 @@ void main() {
       closePreviousScreens: () { closes++; },
       child: const Scaffold(body: Text('old shop')),
     )));
-    actor = null; changes.add(null); await tester.pump();
+    actor = null; changes.add(null); await tester.idle(); await tester.pump();
     expect(find.text('old shop'), findsNothing);
     await tester.tap(find.text('Close previous screens')); await tester.pump();
     expect(closes, 1);
@@ -47,7 +50,7 @@ void main() {
       actorId: () => actor, actorChanges: changes.stream,
       closePreviousScreens: () {}, child: const Text('login'),
     )));
-    actor = 'owner'; changes.add(actor); await tester.pump();
+    actor = 'owner'; changes.add(actor); await tester.idle(); await tester.pump();
     expect(find.text('login'), findsOneWidget);
     expect(find.text('Close previous screens'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink()); await changes.close();
@@ -65,6 +68,7 @@ void main() {
     await tester.pump();
     expect(find.text('previous financial details'), findsNothing);
     changes.add(actor);
+    await tester.idle();
     await tester.pump();
     expect(find.text('previous financial details'), findsNothing);
     expect(closes, 0);
@@ -100,6 +104,7 @@ void main() {
     expect(find.text('old actor private invoice'), findsOneWidget);
     actor = 'customer';
     changes.add(actor);
+    await tester.idle();
     await tester.pump();
     expect(find.text('old actor private invoice'), findsNothing);
     await tester.tap(find.text('Close previous screens'));

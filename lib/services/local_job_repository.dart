@@ -58,11 +58,16 @@ class LocalJobRepository {
         AND v3.entity_id=$alias.id)
   """;
 
+  static String _visibleChildSql(String alias, String kindSql, {String idColumn = 'id'}) =>
+      "NOT EXISTS(SELECT 1 FROM local_job_deletion_v3_fences hidden "
+      "WHERE hidden.business_id=$alias.business_id AND hidden.entity_kind=$kindSql "
+      "AND hidden.entity_id=$alias.$idColumn)";
+
   static const _finishedStatuses = "('completed','cancelled','closed')";
 
   // Import time is not business activity. MB jobs with no reliable historical
   // date sort last; a later edit still counts. Job number only breaks ties.
-  static const _jobActivitySql = """
+  static final _jobActivitySql = """
     MAX(
       COALESCE(j.completed_at, 0),
       CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
@@ -76,7 +81,8 @@ class LocalJobRepository {
           AND v.server_updated_at <= j.created_at THEN 0
           ELSE COALESCE(v.server_updated_at, 0) END
       )) FROM local_job_visits v
-        WHERE v.business_id = j.business_id AND v.job_id = j.id), 0),
+        WHERE v.business_id = j.business_id AND v.job_id = j.id
+          AND ${_visibleChildSql('v', "'job_visit'")}), 0),
       COALESCE((SELECT MAX(MAX(
         COALESCE(CAST(strftime('%s', d.document_date) AS INTEGER), 0),
         COALESCE(d.closed_at, 0),
@@ -86,14 +92,16 @@ class LocalJobRepository {
           ELSE MAX(COALESCE(d.server_updated_at, 0),
                    COALESCE(d.created_at, 0)) END
       )) FROM local_documents d
-        WHERE d.business_id = j.business_id AND d.job_id = j.id), 0),
+        WHERE d.business_id = j.business_id AND d.job_id = j.id
+          AND ${_visibleChildSql('d', 'd.kind')}), 0),
       COALESCE((SELECT MAX(MAX(
         COALESCE(i.inspected_at, 0),
         CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
           AND i.server_updated_at <= j.created_at THEN 0
           ELSE COALESCE(i.server_updated_at, 0) END
       )) FROM local_pre_inspections i
-        WHERE i.business_id = j.business_id AND i.job_id = j.id), 0),
+        WHERE i.business_id = j.business_id AND i.job_id = j.id
+          AND ${_visibleChildSql('i', "'pre_inspection'")}), 0),
       COALESCE((SELECT MAX(MAX(
         COALESCE(f.resolved_at, 0),
         CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
@@ -104,37 +112,46 @@ class LocalJobRepository {
           ELSE COALESCE(f.server_updated_at, 0) END
       )) FROM local_findings f
         WHERE f.business_id = j.business_id
+          AND ${_visibleChildSql('f', "'finding'")}
           AND (f.found_job_id = j.id OR f.repair_job_id = j.id)), 0),
       COALESCE((SELECT MAX(p.captured_at)
         FROM local_pre_inspection_photos p
         JOIN local_pre_inspections i ON i.business_id = p.business_id
           AND i.id = p.inspection_id
-        WHERE i.business_id = j.business_id AND i.job_id = j.id), 0),
+          AND ${_visibleChildSql('p', "'pre_inspection_photo'")}
+          AND ${_visibleChildSql('p', "'attachment'", idColumn: 'attachment_id')}
+        WHERE i.business_id = j.business_id AND i.job_id = j.id
+          AND ${_visibleChildSql('i', "'pre_inspection'")}), 0),
       COALESCE((SELECT MAX(p.captured_at)
         FROM local_finding_photos p
         JOIN local_findings f ON f.business_id = p.business_id
           AND f.id = p.finding_id
+          AND ${_visibleChildSql('p', "'finding_photo'")}
+          AND ${_visibleChildSql('p', "'attachment'", idColumn: 'attachment_id')}
         WHERE f.business_id = j.business_id
+          AND ${_visibleChildSql('f', "'finding'")}
           AND (f.found_job_id = j.id OR f.repair_job_id = j.id)), 0),
       COALESCE((SELECT MAX(MAX(COALESCE(o.created_at, 0),
         CASE WHEN json_valid(o.payload_json)
           THEN COALESCE(CAST(json_extract(o.payload_json, '\$._activity_at') AS INTEGER), 0)
           ELSE 0 END)) FROM sync_outbox o
         WHERE o.business_id = j.business_id AND o.state = 'pending'
+          AND NOT EXISTS(SELECT 1 FROM local_job_deletion_v3_scope_outbox hidden_outbox
+            WHERE hidden_outbox.business_id=o.business_id AND hidden_outbox.outbox_id=o.id)
           AND ((o.entity_id = j.id AND o.entity_type IN
             ('job_create', 'job_admin', 'work_summary', 'preinspection'))
           OR (o.entity_type IN ('invoice_payment_received', 'document_edit',
             'document_draft_create', 'estimate_add_to_invoice') AND EXISTS (
             SELECT 1 FROM local_documents pd
             WHERE pd.business_id = j.business_id AND pd.job_id = j.id
-              AND pd.id = o.entity_id
+              AND pd.id = o.entity_id AND ${_visibleChildSql('pd', 'pd.kind')}
           ))
           OR (o.entity_type IN ('finding_create', 'finding_update',
             'finding_action') AND EXISTS (
             SELECT 1 FROM local_findings pf
             WHERE pf.business_id = j.business_id
               AND (pf.found_job_id = j.id OR pf.repair_job_id = j.id)
-              AND pf.id = o.entity_id
+              AND pf.id = o.entity_id AND ${_visibleChildSql('pf', "'finding'")}
           )))), 0)
     )
   """;
@@ -144,13 +161,15 @@ class LocalJobRepository {
   // of the work itself. Invoice settlement and visit container creation may be
   // later administrative activity. An undated MB import must not use its import
   // timestamp.
-  static const _jobDateSql = """
+  static final _jobDateSql = """
     COALESCE(NULLIF(j.completed_at, 0),
       (SELECT MIN(CAST(strftime('%s', d.document_date) AS INTEGER))
         FROM local_documents d
-        WHERE d.business_id = j.business_id AND d.job_id = j.id),
+        WHERE d.business_id = j.business_id AND d.job_id = j.id
+          AND ${_visibleChildSql('d', 'd.kind')}),
       (SELECT MIN(NULLIF(v.closed_at, 0)) FROM local_job_visits v
-        WHERE v.business_id = j.business_id AND v.job_id = j.id),
+        WHERE v.business_id = j.business_id AND v.job_id = j.id
+          AND ${_visibleChildSql('v', "'job_visit'")}),
       CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
         THEN 0 ELSE COALESCE(j.created_at, 0) END)
   """;
@@ -266,7 +285,8 @@ class LocalJobRepository {
           CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
             THEN COALESCE((SELECT MIN(CAST(strftime('%s', d.document_date) AS INTEGER))
               FROM local_documents d
-              WHERE d.business_id = j.business_id AND d.job_id = j.id), 0)
+              WHERE d.business_id = j.business_id AND d.job_id = j.id
+          AND ${_visibleChildSql('d', 'd.kind')}), 0)
             ELSE COALESCE(j.created_at, 0) END DESC,
         """
         : view == JobListView.all || sort == JobListSort.lastModified
@@ -300,7 +320,7 @@ class LocalJobRepository {
         COALESCE(s.sort_order, 9999) AS status_sort_order,
         (SELECT COUNT(*) FROM local_findings f
           WHERE f.business_id = j.business_id AND f.vehicle_id = j.vehicle_id
-            AND f.status = 'open') AS open_findings
+            AND f.status = 'open' AND ${_visibleChildSql('f', "'finding'")}) AS open_findings
       FROM job_activity j
       LEFT JOIN local_job_statuses s
         ON s.business_id = j.business_id AND s.code = j.status
@@ -775,7 +795,9 @@ class LocalJobRepository {
         )
         .get();
 
+    final blockedAssignments = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_job_assignments');
     final assignments = assignmentRows
+        .where((assignment) => !blockedAssignments.contains(assignment.read<String>('assignment_id')))
         .map(
           (assignment) => <String, dynamic>{
             'assignment_id': assignment.read<String>('assignment_id'),
@@ -801,7 +823,9 @@ class LocalJobRepository {
         )
         .get();
 
+    final blockedVisits = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_job_visits');
     final visits = visitRows
+        .where((visit) => !blockedVisits.contains(visit.read<String>('id')))
         .map(
           (visit) => <String, dynamic>{
             'id': visit.read<String>('id'),
@@ -936,6 +960,7 @@ class LocalJobRepository {
     if (rows.isEmpty) return null;
     final row = rows.first;
     final inspectionId = row.read<String>('id');
+    if ((await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_pre_inspections')).contains(inspectionId)) { return null; }
 
     final photoRows = await _database
         .customSelect(
@@ -952,6 +977,7 @@ class LocalJobRepository {
         )
         .get();
 
+    final blockedPhotos = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_pre_inspection_photos');
     return <String, dynamic>{
       'id': inspectionId,
       'job_id': jobId,
@@ -964,6 +990,7 @@ class LocalJobRepository {
       'row_version': row.readNullable<int>('row_version'),
       'sync_state': row.read<String>('sync_state'),
       'photos': photoRows
+          .where((photo) => !blockedPhotos.contains(photo.read<String>('id')))
           .map(
             (photo) => <String, dynamic>{
               'id': photo.read<String>('id'),
@@ -1013,9 +1040,12 @@ class LocalJobRepository {
         )
         .get();
 
+    final blockedFindings = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_findings');
+    final blockedPhotos = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_finding_photos');
     final result = <Map<String, dynamic>>[];
     for (final row in rows) {
       final findingId = row.read<String>('id');
+      if (blockedFindings.contains(findingId)) { continue; }
       final photoRows = await _database
           .customSelect(
             '''
@@ -1048,6 +1078,7 @@ class LocalJobRepository {
         'can_delete': false,
         'sync_state': row.read<String>('sync_state'),
         'attachments': photoRows
+            .where((photo) => !blockedPhotos.contains(photo.read<String>('id')))
             .map(
               (photo) => <String, dynamic>{
                 'id': photo.read<String>('id'),

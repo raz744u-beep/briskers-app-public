@@ -114,3 +114,29 @@ print('PASS: 5 additional exact-source scope checks; dirty child/cache DELETE bl
 blocked("INSERT OR REPLACE INTO local_financial_cache(business_id,cache_key,payload_json) VALUES ('scope','old','{}')")
 blocked("UPDATE local_financial_cache SET cache_key='new',payload_json='{}' WHERE business_id='scope' AND cache_key='old'")
 print('PASS: 2 dirty financial-key overwrite checks; REPLACE and rename/update cannot erase key-only unknown work.')
+db.execute("INSERT INTO sync_outbox(id,business_id,entity_type,entity_id,payload_json) VALUES (999,'scope','unknown','unrelated','{}')")
+db.execute("INSERT INTO local_job_deletion_v3_scope_outbox VALUES ('scope',999)")
+blocked("DELETE FROM sync_outbox WHERE id=999")
+blocked("INSERT OR REPLACE INTO sync_outbox(id,business_id,entity_type,entity_id,payload_json) VALUES (999,'scope','other','different','{}')")
+print('PASS: 2 scope-quarantined outbox checks; DELETE and REPLACE preserve original pending work.')
+
+repository_source = (root / 'lib/services/local_job_repository.dart').read_text()
+def child_sql(match):
+    alias, kind, column = match.groups()
+    kind = kind[1:-1]
+    column = column or 'id'
+    return (f'NOT EXISTS(SELECT 1 FROM local_job_deletion_v3_fences hidden '
+            f'WHERE hidden.business_id={alias}.business_id AND hidden.entity_kind={kind} '
+            f'AND hidden.entity_id={alias}.{column})')
+def projection(name):
+    raw = repository_source.split('static final '+name+' = """',1)[1].split('""";',1)[0]
+    raw = re.sub(r'''\$\{_visibleChildSql\('([^']+)', ("[^"]+"|'[^']+')(?:, idColumn: '([^']+)')?\)\}''', child_sql, raw)
+    return raw.replace('\\$', '$')
+db.execute("INSERT INTO local_jobs(id,business_id,title,created_at,server_updated_at) VALUES ('root','activity','Fresh root',0,0)")
+db.execute("INSERT INTO local_findings(id,business_id,found_job_id,created_at,server_updated_at,resolved_at) VALUES ('oldfinding','activity','root',123,123,123)")
+activity_sql = f"SELECT {projection('_jobActivitySql')} FROM local_jobs j WHERE business_id='activity'"
+assert int(db.execute(activity_sql).fetchone()[0]) == 123
+db.execute("INSERT INTO local_job_deletion_v3_scope_entities VALUES ('activity','finding','oldfinding',1,0)")
+assert int(db.execute(activity_sql).fetchone()[0]) == 0
+db.execute(f"SELECT {projection('_jobDateSql')} FROM local_jobs j WHERE business_id='activity'").fetchall()
+print('PASS: 3 actual job projection SQL checks; hidden child activity excluded and historical-date query parses.')

@@ -73,8 +73,8 @@ class LocalJobDeletionV3 {
 
   static Future<void> ensureSchema(BriskersLocalDatabase db) async {
     if (_installed[db] == true && (await db.customSelect(
-        "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='deletion_v3_scope_dirty_financial_update'").get()).isNotEmpty &&
-        (await db.customSelect('SELECT 1 FROM local_job_deletion_v3_schema WHERE singleton=1 AND version=4').get()).isNotEmpty) { return; }
+        "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='deletion_v3_scope_outbox_delete'").get()).isNotEmpty &&
+        (await db.customSelect('SELECT 1 FROM local_job_deletion_v3_schema WHERE singleton=1 AND version=5').get()).isNotEmpty) { return; }
     await db.transaction(() async {
       await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_schema (
         singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL)''');
@@ -83,7 +83,7 @@ class LocalJobDeletionV3 {
       final ownedTriggers = <String>{
         'deletion_v3_marker_no_delete', 'deletion_v3_marker_no_update', 'deletion_v3_marker_no_replace',
         'deletion_v3_alias_no_delete', 'deletion_v3_alias_no_update', 'deletion_v3_alias_no_replace',
-        'deletion_v3_scope_outbox_update', 'deletion_v3_scope_dirty_financial_delete',
+        'deletion_v3_scope_outbox_update', 'deletion_v3_scope_outbox_insert', 'deletion_v3_scope_outbox_delete', 'deletion_v3_scope_dirty_financial_delete',
         'deletion_v3_scope_dirty_financial_insert', 'deletion_v3_scope_dirty_financial_update',
         for (final table in {..._tables.values.map((entry) => entry.$1), 'local_finding_photos'})
           'deletion_v3_scope_dirty_${table}_delete',
@@ -130,6 +130,16 @@ class LocalJobDeletionV3 {
         WHEN EXISTS(SELECT 1 FROM local_job_deletion_v3_scope_outbox s
           WHERE s.business_id=OLD.business_id AND s.outbox_id=OLD.id)
         BEGIN SELECT RAISE(ABORT,'Authorization changed; retained work requires reconciliation'); END''');
+      await db.customStatement('''CREATE TRIGGER IF NOT EXISTS deletion_v3_scope_outbox_insert
+        BEFORE INSERT ON sync_outbox
+        WHEN EXISTS(SELECT 1 FROM local_job_deletion_v3_scope_outbox s
+          WHERE s.business_id=NEW.business_id AND s.outbox_id=NEW.id)
+        BEGIN SELECT RAISE(ABORT,'Retained queued work cannot be replaced'); END''');
+      await db.customStatement('''CREATE TRIGGER IF NOT EXISTS deletion_v3_scope_outbox_delete
+        BEFORE DELETE ON sync_outbox
+        WHEN EXISTS(SELECT 1 FROM local_job_deletion_v3_scope_outbox s
+          WHERE s.business_id=OLD.business_id AND s.outbox_id=OLD.id)
+        BEGIN SELECT RAISE(ABORT,'Retained queued work requires authorized reconciliation'); END''');
       await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_cleanup (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL, operation_id TEXT NOT NULL,
         graph_hash TEXT NOT NULL, state TEXT NOT NULL, issue_code TEXT, inventory_generation INTEGER NOT NULL DEFAULT 0,
@@ -237,7 +247,7 @@ class LocalJobDeletionV3 {
             BEGIN SELECT RAISE(ABORT,'Verified deletion blocks stale payload replay'); END''');
         }
       }
-      await db.customStatement('INSERT INTO local_job_deletion_v3_schema(singleton,version) VALUES (1,4) '
+      await db.customStatement('INSERT INTO local_job_deletion_v3_schema(singleton,version) VALUES (1,5) '
           'ON CONFLICT(singleton) DO UPDATE SET version=excluded.version');
     });
     _installed[db] = true;
@@ -1058,12 +1068,16 @@ class LocalJobDeletionV3 {
         await db.customStatement('DELETE FROM $table WHERE business_id=? AND attachment_id=?', [business, id]);
       }
     }
+    final retainedOutbox = (await db.customSelect(
+        'SELECT outbox_id FROM local_job_deletion_v3_scope_outbox WHERE business_id=?',
+        variables: [Variable<String>(business)]).get()).map((row) => row.read<int>('outbox_id')).toSet();
     final removedOutbox = <int>{};
     final outbox = await db.customSelect('SELECT * FROM sync_outbox WHERE business_id=?',
         variables: [Variable<String>(business)]).get();
     for (final row in outbox) {
       final payload = _decode(row.data['payload_json']);
       if (_ownedOutbox(row.data, inventory)) {
+        if (retainedOutbox.contains(row.read<int>('id'))) { unresolved = true; continue; }
         removedOutbox.add(row.read<int>('id'));
         await _queueMedia(db, business, operation, payload);
         await db.customStatement('DELETE FROM sync_outbox WHERE business_id=? AND id=?', [business, row.data['id']]);

@@ -576,7 +576,7 @@ void main() {
     await LocalJobDeletionV3.ensureSchema(db);
     await db.customStatement("UPDATE local_documents SET status='allowed replacement' WHERE id=?", [other]);
     await expectLater(db.customStatement('DELETE FROM local_customers WHERE business_id=?', [business]), throwsA(isA<Exception>()));
-    expect((await db.customSelect('SELECT version FROM local_job_deletion_v3_schema').getSingle()).read<int>('version'), 4);
+    expect((await db.customSelect('SELECT version FROM local_job_deletion_v3_schema').getSingle()).read<int>('version'), 5);
   });
   test('scope-dirty financial key rejects direct replace and update without identity fields', () async {
     await db.customStatement("INSERT INTO local_financial_cache(business_id,cache_key,payload_json,updated_at) VALUES (?,'unknown',?,0)", [business, jsonEncode('only unknown work')]);
@@ -585,5 +585,34 @@ void main() {
     await expectLater(db.customStatement("INSERT OR REPLACE INTO local_financial_cache(business_id,cache_key,payload_json,updated_at) VALUES (?,'unknown','{}',0)", [business]), throwsA(isA<Exception>()));
     await expectLater(db.customStatement("UPDATE local_financial_cache SET cache_key='new-key',payload_json='{}' WHERE business_id=?", [business]), throwsA(isA<Exception>()));
     expect((await db.customSelect('SELECT payload_json FROM local_financial_cache').getSingle()).read<String>('payload_json'), contains('only unknown work'));
+  });
+  test('scope-quarantined outbox rejects direct replace and delete', () async {
+    final id = await enqueue(db, 'invoice_update', invoice, {'memo': 'sole queue data'});
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: other, visibilityScope: 'restricted', readerScope: 'customer');
+    await expectLater(db.customStatement("INSERT OR REPLACE INTO sync_outbox(id,business_id,entity_type,entity_id,operation,payload_json) VALUES (?,?,'other','unrelated','update','{}')", [id, business]), throwsA(isA<Exception>()));
+    await expectLater(db.customStatement('DELETE FROM sync_outbox WHERE id=?', [id]), throwsA(isA<Exception>()));
+    expect((await db.customSelect('SELECT payload_json FROM sync_outbox').getSingle()).read<String>('payload_json'), contains('sole queue data'));
+  });
+  test('freshly authorized root cannot expose retained children absent from current scope', () async {
+    await db.customStatement("UPDATE local_jobs SET vehicle_id='shared-vehicle' WHERE id=?", [job]);
+    await db.customStatement("UPDATE local_findings SET vehicle_id='shared-vehicle' WHERE id=?", [finding]);
+    await db.customStatement('INSERT INTO local_pre_inspections(id,business_id,job_id,notes) VALUES (?,?,?,?)', [inspection,business,job,'old privileged inspection']);
+    await db.customStatement('INSERT INTO local_job_visits(id,business_id,job_id,visit_number,work_summary) VALUES (?,?,?,1,?)', [other,business,job,'old privileged visit']);
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: other, visibilityScope: 'limited', readerScope: 'staff');
+    final generation = await LocalJobDeletionV3.captureVisibilityGeneration(db, business);
+    await db.transaction(() async {
+      await LocalJobDeletionV3.authorizeScopedEntities(db,business,generation,[entity('job',job)]);
+      await db.customStatement("UPDATE local_jobs SET title='fresh authorized root' WHERE id=?", [job]);
+    });
+    final result = await LocalJobRepository(database:db).jobDetail(business,job);
+    expect(result, isNotNull);
+    expect(result!.job['visits'], isEmpty);
+    expect(result.preInspection, isNull);
+    expect(result.findings, isEmpty);
+    final listed = await LocalJobRepository(database:db).listJobs(business);
+    expect(listed.single['open_findings'], 0);
+    expect(await count(db,'local_findings'), 1);
   });
 }
