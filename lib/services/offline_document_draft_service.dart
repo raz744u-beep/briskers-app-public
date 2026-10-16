@@ -556,6 +556,7 @@ class OfflineDocumentDraftService {
     String businessId,
     String jobId,
   ) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final rows = await _database.customSelect(
       '''
       SELECT id, job_number, title, customer_id, customer_name,
