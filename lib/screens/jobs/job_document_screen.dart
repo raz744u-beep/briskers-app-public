@@ -7138,8 +7138,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           ),
         ),          if (widget.sharedBottomNavigationBar != null)
             widget.sharedBottomNavigationBar!,
-        ],
-
+          ],
+        ),
       ),
     );
   }
