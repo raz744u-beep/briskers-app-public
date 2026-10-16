@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:drift/drift.dart' show Variable;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -218,33 +219,228 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Future<void> _showOverviewList(String title, List<Map<String, dynamic>> records) async {
+    Color moduleColor(String type) {
+      switch (type) {
+        case 'Job':
+        case 'Visit':
+          return BriskersColors.jobs;
+        case 'invoice':
+          return BriskersColors.invoices;
+        case 'estimate':
+          return BriskersColors.estimates;
+        case 'Appointment':
+          return BriskersColors.schedule;
+        default:
+          return BriskersColors.invoices;
+      }
+    }
+
+    IconData moduleIcon(String type) {
+      switch (type) {
+        case 'Job':
+          return Icons.build_outlined;
+        case 'Visit':
+          return Icons.history_outlined;
+        case 'invoice':
+          return Icons.receipt_long_outlined;
+        case 'estimate':
+          return Icons.description_outlined;
+        case 'Appointment':
+          return Icons.calendar_today_outlined;
+        default:
+          return Icons.payments_outlined;
+      }
+    }
+
+    Color statusColor(String status, Color fallback) {
+      final key = status.toLowerCase().trim();
+      if (key.contains('pending close') || key.contains('waiting') ||
+          key.contains('draft') || key.contains('pending approval')) {
+        return const Color(0xFFC77700);
+      }
+      if (key.contains('closed') || key.contains('completed') ||
+          key.contains('paid') || key.contains('accepted') ||
+          key.contains('converted')) {
+        return const Color(0xFF2E7D32);
+      }
+      if (key.contains('recheck') || key.contains('void') ||
+          key.contains('cancel')) {
+        return const Color(0xFFC62828);
+      }
+      if (key.contains('open') || key.contains('progress') ||
+          key.contains('sent')) {
+        return const Color(0xFF1976D2);
+      }
+      return fallback;
+    }
+    final documentList = title == 'Invoices' || title == 'Estimates';
+    final financialRows = records.where((record) =>
+      title == 'Invoices' ? record['type'] == 'invoice'
+        : record['type'] == 'estimate').toList();
+    final knownAmounts = financialRows.where((record) =>
+      record['total'] is num).toList();
+    final totalValue = knownAmounts.fold<double>(0, (total, record) =>
+      total + (record['total'] as num).toDouble());
+    final money = NumberFormat.currency(locale: 'en_US', symbol: '\$');
+    final missingAmounts = financialRows.length - knownAmounts.length;
+
+    final sheetColor = title == 'Jobs' || title == 'Visits'
+        ? BriskersColors.jobs
+        : title == 'Estimates'
+            ? BriskersColors.estimates
+            : title == 'Appointments'
+                ? BriskersColors.schedule
+                : BriskersColors.invoices;
     await showModalBottomSheet<void>(
-      context: context, showDragHandle: true, isScrollControlled: true,
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
       builder: (sheetContext) => SafeArea(
         child: FractionallySizedBox(
           heightFactor: 0.75,
           child: Column(children: [
-            Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: Text(title, style: Theme.of(context).textTheme.titleLarge)),
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: sheetColor.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 23,
+                  fontWeight: FontWeight.w800,
+                  color: sheetColor,
+                ),
+              ),
+            ),
+            if (documentList)
+              Container(
+                margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                decoration: BoxDecoration(
+                  color: sheetColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(children: [
+                  Icon(Icons.account_balance_wallet_outlined,
+                    color: sheetColor, size: 21),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title == 'Invoices'
+                          ? 'Total Invoices' : 'Total Estimates',
+                        style: TextStyle(color: sheetColor,
+                          fontWeight: FontWeight.w800, fontSize: 16)),
+                      Text(
+                        '${financialRows.length} records'
+                        '${missingAmounts > 0 ? ' • $missingAmounts amounts unavailable' : ''}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  )),
+                  Text(money.format(totalValue),
+                    style: TextStyle(color: sheetColor,
+                      fontSize: 18, fontWeight: FontWeight.w800)),
+                ]),
+              ),
             Expanded(child: records.isEmpty
               ? const Center(child: Text('No records found on this device.'))
               : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(14, 2, 14, 20),
                   itemCount: records.length,
                   itemBuilder: (context, i) {
                     final item = records[i];
-                    final number = item['number']?.toString() ?? '';
-                    final status = item['status']?.toString() ?? '';
-                    return ListTile(
-                      title: Text(number.isEmpty ? '${item['title'] ?? title}'
-                        : '${item['type']} $number'),
-                      subtitle: Text([item['title'], status, item['vehicle']]
-                        .map((e) => e?.toString().trim() ?? '')
-                        .where((s) => s.isNotEmpty).join(' • ')),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () {
-                        Navigator.pop(sheetContext);
-                        _openOverviewRecord(item);
-                      },
+                    final type = item['type']?.toString() ?? '';
+                    final number = item['number']?.toString().trim() ?? '';
+                    final status = item['status']?.toString().trim() ?? '';
+                    final color = moduleColor(type);
+                    final stateColor = statusColor(status, color);
+                    final amount = item['total'] is num
+                        ? money.format(item['total']) : null;
+                    final recordTitle = number.isEmpty
+                        ? (item['title']?.toString().trim().isNotEmpty == true
+                            ? item['title'].toString()
+                            : type)
+                        : type == 'invoice'
+                            ? 'Invoice #$number'
+                            : type == 'estimate'
+                                ? 'Estimate #$number'
+                                : type == 'Job'
+                                    ? 'Job $number'
+                                    : '$type $number';
+                    final description = [
+                      item['title'],
+                      item['vehicle'],
+                    ].map((value) => value?.toString().trim() ?? '')
+                      .where((value) => value.isNotEmpty && value != recordTitle)
+                      .join(' • ');
+                    return Card(
+                      elevation: 0,
+                      margin: const EdgeInsets.only(bottom: 9),
+                      color: stateColor.withValues(alpha: 0.075),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(15),
+                        side: BorderSide(color: stateColor.withValues(alpha: 0.14)),
+                      ),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(15),
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          _openOverviewRecord(item);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 13),
+                          child: Row(children: [
+                            Icon(moduleIcon(type), color: color, size: 20),
+                            const SizedBox(width: 12),
+                            Expanded(child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(recordTitle,
+                                  style: const TextStyle(
+                                    fontSize: 17, fontWeight: FontWeight.w800),
+                                ),
+                                if (description.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(description,
+                                    style: const TextStyle(fontSize: 14.5),
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis),
+                                ],
+                                if (status.isNotEmpty) ...[
+                                  const SizedBox(height: 7),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 9, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: stateColor.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(status,
+                                      style: TextStyle(color: stateColor,
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w700)),
+                                  ),
+                                ],
+                              ],
+                            )),
+                            if (documentList && amount != null) ...[
+                              const SizedBox(width: 6),
+                              Text(amount, style: const TextStyle(
+                                fontSize: 15.5, fontWeight: FontWeight.w800)),
+                            ],
+                            const SizedBox(width: 5),
+                            Icon(Icons.chevron_right, color: color, size: 21),
+                          ]),
+                        ),
+                      ),
                     );
                   },
                 )),
@@ -284,10 +480,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       Widget link(String title, IconData icon, Color color,
           List<Map<String, dynamic>> items) => ListTile(
         dense: true, visualDensity: VisualDensity.compact,
-        leading: Icon(icon, color: color, size: 23),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+        leading: Icon(icon, color: color, size: 25),
+        title: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text('${items.length}', style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text('${items.length}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
           const SizedBox(width: 6), const Icon(Icons.chevron_right, size: 18),
         ]),
         onTap: () => _showOverviewList(title, items),
@@ -1217,9 +1413,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                         child: Column(mainAxisSize: MainAxisSize.min, children: [
                           Icon(const <IconData>[Icons.dashboard_outlined,
                             Icons.person_outline, Icons.directions_car_outlined,
-                            Icons.note_alt_outlined][i], size: 21),
+                            Icons.note_alt_outlined][i], size: 25),
                           Text(const <String>['Overview', 'Info', 'Vehicles', 'Notes'][i],
-                            style: const TextStyle(fontSize: 11)),
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                         ]),
                       )),
                   ]),
@@ -1288,6 +1484,27 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
+                  if (_customerTab == 0 && _canManageQuickActions)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Row(children: [
+                        Expanded(child: FilledButton.icon(
+                          onPressed: _showQuickActions,
+                          icon: const Icon(Icons.add),
+                          label: const Text('New'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: BriskersColors.customers,
+                            foregroundColor: Colors.white,
+                          ),
+                        )),
+                        const SizedBox(width: 10),
+                        Expanded(child: OutlinedButton.icon(
+                          onPressed: null,
+                          icon: const Icon(Icons.chat_bubble_outline),
+                          label: const Text('New Message • Soon'),
+                        )),
+                      ]),
+                    ),
                   if (_customerTab == 0) _customerOverviewCard(),
                   const SizedBox(height: 10),
                   if (_customerTab == 1) CustomerProblemFlagCard(
