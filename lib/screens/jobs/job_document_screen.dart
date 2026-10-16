@@ -4236,6 +4236,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     final customerId = detail['customer_id']?.toString() ??
         _detail?['customer_id']?.toString() ?? '';
     var email = detail['customer_email']?.toString().trim() ?? '';
+    // Each lookup must fail independently. A local-cache exception must not
+    // suppress the server fallback while Auto/Online is selected.
     if (email.isEmpty && customerId.isNotEmpty) {
       try {
         final local = await LocalCustomerRepository().customerDetail(
@@ -4244,17 +4246,79 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         if (customer is Map) {
           email = customer['email']?.toString().trim() ?? '';
         }
-        if (email.isEmpty &&
-            !BriskersConnectionModeController.instance.forceOffline) {
-          final remote = await _api.customerDetail(widget.businessId, customerId);
-          final remoteCustomer = remote['customer'];
-          if (remoteCustomer is Map) {
-            email = remoteCustomer['email']?.toString().trim() ?? '';
-          }
-        }
-      } catch (_) {
-        // Allow the email app to open with an editable empty recipient.
+      } catch (error) {
+        debugPrint('Invoice customer email local lookup failed: $error');
       }
+      if (email.isEmpty &&
+          !BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          final remote = await _api.customerDetail(
+            widget.businessId, customerId);
+          final customer = remote['customer'];
+          if (customer is Map) {
+            email = customer['email']?.toString().trim() ?? '';
+          }
+        } catch (error) {
+          debugPrint('Invoice customer email server lookup failed: $error');
+        }
+      }
+    }
+    if (!mounted) return;
+    // Never silently compose with an empty or obviously invalid address.
+    // Let the owner supply an address for this send without overwriting
+    // the customer's saved contact record.
+    final recipientMissing = !email.contains('@') ||
+        email.startsWith('@') || email.endsWith('@') ||
+        email.contains(' ');
+    {
+      final controller = TextEditingController(text: email);
+      final supplied = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(recipientMissing
+              ? 'Customer email required' : 'Confirm invoice recipient'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(recipientMissing
+                ? 'Briskers could not find a valid email address for this '
+                    'customer. Enter a recipient before opening Gmail.'
+                : 'Confirm the saved customer email before opening Gmail. '
+                    'You can correct it here without changing the customer record.'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                keyboardType: TextInputType.emailAddress,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Recipient email',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.contains('@') && !value.startsWith('@') &&
+                    !value.endsWith('@') && !value.contains(' ')) {
+                  Navigator.pop(dialogContext, value);
+                }
+              },
+              child: const Text('Continue to Gmail'),
+            ),
+          ],
+        ),
+      );
+      controller.dispose();
+      if (!mounted || supplied == null) return;
+      email = supplied;
     }
     final number = detail['document_number']?.toString().trim() ?? '';
     final subject = '${_estimate ? 'Estimate' : 'Invoice'}'
