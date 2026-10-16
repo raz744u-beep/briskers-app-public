@@ -1125,7 +1125,26 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                         ],
                       ),
                     ),
-                  Card(
+                  Row(children: [
+                    for (var i = 0; i < 4; i++)
+                      Expanded(child: TextButton(
+                        onPressed: () => setState(() => _customerTab = i),
+                        style: TextButton.styleFrom(
+                          backgroundColor: _customerTab == i
+                            ? BriskersColors.customers.withValues(alpha: 0.14) : null,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(const <IconData>[Icons.dashboard_outlined,
+                            Icons.person_outline, Icons.directions_car_outlined,
+                            Icons.note_alt_outlined][i], size: 21),
+                          Text(const <String>['Overview', 'Info', 'Vehicles', 'Notes'][i],
+                            style: const TextStyle(fontSize: 11)),
+                        ]),
+                      )),
+                  ]),
+                  const SizedBox(height: 8),
+                  if (_customerTab == 1) Card(
                     child: ExpansionTile(
                       initiallyExpanded: false,
                       leading: const Icon(Icons.person_outline, color: BriskersColors.customers),
@@ -1189,9 +1208,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  _customerOverviewCard(),
+                  if (_customerTab == 0) _customerOverviewCard(),
                   const SizedBox(height: 10),
-                  CustomerProblemFlagCard(
+                  if (_customerTab == 1) CustomerProblemFlagCard(
                     customerId: widget.customerId,
                     flagged: customer['problem_flag'] == true,
                     note: customer['problem_flag_note']?.toString() ?? '',
@@ -1199,14 +1218,14 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     onEdit: _editProblemFlag,
                   ),
                   const SizedBox(height: 18),
-                  CustomerVehiclesSection(
+                  if (_customerTab == 2) CustomerVehiclesSection(
                     vehicles: vehicles,
                     onAdd: _addVehicle,
                     onEdit: _editVehicle,
                     enabled: _canEditLocal,
                   ),
                   const SizedBox(height: 18),
-                  CustomerVehicleFindingsSection(
+                  if (_customerTab == 2) CustomerVehicleFindingsSection(
                     businessId: widget.businessId,
                     customerId: widget.customerId,
                     vehicles: vehicles,
@@ -1214,7 +1233,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     canDelete: widget.roleCode == 'owner',
                   ),
                   const SizedBox(height: 18),
-                  Container(
+                  if (_customerTab == 3) Container(
                     key: _notesSectionKey,
                     child: KeyedSubtree(
                       key: ValueKey(_expandQuickNotes),
@@ -1226,9 +1245,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 18),
-                  if (BriskersConnectionModeController.instance.forceOffline)
+                  if (_customerTab == 0 && BriskersConnectionModeController.instance.forceOffline)
                     _offlineCustomerSections()
-                  else ...[
+                  else if (_customerTab == 0) ...[
                     CustomerAppointmentsSection(
                       businessId: widget.businessId,
                       customerId: widget.customerId,
