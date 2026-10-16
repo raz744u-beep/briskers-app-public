@@ -4267,19 +4267,25 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     // Never silently compose with an empty or obviously invalid address.
     // Let the owner supply an address for this send without overwriting
     // the customer's saved contact record.
-    if (!email.contains('@') || email.startsWith('@') ||
-        email.endsWith('@') || email.contains(' ')) {
+    final recipientMissing = !email.contains('@') ||
+        email.startsWith('@') || email.endsWith('@') ||
+        email.contains(' ');
+    {
       final controller = TextEditingController(text: email);
       final supplied = await showDialog<String>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Customer email required'),
+          title: Text(recipientMissing
+              ? 'Customer email required' : 'Confirm invoice recipient'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Briskers could not find a valid email address for '
-                  'this customer. Enter the recipient before opening Gmail.'),
+              Text(recipientMissing
+                ? 'Briskers could not find a valid email address for this '
+                    'customer. Enter a recipient before opening Gmail.'
+                : 'Confirm the saved customer email before opening Gmail. '
+                    'You can correct it here without changing the customer record.'),
               const SizedBox(height: 12),
               TextField(
                 controller: controller,
