@@ -850,6 +850,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            const _ActionSectionLabel('Transaction'),
             ListTile(
               leading: const Icon(Icons.visibility_outlined),
               title: const Text('View transaction'),
@@ -869,6 +870,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
               ),
             if (deletable) ...[
               const Divider(height: 1),
+              const _ActionSectionLabel('Delete'),
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.red),
                 title: const Text(
@@ -1712,4 +1714,18 @@ class _ExpensesScreenState extends State<ExpensesScreen>
             ),
     );
   }
+}
+
+class _ActionSectionLabel extends StatelessWidget {
+  const _ActionSectionLabel(this.label);
+  final String label;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+    child: Align(alignment: Alignment.centerLeft,
+      child: Text(label.toUpperCase(),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          letterSpacing: 0.8, fontWeight: FontWeight.w700))),
+  );
 }
