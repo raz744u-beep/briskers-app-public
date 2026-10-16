@@ -3,7 +3,7 @@ name: Build Android debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, feat/combined-118-20261014, fix/oct15-independent-ui-20261015]
+    branches: [main, feat/combined-118-20261014, fix/oct15-independent-ui-20261015, integrate/oct16-ui-delete-v3]
     paths-ignore:
       - '.github/workflows/**'
 
