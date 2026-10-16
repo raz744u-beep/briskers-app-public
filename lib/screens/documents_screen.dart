@@ -144,7 +144,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       case 'Open':
         return tr('invoiceOpen');
       case 'Pending Close':
-        return 'Pending Close';
+        return tr('invoicePendingClose');
       case 'Paid':
         return tr('invoicePaid');
       case 'Closed':
