@@ -445,7 +445,11 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
       const BriskersDockDestination(label: 'More', icon: Icons.more_horiz, color: BriskersColors.more),
     ],
     onSelected: (index) {
-      if (nested && Navigator.of(context).canPop()) Navigator.of(context).pop();
+      if (nested) {
+        // A shared dock may be inside a sheet over a detail page.
+        // Explicit module navigation dismisses the nested routes first.
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
       _goTo(index);
     },
   );

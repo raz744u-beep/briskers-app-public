@@ -6,6 +6,7 @@ import 'package:drift/drift.dart' show Variable;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../widgets/job_compact_card.dart';
 import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
 import '../../core/briskers_i18n.dart';
@@ -139,7 +140,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         'status':a.read<String>('status')});
     }
     final jobs = await localDatabase.customSelect(
-      "SELECT id,title,status,payment_state,job_number FROM local_jobs WHERE business_id=? AND customer_id=? "
+      "SELECT * FROM local_jobs WHERE business_id=? AND customer_id=? "
       "",
       variables: vars).get();
     for (final j in jobs) {
@@ -151,7 +152,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         'job_id':j.read<String>('id'),
         'title':j.read<String>('title'),
         'number':j.readNullable<String>('job_number') ?? 'Pending sync',
-        'status':jobStatus});
+        'status':jobStatus,
+        'job_snapshot': <String, dynamic>{
+          ...j.data,
+          'customer_name': _data?['customer']?['name'] ?? '',
+          'vehicle': j.data['vehicle_label'],
+        } });
     }
     final docs = await CustomerDocumentSummaryService().forCustomer(
       widget.businessId, widget.customerId, includeClosed: true);
@@ -383,6 +389,32 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ].map((value) => value?.toString().trim() ?? '')
                       .where((value) => value.isNotEmpty && value != recordTitle)
                       .join(' • ');
+                    if (type == 'Job') {
+                      final jobData = Map<String, dynamic>.from(
+                        item['job_snapshot'] is Map
+                          ? item['job_snapshot'] as Map
+                          : <String, dynamic>{},
+                      );
+                      return JobCompactCard(
+                        job: jobData,
+                        statusControl: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: stateColor.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(status, style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w700,
+                            color: stateColor,
+                          )),
+                        ),
+                        onOpen: () {
+                          Navigator.pop(sheetContext);
+                          _openOverviewRecord(item);
+                        },
+                      );
+                    }
                     return Card(
                       elevation: 0,
                       margin: const EdgeInsets.only(bottom: 9),
@@ -447,6 +479,41 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     );
                   },
                 )),
+            if (_canManageQuickActions &&
+                (title == 'Jobs' || title == 'Invoices' ||
+                 title == 'Estimates' || title == 'Appointments'))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: sheetColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(sheetContext);
+                      if (title == 'Jobs') {
+                        _createJob();
+                      } else if (title == 'Invoices') {
+                        _createInvoiceForCustomer();
+                      } else if (title == 'Estimates') {
+                        _createEstimateForCustomer();
+                      } else {
+                        _scheduleAppointment();
+                      }
+                    },
+                    icon: const Icon(Icons.add),
+                    label: Text(title == 'Jobs' ? 'New Job'
+                      : title == 'Invoices' ? 'New Invoice'
+                      : title == 'Estimates' ? 'New Estimate'
+                      : 'New Appointment'),
+                  ),
+                ),
+              ),
+            if (widget.sharedBottomNavigationBar != null)
+              widget.sharedBottomNavigationBar!,
           ]),
         ),
       ),
