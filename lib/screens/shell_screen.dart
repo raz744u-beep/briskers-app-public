@@ -437,7 +437,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     destinations: [
       const BriskersDockDestination(label: 'Home', icon: Icons.home_outlined, color: BriskersColors.today),
       const BriskersDockDestination(label: 'Customers', icon: Icons.people_outline, color: BriskersColors.customers),
-      const BriskersDockDestination(label: 'Jobs', icon: Icons.build_outlined, color: BriskersColors.jobs),
+      BriskersDockDestination(label: 'Jobs', icon: Icons.build_outlined, color: BriskersColors.jobs, count: _homeJobsCount),
       const BriskersDockDestination(label: 'Estimates', icon: Icons.description_outlined, color: BriskersColors.estimates),
       const BriskersDockDestination(label: 'Invoices', icon: Icons.receipt_long_outlined, color: BriskersColors.invoices),
       const BriskersDockDestination(label: 'Schedule', icon: Icons.calendar_month_outlined, color: BriskersColors.schedule),
