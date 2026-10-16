@@ -27,6 +27,11 @@ void main() {
         invoiceLaborWorkSummary(invoice)),
         startsWith('Inspection completed\n'));
     });
+    test('does not duplicate a labor description already recorded', () {
+      final work = 'Replace rear air springs. Calibrate air suspension';
+      expect(appendInvoiceLaborWorkSummary(work, invoiceLaborWorkSummary(invoice)),
+        '$work\nReplace airmatic compressor, valve block and filter');
+    });
     test('copies normalized explicit labor rows from cached items', () {
       expect(invoiceLaborWorkSummary({
         'kind': 'invoice',
