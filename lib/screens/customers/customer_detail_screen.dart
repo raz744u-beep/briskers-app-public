@@ -480,10 +480,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       Widget link(String title, IconData icon, Color color,
           List<Map<String, dynamic>> items) => ListTile(
         dense: true, visualDensity: VisualDensity.compact,
-        leading: Icon(icon, color: color, size: 23),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+        leading: Icon(icon, color: color, size: 25),
+        title: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text('${items.length}', style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text('${items.length}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
           const SizedBox(width: 6), const Icon(Icons.chevron_right, size: 18),
         ]),
         onTap: () => _showOverviewList(title, items),
@@ -1413,9 +1413,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                         child: Column(mainAxisSize: MainAxisSize.min, children: [
                           Icon(const <IconData>[Icons.dashboard_outlined,
                             Icons.person_outline, Icons.directions_car_outlined,
-                            Icons.note_alt_outlined][i], size: 21),
+                            Icons.note_alt_outlined][i], size: 25),
                           Text(const <String>['Overview', 'Info', 'Vehicles', 'Notes'][i],
-                            style: const TextStyle(fontSize: 11)),
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                         ]),
                       )),
                   ]),
@@ -1484,6 +1484,27 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
+                  if (_customerTab == 0 && _canManageQuickActions)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Row(children: [
+                        Expanded(child: FilledButton.icon(
+                          onPressed: _showQuickActions,
+                          icon: const Icon(Icons.add),
+                          label: const Text('New'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: BriskersColors.customers,
+                            foregroundColor: Colors.white,
+                          ),
+                        )),
+                        const SizedBox(width: 10),
+                        Expanded(child: OutlinedButton.icon(
+                          onPressed: null,
+                          icon: const Icon(Icons.chat_bubble_outline),
+                          label: const Text('New Message • Soon'),
+                        )),
+                      ]),
+                    ),
                   if (_customerTab == 0) _customerOverviewCard(),
                   const SizedBox(height: 10),
                   if (_customerTab == 1) CustomerProblemFlagCard(
