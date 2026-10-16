@@ -701,6 +701,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              const _ActionSectionLabel('Edit and copy'),
               if (!estimateConverted)
                 ListTile(
                   leading: Icon(
@@ -741,7 +742,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 title: Text(_estimate ? 'Copy Estimate' : tr('copyInvoice')),
                 onTap: () => Navigator.pop(sheetContext, 'copy'),
               ),
-              if (canPayment)
+              if (canPayment) ...[
+                const Divider(height: 1),
+                const _ActionSectionLabel('Payment'),
                 ListTile(
                   leading: const Icon(
                     Icons.credit_card_outlined,
@@ -750,6 +753,11 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   title: Text(tr('addPayment')),
                   onTap: () => Navigator.pop(sheetContext, 'payment'),
                 ),
+              ],
+              if (canExpenses) ...[
+                const Divider(height: 1),
+                const _ActionSectionLabel('Expenses'),
+              ],
               if (canExpenses)
                 ListTile(
                   leading: const Icon(
@@ -768,7 +776,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   title: Text(tr('viewExpenses')),
                   onTap: () => Navigator.pop(sheetContext, 'expenses'),
                 ),
-              if (!_estimate)
+              if (!_estimate) ...[
+                const Divider(height: 1),
+                const _ActionSectionLabel('Repair'),
                 ListTile(
                   leading: const Icon(
                     Icons.warning_amber_rounded,
@@ -777,6 +787,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   title: Text(tr('vehicleFindings')),
                   onTap: () => Navigator.pop(sheetContext, 'findings'),
                 ),
+              ],
+              const Divider(height: 1),
+              const _ActionSectionLabel('Output'),
               ListTile(
                 leading: Icon(
                   Icons.visibility_outlined,
@@ -799,6 +812,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               ),
               if (canDelete) ...[
                 const Divider(height: 1),
+                const _ActionSectionLabel('Delete'),
                 ListTile(
                   leading: const Icon(Icons.delete_outline, color: Colors.red),
                   title: Text(
@@ -1861,4 +1875,18 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       ),
     );
   }
+}
+
+class _ActionSectionLabel extends StatelessWidget {
+  const _ActionSectionLabel(this.label);
+  final String label;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+    child: Align(alignment: Alignment.centerLeft,
+      child: Text(label.toUpperCase(),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          letterSpacing: 0.8, fontWeight: FontWeight.w700))),
+  );
 }
