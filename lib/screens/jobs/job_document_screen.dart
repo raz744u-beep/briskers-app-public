@@ -3534,6 +3534,36 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         originalDate == null ||
         DateUtils.dateOnly(originalDate) != DateUtils.dateOnly(date);
 
+    if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+      // Never send a local-invoice-* ID to a server function expecting UUID.
+      // Customer/vehicle changes require an atomic remap of the local Job and
+      // queued creation payload; keep them unchanged until server resolution.
+      if (customerId != originalCustomerId || vehicleId != originalVehicleId) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('This invoice is pending sync. Change its customer '
+                'or vehicle after it receives a permanent number.'),
+          ));
+        }
+        return;
+      }
+      final saved = await _run(() => _offlineDocumentDraft.updatePendingInvoiceDetails(
+        widget.businessId,
+        widget.documentId,
+        documentDate: date,
+        mileage: newMileage,
+        claimNumber: newClaimNumber.isEmpty ? null : newClaimNumber,
+        authorizationNumber: newAuthorizationNumber.isEmpty
+            ? null : newAuthorizationNumber,
+      ));
+      if (saved && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Invoice details saved locally. Pending sync.'),
+        ));
+      }
+      return;
+    }
+
     if (headerChanged) {
       await _run(() async {
         await _api.updateDocumentHeader(

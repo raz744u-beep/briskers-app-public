@@ -947,6 +947,42 @@ class OfflineDocumentDraftService {
     await _saveDraft(businessId, documentId, detail, lines);
   }
 
+  /// Edit metadata on a queued local invoice without sending a temporary ID
+  /// to UUID-only server RPCs. Refuse edits after replay has been attempted:
+  /// the server may already hold a numbered version of this document.
+  Future<void> updatePendingInvoiceDetails(
+    String businessId,
+    String documentId, {
+    required DateTime documentDate,
+    String? mileage,
+    String? claimNumber,
+    String? authorizationNumber,
+  }) async {
+    if (!documentId.startsWith('local-invoice-')) {
+      throw StateError('This operation requires a pending local invoice.');
+    }
+    final detail = await _requireDraft(businessId, documentId);
+    final date = documentDate.toIso8601String().split('T').first;
+    final updated = <String, dynamic>{
+      ...detail,
+      'document_date': date,
+      'odometer_in': mileage == null || mileage.isEmpty
+          ? null : num.tryParse(mileage),
+      'claim_number': claimNumber,
+      'authorization_number': authorizationNumber,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+      'sync_state': 'pending',
+    };
+    await _database.transaction(() async {
+      await _database.customStatement(
+        'UPDATE local_documents SET document_date=?, sync_state=? '
+        'WHERE business_id=? AND id=?',
+        [date, 'pending', businessId, documentId],
+      );
+      await _cache.save(businessId, documentId, updated);
+    });
+  }
+
   Future<void> saveMemo(
     String businessId,
     String documentId,
