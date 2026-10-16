@@ -245,8 +245,8 @@ void main() {
     final wire = (await OfflineJobPurge.pendingRegistrations(db,business,actor)).single['confirmation'] as Map;
     expect(wire['root_origin'],'standalone_estimate_conversion');
     expect(wire['job_id'],quick);
-    expect(wire['deleted_entities'],contains({'entity_kind':'estimate','entity_id':other}));
-    expect(wire['deleted_entities'],contains({'entity_kind':'operation','entity_id':'standalone_estimate/$other'}));
+    expect(wire['deleted_entities'],contains(equals({'entity_kind':'estimate','entity_id':other})));
+    expect(wire['deleted_entities'],contains(equals({'entity_kind':'operation','entity_id':'standalone_estimate/$other'})));
     expect(jsonEncode(wire),isNot(contains('local-conversion-job')));
   });
 

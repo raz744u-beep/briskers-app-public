@@ -74,7 +74,7 @@ class LocalJobDeletionV3 {
   static Future<void> ensureSchema(BriskersLocalDatabase db) async {
     if (_installed[db] == true && (await db.customSelect(
         "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='deletion_v3_scope_outbox_delete'").get()).isNotEmpty &&
-        (await db.customSelect('SELECT 1 FROM local_job_deletion_v3_schema WHERE singleton=1 AND version=6').get()).isNotEmpty) { return; }
+        (await db.customSelect('SELECT 1 FROM local_job_deletion_v3_schema WHERE singleton=1 AND version=7').get()).isNotEmpty) { return; }
     await db.transaction(() async {
       await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_schema (
         singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL)''');
@@ -172,9 +172,12 @@ class LocalJobDeletionV3 {
       await db.customStatement("CREATE TRIGGER IF NOT EXISTS deletion_v3_alias_no_delete BEFORE DELETE ON local_job_deletion_v3_aliases BEGIN SELECT RAISE(ABORT,'Verified deletion aliases are permanent'); END");
       await db.customStatement("CREATE TRIGGER IF NOT EXISTS deletion_v3_alias_no_update BEFORE UPDATE ON local_job_deletion_v3_aliases BEGIN SELECT RAISE(ABORT,'Verified deletion aliases are permanent'); END");
       await db.customStatement("CREATE TRIGGER IF NOT EXISTS deletion_v3_alias_no_replace BEFORE INSERT ON local_job_deletion_v3_aliases WHEN EXISTS(SELECT 1 FROM local_job_deletion_v3_aliases e WHERE e.business_id=NEW.business_id AND e.entity_kind=NEW.entity_kind AND e.entity_id=NEW.entity_id AND (e.job_id<>NEW.job_id OR e.operation_id<>NEW.operation_id)) BEGIN SELECT RAISE(ABORT,'Verified deletion alias cannot be reassigned'); END");
+      // An independently authorized document may refresh while its parent is
+      // scope-hidden. Actual parent deletion/consent/cancellation still fences
+      // it, and the document's own exact scope fence must be released first.
       final refs = <String, String>{
         'local_jobs': _matches('job', 'NEW.id'),
-        'local_documents': "(e.entity_kind=NEW.kind AND e.entity_id=NEW.id) OR ${_matches('job', 'NEW.job_id')}",
+        'local_documents': "(e.entity_kind=NEW.kind AND e.entity_id=NEW.id) OR (e.operation_id<>'' AND ${_matches('job', 'NEW.job_id')})",
         'local_job_assignments': '${_matches('job_assignment', 'NEW.assignment_id')} OR ${_matches('job', 'NEW.job_id')}',
         'local_job_visits': '${_matches('job_visit', 'NEW.id')} OR ${_matches('job', 'NEW.job_id')}',
         'local_pre_inspections': '${_matches('pre_inspection', 'NEW.id')} OR ${_matches('job', 'NEW.job_id')}',
@@ -255,7 +258,7 @@ class LocalJobDeletionV3 {
             BEGIN SELECT RAISE(ABORT,'Verified deletion blocks stale payload replay'); END''');
         }
       }
-      await db.customStatement('INSERT INTO local_job_deletion_v3_schema(singleton,version) VALUES (1,6) '
+      await db.customStatement('INSERT INTO local_job_deletion_v3_schema(singleton,version) VALUES (1,7) '
           'ON CONFLICT(singleton) DO UPDATE SET version=excluded.version');
     });
     _installed[db] = true;

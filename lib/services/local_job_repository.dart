@@ -348,6 +348,7 @@ class LocalJobRepository {
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;
     }
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final rows = await _database
         .customSelect(
           "SELECT job_number FROM local_jobs j WHERE business_id = ? AND id = ? "
@@ -355,6 +356,7 @@ class LocalJobRepository {
           variables: [Variable<String>(businessId), Variable<String>(jobId)],
         )
         .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     if (rows.isEmpty) return null;
     final number = rows.single.readNullable<String>('job_number')?.trim();
     return number == null || number.isEmpty ? null : number;

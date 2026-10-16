@@ -576,7 +576,7 @@ void main() {
     await LocalJobDeletionV3.ensureSchema(db);
     await db.customStatement("UPDATE local_documents SET status='allowed replacement' WHERE id=?", [other]);
     await expectLater(db.customStatement('DELETE FROM local_customers WHERE business_id=?', [business]), throwsA(isA<Exception>()));
-    expect((await db.customSelect('SELECT version FROM local_job_deletion_v3_schema').getSingle()).read<int>('version'), 6);
+    expect((await db.customSelect('SELECT version FROM local_job_deletion_v3_schema').getSingle()).read<int>('version'), 7);
   });
   test('scope-dirty financial key rejects direct replace and update without identity fields', () async {
     await db.customStatement("INSERT INTO local_financial_cache(business_id,cache_key,payload_json,updated_at) VALUES (?,'unknown',?,0)", [business, jsonEncode('only unknown work')]);
@@ -686,12 +686,18 @@ void main() {
   test('summary readers reject an actor switch during their awaited read', () async {
     await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
       actorId: job, visibilityScope: 'staff', readerScope: 'staff');
+    final generation = await LocalJobDeletionV3.captureVisibilityGeneration(db, business);
+    await db.transaction(() async {
+      await LocalJobDeletionV3.authorizeScopedEntities(db, business, generation, [entity('job', job)]);
+      await db.customStatement("UPDATE local_jobs SET title='fresh authorized title' WHERE id=?", [job]);
+    });
     final documents = LocalDocumentRepository(database: db);
     final jobs = LocalJobRepository(database: db);
     final readers = <Future<Object?> Function()>[
       () => documents.createdAtForDocument(business, invoice),
       () => documents.pendingCloseAttention(business),
       () => documents.openInvoiceCount(business),
+      () => jobs.jobNumberForJob(business, job),
       () => jobs.jobCount(business),
       () => jobs.unassignedOpenJobs(business),
       () => jobs.unassignedOpenJobCount(business),

@@ -140,3 +140,22 @@ db.execute("INSERT INTO local_job_deletion_v3_scope_entities VALUES ('activity',
 assert int(db.execute(activity_sql).fetchone()[0]) == 0
 db.execute(f"SELECT {projection('_jobDateSql')} FROM local_jobs j WHERE business_id='activity'").fetchall()
 print('PASS: 3 actual job projection SQL checks; hidden child activity excluded and historical-date query parses.')
+
+# Independent document authorization must not expose or authorize its parent.
+# A scope-only parent does not block a clean, explicitly released document;
+# irreversible deletion, pending consent, and local cancellation still do.
+db.execute("INSERT INTO local_job_deletion_v3_scope_entities VALUES ('scope','job','hidden-parent',1,0)")
+db.execute("UPDATE local_documents SET job_id='hidden-parent',status='fresh' WHERE business_id='scope' AND id='clean-invoice'")
+assert db.execute("SELECT status FROM local_documents WHERE business_id='scope' AND id='clean-invoice'").fetchone()[0] == 'fresh'
+assert db.execute("SELECT COUNT(*) FROM local_job_deletion_v3_scope_entities WHERE business_id='scope' AND entity_id='hidden-parent'").fetchone()[0] == 1
+blocked("INSERT INTO local_documents(id,business_id,job_id,kind) VALUES ('new-doc','b','j','invoice')")
+db.execute("INSERT INTO local_job_deletion_v3_pending VALUES ('pending-parent','root','op','job','root')")
+blocked("INSERT INTO local_documents(id,business_id,job_id,kind) VALUES ('new-doc','pending-parent','root','invoice')")
+db.execute("INSERT INTO local_offline_job_purge_entities VALUES ('cancelled-parent','root','op','job','root')")
+blocked("INSERT INTO local_documents(id,business_id,job_id,kind) VALUES ('new-doc','cancelled-parent','root','invoice')")
+for table, root_id in [('local_job_deletion_v3_entities','deleted-parent'),
+                       ('local_job_deletion_v3_pending','pending-parent'),
+                       ('local_offline_job_purge_entities','cancelled-parent')]:
+    db.execute(f'INSERT INTO {table} VALUES (?,?,?,?,?)', ['scope',root_id,'op-'+root_id,'job',root_id])
+    blocked("UPDATE local_documents SET job_id=? WHERE business_id='scope' AND id='clean-invoice'", [root_id])
+print('PASS: 8 independent document/hidden-parent checks; refreshed document allowed, parent hidden, permanent/pending/local-cancel parent INSERT and UPDATE blocked.')
