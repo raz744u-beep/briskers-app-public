@@ -466,6 +466,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
           roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: row['id'].toString(),
@@ -1288,6 +1289,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
           roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: invoiceId,
@@ -1317,6 +1319,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         context,
         MaterialPageRoute(
           builder: (_) => JobDocumentScreen(
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
             roleCode: widget.roleCode,
             businessId: widget.businessId,
             documentId: documentId,
