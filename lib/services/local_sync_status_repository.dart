@@ -126,6 +126,16 @@ class LocalSyncStatusRepository {
         '${held.read<int>('n')} preserved operation(s) require review after Job deletion',
       );
     }
+    final scopeExists = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_job_deletion_v3_scope'").get();
+    if (scopeExists.isNotEmpty) {
+      final scopes = await _database.customSelect(
+        'SELECT state FROM local_job_deletion_v3_scope WHERE business_id=?',
+        variables: [Variable<String>(businessId)]).get();
+      if (scopes.any((row) => row.read<String>('state') == 'authorized_reconciliation_required')) {
+        issues.add('Some saved offline work is hidden until its original account access is verified.');
+      }
+    }
     var pendingV3 = 0;
     final v3Exists = await _database.customSelect(
       "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_job_deletion_v3_requests'").get();

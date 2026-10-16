@@ -139,6 +139,7 @@ class LocalJobRetirement {
     String kind,
   ) async {
     await ensureSchema(db);
+    await LocalJobDeletionV3.assertVisibilityActor(db, businessId);
     return (await db
             .customSelect(
               'SELECT entity_id FROM local_job_retirement_entities '
@@ -152,15 +153,17 @@ class LocalJobRetirement {
 
   static Future<Set<String>> blockedJobIds(
     BriskersLocalDatabase db,
-    String businessId,
-  ) async => {...await _ids(db, businessId, 'job'),
-      ...await LocalJobDeletionV3.blockedJobIds(db, businessId)};
+    String businessId, {
+    bool includeVisibilityScope = true,
+  }) async => {...await _ids(db, businessId, 'job'),
+      ...await LocalJobDeletionV3.blockedJobIds(db, businessId, includeVisibilityScope: includeVisibilityScope)};
   static Future<Set<String>> blockedDocumentIds(
     BriskersLocalDatabase db,
-    String businessId,
-  ) async {
+    String businessId, {
+    bool includeVisibilityScope = true,
+  }) async {
     final ids = await _ids(db, businessId, 'invoice');
-    ids.addAll(await LocalJobDeletionV3.blockedDocumentIds(db, businessId));
+    ids.addAll(await LocalJobDeletionV3.blockedDocumentIds(db, businessId, includeVisibilityScope: includeVisibilityScope));
     final linked = await db
         .customSelect(
           "SELECT d.id FROM local_documents d WHERE d.business_id=? AND d.kind='invoice' "

@@ -17,12 +17,14 @@ class LocalFinancialCache {
 
   Future<void> saveTransactions(
     String businessId,
-    List<Map<String, dynamic>> rows,
-  ) async {
+    List<Map<String, dynamic>> rows, {
+    int? visibilityGeneration,
+  }) async {
     await _save(
       businessId,
       _transactionsKey,
-      jsonEncode(rows),
+      rows,
+      visibilityGeneration: visibilityGeneration,
     );
   }
 
@@ -103,9 +105,10 @@ class LocalFinancialCache {
 
   Future<void> saveLinkedExpenses(
     String businessId,
-    List<Map<String, dynamic>> rows,
-  ) async {
-    await _save(businessId, _linkedExpensesKey, jsonEncode(rows));
+    List<Map<String, dynamic>> rows, {
+    int? visibilityGeneration,
+  }) async {
+    await _save(businessId, _linkedExpensesKey, rows, visibilityGeneration: visibilityGeneration);
   }
 
   Future<List<Map<String, dynamic>>?> loadLinkedExpenses(
@@ -146,12 +149,14 @@ class LocalFinancialCache {
   Future<void> saveTransactionDetail(
     String businessId,
     String transactionId,
-    Map<String, dynamic> detail,
-  ) async {
+    Map<String, dynamic> detail, {
+    int? visibilityGeneration,
+  }) async {
     await _save(
       businessId,
       'transaction_detail_$transactionId',
-      jsonEncode(detail),
+      detail,
+      visibilityGeneration: visibilityGeneration,
     );
   }
 
@@ -176,9 +181,10 @@ class LocalFinancialCache {
 
   Future<void> saveOptions(
     String businessId,
-    Map<String, dynamic> options,
-  ) async {
-    await _save(businessId, _optionsKey, jsonEncode(options));
+    Map<String, dynamic> options, {
+    int? visibilityGeneration,
+  }) async {
+    await _save(businessId, _optionsKey, options, visibilityGeneration: visibilityGeneration);
   }
 
   Future<Map<String, dynamic>> loadOptions(String businessId) async {
@@ -197,37 +203,43 @@ class LocalFinancialCache {
   Future<void> _save(
     String businessId,
     String key,
-    String payload,
-  ) async {
+    Object value, {
+    int? visibilityGeneration,
+  }) => _database.transaction(() async {
     await LocalJobDeletionV3.ensureSchema(_database);
-    final ids = await LocalJobDeletionV3.blockedIds(_database, businessId);
-    final decoded = jsonDecode(payload);
+    final scopeKey = 'financial:$key';
+    final generation = await LocalJobDeletionV3.validateVisibilityCacheWrite(
+        _database, businessId, scopeKey, value, visibilityGeneration: visibilityGeneration);
+    if (generation == null) {
+          if (visibilityGeneration != null) { throw StateError('Cache scope changed or retained work requires reconciliation'); }
+          return;
+        }
+    final decoded = LocalJobDeletionV3.stripVisibilityMetadata(value);
+    final ids = {...await LocalJobDeletionV3.blockedIds(_database, businessId, includeVisibilityScope: false),
+      ...await LocalJobDeletionV3.scopeDirtyIds(_database, businessId)};
+    String payload;
     if (decoded is List) {
       payload = jsonEncode(decoded.where((row) => !LocalJobDeletionV3.referencesAny(row, ids)).toList());
     } else if (LocalJobDeletionV3.referencesAny(decoded, ids)) {
       return;
-    }
+    } else { payload = jsonEncode(decoded); }
     if (key.startsWith('transaction_detail_') &&
         ids.contains(key.substring('transaction_detail_'.length))) { return; }
     await _database.customStatement(
-      '''
-      INSERT INTO local_financial_cache (
+      '''INSERT INTO local_financial_cache (
         business_id, cache_key, payload_json, updated_at
       ) VALUES (?, ?, ?, ?)
       ON CONFLICT(business_id, cache_key) DO UPDATE SET
         payload_json=excluded.payload_json,
-        updated_at=excluded.updated_at
-      ''',
-      [
-        businessId,
-        key,
-        payload,
-        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
-      ],
+        updated_at=excluded.updated_at''',
+      [businessId, key, payload, DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000],
     );
-  }
+    await LocalJobDeletionV3.markVisibilityCacheWritten(_database, businessId, scopeKey, generation);
+  });
 
-  Future<String?> _load(String businessId, String key) async {
+  Future<String?> _load(String businessId, String key) => _database.transaction(() async {
+    final generation = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    if (!await LocalJobDeletionV3.visibilityCacheReadable(_database, businessId, 'financial:$key')) { return null; }
     final rows = await _database.customSelect(
       '''
       SELECT payload_json
@@ -242,16 +254,20 @@ class LocalFinancialCache {
     ).get();
     if (rows.isEmpty) { return null; }
     final raw = rows.first.read<String>('payload_json');
-    final ids = await LocalJobDeletionV3.blockedIds(_database, businessId);
+    final ids = {...await LocalJobDeletionV3.blockedIds(_database, businessId, includeVisibilityScope: false),
+      ...await LocalJobDeletionV3.scopeDirtyIds(_database, businessId)};
     if (key.startsWith('transaction_detail_') &&
         ids.contains(key.substring('transaction_detail_'.length))) { return null; }
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, generation);
     try {
       final decoded = jsonDecode(raw);
+      Object? stamp(Object? item) => generation > 0 && item is Map
+          ? {...item, '_local_visibility_generation': generation} : item;
       if (decoded is List) {
-        return jsonEncode(decoded.where((row) => !LocalJobDeletionV3.referencesAny(row, ids)).toList());
+        return jsonEncode(decoded.where((row) => !LocalJobDeletionV3.referencesAny(row, ids)).map(stamp).toList());
       }
-      return LocalJobDeletionV3.referencesAny(decoded, ids) ? null : raw;
+      return LocalJobDeletionV3.referencesAny(decoded, ids) ? null : jsonEncode(stamp(decoded));
     } catch (_) { return null; }
-  }
+  });
 }
 

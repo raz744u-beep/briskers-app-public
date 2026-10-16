@@ -249,6 +249,24 @@ void main() {
     expect((await service.status(business, job)).state, 'pending');
     await expectLater(service.queueConfirmed(preview, actorId: actor, isOwner: true), throwsStateError);
   });
+  test('purging receipt cannot claim cleanup completion time', () {
+    final confirmation = fixture()['confirmation'] as Map<String, dynamic>;
+    final value = receipt(nonce, confirmation);
+    value['status'] = 'purging';
+    value['storage_cleanup'] = 'pending';
+    expect(() => validateDeletionV3Receipt(value, confirmation, nonce), throwsFormatException);
+    value['cleanup_completed_at'] = null;
+    validateDeletionV3Receipt(value, confirmation, nonce);
+  });
+  test('changed actor cannot execute already queued owner consent', () async {
+    final preview = await service.preview(business, job, actorId: actor, isOwner: true);
+    await service.queueConfirmed(preview, actorId: actor, isOwner: true, online: false);
+    gateway.signedInActor = nonce;
+    await service.flush(business);
+    expect(gateway.calls, isEmpty);
+    final row = await db.customSelect('SELECT attempted FROM local_job_deletion_v3_requests').getSingle();
+    expect(row.read<int>('attempted'), 0);
+  });
   test('changed actor cannot confirm another owners cached graph', () async {
     final preview = await service.preview(business, job, actorId: actor, isOwner: true);
     gateway.signedInActor = nonce;

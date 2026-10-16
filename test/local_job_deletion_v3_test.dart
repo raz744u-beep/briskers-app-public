@@ -58,12 +58,14 @@ void main() {
   late BriskersLocalDatabase db;
   late Directory support;
   setUp(() async {
+    LocalJobDeletionV3.currentActorIdProvider = null;
     SharedPreferences.setMockInitialValues({});
     db = BriskersLocalDatabase(NativeDatabase.memory());
     support = await Directory.systemTemp.createTemp('briskers-v3-test-');
     await seed(db);
   });
   tearDown(() async {
+    LocalJobDeletionV3.currentActorIdProvider = null;
     await db.close();
     await support.delete(recursive: true);
   });
@@ -416,4 +418,118 @@ void main() {
     expect((await db.customSelect('SELECT snapshot_json FROM local_job_retirement_requests').getSingle()).read<String>('snapshot_json'),'malformed snapshot');
   });
 
+  test('first staff scope hides legacy privileged caches until exact authorized refresh', () async {
+    final detail = LocalDocumentDetailCache(database: db);
+    await detail.save(business, invoice, {'id': invoice, 'kind': 'invoice', 'memo': 'old owner secret'});
+    await LocalFinancialCache(database: db).saveTransactions(business, [{'id': transaction, 'amount': 125}]);
+    expect(await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: other, visibilityScope: 'mechanic-scope', readerScope: 'staff'), isTrue);
+    expect(await detail.load(business, invoice), isNull);
+    expect(await LocalFinancialCache(database: db).loadTransactions(business), isEmpty);
+    expect(await LocalDocumentRepository(database: db).listByKind(business, kind: 'invoice'), isEmpty);
+    expect(await LocalJobDeletionV3.deletedIds(db, business), isEmpty);
+    final generation = await LocalJobDeletionV3.captureVisibilityGeneration(db, business);
+    await detail.save(business, invoice, {'id': invoice, 'kind': 'invoice', 'memo': 'authorized',
+      '_local_visibility_generation': generation});
+    expect((await detail.load(business, invoice))!['memo'], 'authorized');
+    final stored = (await SharedPreferences.getInstance()).getString('briskers_document_detail_${business}_$invoice')!;
+    expect(stored, isNot(contains('_local_visibility_generation')));
+  });
+
+  test('same business customer switch hides absent invoice and rejects known and unseen late results', () async {
+    final detail = LocalDocumentDetailCache(database: db);
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: job, visibilityScope: 'owner-scope', readerScope: 'staff');
+    final old = await LocalJobDeletionV3.captureVisibilityGeneration(db, business);
+    await detail.save(business, invoice, {'id': invoice, 'kind': 'invoice', 'memo': 'owner secret'}, visibilityGeneration: old);
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: other, visibilityScope: 'customer-scope', readerScope: 'customer');
+    expect(await detail.load(business, invoice), isNull);
+    expect(await LocalJobRetirement.isDocumentBlocked(db, business, invoice), isTrue);
+    await expectLater(detail.save(business, invoice, {'id': invoice, 'kind': 'invoice', 'memo': 'late'}, visibilityGeneration: old), throwsStateError);
+    await expectLater(detail.save(business, 'unseen', {'id': 'unseen', 'kind': 'invoice', 'memo': 'late unseen'}, visibilityGeneration: old), throwsStateError);
+    await detail.save(business, 'untagged', {'id': 'untagged', 'kind': 'invoice'});
+    expect(await detail.load(business, invoice), isNull);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('briskers_document_detail_${business}_unseen'), isNull);
+    expect(prefs.getString('briskers_document_detail_${business}_untagged'), isNull);
+    await expectLater(LocalJobDeletionV3.assertVisibilityGeneration(db, business, old), throwsStateError);
+    final fresh = await LocalJobDeletionV3.captureVisibilityGeneration(db, business);
+    await detail.save(business, other, {'id': other, 'kind': 'invoice', 'memo': 'customer allowed'}, visibilityGeneration: fresh);
+    expect((await detail.load(business, other))!['memo'], 'customer allowed');
+    expect(await LocalJobDeletionV3.deletedIds(db, business), isEmpty);
+  });
+
+  test('scope change preserves dirty snapshots and outbox inaccessible for reconciliation', () async {
+    final detail = LocalDocumentDetailCache(database: db);
+    await detail.save(business, invoice, {'id': invoice, 'kind': 'invoice', '_local_pending': true, 'memo': 'sole local edit'});
+    final outboxId = await enqueue(db, 'invoice_update', invoice, {'document_id': invoice, 'memo': 'sole queued edit'});
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: other, visibilityScope: 'customer', readerScope: 'customer');
+    expect(await detail.load(business, invoice), isNull);
+    final generation = await LocalJobDeletionV3.captureVisibilityGeneration(db, business);
+    await expectLater(detail.save(business, invoice, {'id': invoice, 'kind': 'invoice', 'memo': 'server replacement'}, visibilityGeneration: generation), throwsStateError);
+    expect((await SharedPreferences.getInstance()).getString('briskers_document_detail_${business}_$invoice'), contains('sole local edit'));
+    expect(await count(db, 'sync_outbox'), 1);
+    expect(await LocalJobDeletionV3.visibilityScopeState(db, business), 'authorized_reconciliation_required');
+    await expectLater(LocalJobDeletionV3.assertReplayAllowed(db, business, outboxId: outboxId), throwsStateError);
+    expect(await LocalJobDeletionV3.isEntityDeleted(db, business, 'invoice', invoice), isFalse);
+  });
+
+  test('actor and known role changes deny reads immediately before new feed', () async {
+    var actor = job;
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: actor, visibilityScope: 'owner', readerScope: 'staff');
+    LocalJobDeletionV3.currentActorIdProvider = () => actor;
+    final detail = LocalDocumentDetailCache(database: db);
+    final generation = await LocalJobDeletionV3.captureVisibilityGeneration(db, business);
+    await detail.save(business, invoice, {'id': invoice, 'kind': 'invoice'}, visibilityGeneration: generation);
+    actor = other;
+    await expectLater(detail.load(business, invoice), throwsStateError);
+    await expectLater(LocalJobRepository(database: db).listJobs(business), throwsStateError);
+    actor = job;
+    await LocalJobDeletionV3.lockKnownRoleChange(db, business);
+    await expectLater(detail.load(business, invoice), throwsStateError);
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: actor, visibilityScope: 'owner', readerScope: 'staff');
+    expect(await detail.load(business, invoice), isNull);
+  });
+
+  test('fresh financial scope results rehydrate while stale and mixed generations do not', () async {
+    final cache = LocalFinancialCache(database: db);
+    await cache.saveTransactions(business, [{'id': transaction, 'amount': 20}]);
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: other, visibilityScope: 'staff', readerScope: 'staff');
+    final generation = await LocalJobDeletionV3.captureVisibilityGeneration(db, business);
+    await cache.saveTransactions(business, [{'id': transaction, 'amount': 50, '_local_visibility_generation': generation}]);
+    expect((await cache.loadTransactions(business)).single['amount'], 50);
+    await cache.saveTransactions(business, [{'id': other, 'amount': 900, '_local_visibility_generation': generation - 1}]);
+    expect((await cache.loadTransactions(business)).single['amount'], 50);
+    final raw = (await db.customSelect("SELECT payload_json FROM local_financial_cache WHERE cache_key='transactions_snapshot'").getSingle()).read<String>('payload_json');
+    expect(raw, isNot(contains('_local_visibility_generation')));
+  });
+  test('failed preference write cannot grant current scope to old private snapshot', () async {
+    final cache = LocalDocumentDetailCache(database: db);
+    await cache.save(business, invoice, {'id': invoice, 'kind': 'invoice', 'memo': 'old private body'});
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: other, visibilityScope: 'customer', readerScope: 'customer');
+    final generation = await LocalJobDeletionV3.captureVisibilityGeneration(db, business);
+    final failing = LocalDocumentDetailCache(database: db, preferenceWriter: (_, _, _) async => false);
+    await expectLater(failing.save(business, invoice, {'id': invoice, 'kind': 'invoice', 'memo': 'new permitted body'},
+      visibilityGeneration: generation), throwsStateError);
+    expect(await cache.load(business, invoice), isNull);
+    expect((await SharedPreferences.getInstance()).getString('briskers_document_detail_${business}_$invoice'), contains('old private body'));
+  });
+  test('server receipt preserves scope-dirty baseline and snapshots for pending reconciliation', () async {
+    final cache = LocalDocumentDetailCache(database: db);
+    await cache.save(business, invoice, {'id': invoice, 'kind': 'invoice', 'memo': 'baseline needed by queued edit'});
+    await enqueue(db, 'invoice_update', invoice, {'document_id': invoice, 'memo': 'unconfirmed delta'});
+    await LocalJobDeletionV3.invalidateVisibilityScope(db, businessId: business,
+      actorId: other, visibilityScope: 'customer', readerScope: 'customer');
+    final result = await LocalJobDeletionV3.applyVerifiedReceipt(db, receipt: receipt());
+    expect(result.complete, isFalse);
+    expect((await SharedPreferences.getInstance()).getString('briskers_document_detail_${business}_$invoice'), contains('baseline needed'));
+    expect(await count(db, 'sync_outbox'), 1);
+    expect(await cache.load(business, invoice), isNull);
+  });
 }

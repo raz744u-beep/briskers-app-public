@@ -59,6 +59,7 @@ for table in ['sync_outbox', 'local_financial_cache']:
         identity = 'e.entity_id=NEW.entity_id OR' if table == 'sync_outbox' else "(e.entity_kind='transaction' AND NEW.cache_key='transaction_detail_'||e.entity_id) OR"
         sql = payload_template.replace('${table}', table).replace('$table', table)
         sql = sql.replace('${action.toLowerCase()}', action.lower()).replace('$action', action).replace('$identity', identity)
+        sql = sql.replace('$scopeFilter', '' if table == 'sync_outbox' else " AND (e.operation_id<>'' OR EXISTS(SELECT 1 FROM local_job_deletion_v3_scope_entities s WHERE s.business_id=e.business_id AND s.entity_kind=e.entity_kind AND s.entity_id=e.entity_id AND s.dirty=1))")
         raw_operation = source.split('static const _outboxOperationSql = ',1)[1].split(';',1)[0]
         operation_sql = ''.join(re.findall(r'\"(.*?)\"', raw_operation)).replace('\\$', '$')
         sql = sql.replace('$operationCheck', operation_sql if table == 'sync_outbox' else '0')

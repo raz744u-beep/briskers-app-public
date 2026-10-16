@@ -7,6 +7,7 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_access_history.dart';
 import 'local_job_retirement.dart';
+import 'local_job_deletion_v3.dart';
 
 class LocalJobDetailSnapshot {
   const LocalJobDetailSnapshot({
@@ -223,6 +224,7 @@ class LocalJobRepository {
     int offset = 0,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     await LocalJobAccessHistory(database: _database).ensureTable();
     // Activity is sorted before paging. Keep related lookups indexed even on
     // older installed databases so a large imported history stays usable.
@@ -318,6 +320,7 @@ class LocalJobRepository {
           ],
         )
         .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return rows.map(_jobListMap).toList();
   }
 
@@ -496,6 +499,7 @@ class LocalJobRepository {
     JobListView view = JobListView.all,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
     final filters = _filters(
       businessId,
       status: status,
@@ -513,6 +517,7 @@ class LocalJobRepository {
 
   Stream<int> watchJobCount(String businessId, {String? status}) async* {
     await LocalJobRetirement.ensureSchema(_database);
+    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
     final where = <String>['j.business_id = ?', _visibleJobSql('j')];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
     if (status != null && status.isNotEmpty) {
@@ -535,6 +540,7 @@ class LocalJobRepository {
     int limit = 25,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
     final rows = await _database
         .customSelect(
           '''
@@ -568,6 +574,7 @@ class LocalJobRepository {
 
   Future<int> unassignedOpenJobCount(String businessId) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
     final row = await _database
         .customSelect(
           '''
@@ -586,6 +593,7 @@ class LocalJobRepository {
 
   Future<int> activeJobCount(String businessId) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
     final row = await _database
         .customSelect(
           '''
@@ -603,6 +611,7 @@ class LocalJobRepository {
 
   Stream<int> watchActiveJobCount(String businessId) async* {
     await LocalJobRetirement.ensureSchema(_database);
+    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
     yield* _database
         .customSelect(
           '''
@@ -624,6 +633,7 @@ class LocalJobRepository {
     JobListView view = JobListView.all,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    await LocalJobDeletionV3.assertVisibilityActor(_database, businessId);
     final rows = await _database
         .customSelect(
           '''
@@ -734,6 +744,7 @@ class LocalJobRepository {
     String businessId,
     String jobId,
   ) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;
     }
@@ -855,6 +866,7 @@ class LocalJobRepository {
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;
     }
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return LocalJobDetailSnapshot(
       job: job,
       preInspection: preInspection,

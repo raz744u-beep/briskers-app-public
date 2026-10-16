@@ -328,6 +328,13 @@ class OwnerJobDeletionServiceV3 {
         throw const FormatException('Unverified deletion reader scope.');
       }
       _gateway.assertActor(page['actor_id'] as String);
+      final invalidated = await LocalJobDeletionV3.invalidateVisibilityScope(_db,
+        businessId: business, actorId: page['actor_id'] as String,
+        visibilityScope: nextScope, readerScope: page['reader_scope'] as String);
+      if (invalidated) {
+        await _db.customStatement(
+          'DELETE FROM local_job_deletion_v3_previews WHERE business_id=?', [business]);
+      }
       if (scope != nextScope && (scope != null || cursor != 0)) {
         if (++scopeChanges > 3) throw StateError('Access changed during deletion sync.');
         scope = nextScope; cursor = 0; continue;

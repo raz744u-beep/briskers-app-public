@@ -16,6 +16,8 @@ import '../services/appointment_sync_service.dart';
 import '../services/job_sync_service.dart';
 import '../services/owner_job_retirement_service.dart';
 import '../services/owner_job_deletion_service_v3.dart';
+import '../services/local_job_deletion_v3.dart';
+import '../local/local_database_provider.dart';
 import '../services/local_appointment_repository.dart';
 import '../services/local_customer_repository.dart';
 import '../services/local_document_repository.dart';
@@ -24,6 +26,7 @@ import '../services/local_payment_methods_cache.dart';
 import '../services/local_standard_notes_service.dart';
 import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
+import '../widgets/auth_visibility_shield.dart';
 import '../widgets/connection_header_toggle.dart';
 import 'appointments_screen.dart';
 import 'customers/customers_screen.dart';
@@ -67,6 +70,9 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     BriskersColors.more,
   ];
 
+  StreamSubscription<dynamic>? _scopeAuthSubscription;
+  String? _scopeActor;
+  bool _scopeLocked = false;
   int _index = 0;
   int _customersRefreshToken = 0;
   int _customerNavigationRequest = 0;
@@ -106,6 +112,18 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _scopeActor = supabase.auth.currentUser?.id;
+    _scopeAuthSubscription = supabase.auth.onAuthStateChange.listen((event) {
+      if (!mounted || event.session?.user.id == _scopeActor) return;
+      setState(() {
+        _scopeLocked = true;
+        _lazyPages.clear();
+        _navCounts = const {};
+        _homeJobsCount = 0;
+        _homeEstimatesOpenCount = 0;
+        _homeInvoicesOpenCount = 0;
+      });
+    });
     _retirementRetry = Timer.periodic(const Duration(seconds: 30), (_) {
       if (_foreground) unawaited(_syncRetirements());
     });
@@ -366,8 +384,39 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   }
 
   @override
+  void didUpdateWidget(covariant ShellScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.roleCode != widget.roleCode || oldWidget.businessId != widget.businessId) {
+      _scopeLocked = true;
+      _lazyPages.clear();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) { authVisibilityEpoch.value++; }
+      });
+      unawaited(_refreshKnownAccessChange());
+    }
+  }
+
+  Future<void> _refreshKnownAccessChange() async {
+    final business = widget.businessId;
+    final role = widget.roleCode;
+    try {
+      await LocalJobDeletionV3.lockKnownRoleChange(localDatabase, business);
+      if (BriskersConnectionModeController.instance.forceOffline) return;
+      await OwnerJobDeletionServiceV3().pullTombstones(business);
+      await LocalJobDeletionV3.assertVisibilityActor(localDatabase, business);
+      if (mounted && widget.businessId == business && widget.roleCode == role &&
+          supabase.auth.currentUser?.id == _scopeActor) {
+        setState(() { _scopeLocked = false; });
+      }
+    } catch (_) {
+      // Keep prior-scope screens hidden until verified access is available.
+    }
+  }
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _scopeAuthSubscription?.cancel();
     _retirementRetry?.cancel();
     _retirementChanges?.cancel();
     _customerReviewsSubscription?.cancel();
@@ -485,6 +534,9 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    if (_scopeLocked || supabase.auth.currentUser?.id != _scopeActor) {
+      return const Scaffold(body: Center(child: Text('Your account access changed. Reopen this shop to refresh.')));
+    }
     final activeColor = _sectionColors[_index];
     final isHome = _index == 0;
     final roleStyle = employeeRoleStyle(_roleLabel);

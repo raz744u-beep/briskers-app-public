@@ -10,6 +10,7 @@ import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
 import 'local_financial_cache.dart';
+import 'local_job_deletion_v3.dart';
 
 typedef FinancialMediaDirectoryProvider = Future<Directory> Function();
 
@@ -146,8 +147,9 @@ class OfflineFinancialWriteService {
 
   Future<void> _upsertSummary(
     String businessId,
-    Map<String, dynamic> row,
-  ) async {
+    Map<String, dynamic> row, {
+    required int visibilityGeneration,
+  }) async {
     final rows = await _allTransactions(businessId);
     final id = row['id']?.toString() ?? '';
     final index = rows.indexWhere((item) => item['id']?.toString() == id);
@@ -161,7 +163,7 @@ class OfflineFinancialWriteService {
       final bd = b['transaction_date']?.toString() ?? '';
       return bd.compareTo(ad);
     });
-    await _cache.saveTransactions(businessId, rows);
+    await _cache.saveTransactions(businessId, rows, visibilityGeneration: visibilityGeneration);
   }
 
   Future<Map<String, dynamic>> createLocalTransaction(
@@ -181,6 +183,9 @@ class OfflineFinancialWriteService {
     String? contextLabel,
     required List<Map<String, dynamic>> receipts,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    return _database.transaction(() async {
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     final operationId = _operationId('financial-create');
     final localId = 'local-transaction-$operationId';
     final attachments = <Map<String, dynamic>>[];
@@ -247,7 +252,7 @@ class OfflineFinancialWriteService {
       'recurring': false,
       'sync_state': 'pending',
     };
-    await _upsertSummary(businessId, summary);
+    await _upsertSummary(businessId, summary, visibilityGeneration: visibilityGeneration);
 
     final detail = <String, dynamic>{
       ...summary,
@@ -261,8 +266,11 @@ class OfflineFinancialWriteService {
       businessId,
       localId,
       detail,
+      visibilityGeneration: visibilityGeneration,
     );
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return detail;
+    });
   }
 
   Future<Map<String, dynamic>> updateLocalTransaction(
@@ -283,6 +291,7 @@ class OfflineFinancialWriteService {
     String? contextLabel,
     List<Map<String, dynamic>> receipts = const [],
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     // Keep the edit, all prior attachments, and new upload operations atomic.
     // A retry after a failed local write cannot append a second copy.
     return _database.transaction(() async {
@@ -377,7 +386,7 @@ class OfflineFinancialWriteService {
         'recurring': false,
         'sync_state': 'pending',
       };
-      await _upsertSummary(businessId, summary);
+      await _upsertSummary(businessId, summary, visibilityGeneration: visibilityGeneration);
 
       final detail = <String, dynamic>{
         ...existing,
@@ -391,8 +400,10 @@ class OfflineFinancialWriteService {
         businessId,
         transactionId,
         detail,
+        visibilityGeneration: visibilityGeneration,
       );
 
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
       return detail;
     });
   }
@@ -679,3 +690,4 @@ class OfflineFinancialWriteService {
     });
   }
 }
+

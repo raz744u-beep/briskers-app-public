@@ -23,6 +23,8 @@ class LocalDeletionCleanupResult {
 /// before calling applyVerifiedReceipt. This class validates its wire shape too.
 class LocalJobDeletionV3 {
   static const protocol = 'owner-deletion-3.0';
+  // Set by the authenticated application boundary; tests may inject an actor.
+  static String? Function()? currentActorIdProvider;
   static const entityKinds = <String>{
     'job', 'invoice', 'estimate', 'payment', 'transaction', 'job_assignment',
     'job_visit', 'pre_inspection', 'pre_inspection_photo', 'finding',
@@ -71,7 +73,7 @@ class LocalJobDeletionV3 {
 
   static Future<void> ensureSchema(BriskersLocalDatabase db) async {
     if (_installed[db] == true && (await db.customSelect(
-        "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='deletion_v3_marker_no_replace'").get()).isNotEmpty) { return; }
+        "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='deletion_v3_scope_outbox_update'").get()).isNotEmpty) { return; }
     await db.transaction(() async {
       await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_entities (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL,
@@ -85,10 +87,33 @@ class LocalJobDeletionV3 {
         business_id TEXT NOT NULL, job_id TEXT NOT NULL, operation_id TEXT NOT NULL,
         entity_kind TEXT NOT NULL, entity_id TEXT NOT NULL,
         PRIMARY KEY(business_id,entity_kind,entity_id))''');
-      await db.customStatement('''CREATE VIEW IF NOT EXISTS local_job_deletion_v3_fences AS
+      await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_scope (
+        business_id TEXT PRIMARY KEY NOT NULL, actor_id TEXT NOT NULL,
+        visibility_scope TEXT NOT NULL, reader_scope TEXT NOT NULL,
+        generation INTEGER NOT NULL, state TEXT NOT NULL)''');
+      await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_scope_entities (
+        business_id TEXT NOT NULL, entity_kind TEXT NOT NULL, entity_id TEXT NOT NULL,
+        generation INTEGER NOT NULL, dirty INTEGER NOT NULL,
+        PRIMARY KEY(business_id,entity_kind,entity_id))''');
+      await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_scope_outbox (
+        business_id TEXT NOT NULL, outbox_id INTEGER NOT NULL,
+        PRIMARY KEY(business_id,outbox_id))''');
+      await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_cache_scope (
+        business_id TEXT NOT NULL, cache_key TEXT NOT NULL,
+        generation INTEGER NOT NULL, dirty INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(business_id,cache_key))''');
+      // Recreate the view for databases which installed the first v3 candidate.
+      await db.customStatement('DROP VIEW IF EXISTS local_job_deletion_v3_fences');
+      await db.customStatement('''CREATE VIEW local_job_deletion_v3_fences AS
         SELECT business_id,job_id,operation_id,entity_kind,entity_id FROM local_job_deletion_v3_entities
         UNION ALL SELECT business_id,job_id,operation_id,entity_kind,entity_id FROM local_job_deletion_v3_pending
-        UNION ALL SELECT business_id,job_id,operation_id,entity_kind,entity_id FROM local_job_deletion_v3_aliases''');
+        UNION ALL SELECT business_id,job_id,operation_id,entity_kind,entity_id FROM local_job_deletion_v3_aliases
+        UNION ALL SELECT business_id,'','',entity_kind,entity_id FROM local_job_deletion_v3_scope_entities''');
+      await db.customStatement('''CREATE TRIGGER IF NOT EXISTS deletion_v3_scope_outbox_update
+        BEFORE UPDATE ON sync_outbox
+        WHEN EXISTS(SELECT 1 FROM local_job_deletion_v3_scope_outbox s
+          WHERE s.business_id=OLD.business_id AND s.outbox_id=OLD.id)
+        BEGIN SELECT RAISE(ABORT,'Authorization changed; retained work requires reconciliation'); END''');
       await db.customStatement('''CREATE TABLE IF NOT EXISTS local_job_deletion_v3_cleanup (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL, operation_id TEXT NOT NULL,
         graph_hash TEXT NOT NULL, state TEXT NOT NULL, issue_code TEXT, inventory_generation INTEGER NOT NULL DEFAULT 0,
@@ -121,7 +146,7 @@ class LocalJobDeletionV3 {
         'local_pre_inspections': '${_matches('pre_inspection', 'NEW.id')} OR ${_matches('job', 'NEW.job_id')}',
         'local_pre_inspection_photos': '${_matches('pre_inspection_photo', 'NEW.id')} OR ${_matches('attachment', 'NEW.attachment_id')} OR ${_matches('pre_inspection', 'NEW.inspection_id')}',
         'local_findings': _matches('finding', 'NEW.id'),
-        'local_finding_photos': '${_matches('attachment', 'NEW.attachment_id')} OR ${_matches('finding', 'NEW.finding_id')}',
+        'local_finding_photos': '${_matches('finding_photo', 'NEW.id')} OR ${_matches('attachment', 'NEW.attachment_id')} OR ${_matches('finding', 'NEW.finding_id')}',
         'local_appointments': _matches('appointment', 'NEW.id'),
         'local_expense_iq_photos': _matches('transaction', 'NEW.transaction_id'),
       };
@@ -136,10 +161,12 @@ class LocalJobDeletionV3 {
         'local_pre_inspections': _matches('pre_inspection', 'OLD.id'),
         'local_pre_inspection_photos': '${_matches('pre_inspection_photo', 'OLD.id')} OR ${_matches('attachment', 'OLD.attachment_id')}',
         'local_findings': _matches('finding', 'OLD.id'),
-        'local_finding_photos': _matches('attachment', 'OLD.attachment_id'),
+        'local_finding_photos': '${_matches('finding_photo', 'OLD.id')} OR ${_matches('attachment', 'OLD.attachment_id')}',
         'local_appointments': _matches('appointment', 'OLD.id'),
         'local_expense_iq_photos': _matches('transaction', 'OLD.transaction_id'),
       };
+      await db.customStatement('DROP TRIGGER IF EXISTS deletion_v3_local_finding_photos_insert');
+      await db.customStatement('DROP TRIGGER IF EXISTS deletion_v3_local_finding_photos_update');
       for (final entry in refs.entries) {
         for (final action in const ['INSERT', 'UPDATE']) {
           final old = action == 'UPDATE'
@@ -156,14 +183,16 @@ class LocalJobDeletionV3 {
       // deletes them on that basis. Shared/unknown work remains recoverable.
       for (final table in const ['sync_outbox', 'local_financial_cache']) {
         for (final action in const ['INSERT', 'UPDATE']) {
+          final scopeFilter = table == 'sync_outbox' ? '' : " AND (e.operation_id<>'' OR EXISTS(SELECT 1 FROM local_job_deletion_v3_scope_entities s WHERE s.business_id=e.business_id AND s.entity_kind=e.entity_kind AND s.entity_id=e.entity_id AND s.dirty=1))";
           final identity = table == 'sync_outbox'
               ? 'e.entity_id=NEW.entity_id OR'
               : "(e.entity_kind='transaction' AND NEW.cache_key='transaction_detail_'||e.entity_id) OR";
           final operationCheck = table == 'sync_outbox' ? _outboxOperationSql : '0';
+          await db.customStatement('DROP TRIGGER IF EXISTS deletion_v3_${table}_${action.toLowerCase()}');
           await db.customStatement('''CREATE TRIGGER IF NOT EXISTS deletion_v3_${table}_${action.toLowerCase()}
             BEFORE $action ON $table
             WHEN EXISTS(SELECT 1 FROM local_job_deletion_v3_fences e
-              WHERE e.business_id=NEW.business_id AND ($identity
+              WHERE e.business_id=NEW.business_id$scopeFilter AND ($identity
                 json_valid(NEW.payload_json)=0 OR ($operationCheck) OR EXISTS(
                   SELECT 1 FROM json_tree(CASE WHEN json_valid(NEW.payload_json)
                     THEN NEW.payload_json ELSE '{}' END) j
@@ -173,6 +202,290 @@ class LocalJobDeletionV3 {
       }
     });
     _installed[db] = true;
+  }
+
+  /// This is a visibility epoch, separate from irreversible deletion markers.
+  /// A current authenticated response may rehydrate clean rows only. Unknown
+  /// unsynced work remains hidden until explicit authorized reconciliation.
+  static Future<void> assertVisibilityActor(BriskersLocalDatabase db,
+      String businessId) async {
+    final provider = currentActorIdProvider;
+    if (provider == null) { return; }
+    await ensureSchema(db);
+    final actor = provider();
+    final rows = await db.customSelect(
+        'SELECT actor_id,state FROM local_job_deletion_v3_scope WHERE business_id=?',
+        variables: [Variable<String>(businessId)]).get();
+    if (actor == null || rows.isEmpty || rows.single.read<String>('actor_id') != actor ||
+        rows.single.read<String>('state') == 'scope_verification_required') {
+      throw StateError('Authenticated cache scope has not been verified for this actor');
+    }
+  }
+
+  static Future<void> lockKnownRoleChange(BriskersLocalDatabase db,
+      String businessId) async {
+    await ensureSchema(db);
+    await db.customStatement("UPDATE local_job_deletion_v3_scope SET "
+        "state='scope_verification_required',generation=generation+1 WHERE business_id=?", [businessId]);
+    db.notifyUpdates({const TableUpdate('local_jobs'), const TableUpdate('local_documents'), const TableUpdate('local_financial_cache')});
+    _events.add((businessId: businessId, jobIds: <String>{}));
+  }
+
+  static Future<int> captureVisibilityGeneration(BriskersLocalDatabase db,
+      String businessId) async {
+    await ensureSchema(db);
+    await assertVisibilityActor(db, businessId);
+    final rows = await db.customSelect(
+        'SELECT generation FROM local_job_deletion_v3_scope WHERE business_id=?',
+        variables: [Variable<String>(businessId)]).get();
+    return rows.isEmpty ? 0 : rows.single.read<int>('generation');
+  }
+
+  static Future<void> assertVisibilityGeneration(BriskersLocalDatabase db,
+      String businessId, int expected) async {
+    if (await captureVisibilityGeneration(db, businessId) != expected) {
+      throw StateError('Authorization changed during this request');
+    }
+  }
+
+  static int? visibilityGenerationOf(Object? value, String businessId) {
+    if (value is Map) {
+      final stamp = value['_local_visibility_generation'];
+      return stamp is int ? stamp : null;
+    }
+    if (value is List && value.isNotEmpty) {
+      final stamps = value.map((row) => visibilityGenerationOf(row, businessId)).toSet();
+      return stamps.length == 1 ? stamps.single : null;
+    }
+    return null;
+  }
+
+  /// Private transport metadata never enters snapshots or queued business JSON.
+  static Object? stripVisibilityMetadata(Object? value) {
+    if (value is Map) {
+      return <String, dynamic>{for (final entry in value.entries)
+        if (entry.key != '_local_visibility_generation')
+          entry.key.toString(): stripVisibilityMetadata(entry.value)};
+    }
+    if (value is List) { return value.map(stripVisibilityMetadata).toList(); }
+    return value;
+  }
+
+  static Future<bool> visibilityCacheReadable(BriskersLocalDatabase db,
+      String businessId, String cacheKey) async {
+    final generation = await captureVisibilityGeneration(db, businessId);
+    if (generation == 0) { return true; }
+    final rows = await db.customSelect(
+        'SELECT generation,dirty FROM local_job_deletion_v3_cache_scope WHERE business_id=? AND cache_key=?',
+        variables: [Variable<String>(businessId), Variable<String>(cacheKey)]).get();
+    return rows.isNotEmpty && rows.single.read<int>('generation') == generation &&
+        rows.single.read<int>('dirty') == 0;
+  }
+
+  static Future<int?> validateVisibilityCacheWrite(BriskersLocalDatabase db,
+      String businessId, String cacheKey, Object? value, {int? visibilityGeneration}) async {
+    final current = await captureVisibilityGeneration(db, businessId);
+    final token = visibilityGeneration ?? visibilityGenerationOf(value, businessId);
+    bool mismatchedStamp(Object? item) {
+      if (item is Map) {
+        final stamp = item['_local_visibility_generation'];
+        if (stamp != null && stamp != current) { return true; }
+        return item.values.any(mismatchedStamp);
+      }
+      return item is List && item.any(mismatchedStamp);
+    }
+    if ((current != 0 && token == null) || (token != null && token != current) || mismatchedStamp(value)) {
+      return null;
+    }
+    // Even a current read must never overwrite the sole copy of older work.
+    final dirty = await db.customSelect(
+        'SELECT 1 FROM local_job_deletion_v3_cache_scope WHERE business_id=? AND cache_key=? AND dirty=1',
+        variables: [Variable<String>(businessId), Variable<String>(cacheKey)]).get();
+    return dirty.isEmpty ? current : null;
+  }
+
+  static Future<void> markVisibilityCacheWritten(BriskersLocalDatabase db,
+      String businessId, String cacheKey, int generation) async {
+    await assertVisibilityGeneration(db, businessId, generation);
+    await db.customStatement('INSERT INTO local_job_deletion_v3_cache_scope '
+        '(business_id,cache_key,generation,dirty) VALUES (?,?,?,0) '
+        'ON CONFLICT(business_id,cache_key) DO UPDATE SET generation=excluded.generation',
+        [businessId, cacheKey, generation]);
+  }
+
+  /// Call within the same SQLite transaction as replacing these exact rows.
+  /// Deletion and pending-consent fences are never affected by authorization.
+  static Future<void> authorizeScopedEntities(BriskersLocalDatabase db,
+      String businessId, int expectedGeneration, List<Map<String, dynamic>> entities) async {
+    await assertVisibilityGeneration(db, businessId, expectedGeneration);
+    for (final entity in entities) {
+      final kind = entity['entity_kind'];
+      final id = entity['entity_id'];
+      if (kind is! String || id is! String || id.isEmpty) {
+        throw const FormatException('Exact authorization identity required');
+      }
+      await db.customStatement('DELETE FROM local_job_deletion_v3_scope_entities '
+          'WHERE business_id=? AND entity_kind=? AND entity_id=? AND dirty=0',
+          [businessId, kind, id]);
+    }
+  }
+
+  static Future<String?> visibilityScopeState(BriskersLocalDatabase db,
+      String businessId) async {
+    await ensureSchema(db);
+    final rows = await db.customSelect(
+        'SELECT state FROM local_job_deletion_v3_scope WHERE business_id=?',
+        variables: [Variable<String>(businessId)]).get();
+    return rows.isEmpty ? null : rows.single.read<String>('state');
+  }
+
+  static Future<bool> invalidateVisibilityScope(BriskersLocalDatabase db, {
+    required String businessId, required String actorId,
+    required String visibilityScope, required String readerScope,
+  }) async {
+    await ensureSchema(db);
+    if (businessId.isEmpty || actorId.isEmpty || visibilityScope.isEmpty ||
+        !const {'staff', 'customer'}.contains(readerScope)) {
+      throw const FormatException('Authenticated visibility scope required');
+    }
+    final jobs = <String>{};
+    final changed = await db.transaction(() async {
+      final previous = await db.customSelect(
+          'SELECT * FROM local_job_deletion_v3_scope WHERE business_id=?',
+          variables: [Variable<String>(businessId)]).get();
+      if (previous.isNotEmpty && previous.single.read<String>('actor_id') == actorId &&
+          previous.single.read<String>('visibility_scope') == visibilityScope &&
+          previous.single.read<String>('reader_scope') == readerScope &&
+          previous.single.read<String>('state') != 'scope_verification_required') { return false; }
+      // Legacy cache provenance is unknown even for the first staff scope.
+      const invalidate = true;
+      final generation = previous.isEmpty ? 1 :
+          previous.single.read<int>('generation') + 1;
+      var dirtyFound = false;
+      if (invalidate) {
+        final pendingRows = await db.customSelect('SELECT * FROM sync_outbox WHERE business_id=?',
+            variables: [Variable<String>(businessId)]).get();
+        final dirtyIds = <String>{};
+        var unknownOutbox = false;
+        void gather(Object? value) {
+          if (value is Map) {
+            for (final entry in value.entries) {
+              if (entry.value is String && (entry.key == 'id' || entry.key.toString().endsWith('_id'))) {
+                dirtyIds.add(entry.value as String);
+              }
+              gather(entry.value);
+            }
+          } else if (value is List) { for (final item in value) { gather(item); } }
+        }
+        for (final row in pendingRows) {
+          dirtyIds.add(row.read<String>('entity_id'));
+          final payload = _decode(row.data['payload_json']);
+          unknownOutbox = unknownOutbox || payload == null;
+          gather(payload);
+        }
+        Future<void> fence(String kind, String id, bool dirty) async {
+          if (id.isEmpty) { return; }
+          dirty = dirty || unknownOutbox || dirtyIds.contains(id);
+          dirtyFound = dirtyFound || dirty;
+          if (kind == 'job') { jobs.add(id); }
+          await db.customStatement('INSERT INTO local_job_deletion_v3_scope_entities '
+              '(business_id,entity_kind,entity_id,generation,dirty) VALUES (?,?,?,?,?) '
+              'ON CONFLICT(business_id,entity_kind,entity_id) DO UPDATE SET '
+              'generation=excluded.generation,dirty=MAX(dirty,excluded.dirty)',
+              [businessId, kind, id, generation, dirty ? 1 : 0]);
+        }
+        for (final entry in _tables.entries) {
+          final (table, key, predicate) = entry.value;
+          final rows = await db.customSelect('SELECT * FROM $table WHERE business_id=?$predicate',
+              variables: [Variable<String>(businessId)]).get();
+          for (final row in rows) {
+            await fence(entry.key, row.read<String>(key), _hasUnconfirmedContent(row.data));
+          }
+        }
+        for (final table in const ['local_pre_inspection_photos', 'local_finding_photos']) {
+          final rows = await db.customSelect('SELECT * FROM $table WHERE business_id=?',
+              variables: [Variable<String>(businessId)]).get();
+          for (final row in rows) {
+            await fence('attachment', row.read<String>('attachment_id'), _hasUnconfirmedContent(row.data));
+            if (table == 'local_finding_photos') {
+              await fence('finding_photo', row.read<String>('id'), _hasUnconfirmedContent(row.data));
+            }
+          }
+        }
+        final outbox = await db.customSelect('SELECT * FROM sync_outbox WHERE business_id=?',
+            variables: [Variable<String>(businessId)]).get();
+        for (final row in outbox) {
+          dirtyFound = true;
+          await db.customStatement('INSERT OR IGNORE INTO local_job_deletion_v3_scope_outbox '
+              '(business_id,outbox_id) VALUES (?,?)', [businessId, row.read<int>('id')]);
+          // A pending edit also protects its existing synced projection from
+          // automatic overwrite. Exact scalar IDs only; no ownership inference.
+          final payload = _decode(row.data['payload_json']);
+          final candidates = await db.customSelect(
+              'SELECT entity_kind,entity_id FROM local_job_deletion_v3_scope_entities WHERE business_id=?',
+              variables: [Variable<String>(businessId)]).get();
+          for (final candidate in candidates) {
+            final id = candidate.read<String>('entity_id');
+            if (id == row.data['entity_id'] || referencesAny(payload, {id}) || payload == null) {
+              await fence(candidate.read<String>('entity_kind'), id, true);
+            }
+          }
+        }
+        Future<void> cache(String key, Object? value) async {
+          final dirty = value == null || unknownOutbox || referencesAny(value, dirtyIds) || _hasUnconfirmedContent(value);
+          dirtyFound = dirtyFound || dirty;
+          await db.customStatement('INSERT INTO local_job_deletion_v3_cache_scope '
+              '(business_id,cache_key,generation,dirty) VALUES (?,?,?,?) '
+              'ON CONFLICT(business_id,cache_key) DO UPDATE SET dirty=MAX(dirty,excluded.dirty)',
+              [businessId, key, generation - 1, dirty ? 1 : 0]);
+        }
+        final financial = await db.customSelect('SELECT cache_key,payload_json FROM local_financial_cache WHERE business_id=?',
+            variables: [Variable<String>(businessId)]).get();
+        for (final row in financial) {
+          final value = _decode(row.data['payload_json']);
+          await cache('financial:${row.read<String>('cache_key')}', value);
+          final key = row.read<String>('cache_key');
+          if (key.startsWith('transaction_detail_')) {
+            await fence('transaction', key.substring('transaction_detail_'.length), value == null || _hasUnconfirmedContent(value));
+          }
+          if (value is List) {
+            for (final item in value.whereType<Map>()) {
+              if (item['id'] is String) { await fence('transaction', item['id'] as String, _hasUnconfirmedContent(item)); }
+            }
+          }
+        }
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.reload();
+        final prefix = 'briskers_document_detail_${businessId}_';
+        for (final key in prefs.getKeys().where((key) => key.startsWith(prefix))) {
+          final value = _decode(prefs.getString(key));
+          await cache(key, value);
+          final kind = value is Map && const {'invoice', 'estimate'}.contains(value['kind'])
+              ? value['kind'] as String : null;
+          final ids = <String>{key.substring(prefix.length),
+            if (value is Map && value['id'] is String) value['id'] as String,
+            if (value is Map && value['_server_document_id'] is String) value['_server_document_id'] as String};
+          for (final id in ids) {
+            for (final k in kind == null ? const ['invoice', 'estimate'] : [kind]) {
+              await fence(k, id, value == null || _hasUnconfirmedContent(value));
+            }
+          }
+        }
+      }
+      await db.customStatement('INSERT INTO local_job_deletion_v3_scope '
+          '(business_id,actor_id,visibility_scope,reader_scope,generation,state) VALUES (?,?,?,?,?,?) '
+          'ON CONFLICT(business_id) DO UPDATE SET actor_id=excluded.actor_id,'
+          'visibility_scope=excluded.visibility_scope,reader_scope=excluded.reader_scope,'
+          'generation=excluded.generation,state=excluded.state',
+          [businessId, actorId, visibilityScope, readerScope, generation,
+           dirtyFound ? 'authorized_reconciliation_required' : 'refresh_required']);
+      return invalidate;
+    });
+    if (changed) {
+      db.notifyUpdates({const TableUpdate('local_jobs'), const TableUpdate('local_documents'), const TableUpdate('local_financial_cache')});
+      _events.add((businessId: businessId, jobIds: jobs));
+    }
+    return changed;
   }
 
   static Future<void> setPendingIntent(BriskersLocalDatabase db, {
@@ -209,10 +522,21 @@ class LocalJobDeletionV3 {
     for (final job in jobs) { _notify(db, businessId, job.read<String>('job_id')); }
   }
 
-  static Future<Set<String>> blockedIds(BriskersLocalDatabase db,
-      String businessId, {String? kind}) async {
+  static Future<Set<String>> scopeDirtyIds(BriskersLocalDatabase db,
+      String businessId) async {
     await ensureSchema(db);
-    return (await db.customSelect('SELECT entity_id FROM local_job_deletion_v3_fences '
+    return (await db.customSelect(
+        'SELECT entity_id FROM local_job_deletion_v3_scope_entities WHERE business_id=? AND dirty=1',
+        variables: [Variable<String>(businessId)]).get())
+        .map((row) => row.read<String>('entity_id')).toSet();
+  }
+
+  static Future<Set<String>> blockedIds(BriskersLocalDatabase db,
+      String businessId, {String? kind, bool includeVisibilityScope = true}) async {
+    await ensureSchema(db);
+    final source = includeVisibilityScope ? 'local_job_deletion_v3_fences' :
+        '(SELECT * FROM local_job_deletion_v3_entities UNION ALL SELECT * FROM local_job_deletion_v3_pending UNION ALL SELECT * FROM local_job_deletion_v3_aliases)';
+    return (await db.customSelect('SELECT entity_id FROM $source '
         'WHERE business_id=?${kind == null ? '' : ' AND entity_kind=?'}',
         variables: [Variable<String>(businessId), if (kind != null) Variable<String>(kind)])
         .get()).map((r) => r.read<String>('entity_id')).toSet();
@@ -234,11 +558,13 @@ class LocalJobDeletionV3 {
   static Future<bool> isEntityDeleted(BriskersLocalDatabase db,
       String businessId, String entityKind, String entityId) async =>
       (await deletedIds(db, businessId, kind: entityKind)).contains(entityId);
-  static Future<Set<String>> blockedJobIds(BriskersLocalDatabase db, String businessId) =>
-      blockedIds(db, businessId, kind: 'job');
-  static Future<Set<String>> blockedDocumentIds(BriskersLocalDatabase db, String businessId) async =>
-      {...await blockedIds(db, businessId, kind: 'invoice'),
-       ...await blockedIds(db, businessId, kind: 'estimate')};
+  static Future<Set<String>> blockedJobIds(BriskersLocalDatabase db, String businessId,
+      {bool includeVisibilityScope = true}) =>
+      blockedIds(db, businessId, kind: 'job', includeVisibilityScope: includeVisibilityScope);
+  static Future<Set<String>> blockedDocumentIds(BriskersLocalDatabase db, String businessId,
+      {bool includeVisibilityScope = true}) async =>
+      {...await blockedIds(db, businessId, kind: 'invoice', includeVisibilityScope: includeVisibilityScope),
+       ...await blockedIds(db, businessId, kind: 'estimate', includeVisibilityScope: includeVisibilityScope)};
 
   static Future<Set<String>> blockedIdsForTable(BriskersLocalDatabase db,
       String businessId, String? table) async {
@@ -246,6 +572,9 @@ class LocalJobDeletionV3 {
     final ids = <String>{};
     for (final entry in _tables.entries.where((entry) => entry.value.$1 == table)) {
       ids.addAll(await blockedIds(db, businessId, kind: entry.key));
+    }
+    if (table == 'local_finding_photos') {
+      ids.addAll(await blockedIds(db, businessId, kind: 'finding_photo'));
     }
     if (const ['local_pre_inspection_photos', 'local_finding_photos'].contains(table)) {
       final attachments = await blockedIds(db, businessId, kind: 'attachment');
@@ -268,11 +597,17 @@ class LocalJobDeletionV3 {
   /// Cache rows are replaceable projections. Do not persist late snapshots
   /// containing a deleted identity, even when nested in a payment/attachment.
   static Future<bool> payloadIsDeleted(BriskersLocalDatabase db,
-      String businessId, Object? payload) async =>
-      referencesAny(payload, await blockedIds(db, businessId));
+      String businessId, Object? payload, {bool includeVisibilityScope = true}) async =>
+      referencesAny(payload, await blockedIds(db, businessId, includeVisibilityScope: includeVisibilityScope));
 
   static Future<void> assertReplayAllowed(BriskersLocalDatabase db,
       String businessId, {int? outboxId, Object? response}) async {
+    await ensureSchema(db);
+    if (outboxId != null && (await db.customSelect(
+        'SELECT 1 FROM local_job_deletion_v3_scope_outbox WHERE business_id=? AND outbox_id=?',
+        variables: [Variable<String>(businessId), Variable<int>(outboxId)]).get()).isNotEmpty) {
+      throw StateError('Authorization changed; retained work requires reconciliation');
+    }
     final ids = await blockedIds(db, businessId);
     final operations = await blockedIds(db, businessId, kind: 'operation');
     if (ids.isEmpty) { return; }
@@ -654,6 +989,11 @@ class LocalJobDeletionV3 {
   static Future<bool> _purgeRows(BriskersLocalDatabase db, String business,
       String job, String operation, Map<String, Set<String>> inventory) async {
     var unresolved = false;
+    final dirtyScopeIds = await scopeDirtyIds(db, business);
+    final dirtyCacheRows = await db.customSelect(
+        'SELECT cache_key FROM local_job_deletion_v3_cache_scope WHERE business_id=? AND dirty=1',
+        variables: [Variable<String>(business)]).get();
+    final dirtyCacheKeys = dirtyCacheRows.map((row) => row.read<String>('cache_key')).toSet();
     final allIds = _referenceIds(inventory);
     final aliasRows = await db.customSelect('SELECT entity_id FROM local_job_deletion_v3_aliases WHERE business_id=? AND operation_id=?',
         variables: [Variable<String>(business), Variable<String>(operation)]).get();
@@ -663,7 +1003,7 @@ class LocalJobDeletionV3 {
       for (final id in inventory[entry.key] ?? const <String>{}) {
         final rows = await db.customSelect('SELECT * FROM $table WHERE business_id=? AND $key=?$predicate',
             variables: [Variable<String>(business), Variable<String>(id)]).get();
-        if (rows.any((row) => _hasUnconfirmedContent(row.data))) { unresolved = true; continue; }
+        if (dirtyScopeIds.contains(id) || rows.any((row) => _hasUnconfirmedContent(row.data))) { unresolved = true; continue; }
         for (final row in rows) { await _queueMedia(db, business, operation, row.data); }
         await db.customStatement('DELETE FROM $table WHERE business_id=? AND $key=?$predicate', [business, id]);
       }
@@ -672,7 +1012,7 @@ class LocalJobDeletionV3 {
       for (final table in const ['local_pre_inspection_photos', 'local_finding_photos']) {
         final rows = await db.customSelect('SELECT * FROM $table WHERE business_id=? AND attachment_id=?',
             variables: [Variable<String>(business), Variable<String>(id)]).get();
-        if (rows.any((row) => _hasUnconfirmedContent(row.data))) { unresolved = true; continue; }
+        if (dirtyScopeIds.contains(id) || rows.any((row) => _hasUnconfirmedContent(row.data))) { unresolved = true; continue; }
         for (final row in rows) { await _queueMedia(db, business, operation, row.data); }
         await db.customStatement('DELETE FROM $table WHERE business_id=? AND attachment_id=?', [business, id]);
       }
@@ -700,7 +1040,7 @@ class LocalJobDeletionV3 {
       if (value == null || referencesAny(value, aliasIds)) { unresolved = true; continue; }
       if ((referencesAny(value, allIds) ||
           (key.startsWith('transaction_detail_') && _has(inventory, 'transaction', key.substring('transaction_detail_'.length)))) &&
-          _hasUnconfirmedContent(value)) { unresolved = true; continue; }
+          (_hasUnconfirmedContent(value) || dirtyCacheKeys.contains('financial:$key') || referencesAny(value, dirtyScopeIds))) { unresolved = true; continue; }
       if (key.startsWith('transaction_detail_') &&
           _has(inventory, 'transaction', key.substring('transaction_detail_'.length))) {
         await _queueMedia(db, business, operation, value);
@@ -818,6 +1158,10 @@ class LocalJobDeletionV3 {
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
     var unresolved = false;
+    final dirtyRows = await db.customSelect(
+        'SELECT cache_key FROM local_job_deletion_v3_cache_scope WHERE business_id=? AND dirty=1',
+        variables: [Variable<String>(business)]).get();
+    final dirtyKeys = dirtyRows.map((row) => row.read<String>('cache_key')).toSet();
     final ids = {...?inventory['invoice'], ...?inventory['estimate']};
     final allIds = _referenceIds(inventory);
     final aliasRows = await db.customSelect("SELECT entity_id FROM local_job_deletion_v3_aliases WHERE business_id=? AND operation_id=? AND entity_kind IN ('invoice','estimate')",
@@ -835,7 +1179,7 @@ class LocalJobDeletionV3 {
       }
       final owned = ids.contains(key.substring(prefix.length)) || (detail is Map &&
           (ids.contains(detail['id']) || ids.contains(detail['_server_document_id'])));
-      if ((owned || referencesAny(detail, allIds)) && _hasUnconfirmedContent(detail)) {
+      if ((owned || referencesAny(detail, allIds)) && (_hasUnconfirmedContent(detail) || dirtyKeys.contains(key))) {
         unresolved = true; continue;
       }
       if (owned) { await _queueMedia(db, business, operation, detail); }

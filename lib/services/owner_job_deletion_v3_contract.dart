@@ -250,6 +250,7 @@ void validateDeletionV3Receipt(Map<String, dynamic> receipt,
           !const ['not_required', 'completed'].contains(receipt['storage_cleanup'])) ||
       (receipt['status'] == 'purging' &&
           !const ['pending', 'failed'].contains(receipt['storage_cleanup'])) ||
+      (receipt['status'] == 'purging' && receipt['cleanup_completed_at'] != null) ||
       (receipt['status'] == 'deleted' && DateTime.tryParse('${receipt['cleanup_completed_at']}') == null)) {
     throw const FormatException('Unverified deletion receipt. Request remains pending.');
   }
