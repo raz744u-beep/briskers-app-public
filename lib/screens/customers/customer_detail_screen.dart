@@ -285,9 +285,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           List<Map<String, dynamic>> items) => ListTile(
         dense: true, visualDensity: VisualDensity.compact,
         leading: Icon(icon, color: color, size: 23),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+        title: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text('${items.length}', style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text('${items.length}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
           const SizedBox(width: 6), const Icon(Icons.chevron_right, size: 18),
         ]),
         onTap: () => _showOverviewList(title, items),
@@ -1217,9 +1217,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                         child: Column(mainAxisSize: MainAxisSize.min, children: [
                           Icon(const <IconData>[Icons.dashboard_outlined,
                             Icons.person_outline, Icons.directions_car_outlined,
-                            Icons.note_alt_outlined][i], size: 21),
+                            Icons.note_alt_outlined][i], size: 26),
                           Text(const <String>['Overview', 'Info', 'Vehicles', 'Notes'][i],
-                            style: const TextStyle(fontSize: 11)),
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                         ]),
                       )),
                   ]),
