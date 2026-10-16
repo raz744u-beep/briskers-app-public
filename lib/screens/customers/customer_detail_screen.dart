@@ -258,6 +258,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           key.contains('draft') || key.contains('pending approval')) {
         return const Color(0xFFC77700);
       }
+      if (key.contains('unpaid') || key.contains('overdue')) {
+        return const Color(0xFFC62828);
+      }
       if (key.contains('closed') || key.contains('completed') ||
           key.contains('paid') || key.contains('accepted') ||
           key.contains('converted')) {
@@ -1501,7 +1504,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                         Expanded(child: OutlinedButton.icon(
                           onPressed: null,
                           icon: const Icon(Icons.chat_bubble_outline),
-                          label: const Text('New Message • Soon'),
+                          label: const Text('New Message • Coming Soon'),
                         )),
                       ]),
                     ),
