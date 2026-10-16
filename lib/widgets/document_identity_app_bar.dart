@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Compact document header: number and status share the primary row;
-/// actions remain accessible in a short row without shrinking the number.
+/// Compact invoice/estimate header with number, status and actions in one row.
 class DocumentIdentityAppBar extends StatelessWidget
     implements PreferredSizeWidget {
   const DocumentIdentityAppBar({
@@ -26,7 +25,7 @@ class DocumentIdentityAppBar extends StatelessWidget
 
   @override
   Size get preferredSize => Size.fromHeight(
-    kToolbarHeight + (actions.isEmpty ? 0 : 44),
+    kToolbarHeight,
   );
 
   @override
@@ -69,24 +68,12 @@ class DocumentIdentityAppBar extends StatelessWidget
             ),
           ),
         ),
-        const SizedBox(width: 12),
-      ],
-    ),
-    bottom: actions.isEmpty ? null : PreferredSize(
-      preferredSize: const Size.fromHeight(44),
-      child: SizedBox(
-        height: 44,
-        child: Align(
-          alignment: Alignment.centerRight,
-          child: IconTheme(
+        if (actions.isNotEmpty)
+          IconTheme(
             data: const IconThemeData(color: Colors.white),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: actions,
-            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: actions),
           ),
-        ),
-      ),
+      ],
     ),
   );
 }
