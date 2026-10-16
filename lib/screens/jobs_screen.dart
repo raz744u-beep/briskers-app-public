@@ -122,6 +122,18 @@ class _JobsScreenState extends State<JobsScreen>
   String? _busyJobId;
   bool _onlineReady = false;
   bool _showingLocal = false;
+  bool _showCachedNotice = false;
+  Timer? _cachedNoticeTimer;
+
+  void _flashCachedNotice() {
+    _cachedNoticeTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _showCachedNotice = true);
+    _cachedNoticeTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _showCachedNotice = false);
+    });
+  }
+
 
   bool get _canManage =>
       widget.roleCode == 'owner' ||
@@ -222,6 +234,7 @@ class _JobsScreenState extends State<JobsScreen>
 
   @override
   void dispose() {
+    _cachedNoticeTimer?.cancel();
     _jobVisibility.dispose();
     _retirementChanges?.cancel();
     _searchDebounce?.cancel();
@@ -354,6 +367,7 @@ class _JobsScreenState extends State<JobsScreen>
         _onlineReady = online;
         _error = null;
       });
+      if (!online && refreshRemote) _flashCachedNotice();
     }
 
     if (!mode.forceOnline || !refreshRemote) {
@@ -1174,40 +1188,14 @@ class _JobsScreenState extends State<JobsScreen>
           ),
         ),
         Expanded(
-          child: RefreshIndicator(
+          child: Stack(children: [
+          RefreshIndicator(
             onRefresh: () => _load(),
             child: ListView(
               key: PageStorageKey('jobs-list:$_storageId'),
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 80),
               children: [
-                if (_showingLocal)
-                  Container(
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: BriskersColors.jobs.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.cloud_off_outlined, size: 18),
-                        const SizedBox(width: 7),
-                        Expanded(
-                          child: Text(
-                            _text(
-                              'Showing saved jobs · changes sync when connected',
-                              'Trabajos guardados · los cambios se sincronizarán al conectar',
-                            ),
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 if (_error != null)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1302,6 +1290,29 @@ class _JobsScreenState extends State<JobsScreen>
               ],
             ),
           ),
+          if (_showingLocal && _showCachedNotice)
+            Positioned(
+              top: 0, left: 10, right: 10,
+              child: IgnorePointer(
+                child: Material(
+                  elevation: 3,
+                  borderRadius: BorderRadius.circular(9),
+                  color: const Color(0xFFE5F2FC),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                    child: Row(children: [
+                      const Icon(Icons.cloud_off_outlined, size: 18),
+                      const SizedBox(width: 7),
+                      Expanded(child: Text(_text(
+                        'Showing saved jobs · changes sync when connected',
+                        'Trabajos guardados · los cambios se sincronizarán al conectar',
+                      ), style: const TextStyle(fontWeight: FontWeight.w700))),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ]),
         ),
       ],
     );
