@@ -146,7 +146,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   bool get _estimate => widget.kind == 'estimate';
 
   String _invoiceStage(Map<String, dynamic> row) {
-    if (_estimate) return documentListStage(row, estimate: true);
+    if (_estimate) {
+      return documentListStage(row, estimate: true);
+    }
     if (invoiceNeedsPayment(row,
         receipts: _receiptTotals[row['id']?.toString()] ?? 0)) return 'Open';
     final existing = documentListStage(row, estimate: false);
