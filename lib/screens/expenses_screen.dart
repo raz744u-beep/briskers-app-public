@@ -418,6 +418,19 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           widget.businessId, limit: pageSize, offset: offset,
         );
         rows.addAll(page);
+        if (offset == 0 && mounted) {
+          // Show the latest server payments after the first short page;
+          // continue filling the historical offline snapshot in background.
+          final saved = _invoiceReceipts
+              .where((r) => r['receipt_state']?.toString() != 'local')
+              .toList();
+          final queued = _invoiceReceipts
+              .where((r) => r['receipt_state']?.toString() == 'local')
+              .toList();
+          setState(() => _invoiceReceipts = InvoicePaymentFeed.mergeReceipts(
+            [...page, ...saved], queued,
+          ));
+        }
         if (page.length < pageSize) {
           exhausted = true;
           break;
