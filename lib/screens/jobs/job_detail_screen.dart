@@ -4147,8 +4147,15 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(workSummary.isEmpty
-                          ? 'Manual Work Performed is empty.' : workSummary),
+                      Text(
+                        workSummary.isEmpty
+                            ? 'Manual Work Performed is empty.' : workSummary,
+                        style: const TextStyle(
+                          fontSize: 19,
+                          height: 1.45,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       const Text(
                         'Invoice labor could not be refreshed. '
@@ -4166,13 +4173,21 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(combined.isEmpty
-                        ? 'No work performed entered yet.' : combined),
+                    Text(
+                      combined.isEmpty
+                          ? 'No work performed entered yet.' : combined,
+                      style: const TextStyle(
+                        fontSize: 19,
+                        height: 1.45,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                     if ((snapshot.data ?? '').isNotEmpty)
                       const Padding(
                         padding: EdgeInsets.only(top: 7),
                         child: Text('Invoice labor automatically refreshed',
-                            style: TextStyle(fontSize: 12,
+                            style: TextStyle(fontSize: 14,
+                                fontWeight: FontWeight.w600,
                                 color: BriskersColors.jobs)),
                       ),
                   ],
