@@ -1664,10 +1664,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                       Text(_money(grandTotal),
                           style: TextStyle(fontSize: 26,
                               fontWeight: FontWeight.w800, color: accent)),
-                      Text(scopedRows.length.toString() + ' records' +
-                          (missingAmountCount == 0 ? ''
-                            : ' • amounts unavailable: ' +
-                                missingAmountCount.toString()),
+                      Text('${scopedRows.length} records'
+                        '${missingAmountCount == 0 ? "" : " • amounts unavailable: $missingAmountCount"}',
                           style: const TextStyle(fontSize: 13)),
                     ],
                   ),
