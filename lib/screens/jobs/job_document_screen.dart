@@ -1698,8 +1698,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             debugPrint('New catalog item sync deferred: $error');
           }));
       } catch (error) {
-        if (mounted) setState(() => _error =
-          'Could not save new catalog item: $error');
+        if (mounted) {
+          setState(() => _error = 'Could not save new catalog item: $error');
+        }
         return;
       }
     }
@@ -1724,6 +1725,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       'line_kind': 'item',
     };
 
+    if (!mounted) return;
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
