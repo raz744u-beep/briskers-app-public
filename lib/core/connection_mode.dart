@@ -42,6 +42,13 @@ class BriskersConnectionModeController extends ChangeNotifier {
     );
   }
 
+  /// Protect unsent local work if preferences cannot be read at startup.
+  /// No settings are deleted or overwritten by this fallback.
+  void useSafeOfflineFallback() {
+    _mode = BriskersConnectionMode.offline;
+    notifyListeners();
+  }
+
   Future<void> setMode(BriskersConnectionMode value) async {
     if (_mode == value) return;
     _mode = value;
