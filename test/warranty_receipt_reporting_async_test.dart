@@ -51,12 +51,26 @@ class _Cache extends LocalDocumentDetailCache {
   final List<Map<String, dynamic>> rows;
   final bool fail;
   int calls = 0;
+  int targetedCalls = 0;
 
   @override
   Future<List<Map<String, dynamic>>> loadAll(String businessId) async {
     calls++;
     if (fail) throw StateError('Synthetic cache unavailable');
     return rows.map(_copy).toList();
+  }
+
+  @override
+  Future<Map<String, dynamic>?> load(
+    String businessId,
+    String documentId,
+  ) async {
+    targetedCalls++;
+    if (fail) throw StateError('Synthetic cache unavailable');
+    for (final row in rows) {
+      if (row['id']?.toString() == documentId) return _copy(row);
+    }
+    return null;
   }
 }
 
@@ -306,6 +320,45 @@ void main() {
         ).enrich('shop-a', [_transaction(_card)], refresh: false)).single,
       );
     }
+  });
+
+  test(
+    'offline reporting reads only user-scoped invoice; never scans all cache',
+    () async {
+      await _saveReport();
+      final prefs = await SharedPreferences.getInstance();
+      // Existing installations may hold thousands of unrelated invoice
+      // snapshots. They must not be scanned for a two-row payment display.
+      for (var index = 0; index < 120; index++) {
+        await prefs.setString(
+          'briskers_document_detail_shop-a_unrelated-$index',
+          '{"id":"unrelated-$index","kind":"invoice"}',
+        );
+      }
+      final api = _Api();
+      final cache = _Cache([_invoice]);
+      final result = await _service(api, cache).enrich(
+        'shop-a', [_transaction(_card)], refresh: false,
+      );
+      expect(result.single['reporting_amount'], 500);
+      expect(cache.calls, 0,
+          reason: 'Offline may not read every invoice in the database');
+      expect(cache.targetedCalls, 1);
+      expect(api.detailReads, 0);
+      expect(api.warrantyReads, 0);
+    },
+  );
+
+  test('offline with no user-scoped fee cache does not scan documents',
+      () async {
+    final cache = _Cache([_invoice], fail: true);
+    final rows = [_transaction(_card), _transaction(_cash)];
+    final result = await _service(_Api(), cache)
+        .enrich('shop-a', rows, refresh: false);
+    expect(result, hasLength(2));
+    _expectGross(result.first);
+    expect(cache.calls, 0);
+    expect(cache.targetedCalls, 0);
   });
 
   test(

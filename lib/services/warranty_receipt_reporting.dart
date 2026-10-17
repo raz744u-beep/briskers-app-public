@@ -103,16 +103,23 @@ class WarrantyReceiptReporting {
           : supabase.auth.currentUser?.id;
     } catch (_) { /* No authenticated identity. */ }
     if (userId == null || userId.isEmpty) return transactions.map(unverified).toList();
+    // Offline reporting only trusts user-scoped verified snapshots. Loading
+    // every cached invoice (thousands on established devices) before the
+    // first Expenses frame adds seconds but cannot authorize any reporting:
+    // the old code discarded that whole inventory again below.
+    final offline = !refresh ||
+        BriskersConnectionModeController.instance.forceOffline;
     List<Map<String, dynamic>> snapshots;
     SharedPreferences prefs;
     try {
-      snapshots = await cache.loadAll(businessId);
+      snapshots = offline
+          ? <Map<String, dynamic>>[]
+          : await cache.loadAll(businessId);
       prefs = await SharedPreferences.getInstance();
     } catch (_) {
       // Cache failure must not hide real transactions or stale-adjust them.
       return transactions.map(unverified).toList();
     }
-    final offline = !refresh || BriskersConnectionModeController.instance.forceOffline;
     final prefix = 'briskers_warranty_reporting_${userId}_${businessId}_';
     final scoped = <Map<String, dynamic>>[];
     // Reporting cache is user + business scoped. Business-only document
@@ -122,7 +129,19 @@ class WarrantyReceiptReporting {
       try {
         final saved = Map<String, dynamic>.from(jsonDecode(prefs.getString(key)!) as Map);
         final id = saved['id']?.toString();
-        final existing = snapshots.where((item) => item['id']?.toString() == id).toList();
+        // When disconnected, read only the invoice having a verified
+        // user-scoped reporting record. Still reject newer/dirty local detail,
+        // without scanning unrelated invoice cache entries.
+        final localDetail = offline && id != null && id.isNotEmpty
+            ? await cache.load(businessId, id)
+            : null;
+        final existing = offline
+            ? (localDetail == null
+                ? <Map<String, dynamic>>[]
+                : <Map<String, dynamic>>[localDetail])
+            : snapshots
+                .where((item) => item['id']?.toString() == id)
+                .toList();
         var selected = existing.length == 1 ? newerContext(existing.single, saved) : saved;
         if (existing.length == 1 && identical(selected, existing.single)) {
           selected = {...selected}..remove('offline_warranty_detail');
