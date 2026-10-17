@@ -385,6 +385,14 @@ class CatalogItemDialog extends StatefulWidget {
 }
 
 class CatalogItemDialogState extends State<CatalogItemDialog> {
+  static String _titleCaseNewItemName(String value) {
+    return value.trim().replaceAllMapped(
+      RegExp(r'(^|[\s\-/])([a-z])'),
+      (match) => '${match.group(1)}${match.group(2)!.toUpperCase()}',
+    );
+  }
+
+
   late final TextEditingController _name;
   late final TextEditingController _description;
   late final TextEditingController _price;
@@ -401,7 +409,10 @@ class CatalogItemDialogState extends State<CatalogItemDialog> {
   void initState() {
     super.initState();
     final item = widget.item;
-    _name = TextEditingController(text: item?['name']?.toString() ?? widget.initialName);
+    _name = TextEditingController(
+      text: item?['name']?.toString() ??
+          _titleCaseNewItemName(widget.initialName),
+    );
     _description =
         TextEditingController(text: item?['description']?.toString() ?? '');
     _price =
