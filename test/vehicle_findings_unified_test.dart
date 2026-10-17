@@ -59,6 +59,9 @@ class _Api extends BriskersApi {
       };
   final Map<String, Map<String, dynamic>> rows;
   int addCalls = 0;
+  int resolveCalls = 0;
+  bool loseResolveReply = false;
+  bool resolveWrongJob = false;
   int createCalls = 0;
   bool loseCreateReply = false;
   final registrations = <String>[];
@@ -171,11 +174,20 @@ class _Api extends BriskersApi {
     String businessId,
     String id,
     String jobId,
-  ) async => patch(id, {
-    'status': 'resolved',
-    'repair_job_id': jobId,
-    'resolved_at': '2026-10-14T14:00:00Z',
-  });
+  ) async {
+    resolveCalls++;
+    // Match the deployed RPC: resolving sets resolved_job_id, not repair_job_id.
+    patch(id, {
+      'status': 'resolved',
+      'resolved_job_id': resolveWrongJob ? 'other-job' : jobId,
+      'include_on_invoice': false,
+      'resolved_at': '2026-10-14T14:00:00Z',
+    });
+    if (loseResolveReply) {
+      loseResolveReply = false;
+      throw StateError('Synthetic resolve response lost after server applied');
+    }
+  }
   @override
   Future<void> reopenVehicleFinding(String businessId, String id) async =>
       patch(id, {'status': 'open', 'repair_job_id': null, 'resolved_at': null});
@@ -485,6 +497,59 @@ void main() {
       true,
     );
   });
+
+  test(
+    'lost resolve response reconciles server resolved_job_id without replay',
+    () async {
+      api.loseResolveReply = true;
+      await actions.resolve(business, finding('fixture-f1'), job);
+      await actions.flush(business);
+      expect(api.resolveCalls, 1);
+      expect(
+        await db.customSelect(
+          "SELECT id FROM sync_outbox WHERE entity_type='finding_action'",
+        ).get(),
+        hasLength(1),
+      );
+      expect(api.rows['fixture-f1']!['status'], 'resolved');
+      expect(api.rows['fixture-f1']!['resolved_job_id'], job);
+      expect(api.rows['fixture-f1']!['repair_job_id'], isNull);
+      await actions.flush(business);
+      expect(api.resolveCalls, 1);
+      expect(
+        await db.customSelect(
+          "SELECT id FROM sync_outbox WHERE entity_type='finding_action'",
+        ).get(),
+        isEmpty,
+      );
+      final local = (await work.loadLocalFindings(
+        business,
+        vehicle,
+      )).firstWhere((row) => row['id'] == 'fixture-f1');
+      expect(local['status'], 'resolved');
+      expect(local['repair_job_id'], isNull);
+      expect(local['sync_state'], 'synced');
+    },
+  );
+
+  test(
+    'a different resolution Job does not acknowledge or retry unsafe action',
+    () async {
+      api.loseResolveReply = true;
+      api.resolveWrongJob = true;
+      await actions.resolve(business, finding('fixture-f1'), job);
+      await actions.flush(business);
+      expect(api.resolveCalls, 1);
+      await actions.flush(business);
+      expect(api.resolveCalls, 1);
+      final queued = await db.customSelect(
+        "SELECT id,last_error FROM sync_outbox WHERE entity_type='finding_action'",
+      ).get();
+      expect(queued, hasLength(1));
+      expect(queued.single.read<String>('last_error'),
+          contains('earlier finding change is not yet verified'));
+    },
+  );
 
   test(
     'lost Add reply retries verification without repeating repair linkage',
