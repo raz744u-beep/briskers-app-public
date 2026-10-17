@@ -171,14 +171,43 @@ class InvoicePaymentFeed {
           field?.toString().toLowerCase().contains(needle) ?? false);
     }).toList();
 
-    final postedIds = eligible
-        .where((r) => r['receipt_state']?.toString() == 'posted')
-        .map((r) => r['transaction_id']?.toString() ?? '')
-        .where((id) => id.isNotEmpty).toSet();
+    final allocations = <String, List<Map<String, dynamic>>>{};
+    for (final r in eligible) {
+      if (r['receipt_state']?.toString() != 'posted') continue;
+      final transactionId = r['transaction_id']?.toString() ?? '';
+      if (transactionId.isEmpty) continue;
+      allocations.putIfAbsent(transactionId, () => []).add(r);
+    }
+    final represented = <String>{};
+    final preservedFinancial = <Map<String, dynamic>>[];
+    for (final original in financial) {
+      final id = original['id']?.toString() ?? '';
+      final matches = allocations[id] ?? const <Map<String, dynamic>>[];
+      if (matches.length == 1) {
+        final receipt = matches.single;
+        represented.add(receipt['receipt_id']?.toString() ?? '');
+        // Preserve the already-enriched posted transaction, including exact
+        // warranty processor fee reporting. Only decorate its context.
+        preservedFinancial.add({
+          ...original,
+          'counterparty': receipt['customer_name'] ?? original['counterparty'],
+          'document_id': receipt['invoice_id'],
+          'document_number': receipt['document_number'],
+          'payment_method_name': receipt['payment_method'],
+          '_invoice_receipt': true,
+          '_receipt_state': 'posted',
+          '_payment_coverage': receipt['coverage'],
+        });
+      } else if (matches.isEmpty) {
+        preservedFinancial.add(original);
+      }
+      // A multi-invoice allocation is displayed by its exact per-invoice
+      // receipt rows below. Never also add the full original transaction.
+    }
     final merged = <Map<String, dynamic>>[
-      ...financial.where(
-          (row) => !postedIds.contains(row['id']?.toString() ?? '')),
+      ...preservedFinancial,
       for (final r in eligible)
+        if (!represented.contains(r['receipt_id']?.toString() ?? ''))
         <String, dynamic>{
           'id': r['receipt_id'],
           'direction': 'income',
@@ -192,7 +221,7 @@ class InvoicePaymentFeed {
           'job_number': r['job_number'],
           'payment_method_name': r['payment_method'],
           'remarks': '',
-          'reporting_status': 'verified',
+          'reporting_status': 'unverified',
           '_invoice_receipt': true,
           '_receipt_state': r['receipt_state'],
           '_payment_coverage': r['coverage'] ??
