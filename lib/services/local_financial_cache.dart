@@ -11,6 +11,20 @@ class LocalFinancialCache {
 
   static const _transactionsKey = 'transactions_snapshot';
   static const _optionsKey = 'transaction_options';
+  static const _invoiceReceiptsKey = 'invoice_receipts_v1';
+
+  Future<void> saveInvoiceReceipts(String businessId, List<Map<String,dynamic>> rows) =>
+      _save(businessId, _invoiceReceiptsKey, jsonEncode(rows));
+
+  Future<List<Map<String,dynamic>>> loadInvoiceReceipts(String businessId) async {
+    final raw = await _load(businessId, _invoiceReceiptsKey);
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      return (jsonDecode(raw) as List).whereType<Map>()
+          .map((row) => Map<String,dynamic>.from(row)).toList();
+    } catch (_) { return const []; }
+  }
+
 
   final BriskersLocalDatabase _database;
 
