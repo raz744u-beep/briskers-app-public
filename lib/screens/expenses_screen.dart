@@ -93,8 +93,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     _load();
     _refreshPhotoCounts();
     if (_owner && Platform.isAndroid) {
+      // Photo totals are informational; avoid rebuilding the entire list
+      // every four seconds while the owner is reading transactions.
       _photoCountTimer = Timer.periodic(
-        const Duration(seconds: 4),
+        const Duration(seconds: 30),
         (_) => _refreshPhotoCounts(),
       );
     }
@@ -272,9 +274,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           categoryId: _categoryFilterId,
           counterpartyId: _counterpartyFilterId,
         );
+        // The first offline frame displays at most 50 transactions.
+        // Enrich only those rows. Enriching the entire ~1,000-row snapshot
+        // first can delay the page and unnecessarily process many receipts.
+        final hasMoreLocal = localRows.length > _pageSize;
         localRows = await const WarrantyReceiptReporting().enrich(
           widget.businessId,
-          localRows,
+          localRows.take(_pageSize).toList(),
           refresh: false,
         );
         final localOptions = await _localFinancial.loadOptions(
@@ -284,7 +290,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         if (mounted && (localRows.isNotEmpty || localOptions.isNotEmpty)) {
           setState(() {
             _transactions = localRows.take(_pageSize).toList();
-            _hasMore = localRows.length > _pageSize;
+            _hasMore = hasMoreLocal;
             _quickTemplates = List<dynamic>.from(
               localOptions['quick_templates'] ?? const [],
             ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
