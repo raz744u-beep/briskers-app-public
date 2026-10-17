@@ -4331,11 +4331,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         subject: subject,
         body: 'Please find the attached ${_estimate ? 'estimate' : 'invoice'} from Briskers Foreign Auto Repair.',
       );
-    } catch (_) {
-      await Printing.sharePdf(
-        bytes: bytes,
-        filename: DocumentPdfService.fileName(detail),
-      );
+    } catch (error) {
+      // A generic PDF share loses Gmail's To/Subject intent extras. Do not
+      // silently replace a pre-addressed email with an unaddressed share.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Could not open the addressed Gmail draft: $error. '
+            'The email has not been sent. You can use Share PDF manually.'),
+        duration: const Duration(seconds: 8),
+      ));
     }
   }
 

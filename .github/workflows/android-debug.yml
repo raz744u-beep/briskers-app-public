@@ -204,15 +204,9 @@ jobs:
                           addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                       }
 
-                      if (intent.resolveActivity(packageManager) == null) {
-                          result.error(
-                              "gmail_unavailable",
-                              "Gmail is not installed on this device.",
-                              null
-                          )
-                          return
-                      }
-
+                      // On Android 11+, resolveActivity can return null
+                      // when Gmail is installed but package visibility was not
+                      // declared. Launch directly and catch the real error.
                       startActivity(intent)
                       result.success(true)
                   } catch (error: Exception) {
