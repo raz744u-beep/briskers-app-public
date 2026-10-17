@@ -16,6 +16,10 @@ class LocalFinancialCache {
   Future<void> saveInvoiceReceipts(String businessId, List<Map<String,dynamic>> rows) =>
       _save(businessId, _invoiceReceiptsKey, jsonEncode(rows));
 
+  /// Distinguish "RPC cache never populated" from "server has no receipts".
+  Future<bool> hasServerInvoiceReceipts(String businessId) async =>
+      await _load(businessId, _invoiceReceiptsKey) != null;
+
   Future<List<Map<String,dynamic>>> loadInvoiceReceipts(String businessId) async {
     final raw = await _load(businessId, _invoiceReceiptsKey);
     if (raw == null || raw.isEmpty) return const [];
