@@ -1,7 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
+import '../../core/supabase_config.dart';
 import '../../services/briskers_api.dart';
 
 class ExpenseSettingsScreen extends StatelessWidget {
@@ -1714,6 +1719,46 @@ class _RecurringTransactionsScreenState
   List<Map<String, dynamic>>? rows;
   Map<String, dynamic>? options;
   String? error;
+  bool _offlineUnavailable = false;
+  bool _showingSavedList = false;
+
+  bool get _canEdit =>
+      !BriskersConnectionModeController.instance.forceOffline &&
+      options != null && error == null;
+
+  // A business alone is not enough to isolate an offline financial snapshot.
+  // Never read another signed-in user's recurring instructions from this phone.
+  String? get _cacheKey {
+    final userId = networkSupabase.auth.currentUser?.id;
+    if (userId == null || userId.isEmpty) return null;
+    return 'briskers_recurring_management_v1_${userId}_${widget.businessId}';
+  }
+
+  Future<List<Map<String, dynamic>>?> _readSavedList() async {
+    final key = _cacheKey;
+    if (key == null) return null;
+    try {
+      final raw = (await SharedPreferences.getInstance()).getString(key);
+      if (raw == null) return null; // No snapshot is not an empty server list.
+      return (jsonDecode(raw) as List)
+          .whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _saveList(List<Map<String, dynamic>> snapshot) async {
+    final key = _cacheKey;
+    if (key == null) return;
+    try {
+      await (await SharedPreferences.getInstance())
+          .setString(key, jsonEncode(snapshot));
+    } catch (_) {
+      // A cache failure must not hide a successfully fetched live list.
+    }
+  }
 
   @override
   void initState() {
@@ -1722,28 +1767,50 @@ class _RecurringTransactionsScreenState
   }
 
   Future<void> _load() async {
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // Do not start the API requests at all in Force Offline.
+      final saved = await _readSavedList();
+      if (!mounted) return;
+      setState(() {
+        rows = saved ?? <Map<String, dynamic>>[];
+        options = null; // Recurrence edits are server-authoritative.
+        error = null;
+        _offlineUnavailable = saved == null;
+        _showingSavedList = saved != null;
+      });
+      return;
+    }
+
     try {
       final results = await Future.wait<dynamic>([
         _api.recurringTransactions(widget.businessId),
         _api.transactionOptions(widget.businessId),
       ]);
+      final current = List<Map<String, dynamic>>.from(results[0] as List);
       if (!mounted) return;
       setState(() {
-        rows = List<Map<String, dynamic>>.from(results[0] as List);
+        rows = current;
         options = Map<String, dynamic>.from(results[1] as Map);
         error = null;
+        _offlineUnavailable = false;
+        _showingSavedList = false;
       });
-    } catch (e) {
+      await _saveList(current);
+    } catch (_) {
+      final saved = await _readSavedList();
       if (!mounted) return;
       setState(() {
-        rows = const [];
-        options = <String, dynamic>{};
-        error = e.toString();
+        rows = saved ?? <Map<String, dynamic>>[];
+        options = null;
+        _offlineUnavailable = saved == null;
+        _showingSavedList = saved != null;
+        error = 'Could not refresh recurring transactions. Connect and retry.';
       });
     }
   }
 
   Future<void> _edit([Map<String, dynamic>? row]) async {
+    if (!_canEdit) return;
     final changed = await showDialog<bool>(
       context: context,
       builder: (_) => _RecurringDialog(
@@ -1756,6 +1823,7 @@ class _RecurringTransactionsScreenState
   }
 
   Future<void> _stop(Map<String, dynamic> row) async {
+    if (!_canEdit) return;
     await _api.stopRecurringTransaction(
       widget.businessId,
       row['id'].toString(),
@@ -1783,7 +1851,7 @@ class _RecurringTransactionsScreenState
     return Scaffold(
       appBar: AppBar(title: const Text('Recurring transactions')),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: options == null ? null : () => _edit(),
+        onPressed: _canEdit ? () => _edit() : null,
         backgroundColor: BriskersColors.expenses,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
@@ -1800,18 +1868,40 @@ class _RecurringTransactionsScreenState
                     'This is only a filtered management list. Turning repeating off does not move or delete any transaction already created.',
                   ),
                   const SizedBox(height: 10),
-                  if (error != null)
+                  if (_showingSavedList)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Text(
+                          'Saved recurring transactions (read-only). '
+                          'Reconnect to refresh or change the schedule.',
+                        ),
+                      ),
+                    ),
+                  if (_offlineUnavailable)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(18),
+                        child: Text(
+                          'Recurring transactions unavailable offline. '
+                          'Connect once to load and save the list.',
+                        ),
+                      ),
+                    ),
+                  if (error != null && !_offlineUnavailable)
                     Text(
                       error!,
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.error,
                       ),
                     ),
-                  if (rows!.isEmpty)
+                  if (rows!.isEmpty && !_offlineUnavailable && error == null)
                     const Card(
                       child: Padding(
                         padding: EdgeInsets.all(18),
-                        child: Text('No transactions are currently repeating.'),
+                        child: Text(
+                          'No recurring transactions in the available list.',
+                        ),
                       ),
                     )
                   else
@@ -1850,7 +1940,8 @@ class _RecurringTransactionsScreenState
                                   fontWeight: FontWeight.w800,
                                 ),
                               ),
-                              PopupMenuButton<String>(
+                              if (_canEdit)
+                                PopupMenuButton<String>(
                                 onSelected: (value) {
                                   if (value == 'edit') _edit(row);
                                   if (value == 'stop') _stop(row);
@@ -1868,7 +1959,7 @@ class _RecurringTransactionsScreenState
                               ),
                             ],
                           ),
-                          onTap: () => _edit(row),
+                          onTap: _canEdit ? () => _edit(row) : null,
                         ),
                       );
                     }),
