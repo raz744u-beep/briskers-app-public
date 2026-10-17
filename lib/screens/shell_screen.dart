@@ -527,7 +527,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
               sharedBottomNavigationBar: _shellNavigationBar(nested: true),
             );
           case 6:
-            return ExpensesScreen(businessId: widget.businessId, roleCode: widget.roleCode);
+            return ExpensesScreen(businessId: widget.businessId, roleCode: widget.roleCode, showAppBar: false);
           case 4:
             return DocumentsScreen(
               roleCode: widget.roleCode,
