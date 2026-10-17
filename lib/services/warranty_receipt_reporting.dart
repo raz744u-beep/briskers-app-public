@@ -132,13 +132,13 @@ class WarrantyReceiptReporting {
         // When disconnected, read only the invoice having a verified
         // user-scoped reporting record. Still reject newer/dirty local detail,
         // without scanning unrelated invoice cache entries.
+        final localDetail = offline && id != null && id.isNotEmpty
+            ? await cache.load(businessId, id)
+            : null;
         final existing = offline
-            ? (id == null || id.isEmpty
+            ? (localDetail == null
                 ? <Map<String, dynamic>>[]
-                : <Map<String, dynamic>>[
-                    if (await cache.load(businessId, id) case final current?)
-                      current,
-                  ])
+                : <Map<String, dynamic>>[localDetail])
             : snapshots
                 .where((item) => item['id']?.toString() == id)
                 .toList();
