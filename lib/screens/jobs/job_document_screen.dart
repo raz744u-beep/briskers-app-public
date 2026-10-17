@@ -3682,6 +3682,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     var selectedCustomerName = original['customer_name']?.toString() ?? '';
     String? selectedVehicleId = original['vehicle_id']?.toString();
     var selectedVehicleName = original['vehicle']?.toString() ?? '';
+    var includeOriginalNotes = false;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -3731,6 +3732,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               Text(_estimate
                   ? 'A new standalone estimate will be created.'
                   : 'A new invoice and a new Job will be created.'),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: const Text('Include original notes'),
+                subtitle: const Text(
+                  'Off by default. Notes may appear on the customer PDF.',
+                ),
+                value: includeOriginalNotes,
+                onChanged: (value) => refresh(
+                  () => includeOriginalNotes = value ?? false,
+                ),
+              ),
             ],
           ),
           actions: [
@@ -3755,6 +3768,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         original,
         customerId: selectedCustomerId,
         vehicleId: selectedVehicleId,
+        includeOriginalNotes: includeOriginalNotes,
       );
       // One creation queue entry and a fully populated first snapshot.
       // No partially copied invoice can upload between line mutations.
