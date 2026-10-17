@@ -843,6 +843,91 @@ class OfflineInvoicePaymentLedger {
     }
   }
 
+  /// Replay corrections to existing payments only, never create receipts.
+  /// Lost responses are reconciled by payment UUID and expected version+1.
+  Future<void> flushPendingServerEdits(String businessId) async {
+    final rows = await _database.customSelect(
+      """SELECT id,entity_id FROM sync_outbox
+      WHERE business_id=? AND entity_type='invoice_pending_payment_edit'
+      AND state IN ('pending','inflight') ORDER BY id""",
+      variables:[Variable<String>(businessId)],
+    ).get();
+    for(final row in rows) {
+      final id=row.read<int>('id');
+      final invoiceId=row.read<String>('entity_id');
+      if(invoiceId.startsWith('local-'))continue;
+      try {
+        await LocalJobQuarantine.assertReplayAllowed(
+          _database,businessId,outboxId:id);
+        final payload=await _database.transaction(() async {
+          final current=await _database.customSelect(
+            'SELECT payload_json FROM sync_outbox WHERE id=? AND business_id=?',
+            variables:[Variable<int>(id),Variable<String>(businessId)],
+          ).getSingleOrNull();
+          if(current==null)throw StateError('Correction no longer queued.');
+          final p=Map<String,dynamic>.from(
+            jsonDecode(current.read<String>('payload_json')) as Map);
+          await _database.customStatement(
+            """UPDATE sync_outbox
+            SET last_attempt_at=?,attempt_count=attempt_count+1,
+                state='inflight' WHERE id=?""",
+            [DateTime.now().toUtc().millisecondsSinceEpoch~/1000,id],
+          );
+          return p;
+        });
+        final paymentId=payload['payment_id'].toString();
+        final version=(payload['expected_row_version'] as num).toInt();
+        try {
+          await LocalJobQuarantine.guardReplay(
+            _database,businessId,()=>
+              _api.updatePendingInvoicePaymentV2(
+                businessId,paymentId,
+                amount:(payload['amount_cents'] as num)/100,
+                methodId:payload['method_id'].toString(),
+                paymentDate:payload['payment_date'].toString(),
+                expectedRowVersion:version,
+              ),
+            outboxId:id,
+          );
+        } catch (_) {
+          // A lost successful response can be reconciled below; a real
+          // rejection keeps this correction queued and blocks later edits.
+        }
+        final server=await _api.documentDetailV4(businessId,invoiceId);
+        final payments=server['payments'] is List
+          ? (server['payments'] as List).whereType<Map>().toList()
+          : const <Map>[];
+        final matches=payments.where((p)=>
+          p['id']?.toString()==paymentId &&
+          p['state']?.toString()=='pending').toList();
+        final acknowledged=matches.length==1 &&
+          int.tryParse(matches.single['row_version']?.toString()??'')==version+1 &&
+          (_number(matches.single['amount'])*100).round()==
+            (payload['amount_cents'] as num).round() &&
+          matches.single['payment_method_id']?.toString()==
+            payload['method_id'].toString() &&
+          matches.single['payment_date']?.toString()==
+            payload['payment_date'].toString();
+        if(!acknowledged){
+          throw StateError('Payment correction not yet confirmed.');
+        }
+        await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database,businessId,outboxId:id);
+          await _database.customStatement(
+            'DELETE FROM sync_outbox WHERE id=?',[id]);
+        });
+      } catch(error) {
+        await _database.customStatement(
+          """UPDATE sync_outbox SET state='pending',last_error=?
+          WHERE id=?""",
+          [error.toString(),id],
+        );
+        break; // Hold all later corrections on an unresolved conflict.
+      }
+    }
+  }
+
   Future<List<Map<String, dynamic>>> pendingForInvoice(
     String businessId,
     String invoiceId,
