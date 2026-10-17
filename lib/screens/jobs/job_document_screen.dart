@@ -7664,7 +7664,7 @@ class _AmountRow extends StatelessWidget {
               children: [
                 Flexible(child: Text(label, style: labelStyle, maxLines: 1,
                     overflow: TextOverflow.ellipsis)),
-                if (labelAction != null) labelAction!,
+                ?labelAction,
               ],
             ),
           ),
