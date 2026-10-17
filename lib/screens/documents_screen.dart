@@ -354,25 +354,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     }
   }
 
-  int _estimateStatusRank(String status) {
-    switch (status) {
-      case 'Draft':
-        return 0;
-      case 'Issued':
-        return 1;
-      case 'Accepted':
-        return 2;
-      case 'Declined':
-        return 3;
-      case 'Expired':
-        return 4;
-      case 'Void':
-        return 5;
-      default:
-        return 6;
-    }
-  }
-
   bool _hasFutureDateTag(Map<String, dynamic> row) =>
       isFutureDatedDocument(row);
 
@@ -431,22 +412,33 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       return filtered;
     }
 
-    if (_selectedStatus != null) return filtered;
+    // Keep All Estimates and status-filtered Estimates in newest document
+    // number order. Grouping Draft before Issued hid newer E-2002 records.
+    int? estimateNumber(Map<String, dynamic> row) {
+      final raw = row['document_number']?.toString().trim() ?? '';
+      final matches = RegExp(r'[0-9]+').allMatches(raw).toList();
+      return matches.isEmpty ? null
+          : int.tryParse(matches.last.group(0)!);
+    }
 
     filtered.sort((a, b) {
-      final statusCompare = _estimateStatusRank(
-        a['display_status']?.toString() ?? '',
-      ).compareTo(_estimateStatusRank(b['display_status']?.toString() ?? ''));
-      if (statusCompare != 0) return statusCompare;
-
-      final aDate = DateTime.tryParse(a['document_date']?.toString() ?? '');
-      final bDate = DateTime.tryParse(b['document_date']?.toString() ?? '');
-      if (aDate != null && bDate != null) {
-        return bDate.compareTo(aDate);
+      final aNumber = estimateNumber(a);
+      final bNumber = estimateNumber(b);
+      if (aNumber != null && bNumber != null) {
+        final order = bNumber.compareTo(aNumber);
+        if (order != 0) return order;
+      } else if (aNumber != null) {
+        return -1;
+      } else if (bNumber != null) {
+        return 1;
       }
-      if (aDate != null) return -1;
-      if (bDate != null) return 1;
-      return 0;
+      // Deterministic fallback for imported/un-numbered documents.
+      final aDate = a['document_date']?.toString() ?? '';
+      final bDate = b['document_date']?.toString() ?? '';
+      final byDate = bDate.compareTo(aDate);
+      if (byDate != 0) return byDate;
+      return (b['created_at']?.toString() ?? '')
+          .compareTo(a['created_at']?.toString() ?? '');
     });
 
     return filtered;
