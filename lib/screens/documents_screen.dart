@@ -710,10 +710,14 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
         child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const _ActionSectionLabel('Edit and copy'),
+          child: ListTileTheme(
+            dense: true,
+            minVerticalPadding: 3,
+            visualDensity: const VisualDensity(vertical: -2),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const _ActionSectionLabel('Edit and copy'),
               if (!estimateConverted)
                 ListTile(
                   leading: Icon(
@@ -834,8 +838,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   onTap: () => Navigator.pop(sheetContext, 'delete'),
                 ),
               ],
-              const SizedBox(height: 8),
-            ],
+                const SizedBox(height: 6),
+              ],
+            ),
           ),
         ),
       ),
@@ -1971,11 +1976,18 @@ class _ActionSectionLabel extends StatelessWidget {
   final String label;
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-    child: Align(alignment: Alignment.centerLeft,
-      child: Text(label.toUpperCase(),
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+    padding: const EdgeInsets.fromLTRB(16, 10, 16, 5),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        label.toUpperCase(),
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+          fontSize: 14,
           color: Theme.of(context).colorScheme.onSurfaceVariant,
-          letterSpacing: 0.8, fontWeight: FontWeight.w700))),
+          letterSpacing: 0.45,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ),
   );
 }
