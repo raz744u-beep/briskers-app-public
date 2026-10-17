@@ -914,6 +914,15 @@ class OfflineInvoicePaymentLedger {
         await _database.transaction(() async {
           await LocalJobQuarantine.assertReplayAllowed(
             _database,businessId,outboxId:id);
+          final cache=LocalDocumentDetailCache(database:_database);
+          final oldDetail=await cache.load(businessId,invoiceId);
+          final refreshed=Map<String,dynamic>.from(server);
+          if (!refreshed.containsKey('offline_warranty_detail') &&
+              oldDetail?['offline_warranty_detail'] != null) {
+            refreshed['offline_warranty_detail'] =
+                oldDetail!['offline_warranty_detail'];
+          }
+          await cache.save(businessId,invoiceId,refreshed);
           await _database.customStatement(
             'DELETE FROM sync_outbox WHERE id=?',[id]);
         });
