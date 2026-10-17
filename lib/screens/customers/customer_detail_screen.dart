@@ -207,7 +207,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         builder: (_) => JobDetailScreen(
           businessId: widget.businessId,
           jobId: type == 'Visit' ? jobId : id,
-          roleCode: widget.roleCode)));
+          roleCode: widget.roleCode,
+          bottomNavigationBar: widget.sharedBottomNavigationBar)));
     } else if (type == 'Appointment') {
       await Navigator.push<void>(context, MaterialPageRoute(
         builder: (_) => AppointmentManageScreen(
@@ -1159,6 +1160,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           customerName: customer['name']?.toString() ?? 'Customer',
           roleCode: widget.roleCode,
           vehicles: vehicles,
+          bottomNavigationBar: widget.sharedBottomNavigationBar,
         ),
       ),
     );
