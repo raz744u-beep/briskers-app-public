@@ -713,7 +713,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           child: ListTileTheme(
             dense: true,
             minVerticalPadding: 3,
-            visualDensity: const VisualDensity(vertical: -2),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
