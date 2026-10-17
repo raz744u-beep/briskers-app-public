@@ -1462,14 +1462,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           children: [
             Row(
               children: [
-                if (!_estimate) ...[
-                  Text(
-                    _title,
-                    style: Theme.of(context).textTheme.headlineSmall
-                        ?.copyWith(fontWeight: FontWeight.w800, color: accent),
-                  ),
-                  const SizedBox(width: 8),
-                ],
+                Text(
+                  _title,
+                  style: Theme.of(context).textTheme.headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.w800, color: accent),
+                ),
+                const SizedBox(width: 8),
                 PopupMenuButton<String>(
                   tooltip: 'Filter $_title',
                   onSelected: (value) => setState(() {
