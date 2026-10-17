@@ -786,17 +786,17 @@ class BriskersDiagnosticsService {
     checks.add(DiagnosticCheck(
       id: 'JOB-001',
       category: 'Jobs',
-      title: 'Job list numeric sequence',
+      title: 'Job activity ordering',
       level: inversions == 0
           ? BriskersDiagnosticLevel.pass
-          : BriskersDiagnosticLevel.fail,
+          : BriskersDiagnosticLevel.warning,
       summary: inversions == 0
-          ? 'The first ${jobs.length} jobs follow numeric sequence '
+          ? 'The first ${jobs.length} jobs show numeric sequence '
               'within their status groups.'
-          : '$inversions incorrectly ordered job pair(s) in the first '
+          : '$inversions numeric inversions due to activity ordering in the first '
               '${jobs.length} records.',
       details: [
-        'Active jobs retain priority over completed jobs.',
+        'All Jobs intentionally sorts by recent activity; number gaps are not a sorting failure.',
         if (examples.isNotEmpty) 'Examples: ${examples.join('; ')}',
         'MobileBiz import timestamps are not used to choose the newest job.',
       ],
