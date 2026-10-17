@@ -77,6 +77,9 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   CustomerNotificationService? _customerNotifications;
   StreamSubscription<String>? _customerReviewsSubscription;
   int _jobsRefreshToken = 0;
+  int _estimatesDockReset = 0;
+  int _invoicesDockReset = 0;
+  int _scheduleDockReset = 0;
   int _homeAttentionRefreshToken = 0;
   Map<String, dynamic> _navCounts = const {
     'customers': 0,
@@ -426,8 +429,12 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     setState(() {
       _index = index;
       if (index == 2) _jobsRefreshToken++;
+      if (index == 3) _estimatesDockReset++;
+      if (index == 4) _invoicesDockReset++;
+      if (index == 5) _scheduleDockReset++;
       if (index == 0) _homeAttentionRefreshToken++;
     });
+    if (index == 4) _refreshHomeInvoicesCount();
   }
 
   String get _roleLabel => roleLabel(widget.roleCode);
@@ -436,11 +443,11 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     selectedIndex: _index,
     destinations: [
       const BriskersDockDestination(label: 'Home', icon: Icons.home_outlined, color: BriskersColors.today),
-      const BriskersDockDestination(label: 'Customers', icon: Icons.people_outline, color: BriskersColors.customers),
+      BriskersDockDestination(label: 'Customers', icon: Icons.people_outline, color: BriskersColors.customers, count: _homeCustomersNewCount),
       BriskersDockDestination(label: 'Jobs', icon: Icons.build_outlined, color: BriskersColors.jobs, count: _homeJobsCount),
-      const BriskersDockDestination(label: 'Estimates', icon: Icons.description_outlined, color: BriskersColors.estimates),
-      const BriskersDockDestination(label: 'Invoices', icon: Icons.receipt_long_outlined, color: BriskersColors.invoices),
-      const BriskersDockDestination(label: 'Schedule', icon: Icons.calendar_month_outlined, color: BriskersColors.schedule),
+      BriskersDockDestination(label: 'Estimates', icon: Icons.description_outlined, color: BriskersColors.estimates, count: _homeEstimatesOpenCount),
+      BriskersDockDestination(label: 'Invoices', icon: Icons.receipt_long_outlined, color: BriskersColors.invoices, count: _homeInvoicesOpenCount),
+      BriskersDockDestination(label: 'Schedule', icon: Icons.calendar_month_outlined, color: BriskersColors.schedule, count: _homeAppointmentsCount),
       const BriskersDockDestination(label: 'Expenses', icon: Icons.account_balance_wallet_outlined, color: BriskersColors.expenses),
       const BriskersDockDestination(label: 'More', icon: Icons.more_horiz, color: BriskersColors.more),
     ],
@@ -505,8 +512,31 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
           businessId: widget.businessId,
           roleCode: widget.roleCode,
           refreshToken: _jobsRefreshToken,
+          defaultToOpen: true,
           onJobsChanged: _refreshHomeJobsCount,
           jobDetailBottomNavigationBar: _shellNavigationBar(nested: true),
+        );
+      }
+      if (index == 3 || index == 4) {
+        return DocumentsScreen(
+          roleCode: widget.roleCode,
+          businessId: widget.businessId,
+          kind: index == 3 ? 'estimate' : 'invoice',
+          isOwner: widget.roleCode == 'owner',
+          canManageExpenses: index == 4 &&
+              <String>{'owner', 'manager', 'office'}.contains(widget.roleCode),
+          showAppBar: false,
+          sharedBottomNavigationBar:
+              index == 3 ? _shellNavigationBar(nested: true) : null,
+          dockDefaultsToOpen: true,
+          dockResetToken: index == 3 ? _estimatesDockReset : _invoicesDockReset,
+        );
+      }
+      if (index == 5) {
+        return AppointmentsScreen(
+          businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          dockResetToken: _scheduleDockReset,
         );
       }
       return _lazyPages.putIfAbsent(index, () {
