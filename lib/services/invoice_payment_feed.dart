@@ -119,7 +119,9 @@ class InvoicePaymentFeed {
       final detail = await detailCache.load(businessId, invoiceId);
       if (detail == null ||
           detail['kind'] != 'invoice' ||
-          detail['status'] == 'void') continue;
+          detail['status'] == 'void') {
+        continue;
+      }
       final rows = detail['payments'];
       if (rows is! List) continue;
       final payments = rows.whereType<Map>()
@@ -132,7 +134,9 @@ class InvoicePaymentFeed {
         cumulative += amount;
         if (payment['state']?.toString() != 'pending' ||
             payment['pending_sync'] == true ||
-            payment['_local_pending_payment'] == true) continue;
+            payment['_local_pending_payment'] == true) {
+          continue;
+        }
         final paymentId = payment['id']?.toString() ?? '';
         if (paymentId.isEmpty) continue;
         final at = payment['entered_at']?.toString() ?? '';
