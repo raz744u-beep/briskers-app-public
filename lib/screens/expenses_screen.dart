@@ -15,10 +15,12 @@ import '../services/briskers_api.dart';
 import '../services/warranty_receipt_reporting.dart';
 import '../services/local_attachment_cache.dart';
 import '../services/local_financial_cache.dart';
+import '../services/invoice_payment_feed.dart';
 import '../services/expenseiq_local_photo_sync.dart';
 import '../services/expenseiq_background_scheduler.dart';
 import '../widgets/briskers_page_header.dart';
 import 'expenses/expense_detail_screen.dart';
+import 'jobs/job_document_screen.dart';
 import 'expenses/expense_entry_screen.dart';
 import 'settings/expense_settings_screen.dart';
 
@@ -45,9 +47,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   static const _api = BriskersApi();
   static const _expenseIqChannel = MethodChannel('com.briskers/expenseiq');
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
+  final InvoicePaymentFeed _invoiceFeed = InvoicePaymentFeed();
+  List<Map<String, dynamic>> _invoiceReceipts = const [];
+  bool _recoveringCachedReceipts = false;
   final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
 
   static const int _pageSize = 50;
+  int _visibleCount = _pageSize;
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
@@ -112,8 +118,21 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   void _handleScroll() {
-    if (_scrollController.hasClients &&
-        _scrollController.position.extentAfter < 500) {
+    if (!_scrollController.hasClients ||
+        _scrollController.position.extentAfter >= 500) {
+      return;
+    }
+    final count = InvoicePaymentFeed.combine(
+      financial: _transactions, receipts: _invoiceReceipts,
+      startDate: _rangeStartDate, endDate: _rangeEndDate,
+      search: _searchController.text,
+      direction: _filter == 'all' ? null : _filter,
+      filteredAccount: _accountFilterId != null ||
+          _categoryFilterId != null || _counterpartyFilterId != null,
+    ).length;
+    if (_visibleCount < count) {
+      setState(() => _visibleCount += _pageSize);
+    } else {
       _loadMore();
     }
   }
@@ -252,10 +271,19 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     if (showLoading) {
       setState(() {
         _loading = true;
+        _visibleCount = _pageSize;
         _error = null;
       });
     } else {
       setState(() => _error = null);
+    }
+
+    // Reload the durable offline payment queue on every entry/refresh.
+    try {
+      final receipts = await _invoiceFeed.load(widget.businessId);
+      if (mounted) setState(() => _invoiceReceipts = receipts);
+    } catch (_) {
+      // Preserve the existing financial list if cache access fails.
     }
 
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
@@ -314,14 +342,20 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
 
     if (BriskersConnectionModeController.instance.forceOffline) {
-      if (mounted && !_showingLocal) {
+      if (mounted) {
         setState(() {
-          _transactions = const [];
+          if (!_showingLocal) _transactions = const [];
           _hasMore = false;
           _loading = false;
           _error = null;
           _showingLocal = true;
         });
+        // Existing installations have cached server invoice payments before
+        // the new receipt inventory has ever been pulled. Restore them AFTER
+        // painting, without changing saved payments or requiring a connection.
+        if (_owner || widget.roleCode == 'manager') {
+          unawaited(_recoverCachedInvoiceReceipts());
+        }
       }
       return;
     }
@@ -363,6 +397,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         _showingLocal = false;
         _error = null;
       });
+      unawaited(_refreshInvoiceReceipts());
     } catch (error) {
       if (!mounted) return;
       final forceOffline =
@@ -376,6 +411,122 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         }
       });
     }
+  }
+
+  Future<void> _recoverCachedInvoiceReceipts() async {
+    if (_recoveringCachedReceipts) return;
+    _recoveringCachedReceipts = true;
+    try {
+      final rows =
+          await _invoiceFeed.pendingFromCachedInvoices(widget.businessId);
+      if (!mounted || rows.isEmpty) return;
+      setState(() => _invoiceReceipts = InvoicePaymentFeed.mergeReceipts(
+        rows, _invoiceReceipts,
+      ));
+    } catch (_) {
+      // Preserve the local outbox and posted financial snapshot unchanged.
+    } finally {
+      _recoveringCachedReceipts = false;
+    }
+  }
+
+  Future<void> _refreshInvoiceReceipts() async {
+    try {
+      const pageSize = 250;
+      final rows = <Map<String, dynamic>>[];
+      var exhausted = false;
+      // Never replace the saved receipt inventory with a truncated response.
+      for (var offset = 0; offset < 20000; offset += pageSize) {
+        if (!mounted ||
+            BriskersConnectionModeController.instance.forceOffline) {
+          return;
+        }
+        final page = await _api.invoiceReceipts(
+          widget.businessId, limit: pageSize, offset: offset,
+        );
+        rows.addAll(page);
+        if (offset == 0 && mounted) {
+          // Show the latest server payments after the first short page;
+          // continue filling the historical offline snapshot in background.
+          final saved = _invoiceReceipts
+              .where((r) => r['receipt_state']?.toString() != 'local')
+              .toList();
+          final queued = _invoiceReceipts
+              .where((r) => r['receipt_state']?.toString() == 'local')
+              .toList();
+          setState(() => _invoiceReceipts = InvoicePaymentFeed.mergeReceipts(
+            [...page, ...saved], queued,
+          ));
+        }
+        if (page.length < pageSize) {
+          exhausted = true;
+          break;
+        }
+      }
+      if (!exhausted ||
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
+      await _invoiceFeed.saveServerReceipts(widget.businessId, rows);
+      final merged = await _invoiceFeed.load(widget.businessId);
+      if (mounted) setState(() => _invoiceReceipts = merged);
+    } catch (_) {
+      // Keep locally recorded payments visible on old/unavailable backends.
+    }
+  }
+
+  Future<void> _openInvoiceReceipt(Map<String, dynamic> row) async {
+    final invoiceId = row['document_id']?.toString() ?? '';
+    if (invoiceId.isEmpty) {
+      await _viewInvoiceReceipt(row);
+      return;
+    }
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: invoiceId,
+          isOwner: _owner,
+          roleCode: widget.roleCode,
+          initialTab: 'payment',
+        ),
+      ),
+    );
+    if (mounted) unawaited(_load(showLoading: false));
+  }
+
+  Future<void> _viewInvoiceReceipt(Map<String, dynamic> row) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(row['counterparty']?.toString() ?? 'Customer',
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Text('Invoice #${row['document_number'] ?? '—'}'),
+              Text('Payment method: ${row['payment_method_name'] ?? 'Payment'}'),
+              Text('Amount: ${_money(row['amount'])}'),
+              Text('Date: ${row['transaction_date'] ?? '—'}'),
+              const SizedBox(height: 12),
+              const Text('Payment details and finalization are managed on the invoice.'),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(onPressed: () => Navigator.pop(context),
+                    child: const Text('Close')),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _loadMore() async {
@@ -1131,7 +1282,18 @@ class _ExpensesScreenState extends State<ExpensesScreen>
               sum + (num.tryParse(item['amount']?.toString() ?? '') ?? 0),
         );
 
-    final visible = _transactions;
+    final allVisible = InvoicePaymentFeed.combine(
+      financial: _transactions,
+      receipts: _invoiceReceipts,
+      startDate: _rangeStartDate,
+      endDate: _rangeEndDate,
+      search: _searchController.text,
+      direction: _filter == 'all' ? null : _filter,
+      filteredAccount: _accountFilterId != null ||
+          _categoryFilterId != null || _counterpartyFilterId != null,
+    );
+    final visible = allVisible.take(_visibleCount).toList();
+    final moreReceiptPages = allVisible.length > _visibleCount;
     final feesUnverified = _transactions.any(
       (row) =>
           row['direction'] == 'income' && row['reporting_status'] != 'verified',
@@ -1578,6 +1740,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                             transaction['receipt_count']?.toString() ?? '',
                           ) ??
                           0;
+                      final invoiceReceipt = transaction['_invoice_receipt'] == true;
                       final directionColor = incomeRow
                           ? const Color(0xFF169B62)
                           : const Color(0xFFC62828);
@@ -1586,9 +1749,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                         margin: const EdgeInsets.only(bottom: 8),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
-                          onTap: () => _openTransaction(transaction),
-                          onLongPress: () =>
-                              _showTransactionActions(transaction),
+                          onTap: () => invoiceReceipt
+                              ? _openInvoiceReceipt(transaction)
+                              : _openTransaction(transaction),
+                          onLongPress: invoiceReceipt
+                              ? null
+                              : () => _showTransactionActions(transaction),
                           child: Padding(
                             padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
                             child: Row(
@@ -1631,7 +1797,17 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
-                                      Text(
+                                      if (invoiceReceipt) Text(
+                                        transaction['_payment_coverage'] == 'paid'
+                                            ? 'Paid' : 'Partial',
+                                        style: TextStyle(
+                                          color: transaction['_payment_coverage'] == 'paid'
+                                              ? const Color(0xFF168A4B)
+                                              : const Color(0xFFD56D08),
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      if (!invoiceReceipt) Text(
                                         remarks.isEmpty
                                             ? <String>[
                                                 if (category.isNotEmpty)
@@ -1662,7 +1838,28 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                         color: directionColor,
                                       ),
                                     ),
-                                    if ((num.tryParse(
+                                    if (invoiceReceipt) ...[
+                                      const SizedBox(height: 6),
+                                      Stack(alignment: Alignment.center, children: [
+                                        Icon(
+                                          transaction['_receipt_state'] == 'local'
+                                              ? Icons.cloud_outlined : Icons.cloud,
+                                          size: 32,
+                                          color: transaction['_receipt_state'] == 'local'
+                                              ? const Color(0xFF667085)
+                                              : const Color(0xFF169B62),
+                                        ),
+                                        Icon(
+                                          transaction['_receipt_state'] == 'local'
+                                              ? Icons.priority_high : Icons.check,
+                                          size: transaction['_receipt_state'] == 'local' ? 17 : 19,
+                                          color: transaction['_receipt_state'] == 'local'
+                                              ? const Color(0xFF667085)
+                                              : Colors.white,
+                                        ),
+                                      ]),
+                                    ],
+                                    if (!invoiceReceipt && (num.tryParse(
                                               transaction['reporting_processor_fee']
                                                       ?.toString() ??
                                                   '',
@@ -1673,7 +1870,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                         'Net · fee ${_money(transaction['reporting_processor_fee'])}',
                                         style: const TextStyle(fontSize: 11),
                                       ),
-                                    if (incomeRow &&
+                                    if (!invoiceReceipt && incomeRow &&
                                         transaction['reporting_status'] !=
                                             'verified')
                                       const Text(
@@ -1719,7 +1916,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       padding: EdgeInsets.symmetric(vertical: 18),
                       child: Center(child: CircularProgressIndicator()),
                     )
-                  else if (!_hasMore && visible.isNotEmpty)
+                  else if (!_hasMore && !moreReceiptPages && visible.isNotEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
                       child: Center(
