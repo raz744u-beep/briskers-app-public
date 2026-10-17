@@ -1431,7 +1431,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               ],
             )
           : null,
-      bottomNavigationBar: widget.customerId != null
+      bottomNavigationBar: (widget.customerId != null || !widget.showAppBar)
           ? SafeArea(
               top: false,
               child: Column(
