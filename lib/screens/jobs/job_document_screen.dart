@@ -3080,7 +3080,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _editPayment(Map<String, dynamic> payment) async {
-    if (_estimate || payment['state']?.toString() != 'pending') return;
+    if (_estimate || payment['state']?.toString() != 'pending' ||
+        payment['reconciliation_required'] == true) return;
 
     List<Map<String, dynamic>> methods;
     try {
@@ -3089,29 +3090,67 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       if (mounted) setState(() => _error = error.toString());
       return;
     }
-
     if (!mounted || methods.isEmpty) return;
 
+    final localReceipt = payment['pending_sync'] == true;
+    final rawDate = (payment['payment_date'] ??
+        payment['entered_at'])?.toString() ?? '';
+    final parsedDate = DateTime.tryParse(rawDate);
+    final initialDate = parsedDate == null
+        ? DateFormat('yyyy-MM-dd').format(DateTime.now())
+        : DateFormat('yyyy-MM-dd').format(
+            rawDate.length == 10 ? parsedDate : parsedDate.toLocal(),
+          );
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (_) => _PaymentEntryDialog(
         methods: methods,
         initialAmount: _number(payment['amount']),
         initialMethodId: payment['payment_method_id']?.toString(),
+        initialPaymentDate: initialDate,
+        editDate: true,
         title: tr('editPayment'),
         saveLabel: tr('saveChanges'),
       ),
     );
     if (result == null) return;
+    final methodId = result['method_id'].toString();
+    final chosenMethod = methods.firstWhere(
+      (m) => m['id']?.toString() == methodId,
+    );
+    final chosenDate = result['payment_date'].toString();
 
-    await _run(() async {
-      await _api.updatePendingInvoicePayment(
-        widget.businessId,
-        payment['id'].toString(),
+    if (localReceipt) {
+      final total = _number(_detail?['total_amount']);
+      final recorded = _number(_detail?['paid_amount']) +
+          _number(_detail?['pending_payment']);
+      final allowableCents =
+          ((total - recorded + _number(payment['amount'])) * 100).round();
+      await _run(() => _offlinePayments.editNeverSubmittedPayment(
+        widget.businessId, widget.documentId, payment['id'].toString(),
         amount: result['amount'] as num,
-        methodId: result['method_id'].toString(),
-      );
-    });
+        maximumAllowedCents: allowableCents,
+        methodId: methodId,
+        methodName: chosenMethod['name']?.toString() ?? '',
+        paymentDate: chosenDate,
+      ));
+      return;
+    }
+
+    // Existing v1 server RPC accepts amount and method only. Do not claim
+    // that the date changed until the audited v2 backend is deployed.
+    if (chosenDate != initialDate) {
+      setState(() => _error =
+          'Payment date correction requires the server update. '
+          'The existing payment was not changed.');
+      return;
+    }
+    await _run(() => _api.updatePendingInvoicePayment(
+      widget.businessId,
+      payment['id'].toString(),
+      amount: result['amount'] as num,
+      methodId: methodId,
+    ));
   }
 
   Future<void> _deletePayment(Map<String, dynamic> payment) async {
@@ -5813,7 +5852,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                         final payment = payments[index];
                         final editable =
                             payment['state']?.toString() == 'pending' &&
-                            payment['pending_sync'] != true;
+                            payment['reconciliation_required'] != true;
                         final methodName =
                             payment['payment_method_name']?.toString() ??
                                 tr('paymentSection');
