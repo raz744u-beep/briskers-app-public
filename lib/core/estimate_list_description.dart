@@ -15,7 +15,7 @@ String estimateListDescription(
     detail?['work_summary'],
   ];
   for (final raw in candidates) {
-    final value = raw?.toString().replaceAll(RegExp(r'\\s+'), ' ').trim() ?? '';
+    final value = raw?.toString().replaceAll(RegExp(r'\s+'), ' ').trim() ?? '';
     if (value.isNotEmpty && value.toLowerCase() != title.toLowerCase()) {
       return value;
     }
@@ -28,7 +28,7 @@ String estimateListDescription(
   for (final raw in rawLines) {
     if (raw is! Map || raw['line_kind']?.toString() == 'discount') continue;
     final name = (raw['name'] ?? '').toString()
-        .replaceAll(RegExp(r'\\s+'), ' ').trim();
+        .replaceAll(RegExp(r'\s+'), ' ').trim();
     if (name.isNotEmpty && !names.contains(name)) names.add(name);
     if (names.length == 2) break;
   }
