@@ -1,5 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:briskers_app/services/local_document_detail_cache.dart';
 
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_financial_cache.dart'
@@ -55,6 +57,65 @@ void main() {
       expect(cards.single['_payment_coverage'], 'paid');
       expect(cards.single['_receipt_state'], 'local');
       expect(cards.single['document_number'], '6348');
+    } finally {
+      await db.close();
+    }
+  });
+
+  test('legacy offline invoice cache exposes both unfinalized Sara receipts',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    try {
+      const business = 'fixture-business';
+      await db.customStatement(
+        "INSERT INTO local_customers (id,business_id,display_name)"
+        " VALUES ('sara-id',?, 'Sara Mirza')", [business],
+      );
+      await db.customStatement(
+        "INSERT INTO local_documents (id,business_id,kind,customer_id,"
+        "document_number,total) VALUES ('sara-invoice',?,'invoice',"
+        "'sara-id','6345',3659.08)", [business],
+      );
+      await LocalDocumentDetailCache(database: db).save(
+        business, 'sara-invoice', {
+          'id': 'sara-invoice',
+          'kind': 'invoice',
+          'status': 'issued',
+          'document_number': '6345',
+          'customer_name': 'Sara Mirza',
+          'total_amount': 3659.08,
+          'pending_payment': 3659.08,
+          'payments': [
+            {
+              'id': 'sara-payment-1', 'state': 'pending',
+              'amount': 10, 'payment_method_name': 'Card',
+              'entered_at': '2026-10-13T22:44:36Z',
+            },
+            {
+              'id': 'sara-payment-2', 'state': 'pending',
+              'amount': 3649.08, 'payment_method_name': 'Card',
+              'entered_at': '2026-10-14T21:01:10Z',
+            },
+          ],
+        },
+      );
+      final feed = InvoicePaymentFeed(
+        database: db,
+        cache: financial.LocalFinancialCache(database: db),
+      );
+      final recovered = await feed.pendingFromCachedInvoices(business);
+      expect(recovered, hasLength(2));
+      expect(recovered.map((r) => r['coverage']), ['partial', 'paid']);
+      expect(recovered.map((r) => r['amount']), [10, 3649.08]);
+      expect(InvoicePaymentFeed.combine(
+          financial: [], receipts: recovered), hasLength(2));
+
+      // An authoritative server snapshot, including an empty one, replaces
+      // historical fallback. It must not resurrect stale pending payments.
+      await financial.LocalFinancialCache(database: db)
+          .saveInvoiceReceipts(business, []);
+      expect(await feed.pendingFromCachedInvoices(business), isEmpty);
     } finally {
       await db.close();
     }
