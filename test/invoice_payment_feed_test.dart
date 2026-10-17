@@ -107,8 +107,32 @@ void main() {
     expect(cards, hasLength(2));
     expect(cards.where((x)=>x['_invoice_receipt']==true), hasLength(1));
     expect(cards.where((x)=>x['id']=='unrelated-income'), hasLength(1));
+    expect(cards.where((x)=>x['id']=='transaction-1'), hasLength(1));
     expect(cards.fold<double>(0,
         (sum,r)=>sum + (r['amount'] as num).toDouble()), 200.60);
+  });
+
+  test('posted warranty fee projection remains intact after receipt overlay',
+      () {
+    final original = <String, dynamic>{
+      'id': 'warranty-posted',
+      'direction': 'income',
+      'amount': 300,
+      'reporting_amount': 288,
+      'reporting_processor_fee': 12,
+      'reporting_status': 'verified',
+      'transaction_date': '2026-10-17',
+    };
+    final shown = InvoicePaymentFeed.combine(
+      financial: [original],
+      receipts: [receipt('allocation-w','posted',300,
+          transactionId:'warranty-posted')],
+    );
+    expect(shown, hasLength(1));
+    expect(shown.single['_invoice_receipt'], true);
+    expect(shown.single['reporting_amount'], 288);
+    expect(shown.single['reporting_processor_fee'], 12);
+    expect(shown.single['reporting_status'], 'verified');
   });
 
   test('server ID/operation ID remove queued duplicate, amounts alone do not', () {
