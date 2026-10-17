@@ -264,6 +264,7 @@ class _HomeScreenState extends State<HomeScreen> {
           businessId: widget.businessId,
           jobId: id,
           roleCode: widget.roleCode,
+          bottomNavigationBar: widget.estimatesNavigationBar,
         ),
       ),
     );
