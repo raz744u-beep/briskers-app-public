@@ -49,6 +49,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   final LocalFinancialCache _localFinancial = LocalFinancialCache();
   final InvoicePaymentFeed _invoiceFeed = InvoicePaymentFeed();
   List<Map<String, dynamic>> _invoiceReceipts = const [];
+  bool _recoveringCachedReceipts = false;
   final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
 
   static const int _pageSize = 50;
@@ -349,6 +350,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           _error = null;
           _showingLocal = true;
         });
+        // Existing installations have cached server invoice payments before
+        // the new receipt inventory has ever been pulled. Restore them AFTER
+        // painting, without changing saved payments or requiring a connection.
+        if (_owner || widget.roleCode == 'manager') {
+          unawaited(_recoverCachedInvoiceReceipts());
+        }
       }
       return;
     }
@@ -403,6 +410,23 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           _error = error.toString();
         }
       });
+    }
+  }
+
+  Future<void> _recoverCachedInvoiceReceipts() async {
+    if (_recoveringCachedReceipts) return;
+    _recoveringCachedReceipts = true;
+    try {
+      final rows =
+          await _invoiceFeed.pendingFromCachedInvoices(widget.businessId);
+      if (!mounted || rows.isEmpty) return;
+      setState(() => _invoiceReceipts = InvoicePaymentFeed.mergeReceipts(
+        rows, _invoiceReceipts,
+      ));
+    } catch (_) {
+      // Preserve the local outbox and posted financial snapshot unchanged.
+    } finally {
+      _recoveringCachedReceipts = false;
     }
   }
 
