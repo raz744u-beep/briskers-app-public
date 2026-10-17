@@ -28,6 +28,7 @@ import '../../core/document_presentation.dart';
 import '../../core/document_navigation_role.dart';
 import '../../core/standard_note_rules.dart';
 import '../../services/briskers_api.dart';
+import '../../services/invoice_tax_proposal.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/document_pdf_service.dart';
 import '../../services/invoice_performance_metrics.dart';
@@ -4527,6 +4528,149 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     return text;
   }
 
+  /// Preview and save invoice-wide Tax as one audited transaction.
+  /// No sequence of individually committed line edits is ever attempted.
+  Map<String, dynamic> _invoiceTaxPreview(
+      List<Map<String, dynamic>> lines, num oldRate, num newRate) {
+    if (lines.isEmpty || lines.any((l) => l['line_kind'] == 'discount')) {
+      throw StateError('Tax editing for discounted invoices requires review.');
+    }
+    final taxable = lines.where((l) => _number(l['tax_rate']) > 0).toList();
+    if (taxable.isEmpty ||
+        taxable.any((l) => (_number(l['tax_rate']) - oldRate).abs() > 0.0000001)) {
+      throw StateError('Mixed or unknown taxable rates require individual review.');
+    }
+    final classified = lines.map((line) => <String, dynamic>{
+      ...line,
+      'tax_mode': _number(line['tax_rate']) == 0 ? 'exempt' : 'default',
+    }).toList();
+    final result = InvoiceTaxProposal.preview(
+      lines: classified, rate: newRate);
+    if ((_number(result['old_tax']) - _number(_detail?['tax_amount'])).abs() >
+        0.011) {
+      throw StateError('Invoice tax does not match its lines. Reload and review.');
+    }
+    return result;
+  }
+
+  Future<void> _editInvoiceTax(List<Map<String, dynamic>> lines) async {
+    if (_estimate || !widget.isOwner || _readOnly || _busy || _detail == null) {
+      return;
+    }
+    final existingRates = lines.map((line) => _number(line['tax_rate']))
+        .where((rate) => rate > 0).toSet();
+    if (existingRates.length != 1) {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Tax needs review'),
+          content: const Text(
+            'This invoice has multiple or unknown taxable rates. '
+            'Tax cannot safely be changed for every line at once.'),
+          actions: [TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(tr('ok')),
+          )],
+        ),
+      );
+      return;
+    }
+    final oldRate = existingRates.single;
+    final currentVersion = _version;
+    final controller = TextEditingController(
+      text: (oldRate * 100).toStringAsFixed(2));
+    try {
+      final selectedRate = await showDialog<num>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, updateDialog) {
+            final percent = num.tryParse(controller.text.trim());
+            final rate = percent == null ? null : percent / 100;
+            Map<String, dynamic>? proposed;
+            String? problem;
+            try {
+              if (rate == null || rate <= 0 || rate > 1) {
+                problem = 'Enter a valid percentage above 0 and up to 100.';
+              } else {
+                proposed = _invoiceTaxPreview(lines, oldRate, rate);
+              }
+            } catch (error) {
+              problem = error.toString().replaceFirst('Bad state: ', '');
+            }
+            final offline = BriskersConnectionModeController.instance.forceOffline;
+            return AlertDialog(
+              title: const Text('Edit invoice tax'),
+              content: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Current rate: ${(oldRate * 100).toStringAsFixed(2)}%'),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: controller,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'New sales tax (%)',
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (_) => updateDialog(() {}),
+                    ),
+                    const SizedBox(height: 12),
+                    if (proposed != null) ...[
+                      Text('Current tax: ${_money(_detail?['tax_amount'])}'),
+                      Text('New tax: ${_money(proposed['new_tax'])}'),
+                      Text('New total: ${_money(proposed['new_total'])}',
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      const Text('Exempt (0%) lines are left unchanged. '
+                        'Existing payments will not be edited or finalized.'),
+                    ],
+                    if (problem != null)
+                      Text(problem, style: const TextStyle(color: Colors.red)),
+                    if (offline) ...[
+                      const SizedBox(height: 8),
+                      const Text('Offline: preview only. Saving requires a verified '
+                        'server connection so the invoice changes atomically.'),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: Text(tr('cancel')),
+                ),
+                FilledButton(
+                  onPressed: offline || proposed == null ||
+                          rate == null || (rate-oldRate).abs() < 0.0000001
+                      ? null : () => Navigator.pop(dialogContext, rate),
+                  child: Text(tr('saveChanges')),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+      if (selectedRate == null || !mounted) return;
+      final applied = await _run(() async {
+        await _api.updateInvoiceTaxRate(
+          widget.businessId, widget.documentId,
+          expectedVersion: currentVersion,
+          oldRate: oldRate,
+          newRate: selectedRate,
+        );
+      });
+      if (applied && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(
+            'Invoice tax updated. Review any pending payment amount separately.')),
+        );
+      }
+    } finally {
+      controller.dispose();
+    }
+  }
+
   String _taxLabel(List<Map<String, dynamic>> lines) {
     final rates = lines
         .map((line) => _number(line['tax_rate']))
@@ -5427,9 +5571,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           ),
                     ),
                   ),
-                _AmountRow(
-                  label: _taxLabel(lines),
-                  value: _money(_detail!['tax_amount']),
+                Row(
+                  children: [
+                    Expanded(child: _AmountRow(
+                      label: _taxLabel(lines),
+                      value: _money(_detail!['tax_amount']),
+                    )),
+                    if (!_estimate && widget.isOwner && !_readOnly && !_busy)
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined, size: 19),
+                        tooltip: 'Edit invoice tax',
+                        onPressed: () => _editInvoiceTax(lines),
+                      ),
+                  ],
                 ),
                 const Divider(height: 18),
                 _AmountRow(
