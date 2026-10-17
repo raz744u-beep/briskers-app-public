@@ -5423,6 +5423,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   _AmountRow(
                     label: 'Amount Paid',
                     value: _money(shownPaid),
+                    bold: shownPaid > 0,
                     valueColor: shownPaid > 0
                         ? const Color(0xFF0C9A43)
                         : null,
