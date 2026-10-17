@@ -135,7 +135,8 @@ class OfflineInvoicePaymentLedger {
         'amount': amountCents / 100,
         'payment_method_name': receipt['method_name'],
         'payment_method_id': receipt['method_id'],
-        'entered_at': receipt['received_at'],
+        'entered_at': receipt['payment_date'] ?? receipt['received_at'],
+        'payment_date': receipt['payment_date'],
         'pending_sync': true,
         '_local_pending_payment': true,
         'reconciliation_required': ambiguous,
@@ -223,6 +224,68 @@ class OfflineInvoicePaymentLedger {
       );
     });
     return operationId;
+  }
+
+  /// Edit a never-submitted local receipt in place, preserving operation UUID.
+  /// An uncertain, inflight or already-attempted replay must be reconciled.
+  Future<void> editNeverSubmittedPayment(
+    String businessId, String invoiceId, String operationId, {
+    required num amount,
+    required int maximumAllowedCents,
+    required String methodId,
+    required String methodName,
+    required String paymentDate,
+  }) async {
+    final amountCents = cents(amount);
+    final date = DateTime.tryParse(paymentDate);
+    if (amountCents > maximumAllowedCents) {
+      throw StateError('Payment exceeds available invoice balance.');
+    }
+    if (methodId.isEmpty || methodName.trim().isEmpty ||
+        !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(paymentDate) ||
+        date == null ||
+        date.toIso8601String().substring(0, 10) != paymentDate) {
+      throw ArgumentError('Select a valid amount, date and method.');
+    }
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        """SELECT id, state, attempt_count, last_attempt_at, payload_json
+        FROM sync_outbox WHERE business_id=? AND entity_id=?
+        AND entity_type='invoice_payment_received'
+        AND state IN ('pending','inflight')""",
+        variables: [Variable<String>(businessId), Variable<String>(invoiceId)],
+      ).get();
+      final matching = rows.where((row) {
+        try {
+          final value = jsonDecode(row.read<String>('payload_json')) as Map;
+          return value['operation_id']?.toString() == operationId;
+        } catch (_) { return false; }
+      }).toList();
+      if (matching.length != 1) {
+        throw StateError('Payment not found. Reload before editing.');
+      }
+      final row = matching.single;
+      final value = Map<String, dynamic>.from(
+          jsonDecode(row.read<String>('payload_json')) as Map);
+      if (row.read<String>('state') != 'pending' ||
+          row.read<int>('attempt_count') != 0 ||
+          row.readNullable<int>('last_attempt_at') != null ||
+          value['replay_attempted'] == true ||
+          (value['server_payment_id']?.toString().isNotEmpty ?? false)) {
+        throw StateError(
+          'Payment may have reached the server. Reconcile before editing.');
+      }
+      value['amount_cents'] = amountCents;
+      value['method_id'] = methodId;
+      value['method_name'] = methodName.trim();
+      // Preserve received_at as originally captured; only shop date changes.
+      value['payment_date'] = paymentDate;
+      value['local_edit_at'] = DateTime.now().toUtc().toIso8601String();
+      await _database.customStatement(
+        "UPDATE sync_outbox SET payload_json=?,last_error=NULL WHERE id=?",
+        [jsonEncode(value), row.read<int>('id')],
+      );
+    });
   }
 
   /// Replace a local invoice reference only after the authoritative server
@@ -327,7 +390,14 @@ class OfflineInvoicePaymentLedger {
           () => submitPayment != null
               ? submitPayment(
                   businessId, invoiceId, amount, methodId, operationId)
-              : _api.addPendingInvoicePaymentOnce(
+              : payload['payment_date'] != null
+                  ? _api.addPendingInvoicePaymentOnceV2(
+                      businessId, invoiceId,
+                      amount: amount, methodId: methodId,
+                      operationId: operationId,
+                      paymentDate: payload['payment_date'].toString(),
+                    )
+                  : _api.addPendingInvoicePaymentOnce(
                   businessId, invoiceId,
                   amount: amount, methodId: methodId, operationId: operationId,
                 ),
