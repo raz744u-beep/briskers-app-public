@@ -75,6 +75,19 @@ void main() {
     expect(cards.where((r) => r['_payment_coverage']=='paid'), hasLength(1));
   });
 
+  test('server-saved but unfinalized payment is synchronized for icon only',
+      () {
+    final cards = InvoicePaymentFeed.combine(
+      financial: [],
+      receipts: [receipt('server-pending','pending',175.60)],
+    );
+    expect(cards, hasLength(1));
+    expect(cards.single['_receipt_state'], 'pending');
+    expect(cards.single['_payment_coverage'], 'paid');
+    expect(cards.single['_invoice_receipt'], true);
+    // Pending receipts are visible but are not posted transactions.
+  });
+
   test('posted receipt replaces exact posted transaction, not others', () {
     final posted = {
       'id': 'transaction-1', 'direction': 'income',
