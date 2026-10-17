@@ -226,8 +226,6 @@ class OfflineInvoicePaymentLedger {
     return operationId;
   }
 
-  /// Edit a never-submitted local receipt in place, preserving operation UUID.
-  /// An uncertain, inflight or already-attempted replay must be reconciled.
   Future<void> editNeverSubmittedPayment(
     String businessId, String invoiceId, String operationId, {
     required num amount,
@@ -289,9 +287,8 @@ class OfflineInvoicePaymentLedger {
   }
 
 
-  /// Queue a correction to a server-side PENDING payment when disconnected.
-  /// It never creates another payment or charges the customer's card.
-  /// The server's row_version is required to avoid silent lost updates.
+  /// Offline corrections to server-pending receipts retain the payment ID
+  /// and the originally read server version. No payment is created or charged.
   Future<void> queueServerPendingEdit(
     String businessId, String invoiceId, String paymentId, {
     required int expectedRowVersion,
@@ -301,296 +298,73 @@ class OfflineInvoicePaymentLedger {
     required String methodName,
     required String paymentDate,
   }) async {
-    final centsValue = cents(amount);
-    final date = DateTime.tryParse(paymentDate);
-    if (expectedRowVersion < 1 ||
-        centsValue > maximumAllowedCents ||
+    final amountCents=cents(amount);
+    final date=DateTime.tryParse(paymentDate);
+    if (expectedRowVersion<1 || amountCents>maximumAllowedCents ||
         methodId.isEmpty || methodName.trim().isEmpty ||
-        date == null ||
-        !RegExp(r'^\d{4}-\d{2}-\d{2}
-  /// document has been saved; preserve each payment operation UUID.
-  Future<void> remapInvoice(
-    String businessId,
-    String localId,
-    String serverId,
-  ) async {
-    await _database.transaction(() async {
-      final rows = await _database.customSelect(
-        """SELECT id,payload_json FROM sync_outbox WHERE business_id=?
-        AND entity_type='invoice_payment_received' AND entity_id=?""",
-        variables: [Variable<String>(businessId), Variable<String>(localId)],
-      ).get();
-      for (final row in rows) {
-        final payload = Map<String,dynamic>.from(
-          jsonDecode(row.read<String>('payload_json')) as Map,
-        );
-        payload['invoice_id'] = serverId;
-        await _database.customStatement(
-          'UPDATE sync_outbox SET entity_id=?, payload_json=? WHERE id=?',
-          [serverId,jsonEncode(payload),row.read<int>('id')],
-        );
-      }
-    });
-  }
-
-  /// Retry replay with the *same* saved UUID, never the legacy non-idempotent
-  /// payment API. Fail closed and retain the row when server support is absent.
-  Future<void> flush(
-    String businessId, {
-    Future<String> Function(String businessId, String invoiceId, num amount,
-            String methodId, String operationId)? submitPayment,
-    Future<Map<String, dynamic>> Function(String businessId, String invoiceId)?
-        fetchInvoice,
-    Future<void> Function(String businessId, String invoiceId,
-            Map<String, dynamic> detail)? cacheInvoice,
-  }) {
-    // Multiple sync triggers in the same app process share one replay.
-    // The database and server operation UUID remain the durable safety nets.
-    final active = _activeFlushes[_database] ??= {};
-    final existing = active[businessId];
-    if (existing != null) return existing;
-    final work = _flushInternal(
-      businessId,
-      submitPayment: submitPayment,
-      fetchInvoice: fetchInvoice,
-      cacheInvoice: cacheInvoice,
-    );
-    active[businessId] = work;
-    return work.whenComplete(() {
-      if (identical(active[businessId], work)) {
-        active.remove(businessId);
-      }
-    });
-  }
-
-  Future<void> _flushInternal(
-    String businessId, {
-    Future<String> Function(String businessId, String invoiceId, num amount,
-            String methodId, String operationId)? submitPayment,
-    Future<Map<String, dynamic>> Function(String businessId, String invoiceId)?
-        fetchInvoice,
-    Future<void> Function(String businessId, String invoiceId,
-            Map<String, dynamic> detail)? cacheInvoice,
-  }) async {
-    final rows = await _database.customSelect(
-      """SELECT id,entity_id,payload_json FROM sync_outbox
-      WHERE business_id=? AND entity_type='invoice_payment_received'
-      AND state IN ('pending','inflight') ORDER BY id""",
-      variables: [Variable<String>(businessId)],
-    ).get();
-    final blockedInvoices = <String>{};
-    for (final row in rows) {
-      final id = row.read<int>('id');
-      final invoiceId = row.read<String>('entity_id');
-      if (invoiceId.startsWith('local-')) continue;
-      if (blockedInvoices.contains(invoiceId)) continue;
-      late Map<String,dynamic> payload;
-      try {
-        await LocalJobQuarantine.assertReplayAllowed(
-          _database,
-          businessId,
-          outboxId: id,
-        );
-        // Atomically mark this queue entry as attempted and read the latest
-        // contents. A simultaneous edit cannot overwrite a stale replay.
-        payload = await _database.transaction(() async {
-          final current = await _database.customSelect(
-            'SELECT payload_json FROM sync_outbox WHERE id=? AND business_id=?',
-            variables: [Variable<int>(id),Variable<String>(businessId)],
-          ).getSingleOrNull();
-          if (current == null) {
-            throw StateError('Payment changed during synchronization.');
-          }
-          final value = Map<String,dynamic>.from(
-              jsonDecode(current.read<String>('payload_json')) as Map);
-          value['replay_attempted'] = true;
-          await _database.customStatement(
-            'UPDATE sync_outbox SET payload_json=? WHERE id=?',
-            [jsonEncode(value),id],
-          );
-          return value;
-        });
-        final amount = (payload['amount_cents'] as num) / 100;
-        final methodId = payload['method_id'].toString();
-        final operationId = payload['operation_id'].toString();
-        final paymentId = await LocalJobQuarantine.guardReplay(
-          _database,
-          businessId,
-          () => submitPayment != null
-              ? submitPayment(
-                  businessId, invoiceId, amount, methodId, operationId)
-              : payload['payment_date'] != null
-                  ? _api.addPendingInvoicePaymentOnceV2(
-                      businessId, invoiceId,
-                      amount: amount, methodId: methodId,
-                      operationId: operationId,
-                      paymentDate: payload['payment_date'].toString(),
-                    )
-                  : _api.addPendingInvoicePaymentOnce(
-                  businessId, invoiceId,
-                  amount: amount, methodId: methodId, operationId: operationId,
-                ),
-          outboxId: id,
-        );
-        if (paymentId.trim().isEmpty || paymentId == 'null') {
-          throw StateError('Server did not acknowledge the payment identity.');
-        }
-        // Persist acceptance before refreshing. Another screen may already see
-        // this payment even when the refresh below fails or the app restarts.
-        // Keeping the server ID lets projection deduplicate that accepted row.
-        payload['server_payment_id'] = paymentId;
-        await _database.customStatement(
-          'UPDATE sync_outbox SET payload_json=? WHERE id=?',
-          [jsonEncode(payload), id],
-        );
-        // A server acknowledgement is not sufficient to remove the local
-        // receipt from the outbox. Preserve it until the refreshed server
-        // invoice proves that the payment is represented in its aggregates.
-        // A missing/failed refresh will safely retry with the same UUID.
-        final detail = fetchInvoice != null
-            ? await fetchInvoice(businessId, invoiceId)
-            : await _api.documentDetail(businessId, invoiceId);
-        await LocalJobQuarantine.assertReplayAllowed(
-          _database,
-          businessId,
-          outboxId: id,
-        );
-        final present = serverAcknowledgesPayment(detail, paymentId);
-        if (!present) {
-          // A finalized payment can permanently lose its pending ID. Retain
-          // that receipt and stop later payments for this invoice, but do not
-          // let its ambiguity starve unrelated invoices in the business queue.
-          blockedInvoices.add(invoiceId);
-          throw StateError(
-            'Server accepted payment but invoice detail has not reconciled yet.',
-          );
-        }
-        await _database.transaction(() async {
-          await LocalJobQuarantine.assertReplayAllowed(
-            _database,
-            businessId,
-            outboxId: id,
-          );
-          if (cacheInvoice != null) {
-            await cacheInvoice(businessId, invoiceId, detail);
-          } else {
-            final cache = LocalDocumentDetailCache(database: _database);
-            final cached = await cache.load(businessId, invoiceId);
-            final refreshed = Map<String, dynamic>.from(detail);
-            // Warranty detail has its own endpoint. A payment refresh must not
-            // erase the separately cached warranty needed while disconnected.
-            if (!refreshed.containsKey('offline_warranty_detail') &&
-                cached != null && cached.containsKey('offline_warranty_detail')) {
-              refreshed['offline_warranty_detail'] =
-                  cached['offline_warranty_detail'];
-            }
-            await cache.save(businessId, invoiceId, refreshed);
-          }
-          await _database.customStatement(
-            'DELETE FROM sync_outbox WHERE id=?',
-            [id],
-          );
-        });
-      } catch (error) {
-        await _database.customStatement(
-          """UPDATE sync_outbox SET state='pending',
-          attempt_count=attempt_count+1,last_error=? WHERE id=?""",
-          [error.toString(),id],
-        );
-        if (blockedInvoices.contains(invoiceId)) continue;
-        break;
-      }
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> pendingForInvoice(
-    String businessId,
-    String invoiceId,
-  ) async {
-    final rows = await _database.customSelect(
-      '''
-      SELECT payload_json FROM sync_outbox
-      WHERE business_id = ? AND entity_id = ?
-        AND entity_type = 'invoice_payment_received'
-        AND state IN ('pending', 'inflight')
-      ORDER BY id
-      ''',
-      variables: [
-        Variable<String>(businessId),
-        Variable<String>(invoiceId),
-      ],
-    ).get();
-    return rows.map((row) {
-      final decoded = jsonDecode(row.read<String>('payload_json')) as Map;
-      return Map<String, dynamic>.from(decoded);
-    }).toList();
-  }
-}
-
-).hasMatch(paymentDate) ||
-        date.toIso8601String().substring(0,10) != paymentDate) {
-      throw ArgumentError('Invalid payment correction or invoice balance.');
+        !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(paymentDate) ||
+        date==null ||
+        date.toIso8601String().substring(0,10)!=paymentDate) {
+      throw ArgumentError('Invalid payment correction or balance.');
     }
     await _database.transaction(() async {
-      final pending = await _database.customSelect(
+      final rows=await _database.customSelect(
         """SELECT id,state,attempt_count,last_attempt_at,payload_json
-        FROM sync_outbox WHERE business_id=? AND entity_id=?
-          AND entity_type='invoice_pending_payment_edit'
-          AND state IN ('pending','inflight')""",
-        variables: [Variable<String>(businessId), Variable<String>(invoiceId)],
+           FROM sync_outbox WHERE business_id=? AND entity_id=?
+           AND entity_type='invoice_pending_payment_edit'
+           AND state IN ('pending','inflight')""",
+        variables:[Variable<String>(businessId),Variable<String>(invoiceId)],
       ).get();
-      final samePayment = pending.where((row) {
+      final matched=rows.where((row) {
         try {
-          final p=jsonDecode(row.read<String>('payload_json')) as Map;
-          return p['payment_id']?.toString()==paymentId;
-        } catch (_) { return false; }
+          final payload=jsonDecode(row.read<String>('payload_json')) as Map;
+          return payload['payment_id']?.toString()==paymentId;
+        }catch(_){ return false; }
       }).toList();
-      if (samePayment.length>1) {
-        throw StateError('Conflicting pending corrections. Reconcile first.');
+      if(matched.length>1) {
+        throw StateError('Conflicting queued payment corrections.');
       }
-      final existing = samePayment.isEmpty ? null : samePayment.single;
-      if (existing != null &&
-          (existing.read<String>('state') != 'pending' ||
-           existing.read<int>('attempt_count') != 0 ||
-           existing.readNullable<int>('last_attempt_at') != null)) {
+      final row=matched.isEmpty?null:matched.single;
+      if(row!=null && (
+        row.read<String>('state')!='pending' ||
+        row.read<int>('attempt_count')!=0 ||
+        row.readNullable<int>('last_attempt_at')!=null
+      )){
         throw StateError(
-          'This correction may already have been sent. Reconcile first.');
+          'Correction may already have reached the server. Reconcile first.');
       }
-      final previous = existing==null
-          ? null
-          : Map<String,dynamic>.from(
-              jsonDecode(existing.read<String>('payload_json')) as Map);
-      if (previous != null &&
-          previous['expected_row_version'] != expectedRowVersion) {
-        throw StateError('Server payment version changed. Refresh first.');
+      final previous=row==null?null:Map<String,dynamic>.from(
+        jsonDecode(row.read<String>('payload_json')) as Map);
+      if(previous!=null && previous['expected_row_version']!=expectedRowVersion){
+        throw StateError('Pending payment changed; refresh before editing.');
       }
-      final payload = <String,dynamic>{
-        'invoice_id': invoiceId,
-        'payment_id': paymentId,
-        'expected_row_version': expectedRowVersion,
-        'amount_cents': centsValue,
-        'method_id': methodId,
-        'method_name': methodName.trim(),
-        'payment_date': paymentDate,
-        'created_at': previous?['created_at'] ??
-            DateTime.now().toUtc().toIso8601String(),
-        'local_edit_at': DateTime.now().toUtc().toIso8601String(),
+      final now=DateTime.now().toUtc();
+      final payload=<String,dynamic>{
+        'invoice_id':invoiceId,
+        'payment_id':paymentId,
+        'expected_row_version':expectedRowVersion,
+        'amount_cents':amountCents,
+        'method_id':methodId,
+        'method_name':methodName.trim(),
+        'payment_date':paymentDate,
+        'created_at':previous?['created_at']??now.toIso8601String(),
+        'local_edit_at':now.toIso8601String(),
       };
-      if (existing==null) {
-        final now=DateTime.now().toUtc().millisecondsSinceEpoch~/1000;
+      if(row==null){
         await _database.customStatement(
           """INSERT INTO sync_outbox
-          (business_id,entity_type,entity_id,operation,payload_json,
-           base_row_version,state,attempt_count,created_at,
-           last_attempt_at,last_error)
-          VALUES (?,'invoice_pending_payment_edit',?,'edit_pending_payment',
-                  ?,?,'pending',0,?,NULL,NULL)""",
-          [businessId,invoiceId,jsonEncode(payload),expectedRowVersion,now],
+             (business_id,entity_type,entity_id,operation,payload_json,
+              base_row_version,state,attempt_count,created_at,
+              last_attempt_at,last_error)
+             VALUES (?,'invoice_pending_payment_edit',?,'edit_pending_payment',
+                     ?,?,'pending',0,?,NULL,NULL)""",
+          [businessId,invoiceId,jsonEncode(payload),
+           expectedRowVersion,now.millisecondsSinceEpoch~/1000],
         );
-      } else {
+      }else{
         await _database.customStatement(
           'UPDATE sync_outbox SET payload_json=?,last_error=NULL WHERE id=?',
-          [jsonEncode(payload),existing.read<int>('id')],
+          [jsonEncode(payload),row.read<int>('id')],
         );
       }
     });
