@@ -186,6 +186,7 @@ class InvoicePaymentFeed {
           'amount': r['amount'],
           'counterparty': r['customer_name'] ?? 'Customer',
           'transaction_date': r['transaction_date'],
+          'received_at': r['received_at'],
           'document_id': r['invoice_id'],
           'document_number': r['document_number'],
           'job_number': r['job_number'],
