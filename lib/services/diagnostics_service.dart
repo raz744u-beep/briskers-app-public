@@ -894,6 +894,16 @@ class BriskersDiagnosticsService {
       [Variable<String>(businessId)],
     );
 
+    final pendingOperations = await _database.customSelect(
+      '''
+      SELECT entity_type, entity_id, operation, attempt_count
+      FROM sync_outbox
+      WHERE business_id = ? AND state = 'pending'
+      ORDER BY attempt_count DESC, created_at LIMIT 5
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
     checks.add(
       DiagnosticCheck(
         id: 'SYNC-001',
@@ -927,6 +937,11 @@ class BriskersDiagnosticsService {
           if (retryingCount > 0)
             retryingCount.toString() +
                 ' pending operation(s) have already failed at least once.',
+          for (final row in pendingOperations)
+            'Outbox ' + row.read<String>('entity_type') +
+                '/' + row.read<String>('operation') +
+                ' • attempts ' + row.read<int>('attempt_count').toString() +
+                ' • ID ' + row.read<String>('entity_id'),
         ],
       ),
     );
@@ -1237,6 +1252,25 @@ class BriskersDiagnosticsService {
       ),
     };
 
+    final orphanAppointments = await _database.customSelect(
+      '''
+      SELECT a.id, a.sync_state, a.status
+      FROM local_appointments a
+      LEFT JOIN local_customers c
+        ON c.business_id = a.business_id AND c.id = a.customer_id
+      LEFT JOIN local_jobs j
+        ON j.business_id = a.business_id AND j.id = a.job_id
+      LEFT JOIN local_vehicles v
+        ON v.business_id = a.business_id AND v.id = a.vehicle_id
+      WHERE a.business_id = ? AND (
+        c.id IS NULL OR
+        (a.job_id IS NOT NULL AND j.id IS NULL) OR
+        (a.vehicle_id IS NOT NULL AND v.id IS NULL))
+      LIMIT 5
+      ''',
+      variables: [Variable<String>(businessId)],
+    ).get();
+
     final total = problems.values.fold<int>(0, (sum, value) => sum + value);
     checks.add(
       DiagnosticCheck(
@@ -1251,7 +1285,13 @@ class BriskersDiagnosticsService {
         details: problems.entries
             .where((entry) => entry.value > 0)
             .map((entry) => entry.key + ': ' + entry.value.toString())
-            .toList(),
+            .toList()
+          ..addAll([
+            for (final row in orphanAppointments)
+              'Appointment ID ' + row.read<String>('id') +
+              ' • sync ' + (row.readNullable<String>('sync_state') ?? '') +
+              ' • status ' + (row.readNullable<String>('status') ?? ''),
+          ]),
       ),
     );
   }
