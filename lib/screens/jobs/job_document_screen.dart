@@ -7217,11 +7217,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             ],
           ),
         ),
-        bottomNavigationBar: Column(
+        // Some Android gesture/navigation configurations report a bottom
+        // system inset that the inner SafeArea does not reserve after the
+        // keyboard closes. Reserve it outside the entire action dock.
+        bottomNavigationBar: Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewPaddingOf(context).bottom,
+          ),
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [SafeArea(
           top: false,
-          bottom: widget.sharedBottomNavigationBar == null,
+          bottom: false,
           child: Container(
             decoration: const BoxDecoration(
               color: Colors.white,
@@ -7305,6 +7312,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ),          if (widget.sharedBottomNavigationBar != null)
             widget.sharedBottomNavigationBar!,
           ],
+          ),
         ),
       ),
     );
