@@ -1534,6 +1534,19 @@ class BriskersApi {
         .toList();
   }
 
+  /// Permission-checked, read-only inventory. Payments are NOT finalized here.
+  Future<List<Map<String, dynamic>>> invoiceReceipts(String businessId, {
+    int limit = 250,
+    int offset = 0,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_invoice_receipts_v1',
+      params: {'p_business_id': businessId, 'p_limit': limit, 'p_offset': offset},
+    );
+    return (result as List<dynamic>)
+        .map((row) => Map<String, dynamic>.from(row as Map)).toList();
+  }
+
   Future<List<Map<String, dynamic>>> transactions(
     String businessId, {
     int limit = 500,
