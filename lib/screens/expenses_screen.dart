@@ -30,11 +30,13 @@ class ExpensesScreen extends StatefulWidget {
     required this.businessId,
     required this.roleCode,
     this.showAppBar = true,
+    this.dockResetToken = 0,
   });
 
   final String businessId;
   final String roleCode;
   final bool showAppBar;
+  final int dockResetToken;
 
   @override
   State<ExpensesScreen> createState() => _ExpensesScreenState();
@@ -105,6 +107,24 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         const Duration(seconds: 30),
         (_) => _refreshPhotoCounts(),
       );
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant ExpensesScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dockResetToken != widget.dockResetToken) {
+      _searchDebounce?.cancel();
+      _filter = 'all';
+      _dateRange = '30d';
+      _customStartDate = null;
+      _customEndDate = null;
+      _accountFilterId = null;
+      _categoryFilterId = null;
+      _counterpartyFilterId = null;
+      _searchController.clear();
+      _visibleCount = _pageSize;
+      unawaited(_load());
     }
   }
 
