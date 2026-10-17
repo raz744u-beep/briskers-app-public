@@ -150,7 +150,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       return documentListStage(row, estimate: true);
     }
     if (invoiceNeedsPayment(row,
-        receipts: _receiptTotals[row['id']?.toString()] ?? 0)) return 'Open';
+        receipts: _receiptTotals[row['id']?.toString()] ?? 0)) {
+      return 'Open';
+    }
     final existing = documentListStage(row, estimate: false);
     return existing == 'Open' ? 'Pending Close' : existing;
   }
