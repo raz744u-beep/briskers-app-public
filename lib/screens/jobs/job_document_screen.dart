@@ -33,6 +33,7 @@ import '../../services/document_pdf_service.dart';
 import '../../services/invoice_performance_metrics.dart';
 import '../../services/gmail_compose_service.dart';
 import '../../services/catalog_sync_service.dart';
+import '../settings/catalog_settings_screen.dart';
 import '../../services/local_catalog_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_document_repository.dart';
@@ -1539,15 +1540,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
     if (!mounted) return;
 
-    if (items.isEmpty) {
-      setState(() {
-        _error = BriskersConnectionModeController.instance.forceOffline
-            ? 'No item catalog is saved on this device yet. Go online once so Briskers can sync the Items / Catalog, then offline estimates can use it.'
-            : 'No active catalog items are available.';
-      });
-      return;
-    }
-
     final searchController = TextEditingController();
     var filtered = List<Map<String, dynamic>>.from(items);
 
@@ -1606,6 +1598,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                         ),
                       ),
                     ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _accent,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () => Navigator.pop(sheetContext, {
+                            '_new_catalog_item': true,
+                            '_initial_name': searchController.text.trim(),
+                          }),
+                          icon: const Icon(Icons.add),
+                          label: const Text('New Catalog Item'),
+                        ),
+                      ),
+                    ),
                     Expanded(
                       child: filtered.isEmpty
                           ? Center(child: Text(tr('noMatchingItems')))
@@ -1652,8 +1662,50 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     searchController.dispose();
 
     if (selected == null || !mounted) return;
+    Map<String, dynamic> chosenItem = selected;
+    if (selected['_new_catalog_item'] == true) {
+      final created = await showModalBottomSheet<Map<String, dynamic>>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        showDragHandle: true,
+        builder: (_) => CatalogItemDialog(
+          categories: const [],
+          initialName: selected['_initial_name']?.toString() ?? '',
+        ),
+      );
+      if (created == null || !mounted) return;
+      try {
+        await _catalogSync.queueSave(
+          widget.businessId,
+          name: created['name'].toString(),
+          description: created['description']?.toString(),
+          itemType: created['item_type'].toString(),
+          sellingPrice: created['selling_price'] as num,
+          pricingUnit: created['pricing_unit']?.toString(),
+          cost: created['cost'] as num,
+          taxable: created['taxable'] == true,
+          category: created['category']?.toString(),
+          barcode: created['barcode']?.toString(),
+          active: created['active'] == true,
+        );
+        // Local catalog creates have provisional non-UUID IDs. Add the item
+        // as a normal invoice line without passing the provisional ID to
+        // the server; catalog synchronization continues independently.
+        chosenItem = {...created, 'id': null};
+        unawaited(_catalogSync.flush(widget.businessId)
+          .catchError((Object error) {
+            debugPrint('New catalog item sync deferred: $error');
+          }));
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Could not save new catalog item: $error');
+        }
+        return;
+      }
+    }
 
-    if (selected['taxable'] == true &&
+    if (chosenItem['taxable'] == true &&
         BriskersConnectionModeController.instance.forceOffline &&
         !_taxSettingsCached) {
       setState(() {
@@ -1665,14 +1717,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
 
     final line = <String, dynamic>{
-      'name': selected['name']?.toString() ?? 'Item',
-      'description': selected['description']?.toString(),
+      'name': chosenItem['name']?.toString() ?? 'Item',
+      'description': chosenItem['description']?.toString(),
       'quantity': 1,
-      'unit_price': _number(selected['selling_price']),
-      'tax_rate': selected['taxable'] == true ? _defaultTaxRate : 0,
+      'unit_price': _number(chosenItem['selling_price']),
+      'tax_rate': chosenItem['taxable'] == true ? _defaultTaxRate : 0,
       'line_kind': 'item',
     };
 
+    if (!mounted) return;
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
@@ -1698,7 +1751,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       await _addLineLocalAware(
         name: translatedResult['name'].toString(),
         description: translatedResult['description']?.toString(),
-        itemId: selected['id']?.toString(),
+        itemId: chosenItem['id']?.toString(),
         quantity: translatedResult['quantity'] as num,
         unitPrice: translatedResult['unit_price'] as num,
         taxRate: translatedResult['tax_rate'] as num,

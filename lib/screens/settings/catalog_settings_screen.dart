@@ -103,7 +103,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
-      builder: (_) => _CatalogItemDialog(
+      builder: (_) => CatalogItemDialog(
         item: item,
         categories: _categories,
       ),
@@ -368,20 +368,23 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
   }
 }
 
-class _CatalogItemDialog extends StatefulWidget {
-  const _CatalogItemDialog({
+class CatalogItemDialog extends StatefulWidget {
+  const CatalogItemDialog({
+    super.key,
     this.item,
     required this.categories,
+    this.initialName = '',
   });
 
   final Map<String, dynamic>? item;
   final List<Map<String, dynamic>> categories;
+  final String initialName;
 
   @override
-  State<_CatalogItemDialog> createState() => _CatalogItemDialogState();
+  State<CatalogItemDialog> createState() => CatalogItemDialogState();
 }
 
-class _CatalogItemDialogState extends State<_CatalogItemDialog> {
+class CatalogItemDialogState extends State<CatalogItemDialog> {
   late final TextEditingController _name;
   late final TextEditingController _description;
   late final TextEditingController _price;
@@ -398,7 +401,7 @@ class _CatalogItemDialogState extends State<_CatalogItemDialog> {
   void initState() {
     super.initState();
     final item = widget.item;
-    _name = TextEditingController(text: item?['name']?.toString() ?? '');
+    _name = TextEditingController(text: item?['name']?.toString() ?? widget.initialName);
     _description =
         TextEditingController(text: item?['description']?.toString() ?? '');
     _price =
