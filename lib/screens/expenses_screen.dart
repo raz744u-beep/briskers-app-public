@@ -117,7 +117,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
 
   void _handleScroll() {
     if (!_scrollController.hasClients ||
-        _scrollController.position.extentAfter >= 500) return;
+        _scrollController.position.extentAfter >= 500) {
+      return;
+    }
     final count = InvoicePaymentFeed.combine(
       financial: _transactions, receipts: _invoiceReceipts,
       startDate: _rangeStartDate, endDate: _rangeEndDate,
