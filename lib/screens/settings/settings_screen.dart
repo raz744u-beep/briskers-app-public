@@ -6,6 +6,7 @@ import '../../core/connection_mode.dart';
 import '../../widgets/briskers_page_header.dart';
 import '../kiosk/kiosk_checkin_screen.dart';
 import 'catalog_settings_screen.dart';
+import 'email_templates_settings_screen.dart';
 import 'diagnostics_screen.dart';
 import 'document_numbering_settings_screen.dart';
 import 'employees_settings_screen.dart';
@@ -414,6 +415,25 @@ class SettingsScreen extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (_) => TaxInvoicingSettingsScreen(
+                    businessId: businessId,
+                  ),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(
+              Icons.email_outlined,
+              color: BriskersColors.invoices,
+            ),
+            title: const Text('Email templates'),
+            subtitle: const Text('Edit Gmail subject and message body'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => EmailTemplatesSettingsScreen(
                     businessId: businessId,
                   ),
                 ),
