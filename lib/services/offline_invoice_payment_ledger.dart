@@ -384,25 +384,35 @@ class OfflineInvoicePaymentLedger {
       final invoiceId = row.read<String>('entity_id');
       if (invoiceId.startsWith('local-')) continue;
       if (blockedInvoices.contains(invoiceId)) continue;
-      final payload = Map<String,dynamic>.from(
-        jsonDecode(row.read<String>('payload_json')) as Map,
-      );
+      late Map<String,dynamic> payload;
       try {
         await LocalJobQuarantine.assertReplayAllowed(
           _database,
           businessId,
           outboxId: id,
         );
+        // Atomically mark this queue entry as attempted and read the latest
+        // contents. A simultaneous edit cannot overwrite a stale replay.
+        payload = await _database.transaction(() async {
+          final current = await _database.customSelect(
+            'SELECT payload_json FROM sync_outbox WHERE id=? AND business_id=?',
+            variables: [Variable<int>(id),Variable<String>(businessId)],
+          ).getSingleOrNull();
+          if (current == null) {
+            throw StateError('Payment changed during synchronization.');
+          }
+          final value = Map<String,dynamic>.from(
+              jsonDecode(current.read<String>('payload_json')) as Map);
+          value['replay_attempted'] = true;
+          await _database.customStatement(
+            'UPDATE sync_outbox SET payload_json=? WHERE id=?',
+            [jsonEncode(value),id],
+          );
+          return value;
+        });
         final amount = (payload['amount_cents'] as num) / 100;
         final methodId = payload['method_id'].toString();
         final operationId = payload['operation_id'].toString();
-        // Record uncertainty before the network call: a lost response or
-        // process interruption can happen after the server accepted payment.
-        payload['replay_attempted'] = true;
-        await _database.customStatement(
-          'UPDATE sync_outbox SET payload_json=? WHERE id=?',
-          [jsonEncode(payload), id],
-        );
         final paymentId = await LocalJobQuarantine.guardReplay(
           _database,
           businessId,
