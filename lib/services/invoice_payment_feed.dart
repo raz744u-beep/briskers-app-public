@@ -102,7 +102,7 @@ class InvoicePaymentFeed {
     final detailCache = LocalDocumentDetailCache(database: _db);
     final pendingRows = <Map<String, dynamic>>[];
     final aggregate = RegExp(
-        r'"pending_payment"\\s*:\\s*"?([0-9]+(?:\\.[0-9]+)?)');
+        r'"pending_payment"\s*:\s*"?([0-9]+(?:\.[0-9]+)?)');
     var examined = 0;
     for (final key in prefs.getKeys()) {
       if (!key.startsWith(prefix)) continue;
