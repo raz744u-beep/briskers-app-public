@@ -370,6 +370,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
 
 class CatalogItemDialog extends StatefulWidget {
   const CatalogItemDialog({
+    super.key,
     this.item,
     required this.categories,
     this.initialName = '',
