@@ -346,7 +346,9 @@ void main() {
 
   test('Standalone Estimates restores main navigation and owner pill', () async {
     final docs = await File('lib/screens/documents_screen.dart').readAsString();
-    expect(docs, contains('bottomNavigationBar: widget.showAppBar && _estimate'));
+    expect(docs, contains('bottomNavigationBar: (widget.customerId != null || !widget.showAppBar)'));
+    expect(docs, contains('widget.sharedBottomNavigationBar!'));
+    expect(docs, contains(': widget.showAppBar && _estimate'));
     expect(docs, contains('ShellScreen('));
     expect(docs, matches(RegExp(r"child:\s*Text\(\s*'OWNER'")));
   });

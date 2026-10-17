@@ -22,6 +22,7 @@ import '../../services/offline_customer_vehicle_admin_service.dart';
 import '../appointments/appointment_create_screen.dart';
 import '../jobs/job_create_screen.dart';
 import '../jobs/job_document_screen.dart';
+import '../documents_screen.dart';
 import '../jobs/job_detail_screen.dart';
 import '../appointments/appointment_manage_screen.dart';
 import '../jobs/blank_invoice_setup_screen.dart';
@@ -222,6 +223,30 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           isOwner: widget.roleCode == 'owner',
           roleCode: widget.roleCode)));
     }
+  }
+
+  Future<void> _showCustomerDocuments(String title) async {
+    final isEstimate = title == 'Estimates';
+    final customer = Map<String, dynamic>.from(
+      _data?['customer'] is Map ? _data!['customer'] as Map : const {});
+    final vehicles = List<dynamic>.from(_data?['vehicles'] ?? const []);
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DocumentsScreen(
+          businessId: widget.businessId,
+          kind: isEstimate ? 'estimate' : 'invoice',
+          roleCode: widget.roleCode,
+          isOwner: widget.roleCode == 'owner',
+          canManageExpenses: _canManageQuickActions,
+          customerId: widget.customerId,
+          customerName: customer['name']?.toString(),
+          customerVehicles: vehicles,
+          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
+        ),
+      ),
+    );
+    if (mounted) await _load();
   }
 
   Future<void> _showOverviewList(String title, List<Map<String, dynamic>> records) async {
@@ -556,7 +581,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           Text('${items.length}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
           const SizedBox(width: 6), const Icon(Icons.chevron_right, size: 18),
         ]),
-        onTap: () => _showOverviewList(title, items),
+        onTap: () => title == 'Invoices' || title == 'Estimates'
+            ? _showCustomerDocuments(title)
+            : _showOverviewList(title, items),
       );
       return Card(child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),

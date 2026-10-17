@@ -88,8 +88,14 @@ class DocumentsScreen extends StatefulWidget {
     required this.roleCode,
     this.onPrimaryDestinationSelected,
     this.sharedBottomNavigationBar,
+    this.customerId,
+    this.customerName,
+    this.customerVehicles = const [],
   });
 
+  final String? customerId;
+  final String? customerName;
+  final List<dynamic> customerVehicles;
   final bool showAppBar;
   final String businessName;
   final String roleCode;
@@ -371,12 +377,16 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       isFutureDatedDocument(row);
 
   int get _futureDatedCount =>
-      (_rows ?? const <Map<String, dynamic>>[]).where(_hasFutureDateTag).length;
+      (_rows ?? const <Map<String, dynamic>>[])
+          .where((row) => widget.customerId == null ||
+              row['customer_id']?.toString() == widget.customerId)
+          .where(_hasFutureDateTag).length;
 
   List<Map<String, dynamic>> get _visibleRows {
     final rows = List<Map<String, dynamic>>.from(
       _rows ?? const <Map<String, dynamic>>[],
-    );
+    ).where((row) => widget.customerId == null ||
+        row['customer_id']?.toString() == widget.customerId).toList();
 
     var filtered = _selectedStatus == null
         ? rows
@@ -444,7 +454,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
 
   int _statusCount(String status) {
     final rows = _rows ?? const <Map<String, dynamic>>[];
-    return rows.where((row) => _invoiceStage(row) == status).length;
+    return rows.where((row) => widget.customerId == null ||
+        row['customer_id']?.toString() == widget.customerId)
+        .where((row) => _invoiceStage(row) == status).length;
   }
 
   Widget _menuCount(int count, {bool alwaysShow = false}) {
@@ -1294,7 +1306,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final invoiceId = await Navigator.push<String>(
       context,
       MaterialPageRoute(
-        builder: (_) => BlankInvoiceSetupScreen(businessId: widget.businessId),
+        builder: (_) => BlankInvoiceSetupScreen(
+          businessId: widget.businessId,
+          initialCustomerId: widget.customerId,
+          initialCustomerName: widget.customerName,
+          initialVehicles: widget.customerVehicles,
+        ),
       ),
     );
     if (!mounted || invoiceId == null || invoiceId.isEmpty) return;
@@ -1324,6 +1341,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         builder: (_) => BlankInvoiceSetupScreen(
           businessId: widget.businessId,
           kind: 'estimate',
+          initialCustomerId: widget.customerId,
+          initialCustomerName: widget.customerName,
+          initialVehicles: widget.customerVehicles,
         ),
       ),
     );
@@ -1355,12 +1375,26 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               ? tr('all')
               : _localizedStatusLabel(_selectedStatus!));
     final accent = _estimate
-        ? BriskersColors.estimates
-        : BriskersColors.invoices;
+        ? BriskersColors.estimates : BriskersColors.invoices;
+    final scopedRows = (_rows ?? const <Map<String, dynamic>>[])
+        .where((row) => widget.customerId == null ||
+            row['customer_id']?.toString() == widget.customerId).toList();
+    final knownAmounts = scopedRows.where((row) =>
+        num.tryParse(row['total_amount']?.toString() ?? '') != null).toList();
+    final grandTotal = knownAmounts.fold<num>(0, (sum, row) =>
+        sum + (num.tryParse(row['total_amount']?.toString() ?? '') ?? 0));
+    final missingAmountCount = scopedRows.length - knownAmounts.length;
 
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: widget.showAppBar
+      appBar: widget.customerId != null
+          ? AppBar(
+              title: Text(widget.customerName?.trim().isNotEmpty == true
+                  ? widget.customerName! : _title,
+                  style: TextStyle(color: accent, fontWeight: FontWeight.w800)),
+              backgroundColor: accent.withValues(alpha: 0.08),
+            )
+          : widget.showAppBar
           ? AppBar(
               automaticallyImplyLeading: false,
               toolbarHeight: 78,
@@ -1403,7 +1437,36 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               ],
             )
           : null,
-      bottomNavigationBar: widget.showAppBar && _estimate
+      bottomNavigationBar: (widget.customerId != null || !widget.showAppBar)
+          ? SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (widget.isOwner || widget.canManageExpenses)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 7, 12, 9),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _estimate ? _createStandaloneEstimate
+                              : _createBlankInvoice,
+                          icon: const Icon(Icons.add),
+                          label: Text(_estimate ? 'New Estimate' : 'New Invoice'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: accent,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (widget.sharedBottomNavigationBar != null)
+                    widget.sharedBottomNavigationBar!,
+                ],
+              ),
+            )
+          : widget.showAppBar && _estimate
           ? (widget.sharedBottomNavigationBar ??
                 NavigationBar(
                   selectedIndex: 5,
@@ -1485,7 +1548,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                           const Icon(Icons.all_inclusive),
                           const SizedBox(width: 10),
                           Expanded(child: Text(tr('all'))),
-                          _menuCount(_rows?.length ?? 0, alwaysShow: true),
+                          _menuCount(scopedRows.length, alwaysShow: true),
                         ],
                       ),
                     ),
@@ -1580,7 +1643,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 const Spacer(),
                 if (_rows != null)
                   Text(
-                    '${tr('total')} ${_rows!.length}',
+                    '${tr('total')} ${scopedRows.length}',
                     style: TextStyle(
                       color: accent,
                       fontWeight: FontWeight.w800,
@@ -1588,6 +1651,34 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   ),
               ],
             ),
+            if (_rows != null) ...[
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
+              Card(
+                elevation: 0,
+                color: accent.withValues(alpha: 0.12),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 15, 18, 15),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_estimate ? 'Total Estimates' : 'Total Invoices',
+                          style: TextStyle(fontSize: 18,
+                              fontWeight: FontWeight.w800, color: accent)),
+                      const SizedBox(height: 4),
+                      Text(_money(grandTotal),
+                          style: TextStyle(fontSize: 26,
+                              fontWeight: FontWeight.w800, color: accent)),
+                      Text('${scopedRows.length} records'
+                        '${missingAmountCount == 0 ? "" : " • amounts unavailable: $missingAmountCount"}',
+                          style: const TextStyle(fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             if (!_estimate && widget.isOwner) ...[
               const SizedBox(height: 10),
               Align(
