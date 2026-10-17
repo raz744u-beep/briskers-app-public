@@ -349,6 +349,18 @@ void main() {
     },
   );
 
+  test('offline with no user-scoped fee cache does not scan documents',
+      () async {
+    final cache = _Cache([_invoice], fail: true);
+    final rows = [_transaction(_card), _transaction(_cash)];
+    final result = await _service(_Api(), cache)
+        .enrich('shop-a', rows, refresh: false);
+    expect(result, hasLength(2));
+    _expectGross(result.first);
+    expect(cache.calls, 0);
+    expect(cache.targetedCalls, 0);
+  });
+
   test(
     'Force Offline performs no RPC and preserves unrelated receipts',
     () async {
