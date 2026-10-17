@@ -1160,6 +1160,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           customerName: customer['name']?.toString() ?? 'Customer',
           roleCode: widget.roleCode,
           vehicles: vehicles,
+          bottomNavigationBar: widget.sharedBottomNavigationBar,
         ),
       ),
     );
