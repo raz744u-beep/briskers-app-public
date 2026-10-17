@@ -4657,6 +4657,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           businessId: widget.businessId,
           jobId: jobId,
           roleCode: _navigationRoleCode,
+          bottomNavigationBar: widget.sharedBottomNavigationBar,
         ),
       ),
     );
