@@ -354,25 +354,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     }
   }
 
-  int _estimateStatusRank(String status) {
-    switch (status) {
-      case 'Draft':
-        return 0;
-      case 'Issued':
-        return 1;
-      case 'Accepted':
-        return 2;
-      case 'Declined':
-        return 3;
-      case 'Expired':
-        return 4;
-      case 'Void':
-        return 5;
-      default:
-        return 6;
-    }
-  }
-
   bool _hasFutureDateTag(Map<String, dynamic> row) =>
       isFutureDatedDocument(row);
 
