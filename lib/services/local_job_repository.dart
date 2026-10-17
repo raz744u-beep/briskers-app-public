@@ -264,7 +264,9 @@ class LocalJobRepository {
               WHERE d.business_id = j.business_id AND d.job_id = j.id), 0)
             ELSE COALESCE(j.created_at, 0) END DESC,
         """
-        : view == JobListView.all || sort == JobListSort.lastModified
+        : view == JobListView.all
+        ? '$_numberOrderSql,'
+        : sort == JobListSort.lastModified
         ? 'j.activity_at DESC,'
         : view == JobListView.recent && sort == JobListSort.lastAccessed
         // Accesses always precede unopened Jobs, even if a later import/edit
@@ -273,7 +275,8 @@ class LocalJobRepository {
               'a.last_accessed_at DESC, j.job_date_at DESC,'
         : 'j.job_date_at DESC,';
     // Only legacy callers keep the old provisional pin. The Jobs screen's All
-    // list is strictly newest activity first, including pending local Jobs.
+    // list orders permanent Job numbers descending, independent of imported
+    // timestamps or status; temporary numbers use the fallback ordering.
     final legacyPin =
         view == JobListView.all || status?.toLowerCase() == 'completed'
         ? ''
