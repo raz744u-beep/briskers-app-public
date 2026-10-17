@@ -23,8 +23,10 @@ class AppointmentsScreen extends StatefulWidget {
     super.key,
     required this.businessId,
     required this.roleCode,
+    this.dockResetToken = 0,
   });
 
+  final int dockResetToken;
   final String businessId;
   final String roleCode;
 
@@ -107,6 +109,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       _pending = 0;
       _onlineReady = false;
       _listenForQuarantine();
+      _load(initialEntry: true);
+    } else if (oldWidget.dockResetToken != widget.dockResetToken) {
+      _filter = 'today';
+      _search.clear();
       _load(initialEntry: true);
     }
   }
