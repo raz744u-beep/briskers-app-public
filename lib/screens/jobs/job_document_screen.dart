@@ -5571,19 +5571,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           ),
                     ),
                   ),
-                Row(
-                  children: [
-                    Expanded(child: _AmountRow(
-                      label: _taxLabel(lines),
-                      value: _money(_detail!['tax_amount']),
-                    )),
-                    if (!_estimate && widget.isOwner && !_readOnly && !_busy)
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined, size: 19),
-                        tooltip: 'Edit invoice tax',
-                        onPressed: () => _editInvoiceTax(lines),
-                      ),
-                  ],
+                _AmountRow(
+                  label: _taxLabel(lines),
+                  value: _money(_detail!['tax_amount']),
+                  labelAction: !_estimate && widget.isOwner && !_readOnly && !_busy
+                      ? IconButton(
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          tooltip: 'Edit invoice tax percentage',
+                          onPressed: () => _editInvoiceTax(lines),
+                          padding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(
+                            minWidth: 36,
+                            minHeight: 36,
+                          ),
+                        )
+                      : null,
                 ),
                 const Divider(height: 18),
                 _AmountRow(
@@ -7629,12 +7632,15 @@ class _AmountRow extends StatelessWidget {
     required this.value,
     this.bold = false,
     this.valueColor,
+    this.labelAction,
   });
 
   final String label;
   final String value;
   final bool bold;
   final Color? valueColor;
+  /// Optional control beside the label, never beside the monetary column.
+  final Widget? labelAction;
 
   @override
   Widget build(BuildContext context) {
@@ -7652,7 +7658,16 @@ class _AmountRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Expanded(child: Text(label, style: labelStyle)),
+          Expanded(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(child: Text(label, style: labelStyle, maxLines: 1,
+                    overflow: TextOverflow.ellipsis)),
+                ?labelAction,
+              ],
+            ),
+          ),
           Text(value, style: valueStyle),
         ],
       ),
