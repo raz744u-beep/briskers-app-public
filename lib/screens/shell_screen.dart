@@ -80,6 +80,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   int _estimatesDockReset = 0;
   int _invoicesDockReset = 0;
   int _scheduleDockReset = 0;
+  int _expensesDockReset = 0;
   int _homeAttentionRefreshToken = 0;
   Map<String, dynamic> _navCounts = const {
     'customers': 0,
@@ -432,6 +433,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
       if (index == 3) _estimatesDockReset++;
       if (index == 4) _invoicesDockReset++;
       if (index == 5) _scheduleDockReset++;
+      if (index == 6) _expensesDockReset++;
       if (index == 0) _homeAttentionRefreshToken++;
     });
     if (index == 4) _refreshHomeInvoicesCount();
@@ -537,6 +539,14 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
           businessId: widget.businessId,
           roleCode: widget.roleCode,
           dockResetToken: _scheduleDockReset,
+        );
+      }
+      if (index == 6) {
+        return ExpensesScreen(
+          businessId: widget.businessId,
+          roleCode: widget.roleCode,
+          showAppBar: false,
+          dockResetToken: _expensesDockReset,
         );
       }
       return _lazyPages.putIfAbsent(index, () {
