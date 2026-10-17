@@ -377,7 +377,10 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       isFutureDatedDocument(row);
 
   int get _futureDatedCount =>
-      (_rows ?? const <Map<String, dynamic>>[]).where(_hasFutureDateTag).length;
+      (_rows ?? const <Map<String, dynamic>>[])
+          .where((row) => widget.customerId == null ||
+              row['customer_id']?.toString() == widget.customerId)
+          .where(_hasFutureDateTag).length;
 
   List<Map<String, dynamic>> get _visibleRows {
     final rows = List<Map<String, dynamic>>.from(
@@ -451,7 +454,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
 
   int _statusCount(String status) {
     final rows = _rows ?? const <Map<String, dynamic>>[];
-    return rows.where((row) => _invoiceStage(row) == status).length;
+    return rows.where((row) => widget.customerId == null ||
+        row['customer_id']?.toString() == widget.customerId)
+        .where((row) => _invoiceStage(row) == status).length;
   }
 
   Widget _menuCount(int count, {bool alwaysShow = false}) {
@@ -1542,7 +1547,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                           const Icon(Icons.all_inclusive),
                           const SizedBox(width: 10),
                           Expanded(child: Text(tr('all'))),
-                          _menuCount(_rows?.length ?? 0, alwaysShow: true),
+                          _menuCount(scopedRows.length, alwaysShow: true),
                         ],
                       ),
                     ),
@@ -1637,7 +1642,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 const Spacer(),
                 if (_rows != null)
                   Text(
-                    '${tr('total')} ${_rows!.length}',
+                    '${tr('total')} ${scopedRows.length}',
                     style: TextStyle(
                       color: accent,
                       fontWeight: FontWeight.w800,
