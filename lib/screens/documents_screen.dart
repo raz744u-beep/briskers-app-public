@@ -88,8 +88,14 @@ class DocumentsScreen extends StatefulWidget {
     required this.roleCode,
     this.onPrimaryDestinationSelected,
     this.sharedBottomNavigationBar,
+    this.customerId,
+    this.customerName,
+    this.customerVehicles = const [],
   });
 
+  final String? customerId;
+  final String? customerName;
+  final List<dynamic> customerVehicles;
   final bool showAppBar;
   final String businessName;
   final String roleCode;
@@ -376,7 +382,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   List<Map<String, dynamic>> get _visibleRows {
     final rows = List<Map<String, dynamic>>.from(
       _rows ?? const <Map<String, dynamic>>[],
-    );
+    ).where((row) => widget.customerId == null ||
+        row['customer_id']?.toString() == widget.customerId).toList();
 
     var filtered = _selectedStatus == null
         ? rows
@@ -1294,7 +1301,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final invoiceId = await Navigator.push<String>(
       context,
       MaterialPageRoute(
-        builder: (_) => BlankInvoiceSetupScreen(businessId: widget.businessId),
+        builder: (_) => BlankInvoiceSetupScreen(
+          businessId: widget.businessId,
+          initialCustomerId: widget.customerId,
+          initialCustomerName: widget.customerName,
+          initialVehicles: widget.customerVehicles,
+        ),
       ),
     );
     if (!mounted || invoiceId == null || invoiceId.isEmpty) return;
@@ -1324,6 +1336,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         builder: (_) => BlankInvoiceSetupScreen(
           businessId: widget.businessId,
           kind: 'estimate',
+          initialCustomerId: widget.customerId,
+          initialCustomerName: widget.customerName,
+          initialVehicles: widget.customerVehicles,
         ),
       ),
     );
@@ -1357,10 +1372,24 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final accent = _estimate
         ? BriskersColors.estimates
         : BriskersColors.invoices;
+    final scopedRows = (_rows ?? const <Map<String, dynamic>>[])
+        .where((row) => widget.customerId == null ||
+            row['customer_id']?.toString() == widget.customerId).toList();
+    final knownAmounts = scopedRows.where((row) =>
+        num.tryParse(row['total_amount']?.toString() ?? '') != null).toList();
+    final grandTotal = knownAmounts.fold<double>(0.0, (sum, row) =>
+        sum + (num.tryParse(row['total_amount']?.toString() ?? '') ?? 0));
+    final missingAmounts = scopedRows.length - knownAmounts.length;
 
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: widget.showAppBar
+      appBar: widget.customerId != null
+          ? AppBar(
+              title: Text(_title, style: TextStyle(
+                color: accent, fontWeight: FontWeight.w800)),
+              backgroundColor: accent.withValues(alpha: 0.08),
+            )
+          : widget.showAppBar
           ? AppBar(
               automaticallyImplyLeading: false,
               toolbarHeight: 78,
@@ -1403,7 +1432,34 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               ],
             )
           : null,
-      bottomNavigationBar: widget.showAppBar && _estimate
+      bottomNavigationBar: widget.customerId != null
+          ? SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (widget.isOwner || widget.canManageExpenses)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 7, 12, 9),
+                      child: SizedBox(width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _estimate
+                              ? _createStandaloneEstimate : _createBlankInvoice,
+                          icon: const Icon(Icons.add),
+                          label: Text(_estimate ? 'New Estimate' : 'New Invoice'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: accent,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                          ),
+                        )),
+                    ),
+                  if (widget.sharedBottomNavigationBar != null)
+                    widget.sharedBottomNavigationBar!,
+                ],
+              ),
+            )
+          : widget.showAppBar && _estimate
           ? (widget.sharedBottomNavigationBar ??
                 NavigationBar(
                   selectedIndex: 5,
@@ -1460,6 +1516,459 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         child: ListView(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 84),
           children: [
+            if (_rows != null) ...[
+              Card(
+                elevation: 0,
+                color: accent.withValues(alpha: 0.12),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(_estimate ? 'Total Estimates' : 'Total Invoices',
+                        style: TextStyle(fontSize: 18,
+                          fontWeight: FontWeight.w800, color: accent)),
+                      const SizedBox(height: 4),
+                      Text(NumberFormat.currency(symbol: '\
+                  _title,
+                  style: Theme.of(context).textTheme.headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.w800, color: accent),
+                ),
+                const SizedBox(width: 8),
+                PopupMenuButton<String>(
+                  tooltip: 'Filter $_title',
+                  onSelected: (value) => setState(() {
+                    _futureDatedOnly = value == '__future__';
+                    _selectedStatus =
+                        value == '__all__' || value == '__future__'
+                        ? null
+                        : value;
+                  }),
+                  itemBuilder: (_) => [
+                    PopupMenuItem<String>(
+                      value: '__all__',
+                      child: Row(
+                        children: [
+                          const Icon(Icons.all_inclusive),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(tr('all'))),
+                          _menuCount(_rows?.length ?? 0, alwaysShow: true),
+                        ],
+                      ),
+                    ),
+                    if (!_estimate)
+                      PopupMenuItem<String>(
+                        value: '__future__',
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.flag_outlined,
+                              color: Color(0xFFB26A00),
+                            ),
+                            const SizedBox(width: 10),
+                            const Expanded(child: Text('Future-dated')),
+                            _menuCount(_futureDatedCount, alwaysShow: true),
+                          ],
+                        ),
+                      ),
+                    ..._statuses.map((status) {
+                      final count = _statusCount(status);
+                      return PopupMenuItem<String>(
+                        value: status,
+                        child: Row(
+                          children: [
+                            Icon(
+                              _statusIcon(status),
+                              size: 16,
+                              color: _statusColor(status),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(_localizedStatusLabel(status)),
+                            ),
+                            _menuCount(count),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color:
+                            (_futureDatedOnly
+                                    ? const Color(0xFFB26A00)
+                                    : (_selectedStatus == null
+                                          ? accent
+                                          : _statusColor(_selectedStatus!)))
+                                .withValues(alpha: 0.50),
+                      ),
+                      color:
+                          (_futureDatedOnly
+                                  ? const Color(0xFFB26A00)
+                                  : (_selectedStatus == null
+                                        ? accent
+                                        : _statusColor(_selectedStatus!)))
+                              .withValues(alpha: 0.08),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          selectedLabel,
+                          style: TextStyle(
+                            color: _futureDatedOnly
+                                ? const Color(0xFFB26A00)
+                                : (_selectedStatus == null
+                                      ? accent
+                                      : _statusColor(_selectedStatus!)),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(width: 3),
+                        Icon(
+                          Icons.chevron_right,
+                          size: 18,
+                          color: _futureDatedOnly
+                              ? const Color(0xFFB26A00)
+                              : (_selectedStatus == null
+                                    ? accent
+                                    : _statusColor(_selectedStatus!)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                if (_rows != null)
+                  Text(
+                    '${tr('total')} ${_rows!.length}',
+                    style: TextStyle(
+                      color: accent,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+              ],
+            ),
+            if (!_estimate && widget.isOwner) ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: BriskersColors.invoices,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: _showCloseInvoices,
+                  icon: const Icon(Icons.lock_outline),
+                  label: const Text('Close invoices'),
+                ),
+              ),
+            ],
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: SearchBar(
+                    key: const ValueKey('persistent-document-search'),
+                    controller: _search,
+                    focusNode: _searchFocus,
+                    hintText: _estimate
+                        ? 'Search estimate #, customer, job or vehicle'
+                        : 'Search invoice #, customer, job or vehicle',
+                    leading: const Icon(Icons.search),
+                    trailing: [
+                      if (_search.text.isNotEmpty)
+                        IconButton(
+                          tooltip: 'Clear',
+                          onPressed: () {
+                            _search.clear();
+                            setState(() {});
+                          },
+                          icon: const Icon(Icons.close),
+                        ),
+                    ],
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (widget.isOwner || widget.canManageExpenses)
+                  IconButton.filled(
+                    tooltip: _estimate ? 'New Estimate' : 'New Invoice',
+                    style: IconButton.styleFrom(
+                      backgroundColor: _estimate
+                          ? BriskersColors.estimates
+                          : BriskersColors.invoices,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _estimate
+                        ? _createStandaloneEstimate
+                        : _createBlankInvoice,
+                    icon: const Icon(Icons.add),
+                  ),
+              ],
+            ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            const SizedBox(height: 10),
+            if (_rows == null)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (visible.isEmpty)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Text(
+                    _futureDatedOnly
+                        ? 'No future-dated invoices found. Refresh to check for updates.'
+                        : 'No ${_title.toLowerCase()} in this status.',
+                  ),
+                ),
+              )
+            else
+              ...visible.map((row) {
+                final status = _invoiceStage(row);
+                final statusLabel = _localizedStatusLabel(status);
+                final color = _statusColor(status);
+                final number = row['document_number']?.toString() ?? '';
+                final customer = row['customer_name']?.toString() ?? '';
+                final documentTitle =
+                    (row['title'] ?? row['job_title'])?.toString().trim() ?? '';
+                final vehicle = row['vehicle']?.toString() ?? '';
+                final jobNumber = row['job_number']?.toString() ?? '';
+                final documentDate = _shortDate(row['document_date']);
+                final displayNumber = number.isEmpty
+                    ? ''
+                    : (_estimate
+                          ? (number.toUpperCase().startsWith('E-')
+                                ? number
+                                : 'E-$number')
+                          : (number.toUpperCase().startsWith('I-')
+                                ? number
+                                : 'I-$number'));
+
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 9),
+                  color: Color.alphaBlend(
+                    color.withValues(alpha: 0.08),
+                    Colors.white,
+                  ),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _open(row),
+                    onLongPress: () => _showDocumentActions(row),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    if (displayNumber.isNotEmpty) ...[
+                                      Text(
+                                        displayNumber,
+                                        style: const TextStyle(
+                                          fontSize: 17.5,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                    ],
+                                    Expanded(
+                                      child: Text(
+                                        customer,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 17.5,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                    ),
+                                    if (row['customer_problem_flag'] ==
+                                        true) ...[
+                                      const SizedBox(width: 5),
+                                      const Icon(
+                                        Icons.flag,
+                                        color: Colors.red,
+                                        size: 18,
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                if (documentTitle.isNotEmpty) ...[
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    documentTitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 3),
+                                if (vehicle.isNotEmpty)
+                                  Text(
+                                    vehicle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                if (_hasFutureDateTag(row)) ...[
+                                  const SizedBox(height: 4),
+                                  const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.flag_outlined,
+                                        size: 14,
+                                        color: Color(0xFFB26A00),
+                                      ),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        'Future-dated',
+                                        style: TextStyle(
+                                          color: Color(0xFFB26A00),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                                if (jobNumber.isNotEmpty ||
+                                    documentDate.isNotEmpty) ...[
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    <String>[
+                                      if (jobNumber.isNotEmpty)
+                                        '${tr('jobLabel')} $jobNumber',
+                                      if (documentDate.isNotEmpty) documentDate,
+                                    ].join(' • '),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 98,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    _money(row['total_amount']),
+                                    style: const TextStyle(
+                                      fontSize: 16.5,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 5),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: color.withValues(alpha: 0.11),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      statusLabel,
+                                      style: TextStyle(
+                                        color: color,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionSectionLabel extends StatelessWidget {
+  const _ActionSectionLabel(this.label);
+  final String label;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+    child: Align(alignment: Alignment.centerLeft,
+      child: Text(label.toUpperCase(),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          letterSpacing: 0.8, fontWeight: FontWeight.w700))),
+  );
+}
+).format(grandTotal),
+                        style: TextStyle(fontSize: 26,
+                          fontWeight: FontWeight.w800, color: accent)),
+                      Text('${scopedRows.length} records'
+                        '${missingAmounts > 0 ? ' • $missingAmounts amounts unavailable' : ''}',
+                        style: const TextStyle(fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
+            ],
             Row(
               children: [
                 Text(
