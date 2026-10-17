@@ -43,10 +43,29 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
   Future<void> _initialize() async {
     try {
       await _runStep('Opening local database', initializeLocalDatabase);
-      await _runStep('Loading language', () =>
-          BriskersLanguageController.instance.initialize());
-      await _runStep('Loading connection settings', () =>
-          BriskersConnectionModeController.instance.initialize());
+      // Preferences are non-financial UI settings. A stalled or unavailable
+      // Android preferences plugin must not prevent access to the local
+      // database. Never clear the underlying stored preferences on error.
+      await _runStep('Loading language', () async {
+        try {
+          await BriskersLanguageController.instance.initialize()
+              .timeout(const Duration(seconds: 8));
+        } catch (error) {
+          debugPrint('Language preferences unavailable; using English '
+              'until preferences recover: $error');
+        }
+      });
+      await _runStep('Loading connection settings', () async {
+        try {
+          await BriskersConnectionModeController.instance.initialize()
+              .timeout(const Duration(seconds: 8));
+        } catch (error) {
+          // Unknown saved mode must never trigger unexpected network work.
+          BriskersConnectionModeController.instance.useSafeOfflineFallback();
+          debugPrint('Connection preferences unavailable; safely '
+              'forcing offline until user selects a connection mode: $error');
+        }
+      });
       await _runStep('Initializing secure session', () => Supabase.initialize(
         url: supabaseUrl,
         publishableKey: supabasePublishableKey,
