@@ -32,6 +32,7 @@ class JobsScreen extends StatefulWidget {
     required this.businessId,
     required this.roleCode,
     this.refreshToken = 0,
+    this.defaultToOpen = false,
     this.onJobsChanged,
     this.jobDetailBottomNavigationBar,
     this.repository,
@@ -43,6 +44,7 @@ class JobsScreen extends StatefulWidget {
   final String businessId;
   final String roleCode;
   final int refreshToken;
+  final bool defaultToOpen;
   final VoidCallback? onJobsChanged;
   final Widget? jobDetailBottomNavigationBar;
   final LocalJobRepository? repository;
@@ -75,6 +77,10 @@ class _JobsScreenState extends State<JobsScreen>
   List<Map<String, dynamic>>? _rows;
   List<Map<String, dynamic>> _statuses = const [];
   String? _selectedStatus;
+  JobListView get _listView => _selectedStatus == '__open__'
+      ? JobListView.active : JobListView.all;
+  String? get _queryStatus => _selectedStatus == '__open__'
+      ? null : _selectedStatus;
   static const _pageSize = 30;
   int _visibleLimit = _pageSize;
   bool _restoredView = false;
@@ -185,9 +191,9 @@ class _JobsScreenState extends State<JobsScreen>
       final counts = await Future.wait<dynamic>([
         _localJobs.jobCount(
           widget.businessId,
-          status: _selectedStatus,
+          status: _queryStatus,
           search: _search.text.trim(),
-          view: JobListView.all,
+          view: _listView,
         ),
         _localJobs.jobStatusCounts(widget.businessId, view: JobListView.all),
       ]);
@@ -212,7 +218,9 @@ class _JobsScreenState extends State<JobsScreen>
     _restoredView = true;
     final saved = PageStorage.maybeOf(context)
         ?.readState(context, identifier: _storageId);
-    if (saved is JobListPreferences) {
+    if (widget.defaultToOpen) {
+      _selectedStatus = '__open__';
+    } else if (saved is JobListPreferences) {
       _selectedStatus = saved.status;
       _search.text = saved.search;
       _visibleLimit = saved.visibleLimit;
@@ -252,7 +260,13 @@ class _JobsScreenState extends State<JobsScreen>
       _listenForQuarantine();
       _restoreView();
     } else if (oldWidget.refreshToken != widget.refreshToken) {
-      _load();
+      if (widget.defaultToOpen) {
+        _selectedStatus = '__open__';
+        _search.clear();
+        _visibleLimit = _pageSize;
+        _rememberView();
+      }
+      _load(refreshRemote: false);
     }
   }
 
@@ -306,7 +320,8 @@ class _JobsScreenState extends State<JobsScreen>
     final generation = visibility.beginLoad();
     final businessId = widget.businessId;
     final query = _search.text.trim();
-    final status = _selectedStatus;
+    final status = _queryStatus;
+    final view = _listView;
     final limit = _visibleLimit;
     final userId = _userId;
     var localAvailable = false;
@@ -318,7 +333,7 @@ class _JobsScreenState extends State<JobsScreen>
           businessId,
           status: status,
           search: query,
-          view: JobListView.all,
+          view: view,
           sort: JobListSort.lastModified,
           userId: userId,
           limit: limit,
@@ -328,7 +343,7 @@ class _JobsScreenState extends State<JobsScreen>
           businessId,
           status: status,
           search: query,
-          view: JobListView.all,
+          view: view,
         ),
         _localJobs.jobStatusCounts(businessId, view: JobListView.all),
         query.isEmpty
@@ -980,6 +995,17 @@ class _JobsScreenState extends State<JobsScreen>
                         },
                         itemBuilder: (_) => [
                           PopupMenuItem<String>(
+                            value: '__open__',
+                            child: Row(children: [
+                              const Icon(Icons.work_outline),
+                              const SizedBox(width: 10),
+                              Expanded(child: Text(_text('Open jobs', 'Trabajos abiertos'))),
+                              _menuCount(_statusCounts.entries
+                                  .where((e) => !const {'completed','cancelled','closed'}.contains(e.key))
+                                  .fold<int>(0, (a, e) => a + e.value), alwaysShow: true),
+                            ]),
+                          ),
+                          PopupMenuItem<String>(
                             value: 'paid_still_open',
                             child: Row(
                               children: [
@@ -1061,7 +1087,9 @@ class _JobsScreenState extends State<JobsScreen>
                                 : colorFromHex(
                                     selected['color_hex']?.toString(),
                                   );
-                            final label = _selectedStatus == 'paid_still_open'
+                            final label = _selectedStatus == '__open__'
+                                ? _text('Open jobs', 'Trabajos abiertos')
+                                : _selectedStatus == 'paid_still_open'
                                 ? _text(
                                     'Paid, Still Open',
                                     'Pagado, aún abierto',

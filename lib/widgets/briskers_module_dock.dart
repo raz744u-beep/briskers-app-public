@@ -123,7 +123,8 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
                     child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                       Badge(
                         isLabelVisible: item.count > 0,
-                        label: Text('${item.count}'),
+                        backgroundColor: const Color(0xFF465468),
+                        label: Text(item.count > 99 ? '99+' : '${item.count}'),
                         child: Icon(item.icon, color: item.color, size: 25),
                       ),
                       const SizedBox(height: 2),

@@ -1,9 +1,38 @@
 import 'package:drift/drift.dart';
 
+import '../core/document_presentation.dart';
+import 'invoice_payment_feed.dart';
+
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_document_detail_cache.dart';
 import 'local_job_retirement.dart';
+
+/// Shared read-only predicate for the dock badge and the document list.
+bool invoiceNeedsPayment(Map<String, dynamic> document, {num receipts = 0}) {
+  if ((document['kind']?.toString() ?? 'invoice') != 'invoice') return false;
+  final row = Map<String, dynamic>.from(document);
+  if (row['_local_snapshot'] == true) {
+    row.remove('paid_amount');
+    row.remove('pending_payment');
+  }
+  final display = DocumentPresentation(row);
+  if (display.isVoid || display.isClosed || display.fullyCovered) return false;
+  final total = num.tryParse((row['total_amount'] ?? row['total'])?.toString() ?? '');
+  if (total == null || total <= 0 || !total.isFinite) return true;
+  return receipts + 0.005 < total;
+}
+
+Map<String, num> invoiceRecordedReceiptTotals(Iterable<Map<String, dynamic>> receipts) {
+  final amounts = <String, num>{};
+  for (final row in receipts) {
+    final id = row['invoice_id']?.toString() ?? '';
+    final amount = num.tryParse(row['amount']?.toString() ?? '');
+    if (id.isEmpty || amount == null || !amount.isFinite || amount <= 0) continue;
+    amounts[id] = (amounts[id] ?? 0) + amount;
+  }
+  return amounts;
+}
 
 class LocalDocumentRepository {
   LocalDocumentRepository({BriskersLocalDatabase? database})
@@ -435,43 +464,27 @@ class LocalDocumentRepository {
     };
   }
 
+  /// Covers local/server recorded receipts without posting or finalizing.
   Future<int> openInvoiceCount(String businessId) async {
-    await LocalJobRetirement.ensureSchema(_database);
-    final row = await _database
-        .customSelect(
-          '''
-      SELECT COUNT(*) AS count
-      FROM local_documents d
-      WHERE business_id = ?
-        AND ${_visibleDocumentSql('d')}
-        AND kind = 'invoice'
-        AND closed_at IS NULL
-        AND lower(COALESCE(status, '')) <> 'void'
-      ''',
-          variables: [Variable<String>(businessId)],
-        )
-        .getSingle();
-    return row.read<int>('count');
+    final docs = await listByKind(businessId, kind: 'invoice');
+    final receipts = await InvoicePaymentFeed(database: _database).load(businessId);
+    final paid = invoiceRecordedReceiptTotals(receipts);
+    return docs.where((d) => invoiceNeedsPayment(d,
+        receipts: paid[d['id']?.toString()] ?? 0)).length;
   }
 
   Stream<int> watchOpenInvoiceCount(String businessId) async* {
     await LocalJobRetirement.ensureSchema(_database);
-    yield* _database
-        .customSelect(
-          '''
-          SELECT COUNT(*) AS count
-          FROM local_documents d
-          WHERE business_id = ?
-            AND ${_visibleDocumentSql('d')}
-            AND kind = 'invoice'
-            AND closed_at IS NULL
-            AND lower(COALESCE(status, '')) <> 'void'
-          ''',
-          variables: [Variable<String>(businessId)],
-          readsFrom: {_database.localDocuments},
-        )
-        .watchSingle()
-        .map((row) => row.read<int>('count'));
+    yield await openInvoiceCount(businessId);
+    yield* _database.customSelect(
+      '''SELECT (SELECT COUNT(*) FROM local_documents
+                 WHERE business_id=? AND kind='invoice') AS docs,
+                (SELECT COUNT(*) FROM sync_outbox
+                 WHERE business_id=? AND entity_type='invoice_payment_received'
+                   AND state IN ('pending','inflight')) AS receipts''',
+      variables: [Variable<String>(businessId), Variable<String>(businessId)],
+      readsFrom: {_database.localDocuments, _database.syncOutbox},
+    ).watch().asyncMap((_) => openInvoiceCount(businessId));
   }
 
   Future<List<Map<String, dynamic>>> search(

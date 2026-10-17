@@ -14,6 +14,7 @@ import '../core/document_search.dart';
 import '../core/document_future_date.dart';
 import '../core/document_presentation.dart';
 import '../services/briskers_api.dart';
+import '../services/invoice_payment_feed.dart';
 import '../services/local_job_retirement.dart';
 import '../local/local_database_provider.dart';
 import '../services/local_financial_cache.dart';
@@ -56,6 +57,7 @@ const invoiceListStatusFilters = [
   'Void',
 ];
 const estimateListStatusFilters = [
+  'Open',
   'Draft',
   'Issued',
   'Accepted',
@@ -91,8 +93,12 @@ class DocumentsScreen extends StatefulWidget {
     this.customerId,
     this.customerName,
     this.customerVehicles = const [],
+    this.dockDefaultsToOpen = false,
+    this.dockResetToken = 0,
   });
 
+  final bool dockDefaultsToOpen;
+  final int dockResetToken;
   final String? customerId;
   final String? customerName;
   final List<dynamic> customerVehicles;
@@ -130,6 +136,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   StreamSubscription<({String businessId, Set<String> jobIds})>? _retirement;
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
+  Map<String, num> _receiptTotals = const {};
+  final InvoicePaymentFeed _paymentFeed = InvoicePaymentFeed();
   bool _futureDatedOnly = false;
   String? _error;
   final TextEditingController _search = TextEditingController();
@@ -137,8 +145,38 @@ class _DocumentsScreenState extends State<DocumentsScreen>
 
   bool get _estimate => widget.kind == 'estimate';
 
-  String _invoiceStage(Map<String, dynamic> row) =>
-      documentListStage(row, estimate: _estimate);
+  String _invoiceStage(Map<String, dynamic> row) {
+    if (_estimate) {
+      return documentListStage(row, estimate: true);
+    }
+    if (invoiceNeedsPayment(row,
+        receipts: _receiptTotals[row['id']?.toString()] ?? 0)) {
+      return 'Open';
+    }
+    final existing = documentListStage(row, estimate: false);
+    return existing == 'Open' ? 'Pending Close' : existing;
+  }
+
+  bool _matchesStatus(Map<String, dynamic> row, String status) {
+    if (_estimate && status == 'Open') {
+      final raw = row['status']?.toString().toLowerCase() ?? '';
+      return row['converted'] != true &&
+          !const {'accepted','declined','expired','void'}.contains(raw);
+    }
+    return _invoiceStage(row) == status;
+  }
+
+  Future<void> _refreshReceiptTotals(int epoch) async {
+    if (_estimate) return;
+    try {
+      final receipts = await _paymentFeed.load(widget.businessId);
+      if (!mounted || epoch != _loadEpoch) return;
+      setState(() => _receiptTotals = invoiceRecordedReceiptTotals(receipts));
+    } catch (_) {
+      // Unknown payment data never fabricates a fully paid state.
+    }
+  }
+
 
   List<String> get _statuses =>
       _estimate ? estimateListStatusFilters : invoiceListStatusFilters;
@@ -228,6 +266,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   @override
   void initState() {
     super.initState();
+    _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
     final cachedStyles = _styleCache[widget.businessId];
     if (!_estimate && cachedStyles != null) {
       _invoiceStyles = List<Map<String, dynamic>>.from(cachedStyles);
@@ -249,8 +288,17 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         oldWidget.kind != widget.kind) {
       _loadEpoch++;
       _rows = null;
+      _receiptTotals = const {};
+      _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
       _invoiceStyles = const [];
       _error = null;
+      unawaited(_load());
+    } else if (oldWidget.dockResetToken != widget.dockResetToken) {
+      setState(() {
+        _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
+        _futureDatedOnly = false;
+        _search.clear();
+      });
       unawaited(_load());
     }
   }
@@ -265,6 +313,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
 
   Future<void> _load() async {
     final epoch = ++_loadEpoch;
+    unawaited(_refreshReceiptTotals(epoch));
     var localShown = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
     final forceOffline = BriskersConnectionModeController.instance.forceOffline;
@@ -371,7 +420,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
 
     var filtered = _selectedStatus == null
         ? rows
-        : rows.where((row) => _invoiceStage(row) == _selectedStatus).toList();
+        : rows.where((row) => _matchesStatus(row, _selectedStatus!)).toList();
 
     if (_futureDatedOnly) {
       filtered = filtered.where(_hasFutureDateTag).toList();
@@ -448,7 +497,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final rows = _rows ?? const <Map<String, dynamic>>[];
     return rows.where((row) => widget.customerId == null ||
         row['customer_id']?.toString() == widget.customerId)
-        .where((row) => _invoiceStage(row) == status).length;
+        .where((row) => _matchesStatus(row, status)).length;
   }
 
   Widget _menuCount(int count, {bool alwaysShow = false}) {

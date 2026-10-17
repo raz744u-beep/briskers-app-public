@@ -417,7 +417,7 @@ class VehicleFindingActionsService {
         final before = beforeRows
             .where((f) => f['id']?.toString() == findingId)
             .firstOrNull;
-        if (before == null || !_matchesPatch(before, payload['patch'] as Map)) {
+        if (before == null || !_matchesActionResult(before, payload)) {
           if (payload['_mutation_attempted'] == true) {
             throw StateError(
               'The earlier finding change is not yet verified. '
@@ -463,7 +463,7 @@ class VehicleFindingActionsService {
         final server = serverRows
             .where((f) => f['id']?.toString() == findingId)
             .firstOrNull;
-        if (server == null || !_matchesPatch(server, payload['patch'] as Map)) {
+        if (server == null || !_matchesActionResult(server, payload)) {
           throw StateError(
             'The saved finding could not yet be verified. It remains queued.',
           );
@@ -680,6 +680,24 @@ class VehicleFindingActionsService {
           }
         : {...rows[index], ...updated};
     await _cache.save(businessId, customerId, 'findings', rows);
+  }
+
+  // The server's resolve RPC writes resolved_job_id, NOT repair_job_id.
+  // Compare authoritative server effects so that an acknowledged (or
+  // previously applied with a lost reply) resolution is never resent.
+  static bool _matchesActionResult(
+    Map<String, dynamic> server,
+    Map<String, dynamic> payload,
+  ) {
+    if (payload['action'] == 'resolve') {
+      final jobId = payload['job_id']?.toString() ?? '';
+      return jobId.isNotEmpty &&
+          server['status'] == 'resolved' &&
+          server['resolved_job_id']?.toString() == jobId &&
+          server['resolved_at'] != null;
+    }
+    final patch = payload['patch'];
+    return patch is Map && _matchesPatch(server, patch);
   }
 
   static bool _matchesPatch(Map<String, dynamic> server, Map patch) {

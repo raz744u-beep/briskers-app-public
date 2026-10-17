@@ -4024,6 +4024,28 @@ class BriskersApi {
     return networkSupabase.storage.from(bucket).download(key);
   }
 
+  /// One audited server transaction updates all ordinary taxable invoice lines.
+  /// It never edits pending receipts or finalizes any payment.
+  Future<Map<String, dynamic>> updateInvoiceTaxRate(
+    String businessId,
+    String invoiceId, {
+    required int expectedVersion,
+    required num oldRate,
+    required num newRate,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_update_invoice_tax_rate_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+        'p_expected_version': expectedVersion,
+        'p_old_rate': oldRate,
+        'p_new_rate': newRate,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
   Future<void> updateDocumentLineV2(
     String businessId,
     String lineId, {
