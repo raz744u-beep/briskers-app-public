@@ -122,6 +122,15 @@ void main() {
     expect(rows, hasLength(2));
   });
 
+  test('lost-response replay uses operation UUID to suppress duplication', () {
+    final server = receipt('server-id','pending',175.60,
+        operationId: 'lost-response-op');
+    final queued = receipt('lost-response-op','local',175.60);
+    final combined = InvoicePaymentFeed.mergeReceipts([server], [queued]);
+    expect(combined, hasLength(1));
+    expect(combined.single['receipt_id'], 'server-id');
+  });
+
   test('offline search/range/direction filter invoice receipts', () {
     final data = [receipt('one','pending',175.60)];
     expect(InvoicePaymentFeed.combine(
