@@ -3,7 +3,7 @@ name: Build Android debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, feat/combined-118-20261014, fix/oct15-independent-ui-20261015]
+    branches: [main, feat/combined-118-20261014, fix/oct15-independent-ui-20261015, recovery/latest-feature-startup-20261017]
     paths-ignore:
       - '.github/workflows/**'
 
@@ -646,7 +646,7 @@ jobs:
             rm -rf build/native_assets
             rm -rf build/.dart_tool
 
-            if flutter build apk --release               --build-name "$VERSION"               --build-number "$BUILD_NUMBER"; then
+            if flutter build apk --release               --build-name "$VERSION"               --build-number "$BUILD_NUMBER"               --dart-define="BRISKERS_BUILD_NUMBER=$BUILD_NUMBER"               --dart-define="BRISKERS_SOURCE=${GITHUB_SHA:0:12}"; then
               exit 0
             fi
 

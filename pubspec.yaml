@@ -20,6 +20,10 @@ dependencies:
   pdf: ^3.11.3
   printing: ^5.14.2
   shared_preferences: ^2.5.5
+  # b2268 (last phone-working APK) resolved 2.4.28; b2278/b2285
+  # resolved 2.5.0 and fail during native preference/session startup.
+  # Lock only this Android implementation until on-device verification.
+  shared_preferences_android: 2.4.28
   drift: 2.32.1
   drift_flutter: 0.3.1
   path_provider: 2.1.5
