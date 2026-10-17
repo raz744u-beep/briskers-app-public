@@ -3081,7 +3081,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<void> _editPayment(Map<String, dynamic> payment) async {
     if (_estimate || payment['state']?.toString() != 'pending' ||
-        payment['reconciliation_required'] == true) return;
+        payment['reconciliation_required'] == true) {
+      return;
+    }
 
     List<Map<String, dynamic>> methods;
     try {
