@@ -13,12 +13,14 @@ import '../core/briskers_i18n.dart';
 import '../core/document_search.dart';
 import '../core/document_future_date.dart';
 import '../core/document_presentation.dart';
+import '../core/estimate_list_description.dart';
 import '../services/briskers_api.dart';
 import '../services/invoice_payment_feed.dart';
 import '../services/local_job_retirement.dart';
 import '../local/local_database_provider.dart';
 import '../services/local_financial_cache.dart';
 import '../services/local_document_repository.dart';
+import '../services/local_document_detail_cache.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
 import '../services/invoice_finalization_guard.dart';
@@ -123,6 +125,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       _estimate ? BriskersColors.estimates : BriskersColors.invoices;
   static const _api = BriskersApi();
   final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
+  final LocalDocumentDetailCache _localDetailCache = const LocalDocumentDetailCache();
   final OfflineDocumentDraftService _offlineDrafts =
       OfflineDocumentDraftService();
   final LocalInvoiceStatusStylesCache _localInvoiceStyles =
@@ -311,6 +314,42 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     super.dispose();
   }
 
+  // Populate visible estimates from their existing local details, not a full
+  // historical scan. This is read-only and runs after the list first paints.
+  Future<void> _enrichEstimateDescriptions(
+    int epoch, List<Map<String, dynamic>> snapshot,
+  ) async {
+    if (!_estimate) return;
+    final shown = _selectedStatus == null ? snapshot
+        : snapshot.where((row) => _matchesStatus(row, _selectedStatus!)).toList();
+    final summaries = <String, String>{};
+    for (final row in shown.take(75)) {
+      if (!mounted || epoch != _loadEpoch) return;
+      final id = row['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+      final indexed = estimateListDescription(row);
+      if (indexed.isNotEmpty) {
+        summaries[id] = indexed;
+        continue;
+      }
+      try {
+        final detail = await _localDetailCache.load(widget.businessId, id);
+        if (detail == null) continue;
+        final summary = estimateListDescription(row, detail: detail);
+        if (summary.isNotEmpty) summaries[id] = summary;
+      } catch (_) {
+        // Missing detail must not block opening Estimates.
+      }
+    }
+    if (!mounted || epoch != _loadEpoch || summaries.isEmpty) return;
+    setState(() {
+      for (final row in _rows ?? <Map<String, dynamic>>[]) {
+        final summary = summaries[row['id']?.toString()];
+        if (summary != null) row['_estimate_list_description'] = summary;
+      }
+    });
+  }
+
   Future<void> _load() async {
     final epoch = ++_loadEpoch;
     unawaited(_refreshReceiptTotals(epoch));
@@ -339,6 +378,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
             _rows = local.map(documentListIndexPresentation).toList();
             _error = null;
           });
+          if (_estimate) unawaited(_enrichEstimateDescriptions(epoch, _rows!));
         }
       } catch (_) {}
     }
@@ -392,6 +432,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         _invoiceStyles = styles;
         _error = null;
       });
+      if (_estimate) unawaited(_enrichEstimateDescriptions(epoch, rows));
     } catch (_) {
       if (!mounted || epoch != _loadEpoch) return;
       setState(() {
@@ -1787,6 +1828,10 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                 final customer = row['customer_name']?.toString() ?? '';
                 final documentTitle =
                     (row['title'] ?? row['job_title'])?.toString().trim() ?? '';
+                final estimateDescription = _estimate
+                    ? (row['_estimate_list_description']?.toString().trim() ??
+                        estimateListDescription(row))
+                    : '';
                 final vehicle = row['vehicle']?.toString() ?? '';
                 final jobNumber = row['job_number']?.toString() ?? '';
                 final documentDate = _shortDate(row['document_date']);
@@ -1826,7 +1871,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                                         displayNumber,
                                         style: const TextStyle(
                                           fontSize: 17.5,
-                                          fontWeight: FontWeight.w900,
+                                          fontWeight: FontWeight.w700,
                                         ),
                                       ),
                                       const SizedBox(width: 10),
@@ -1838,7 +1883,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                                         overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
                                           fontSize: 17.5,
-                                          fontWeight: FontWeight.w900,
+                                          fontWeight: FontWeight.w700,
                                         ),
                                       ),
                                     ),
@@ -1862,6 +1907,19 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                                     style: const TextStyle(
                                       fontSize: 15,
                                       fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                                if (estimateDescription.isNotEmpty) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    estimateDescription,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 14.5,
+                                      fontWeight: FontWeight.w400,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                                 ],
@@ -1938,7 +1996,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                                     _money(row['total_amount']),
                                     style: const TextStyle(
                                       fontSize: 16.5,
-                                      fontWeight: FontWeight.w900,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                 ),
@@ -1959,7 +2017,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                                       style: TextStyle(
                                         color: color,
                                         fontSize: 13,
-                                        fontWeight: FontWeight.w800,
+                                        fontWeight: FontWeight.w600,
                                       ),
                                     ),
                                   ),
@@ -1994,7 +2052,7 @@ class _ActionSectionLabel extends StatelessWidget {
           fontSize: 14,
           color: Theme.of(context).colorScheme.onSurfaceVariant,
           letterSpacing: 0.45,
-          fontWeight: FontWeight.w800,
+          fontWeight: FontWeight.w600,
         ),
       ),
     ),
