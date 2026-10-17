@@ -1,10 +1,12 @@
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../local/briskers_local_database.dart' hide LocalFinancialCache;
 import '../local/local_database_provider.dart';
 import 'local_financial_cache.dart';
+import 'local_document_detail_cache.dart';
 
 /// Read-only projection of real invoice receipts into Expenses & Income.
 /// No methods in this class insert, finalize, post, or charge a payment.
@@ -76,6 +78,88 @@ class InvoicePaymentFeed {
       }
     }
     return mergeReceipts(server, local);
+  }
+
+  /// An existing b2286 installation already holds local invoice details.
+  /// Until the new RPC has downloaded its complete receipt inventory, recover
+  /// server-pending receipts from those protected snapshots WITHOUT networking
+  /// or writing money. This runs AFTER the Expenses first paint.
+  Future<List<Map<String, dynamic>>> pendingFromCachedInvoices(
+      String businessId) async {
+    if (await _cache.hasServerInvoiceReceipts(businessId)) {
+      // A complete server RPC cache, even if empty, outranks stale documents.
+      return const [];
+    }
+    final active = await _db.customSelect(
+      "SELECT id FROM local_documents "
+      "WHERE business_id = ? AND kind = 'invoice' "
+      "AND COALESCE(status, '') <> 'void'",
+      variables: [Variable<String>(businessId)],
+    ).get();
+    final invoiceIds = active.map((r) => r.read<String>('id')).toSet();
+    final prefs = await SharedPreferences.getInstance();
+    final prefix = 'briskers_document_detail_${businessId}_';
+    final detailCache = LocalDocumentDetailCache(database: _db);
+    final pendingRows = <Map<String, dynamic>>[];
+    final aggregate = RegExp(
+        r'"pending_payment"\\s*:\\s*"?([0-9]+(?:\\.[0-9]+)?)');
+    var examined = 0;
+    for (final key in prefs.getKeys()) {
+      if (!key.startsWith(prefix)) continue;
+      final invoiceId = key.substring(prefix.length);
+      if (!invoiceIds.contains(invoiceId)) continue;
+      final raw = prefs.getString(key);
+      if (raw == null) continue;
+      final match = aggregate.firstMatch(raw);
+      if (match == null ||
+          (double.tryParse(match.group(1) ?? '') ?? 0) <= 0.005) {
+        continue;
+      }
+      // Honor local retirement/quarantine protections before exposing details.
+      final detail = await detailCache.load(businessId, invoiceId);
+      if (detail == null ||
+          detail['kind'] != 'invoice' ||
+          detail['status'] == 'void') continue;
+      final rows = detail['payments'];
+      if (rows is! List) continue;
+      final payments = rows.whereType<Map>()
+          .map((p) => Map<String, dynamic>.from(p)).toList();
+      var cumulative = 0.0;
+      final total = _amount(detail['total_amount']);
+      for (final payment in payments) {
+        final amount = _amount(payment['amount']);
+        if (amount <= 0) continue;
+        cumulative += amount;
+        if (payment['state']?.toString() != 'pending' ||
+            payment['pending_sync'] == true ||
+            payment['_local_pending_payment'] == true) continue;
+        final paymentId = payment['id']?.toString() ?? '';
+        if (paymentId.isEmpty) continue;
+        final at = payment['entered_at']?.toString() ?? '';
+        pendingRows.add({
+          'receipt_id': paymentId,
+          'invoice_id': invoiceId,
+          'document_number': detail['document_number'],
+          'customer_name': detail['customer_name'] ?? 'Customer',
+          'job_number': detail['job_number'],
+          'payment_method': payment['payment_method_name'] ?? 'Payment',
+          'amount': amount,
+          'invoice_total': total,
+          'transaction_date': at.isNotEmpty
+              ? at.split('T').first : detail['document_date'],
+          'received_at': at,
+          'receipt_state': 'pending',
+          'coverage': total > 0 && cumulative + 0.005 >= total
+              ? 'paid' : 'partial',
+        });
+      }
+      examined += 1;
+      if (examined % 25 == 0) {
+        // Allow frames to render between independent cache entries.
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+    return mergeReceipts(pendingRows, const []);
   }
 
   /// Stable identity is required to retire a local card without duplication.
