@@ -95,6 +95,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   List<Map<String, dynamic>> _employees = const [];
   List<Map<String, dynamic>> _statuses = const [];
   List<Map<String, dynamic>> _documents = const [];
+  Future<String>? _automaticInvoiceLabor;
   List<Map<String, dynamic>> _findings = const [];
   List<Map<String, dynamic>> _jobExpenses = const [];
   bool _linkedExpensesCached = false;
@@ -4030,6 +4031,44 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     );
   }
 
+  /// Work Performed remains manually editable. Invoice labor is derived
+  /// from current invoice details whenever the drawer opens, so later
+  /// invoice edits and removals don't leave stale copied prose behind.
+  Future<String> _currentInvoiceLaborForJob() async {
+    if (!_canSeeFinancial) return '';
+    final mode = BriskersConnectionModeController.instance;
+    final documents = await readInvoiceLaborSource<List<Map<String, dynamic>>>(
+      onlineRead: () => _api.jobDocuments(widget.businessId, widget.jobId),
+      cachedRead: () => _localDocumentsForJob(recoverLegacy: false),
+      forceOffline: mode.forceOffline,
+      forceOnline: mode.forceOnline,
+    );
+    final seen = <String>{};
+    var summary = '';
+    for (final invoice in documents) {
+      if (invoice['kind']?.toString() != 'invoice') continue;
+      final id = invoice['id']?.toString() ?? '';
+      if (id.isEmpty || !seen.add(id)) continue;
+      if (const {'void', 'voided', 'cancelled', 'canceled'}
+          .contains(invoice['status']?.toString().toLowerCase())) {
+        continue;
+      }
+      final detail = await readInvoiceLaborSource<Map<String, dynamic>?>(
+        onlineRead: () => _api.documentDetail(widget.businessId, id),
+        cachedRead: () => _documentDetailCache.load(widget.businessId, id),
+        forceOffline: mode.forceOffline || id.startsWith('local-invoice-'),
+        forceOnline: mode.forceOnline,
+      );
+      if (detail == null || detail['job_id']?.toString() != widget.jobId ||
+          detail['kind']?.toString() != 'invoice') {
+        continue;
+      }
+      summary = appendInvoiceLaborWorkSummary(
+        summary, invoiceLaborWorkSummary(detail));
+    }
+    return summary;
+  }
+
   Widget _workPerformedDrawer(
     String workSummary,
     Map<String, dynamic>? currentVisit,
@@ -4101,10 +4140,44 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   ],
                 ),
               ),
-            Text(
-              workSummary.isEmpty
-                  ? 'No work performed entered yet.'
-                  : workSummary,
+            FutureBuilder<String>(
+              future: _automaticInvoiceLabor,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(workSummary.isEmpty
+                          ? 'Manual Work Performed is empty.' : workSummary),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Invoice labor could not be refreshed. '
+                        'Manual notes remain unchanged.',
+                        style: TextStyle(color: Colors.deepOrange),
+                      ),
+                    ],
+                  );
+                }
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const LinearProgressIndicator(minHeight: 2);
+                }
+                final combined = appendInvoiceLaborWorkSummary(
+                  workSummary, snapshot.data ?? '');
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(combined.isEmpty
+                        ? 'No work performed entered yet.' : combined),
+                    if ((snapshot.data ?? '').isNotEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 7),
+                        child: Text('Invoice labor automatically refreshed',
+                            style: TextStyle(fontSize: 12,
+                                color: BriskersColors.jobs)),
+                      ),
+                  ],
+                );
+              },
             ),
             if (currentVisit != null && _canEditWork) ...[
               const SizedBox(height: 8),
@@ -4637,6 +4710,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
   Future<void> _openSectionModal(String key) async {
     if (_job == null) return;
+    if (key == 'work') {
+      _automaticInvoiceLabor = _currentInvoiceLaborForJob();
+    }
 
     // The online response already contains the authoritative Job document list.
     // Never overwrite it with a potentially lagging local index when the
@@ -4874,6 +4950,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     );
 
     _modalRefresh = null;
+    _automaticInvoiceLabor = null;
     if (mounted) await _load();
   }
 
