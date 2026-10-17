@@ -3363,14 +3363,21 @@ class BriskersApi {
     String businessId,
     String documentId,
   ) async {
-    final result = await networkSupabase.rpc(
-      'briskers_document_detail_v3',
-      params: {
-        'p_business_id': businessId,
-        'p_document_id': documentId,
-      },
-    );
-    return Map<String, dynamic>.from(result as Map);
+    try {
+      return await documentDetailV4(businessId, documentId);
+    } on PostgrestException catch (error) {
+      // Mixed-version deployments: no accidental fallback on permission,
+      // conflict or database errors. Only missing v4 function is expected.
+      if (error.code != 'PGRST202') rethrow;
+      final result = await networkSupabase.rpc(
+        'briskers_document_detail_v3',
+        params: {
+          'p_business_id': businessId,
+          'p_document_id': documentId,
+        },
+      );
+      return Map<String, dynamic>.from(result as Map);
+    }
   }
 
   Future<List<Map<String, dynamic>>> itemCategories(
