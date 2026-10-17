@@ -8468,6 +8468,8 @@ class _PaymentEntryDialog extends StatefulWidget {
     required this.methods,
     required this.initialAmount,
     this.initialMethodId,
+    this.initialPaymentDate,
+    this.editDate = false,
     this.title = 'Add payment',
     this.saveLabel = 'Save payment',
   });
@@ -8475,6 +8477,8 @@ class _PaymentEntryDialog extends StatefulWidget {
   final List<Map<String, dynamic>> methods;
   final num initialAmount;
   final String? initialMethodId;
+  final String? initialPaymentDate;
+  final bool editDate;
   final String title;
   final String saveLabel;
 
@@ -8485,6 +8489,7 @@ class _PaymentEntryDialog extends StatefulWidget {
 class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
   late final TextEditingController _amount;
   late String _methodId;
+  late DateTime _paymentDate;
   String? _error;
 
   @override
@@ -8493,6 +8498,7 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
     _amount = TextEditingController(
       text: widget.initialAmount.toStringAsFixed(2),
     );
+    _paymentDate = DateTime.tryParse(widget.initialPaymentDate ?? '') ?? DateTime.now();
     final existing = widget.initialMethodId;
     _methodId = existing != null &&
             widget.methods.any((item) => item['id']?.toString() == existing)
@@ -8506,6 +8512,16 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
     super.dispose();
   }
 
+  Future<void> _pickPaymentDate() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _paymentDate,
+      firstDate: DateTime(1990),
+      lastDate: DateTime.now().add(const Duration(days: 1)),
+    );
+    if (date != null && mounted) setState(() => _paymentDate = date);
+  }
+
   void _save() {
     final amount = num.tryParse(_amount.text.trim());
     if (amount == null || amount <= 0) {
@@ -8517,6 +8533,8 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
       <String, dynamic>{
         'amount': amount,
         'method_id': _methodId,
+        if (widget.editDate)
+          'payment_date': DateFormat('yyyy-MM-dd').format(_paymentDate),
       },
     );
   }
@@ -8530,7 +8548,7 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
       title: Text(widget.title),
       content: SizedBox(
         width: 400,
-        child: Column(
+        child: SingleChildScrollView(child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           TextField(
@@ -8578,6 +8596,17 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
               if (value != null) setState(() => _methodId = value);
             },
           ),
+          if (widget.editDate) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _pickPaymentDate,
+                icon: const Icon(Icons.calendar_month_outlined),
+                label: Text('Payment date: ${DateFormat('MMM d, yyyy').format(_paymentDate)}'),
+              ),
+            ),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(
@@ -8586,7 +8615,7 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
             ),
           ],
         ],
-      ),
+      )),
       ),
       actions: [
         TextButton(
