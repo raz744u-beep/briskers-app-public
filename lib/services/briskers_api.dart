@@ -3348,6 +3348,17 @@ class BriskersApi {
     );
   }
 
+  Future<Map<String, dynamic>> documentDetailV4(
+    String businessId,
+    String documentId,
+  ) async {
+    final result = await networkSupabase.rpc(
+      'briskers_document_detail_v4',
+      params: {'p_business_id':businessId,'p_document_id':documentId},
+    );
+    return Map<String,dynamic>.from(result as Map);
+  }
+
   Future<Map<String, dynamic>> documentDetail(
     String businessId,
     String documentId,
@@ -4431,6 +4442,28 @@ class BriskersApi {
         'p_payment_id': paymentId,
         'p_amount': amount,
         'p_method_id': methodId,
+      },
+    );
+  }
+
+  /// Version-checked amount/method/date edit; never mutate posted receipts.
+  Future<void> updatePendingInvoicePaymentV2(
+    String businessId,
+    String paymentId, {
+    required num amount,
+    required String methodId,
+    required String paymentDate,
+    required int expectedRowVersion,
+  }) async {
+    await networkSupabase.rpc(
+      'briskers_update_pending_invoice_payment_v2',
+      params: {
+        'p_business_id':businessId,
+        'p_payment_id':paymentId,
+        'p_amount':amount,
+        'p_method_id':methodId,
+        'p_payment_date':paymentDate,
+        'p_expected_row_version':expectedRowVersion,
       },
     );
   }
