@@ -166,10 +166,12 @@ void main() {
           ),
           isNull,
         );
-        expect(await documents.openInvoiceCount('synthetic-shop'), 1);
+        // Both surviving invoices are flagged pending_close (already fully covered).
+        // The new dock Open count means a remaining customer balance only.
+        expect(await documents.openInvoiceCount('synthetic-shop'), 0);
         expect(
           await documents.watchOpenInvoiceCount('synthetic-shop').first,
-          1,
+          0,
         );
         expect(
           (await documents.pendingCloseAttention('synthetic-shop'))['count'],
@@ -255,7 +257,7 @@ void main() {
       await block();
       await block(state: 'rejected');
       expect(await jobs.jobCount('synthetic-shop'), 2);
-      expect(await documents.openInvoiceCount('synthetic-shop'), 2);
+      expect(await documents.openInvoiceCount('synthetic-shop'), 0);
       expect(await cache.load('synthetic-shop', 'retiring-invoice'), isNotNull);
     },
   );
