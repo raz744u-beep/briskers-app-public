@@ -27,10 +27,12 @@ class ExpensesScreen extends StatefulWidget {
     super.key,
     required this.businessId,
     required this.roleCode,
+    this.showAppBar = true,
   });
 
   final String businessId;
   final String roleCode;
+  final bool showAppBar;
 
   @override
   State<ExpensesScreen> createState() => _ExpensesScreenState();
@@ -1130,11 +1132,15 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     );
 
     return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 68,
-        backgroundColor: const Color(0xFFC62828).withValues(alpha: 0.08),
-        title: BriskersPageTitle(title: tr('expensesIncome'), logoHeight: 40),
-      ),
+      appBar: widget.showAppBar
+          ? AppBar(
+              toolbarHeight: 68,
+              backgroundColor:
+                  const Color(0xFFC62828).withValues(alpha: 0.08),
+              title: BriskersPageTitle(
+                  title: tr('expensesIncome'), logoHeight: 40),
+            )
+          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -1143,6 +1149,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                 controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
                 children: [
+                  if (!widget.showAppBar) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(6, 2, 6, 14),
+                      child: Text(tr('expensesIncome'),
+                        style: Theme.of(context).textTheme.titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w800)),
+                    ),
+                  ],
                   if (_showingLocal)
                     Container(
                       margin: const EdgeInsets.only(bottom: 10),

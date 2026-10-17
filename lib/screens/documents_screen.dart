@@ -1379,11 +1379,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final scopedRows = (_rows ?? const <Map<String, dynamic>>[])
         .where((row) => widget.customerId == null ||
             row['customer_id']?.toString() == widget.customerId).toList();
-    final knownAmounts = scopedRows.where((row) =>
-        num.tryParse(row['total_amount']?.toString() ?? '') != null).toList();
-    final grandTotal = knownAmounts.fold<num>(0, (sum, row) =>
-        sum + (num.tryParse(row['total_amount']?.toString() ?? '') ?? 0));
-    final missingAmountCount = scopedRows.length - knownAmounts.length;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -1461,7 +1456,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                         ),
                       ),
                     ),
-                  if (widget.sharedBottomNavigationBar != null)
+                  if (widget.customerId != null &&
+                      widget.sharedBottomNavigationBar != null)
                     widget.sharedBottomNavigationBar!,
                 ],
               ),
@@ -1651,34 +1647,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   ),
               ],
             ),
-            if (_rows != null) ...[
-              const SizedBox(height: 12),
-              const Divider(height: 1),
-              const SizedBox(height: 12),
-              Card(
-                elevation: 0,
-                color: accent.withValues(alpha: 0.12),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 15, 18, 15),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(_estimate ? 'Total Estimates' : 'Total Invoices',
-                          style: TextStyle(fontSize: 18,
-                              fontWeight: FontWeight.w800, color: accent)),
-                      const SizedBox(height: 4),
-                      Text(_money(grandTotal),
-                          style: TextStyle(fontSize: 26,
-                              fontWeight: FontWeight.w800, color: accent)),
-                      Text('${scopedRows.length} records'
-                        '${missingAmountCount == 0 ? "" : " • amounts unavailable: $missingAmountCount"}',
-                          style: const TextStyle(fontSize: 13)),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
             if (!_estimate && widget.isOwner) ...[
               const SizedBox(height: 10),
               Align(
@@ -1721,7 +1689,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (widget.isOwner || widget.canManageExpenses)
+                if (widget.showAppBar &&
+                    (widget.isOwner || widget.canManageExpenses))
                   IconButton.filled(
                     tooltip: _estimate ? 'New Estimate' : 'New Invoice',
                     style: IconButton.styleFrom(
