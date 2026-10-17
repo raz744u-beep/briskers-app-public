@@ -4394,6 +4394,30 @@ class BriskersApi {
     return result.toString();
   }
 
+  /// Date-aware, idempotent payment capture. Only enabled after the
+  /// reviewed v2 server contract is deployed; otherwise replay fails closed.
+  Future<String> addPendingInvoicePaymentOnceV2(
+    String businessId,
+    String invoiceId, {
+    required num amount,
+    required String methodId,
+    required String operationId,
+    required String paymentDate,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_add_pending_invoice_payment_once_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+        'p_amount': amount,
+        'p_method_id': methodId,
+        'p_operation_id': operationId,
+        'p_payment_date': paymentDate,
+      },
+    );
+    return result.toString();
+  }
+
   Future<void> updatePendingInvoicePayment(
     String businessId,
     String paymentId, {
