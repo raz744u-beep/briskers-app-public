@@ -22,8 +22,13 @@ class _BriskersBootstrap extends StatefulWidget {
 }
 
 class _BriskersBootstrapState extends State<_BriskersBootstrap> {
+  static const String _buildNumber = String.fromEnvironment(
+    'BRISKERS_BUILD_NUMBER', defaultValue: 'unidentified');
+  static const String _sourceRef = String.fromEnvironment(
+    'BRISKERS_SOURCE', defaultValue: 'unidentified');
   String _step = 'Preparing startup';
   String? _failedStep;
+  String? _failureKind;
   bool _ready = false;
 
   @override
@@ -75,7 +80,12 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
       if (mounted) setState(() => _ready = true);
     } catch (error, stack) {
       debugPrint('Briskers startup failed at $_step: $error\n$stack');
-      if (mounted) setState(() => _failedStep = _step);
+      if (mounted) {
+        setState(() {
+          _failedStep = _step;
+          _failureKind = error.runtimeType.toString();
+        });
+      }
     }
   }
 
@@ -95,6 +105,10 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
                 children: [
                   const Text('Briskers',
                       style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  const Text('Build $_buildNumber  •  $_sourceRef',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: Colors.black54)),
                   const SizedBox(height: 24),
                   if (_failedStep == null) ...[
                     const CircularProgressIndicator(),
@@ -107,6 +121,11 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
                         textAlign: TextAlign.center),
                     const SizedBox(height: 8),
                     Text('Stage: $_failedStep', textAlign: TextAlign.center),
+                    if (_failureKind != null) ...[
+                      const SizedBox(height: 6),
+                      Text('Error type: $_failureKind',
+                          textAlign: TextAlign.center),
+                    ],
                     const SizedBox(height: 12),
                     const Text('Your local data has not been cleared. '
                         'Do not uninstall or clear app storage.',
