@@ -68,8 +68,8 @@ class InvoicePaymentFeed {
           'invoice_total': row.readNullable<double>('invoice_total'),
           'payment_method': data['method_name'] ?? 'Payment',
           'amount': cents / 100,
-          'transaction_date': (data['received_at']?.toString() ?? '')
-              .split('T').first,
+          'transaction_date': (data['payment_date']?.toString() ??
+                  data['received_at']?.toString() ?? '').split('T').first,
           'received_at': data['received_at'],
           'receipt_state': 'local',
         });
@@ -149,8 +149,9 @@ class InvoicePaymentFeed {
           'payment_method': payment['payment_method_name'] ?? 'Payment',
           'amount': amount,
           'invoice_total': total,
-          'transaction_date': at.isNotEmpty
-              ? at.split('T').first : detail['document_date'],
+          'transaction_date': (payment['payment_date']?.toString().isNotEmpty == true)
+              ? payment['payment_date'] : (at.isNotEmpty
+                ? at.split('T').first : detail['document_date']),
           'received_at': at,
           'receipt_state': 'pending',
           'coverage': total > 0 && cumulative + 0.005 >= total
