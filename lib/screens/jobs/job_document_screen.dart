@@ -424,9 +424,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     );
     final findingsProjected = await VehicleFindingActionsService()
         .projectInvoiceNotes(widget.businessId, memoProjected);
-    final projected = OfflineInvoicePaymentLedger.projectPendingPayments(
+    final withLocalReceipts = OfflineInvoicePaymentLedger.projectPendingPayments(
       findingsProjected,
       await _offlinePayments.pendingForInvoice(
+        widget.businessId, widget.documentId,
+      ),
+    );
+    final projected = OfflineInvoicePaymentLedger.projectPendingEdits(
+      withLocalReceipts,
+      await _offlinePayments.pendingEditsForInvoice(
         widget.businessId, widget.documentId,
       ),
     );
