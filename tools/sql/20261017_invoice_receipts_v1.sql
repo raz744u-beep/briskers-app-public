@@ -18,13 +18,21 @@ BEGIN
       'pending'::text AS receipt_state,
       p.id AS receipt_id,
       NULL::uuid AS transaction_id,
-      NULL::uuid AS operation_id,
+      k.operation_id AS operation_id,
       p.invoice_id,
       p.amount AS receipt_amount,
       p.entered_at AS receipt_time,
       p.entered_at::date AS receipt_date,
       p.payment_method_id
     FROM briskers.invoice_pending_payments p
+    LEFT JOIN LATERAL (
+      SELECT k.operation_id
+      FROM briskers.invoice_payment_operation_keys k
+      WHERE k.business_id=p.business_id
+        AND k.pending_payment_id=p.id
+      ORDER BY k.created_at DESC
+      LIMIT 1
+    ) k ON true
     WHERE p.business_id=p_business_id
     UNION ALL
     SELECT
