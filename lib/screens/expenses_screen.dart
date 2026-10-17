@@ -20,6 +20,7 @@ import '../services/expenseiq_local_photo_sync.dart';
 import '../services/expenseiq_background_scheduler.dart';
 import '../widgets/briskers_page_header.dart';
 import 'expenses/expense_detail_screen.dart';
+import 'jobs/job_document_screen.dart';
 import 'expenses/expense_entry_screen.dart';
 import 'settings/expense_settings_screen.dart';
 
@@ -448,6 +449,27 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     } catch (_) {
       // Keep locally recorded payments visible on old/unavailable backends.
     }
+  }
+
+  Future<void> _openInvoiceReceipt(Map<String, dynamic> row) async {
+    final invoiceId = row['document_id']?.toString() ?? '';
+    if (invoiceId.isEmpty) {
+      await _viewInvoiceReceipt(row);
+      return;
+    }
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobDocumentScreen(
+          businessId: widget.businessId,
+          documentId: invoiceId,
+          isOwner: _owner,
+          roleCode: widget.roleCode,
+          initialTab: 'payment',
+        ),
+      ),
+    );
+    if (mounted) unawaited(_load(showLoading: false));
   }
 
   Future<void> _viewInvoiceReceipt(Map<String, dynamic> row) async {
@@ -1704,7 +1726,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
                           onTap: () => invoiceReceipt
-                              ? _viewInvoiceReceipt(transaction)
+                              ? _openInvoiceReceipt(transaction)
                               : _openTransaction(transaction),
                           onLongPress: invoiceReceipt
                               ? null
