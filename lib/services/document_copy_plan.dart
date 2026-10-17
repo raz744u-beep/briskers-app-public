@@ -7,6 +7,7 @@ class DocumentCopyPlan {
     Map<String, dynamic> original, {
     required String customerId,
     required String? vehicleId,
+    bool includeOriginalNotes = false,
   }) {
     final kind = original['kind']?.toString();
     if (kind != 'invoice' && kind != 'estimate') {
@@ -33,7 +34,9 @@ class DocumentCopyPlan {
       'pending_payment': 0,
       'closed_at': null,
       'converted': false,
-      'memo': original['memo']?.toString(),
+      // Customer-visible notes must never be copied by default.
+      // A source-reference note, if present, is copied only by opt-in.
+      'memo': includeOriginalNotes ? original['memo']?.toString() : null,
       'lines': [
         for (final item in sourceLines)
           if (item is Map)
