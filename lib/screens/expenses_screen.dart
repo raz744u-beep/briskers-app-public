@@ -411,7 +411,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       // Never replace the saved receipt inventory with a truncated response.
       for (var offset = 0; offset < 20000; offset += pageSize) {
         if (!mounted ||
-            BriskersConnectionModeController.instance.forceOffline) return;
+            BriskersConnectionModeController.instance.forceOffline) {
+          return;
+        }
         final page = await _api.invoiceReceipts(
           widget.businessId, limit: pageSize, offset: offset,
         );
@@ -422,7 +424,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         }
       }
       if (!exhausted ||
-          BriskersConnectionModeController.instance.forceOffline) return;
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
       await _invoiceFeed.saveServerReceipts(widget.businessId, rows);
       final merged = await _invoiceFeed.load(widget.businessId);
       if (mounted) setState(() => _invoiceReceipts = merged);
