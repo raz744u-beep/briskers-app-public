@@ -1389,7 +1389,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       backgroundColor: Colors.white,
       appBar: widget.customerId != null
           ? AppBar(
-              title: Text(_title,
+              title: Text(widget.customerName?.trim().isNotEmpty == true
+                  ? widget.customerName! : _title,
                   style: TextStyle(color: accent, fontWeight: FontWeight.w800)),
               backgroundColor: accent.withValues(alpha: 0.08),
             )
