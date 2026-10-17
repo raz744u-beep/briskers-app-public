@@ -3348,18 +3348,36 @@ class BriskersApi {
     );
   }
 
-  Future<Map<String, dynamic>> documentDetail(
+  Future<Map<String, dynamic>> documentDetailV4(
     String businessId,
     String documentId,
   ) async {
     final result = await networkSupabase.rpc(
-      'briskers_document_detail_v3',
-      params: {
-        'p_business_id': businessId,
-        'p_document_id': documentId,
-      },
+      'briskers_document_detail_v4',
+      params: {'p_business_id':businessId,'p_document_id':documentId},
     );
-    return Map<String, dynamic>.from(result as Map);
+    return Map<String,dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> documentDetail(
+    String businessId,
+    String documentId,
+  ) async {
+    try {
+      return await documentDetailV4(businessId, documentId);
+    } on PostgrestException catch (error) {
+      // Mixed-version deployments: no accidental fallback on permission,
+      // conflict or database errors. Only missing v4 function is expected.
+      if (error.code != 'PGRST202') rethrow;
+      final result = await networkSupabase.rpc(
+        'briskers_document_detail_v3',
+        params: {
+          'p_business_id': businessId,
+          'p_document_id': documentId,
+        },
+      );
+      return Map<String, dynamic>.from(result as Map);
+    }
   }
 
   Future<List<Map<String, dynamic>>> itemCategories(
@@ -4394,6 +4412,30 @@ class BriskersApi {
     return result.toString();
   }
 
+  /// Date-aware, idempotent payment capture. Only enabled after the
+  /// reviewed v2 server contract is deployed; otherwise replay fails closed.
+  Future<String> addPendingInvoicePaymentOnceV2(
+    String businessId,
+    String invoiceId, {
+    required num amount,
+    required String methodId,
+    required String operationId,
+    required String paymentDate,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_add_pending_invoice_payment_once_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_invoice_id': invoiceId,
+        'p_amount': amount,
+        'p_method_id': methodId,
+        'p_operation_id': operationId,
+        'p_payment_date': paymentDate,
+      },
+    );
+    return result.toString();
+  }
+
   Future<void> updatePendingInvoicePayment(
     String businessId,
     String paymentId, {
@@ -4407,6 +4449,28 @@ class BriskersApi {
         'p_payment_id': paymentId,
         'p_amount': amount,
         'p_method_id': methodId,
+      },
+    );
+  }
+
+  /// Version-checked amount/method/date edit; never mutate posted receipts.
+  Future<void> updatePendingInvoicePaymentV2(
+    String businessId,
+    String paymentId, {
+    required num amount,
+    required String methodId,
+    required String paymentDate,
+    required int expectedRowVersion,
+  }) async {
+    await networkSupabase.rpc(
+      'briskers_update_pending_invoice_payment_v2',
+      params: {
+        'p_business_id':businessId,
+        'p_payment_id':paymentId,
+        'p_amount':amount,
+        'p_method_id':methodId,
+        'p_payment_date':paymentDate,
+        'p_expected_row_version':expectedRowVersion,
       },
     );
   }
