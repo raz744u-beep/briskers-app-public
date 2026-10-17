@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app.dart';
@@ -29,6 +30,10 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
   String _step = 'Preparing startup';
   String? _failedStep;
   String? _failureKind;
+  String? _failureCode;
+  String? _failureChannel;
+  String? _languagePrefsError;
+  String? _connectionPrefsError;
   bool _ready = false;
 
   @override
@@ -56,6 +61,9 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
           await BriskersLanguageController.instance.initialize()
               .timeout(const Duration(seconds: 8));
         } catch (error) {
+          _languagePrefsError = error is PlatformException
+              ? error.code
+              : error.runtimeType.toString();
           debugPrint('Language preferences unavailable; using English '
               'until preferences recover: $error');
         }
@@ -65,6 +73,9 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
           await BriskersConnectionModeController.instance.initialize()
               .timeout(const Duration(seconds: 8));
         } catch (error) {
+          _connectionPrefsError = error is PlatformException
+              ? error.code
+              : error.runtimeType.toString();
           // Unknown saved mode must never trigger unexpected network work.
           BriskersConnectionModeController.instance.useSafeOfflineFallback();
           debugPrint('Connection preferences unavailable; safely '
@@ -84,6 +95,19 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
         setState(() {
           _failedStep = _step;
           _failureKind = error.runtimeType.toString();
+          if (error is PlatformException) {
+            _failureCode = error.code;
+            // Surface only the non-sensitive plugin channel diagnostic.
+            // Never show session payloads, credentials, or arbitrary exception text.
+            final String message = error.message ?? '';
+            if (message.contains('shared_preferences_android')) {
+              _failureChannel = 'shared_preferences_android';
+            } else if (message.contains('app_links')) {
+              _failureChannel = 'app_links';
+            } else if (message.contains('flutter_secure_storage')) {
+              _failureChannel = 'flutter_secure_storage';
+            }
+          }
         });
       }
     }
@@ -124,6 +148,26 @@ class _BriskersBootstrapState extends State<_BriskersBootstrap> {
                     if (_failureKind != null) ...[
                       const SizedBox(height: 6),
                       Text('Error type: $_failureKind',
+                          textAlign: TextAlign.center),
+                    ],
+                    if (_failureCode != null) ...[
+                      const SizedBox(height: 6),
+                      Text('Error code: $_failureCode',
+                          textAlign: TextAlign.center),
+                    ],
+                    if (_failureChannel != null) ...[
+                      const SizedBox(height: 6),
+                      Text('Plugin: $_failureChannel',
+                          textAlign: TextAlign.center),
+                    ],
+                    if (_languagePrefsError != null) ...[
+                      const SizedBox(height: 6),
+                      Text('Language preferences: $_languagePrefsError',
+                          textAlign: TextAlign.center),
+                    ],
+                    if (_connectionPrefsError != null) ...[
+                      const SizedBox(height: 6),
+                      Text('Connection preferences: $_connectionPrefsError',
                           textAlign: TextAlign.center),
                     ],
                     const SizedBox(height: 12),
