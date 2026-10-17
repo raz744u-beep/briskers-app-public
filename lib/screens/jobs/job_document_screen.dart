@@ -3099,8 +3099,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       return;
     }
     if (!mounted || methods.isEmpty) return;
-
-    final localReceipt = payment['pending_sync'] == true;
+    final localReceipt = payment['_local_pending_payment'] == true;
+    final queuedServerEdit = payment['_local_pending_edit'] == true;
     final rawDate = (payment['payment_date'] ??
         payment['entered_at'])?.toString() ?? '';
     final parsedDate = DateTime.tryParse(rawDate);
@@ -3127,13 +3127,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       (m) => m['id']?.toString() == methodId,
     );
     final chosenDate = result['payment_date'].toString();
+    final total = _number(_detail?['total_amount']);
+    final recorded = _number(_detail?['paid_amount']) +
+        _number(_detail?['pending_payment']);
+    final allowableCents =
+        ((total - recorded + _number(payment['amount'])) * 100).round();
 
     if (localReceipt) {
-      final total = _number(_detail?['total_amount']);
-      final recorded = _number(_detail?['paid_amount']) +
-          _number(_detail?['pending_payment']);
-      final allowableCents =
-          ((total - recorded + _number(payment['amount'])) * 100).round();
       await _run(() => _offlinePayments.editNeverSubmittedPayment(
         widget.businessId, widget.documentId, payment['id'].toString(),
         amount: result['amount'] as num,
@@ -3145,19 +3145,38 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       return;
     }
 
-    // Existing v1 server RPC accepts amount and method only. Do not claim
-    // that the date changed until the audited v2 backend is deployed.
-    if (chosenDate != initialDate) {
+    // An already-synced payment needs its authoritative row_version to
+    // queue offline edits, or to perform a guarded direct online change.
+    final version = int.tryParse(payment['row_version']?.toString() ?? '');
+    if (version == null || version < 1) {
       setState(() => _error =
-          'Payment date correction requires the server update. '
-          'The existing payment was not changed.');
+          'Payment edit requires a verified server version. '
+          'Reconnect and refresh this invoice before editing.');
       return;
     }
-    await _run(() => _api.updatePendingInvoicePayment(
-      widget.businessId,
-      payment['id'].toString(),
+
+    if (BriskersConnectionModeController.instance.forceOffline ||
+        queuedServerEdit) {
+      await _run(() => _offlinePayments.queueServerPendingEdit(
+        widget.businessId, widget.documentId, payment['id'].toString(),
+        expectedRowVersion: version,
+        amount: result['amount'] as num,
+        maximumAllowedCents: allowableCents,
+        methodId: methodId,
+        methodName: chosenMethod['name']?.toString() ?? '',
+        paymentDate: chosenDate,
+      ));
+      return;
+    }
+
+    // This v2 server RPC refuses stale versions and finalized payments.
+    // If not deployed, the edit fails closed without changing the receipt.
+    await _run(() => _api.updatePendingInvoicePaymentV2(
+      widget.businessId, payment['id'].toString(),
       amount: result['amount'] as num,
       methodId: methodId,
+      paymentDate: chosenDate,
+      expectedRowVersion: version,
     ));
   }
 
