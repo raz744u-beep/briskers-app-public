@@ -51,6 +51,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
 
   static const int _pageSize = 50;
+  int _visibleCount = _pageSize;
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
@@ -115,8 +116,19 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   void _handleScroll() {
-    if (_scrollController.hasClients &&
-        _scrollController.position.extentAfter < 500) {
+    if (!_scrollController.hasClients ||
+        _scrollController.position.extentAfter >= 500) return;
+    final count = InvoicePaymentFeed.combine(
+      financial: _transactions, receipts: _invoiceReceipts,
+      startDate: _rangeStartDate, endDate: _rangeEndDate,
+      search: _searchController.text,
+      direction: _filter == 'all' ? null : _filter,
+      filteredAccount: _accountFilterId != null ||
+          _categoryFilterId != null || _counterpartyFilterId != null,
+    ).length;
+    if (_visibleCount < count) {
+      setState(() => _visibleCount += _pageSize);
+    } else {
       _loadMore();
     }
   }
@@ -255,6 +267,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     if (showLoading) {
       setState(() {
         _loading = true;
+        _visibleCount = _pageSize;
         _error = null;
       });
     } else {
@@ -1204,7 +1217,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
               sum + (num.tryParse(item['amount']?.toString() ?? '') ?? 0),
         );
 
-    final visible = InvoicePaymentFeed.combine(
+    final allVisible = InvoicePaymentFeed.combine(
       financial: _transactions,
       receipts: _invoiceReceipts,
       startDate: _rangeStartDate,
@@ -1214,6 +1227,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       filteredAccount: _accountFilterId != null ||
           _categoryFilterId != null || _counterpartyFilterId != null,
     );
+    final visible = allVisible.take(_visibleCount).toList();
+    final moreReceiptPages = allVisible.length > _visibleCount;
     final feesUnverified = _transactions.any(
       (row) =>
           row['direction'] == 'income' && row['reporting_status'] != 'verified',
@@ -1836,7 +1851,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       padding: EdgeInsets.symmetric(vertical: 18),
                       child: Center(child: CircularProgressIndicator()),
                     )
-                  else if (!_hasMore && visible.isNotEmpty)
+                  else if (!_hasMore && !moreReceiptPages && visible.isNotEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
                       child: Center(
