@@ -32,6 +32,7 @@ import '../../services/local_financial_cache.dart';
 import '../../services/document_pdf_service.dart';
 import '../../services/invoice_performance_metrics.dart';
 import '../../services/gmail_compose_service.dart';
+import '../../services/email_draft_templates.dart';
 import '../../services/catalog_sync_service.dart';
 import '../settings/catalog_settings_screen.dart';
 import '../../services/local_catalog_repository.dart';
@@ -4374,15 +4375,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       email = supplied;
     }
     final number = detail['document_number']?.toString().trim() ?? '';
-    final subject = '${_estimate ? 'Estimate' : 'Invoice'}'
-        '${number.isEmpty ? '' : ' #$number'} - Briskers Foreign Auto Repair';
+    final templates = await EmailDraftTemplates.load(widget.businessId);
+    final subject = templates.render(templates.subject,
+        estimate: _estimate, number: number);
+    final messageBody = templates.render(templates.body,
+        estimate: _estimate, number: number);
     try {
       await GmailComposeService.composePdf(
         bytes: bytes,
         filename: DocumentPdfService.fileName(detail),
         to: email,
         subject: subject,
-        body: 'Please find the attached ${_estimate ? 'estimate' : 'invoice'} from Briskers Foreign Auto Repair.',
+        body: messageBody,
       );
     } catch (error) {
       // A generic PDF share loses Gmail's To/Subject intent extras. Do not
