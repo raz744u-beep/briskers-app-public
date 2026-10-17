@@ -47,7 +47,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   late JobSummaryVisibility _jobVisibility;
   List<Map<String, dynamic>>? _appointments;
-  String _filter = 'today';
+  String _filter = 'confirmed_today';
   final TextEditingController _search = TextEditingController();
   String? _error;
   String? _checkingInId;
@@ -111,7 +111,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       _listenForQuarantine();
       _load(initialEntry: true);
     } else if (oldWidget.dockResetToken != widget.dockResetToken) {
-      _filter = 'today';
+      _filter = 'confirmed_today';
       _search.clear();
       _load(initialEntry: true);
     }
@@ -939,6 +939,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     runSpacing: 6,
                     children: [
                       for (final option in const <String>[
+                        'confirmed_today',
                         'today',
                         'upcoming',
                         'past',
@@ -946,8 +947,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       ])
                         ChoiceChip(
                           label: Text(
-                            option == 'today'
+                            option == 'confirmed_today'
                                 ? tr('today')
+                                : option == 'today'
+                                    ? 'All today'
                                 : option == 'upcoming'
                                     ? tr('upcoming')
                                     : option == 'past'
