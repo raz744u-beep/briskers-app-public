@@ -284,6 +284,7 @@ class _JobsScreenState extends State<JobsScreen>
             customerName: selected['display_name']?.toString() ?? 'Customer',
             roleCode: widget.roleCode,
             vehicles: List<dynamic>.from(detail['vehicles'] ?? const []),
+            bottomNavigationBar: widget.jobDetailBottomNavigationBar,
           ),
         ),
       );
