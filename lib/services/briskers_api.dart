@@ -4421,6 +4421,7 @@ class BriskersApi {
     required String methodId,
     required String operationId,
     required String paymentDate,
+    List<dynamic> localEditHistory = const [],
   }) async {
     final result = await networkSupabase.rpc(
       'briskers_add_pending_invoice_payment_once_v2',
@@ -4431,6 +4432,7 @@ class BriskersApi {
         'p_method_id': methodId,
         'p_operation_id': operationId,
         'p_payment_date': paymentDate,
+        'p_local_edit_history': localEditHistory,
       },
     );
     return result.toString();
