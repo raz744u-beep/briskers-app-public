@@ -55,7 +55,8 @@ BEGIN
      OR p_payment_date > current_date + 1
      OR p_local_edit_history IS NULL
      OR jsonb_typeof(p_local_edit_history) IS DISTINCT FROM 'array'
-     OR jsonb_array_length(p_local_edit_history) > 100 THEN
+     OR jsonb_array_length(p_local_edit_history) > 100
+     OR octet_length(p_local_edit_history::text) > 32768 THEN
     RAISE EXCEPTION 'Invalid payment date' USING ERRCODE='22023';
   END IF;
   -- Two concurrent uses of this UUID serialize in the v1 function, which
@@ -198,8 +199,11 @@ REVOKE ALL ON FUNCTION public.briskers_update_pending_invoice_payment_v2(
 GRANT EXECUTE ON FUNCTION public.briskers_update_pending_invoice_payment_v2(
   uuid,uuid,numeric,uuid,date,bigint) TO authenticated;
 
--- Preserve historical receipt_date in posted accounting: previous code passed
--- current_date, which is incorrect for payments received yesterday/offline.
+-- Preserve the receipt's original business date on finalization.
+-- For new v2 receipts, payment_date is captured on the phone or corrected by
+-- the owner. Legacy v1 records without a business date keep their original
+-- entered_at date rather than acquiring the later finalization date; the
+-- owner may correct any timezone discrepancy before finalizing.
 CREATE OR REPLACE FUNCTION public.briskers_finalize_pending_invoice_payment(
   p_business_id uuid, p_invoice_id uuid
 ) RETURNS uuid
@@ -237,7 +241,7 @@ BEGIN
   LOOP
     v_tx := public.briskers_record_payment(
       p_business_id,p_invoice_id,p.account_id,p.amount,
-      gen_random_uuid(),COALESCE(p.payment_date,current_date),
+      gen_random_uuid(),COALESCE(p.payment_date,p.entered_at::date),
       p.payment_method_id
     );
     v_last_tx := v_tx;
