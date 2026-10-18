@@ -65,20 +65,25 @@ class EmployeeRosterCache {
       String businessId, String scope, List<Map<String, dynamic>> rows) async {
     final key = _key(businessId, scope);
     if (key == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(key, jsonEncode({
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-      'rows': _safeRows(rows),
-    }));
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(key, jsonEncode({
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+        'rows': _safeRows(rows),
+      }));
+    } catch (_) {
+      // A storage/plugin failure must not masquerade as a failed server write.
+      // The online roster remains authoritative and available in this view.
+    }
   }
 
   Future<EmployeeRosterSnapshot?> _read(String businessId, String scope) async {
     final key = _key(businessId, scope);
     if (key == null) return null;
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(key);
-    if (raw == null) return null; // No cache is not a true empty roster.
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(key);
+      if (raw == null) return null; // No cache is not a true empty roster.
       final data = Map<String, dynamic>.from(jsonDecode(raw) as Map);
       final updatedAt = DateTime.tryParse(data['updated_at']?.toString() ?? '');
       final rows = data['rows'];
@@ -132,10 +137,15 @@ class EmployeeRosterCache {
   /// Called if a successful employee/position write cannot be followed by
   /// an authoritative refresh. Never leave an old employee assignable.
   Future<void> invalidate(String businessId) async {
-    final prefs = await SharedPreferences.getInstance();
-    for (final scope in ['settings', 'assignable']) {
-      final key = _key(businessId, scope);
-      if (key != null) await prefs.remove(key);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final scope in ['settings', 'assignable']) {
+        final key = _key(businessId, scope);
+        if (key != null) await prefs.remove(key);
+      }
+    } catch (_) {
+      // App settings storage failure must not invite a duplicate server save.
+      // Next successful authoritative refresh replaces the stale snapshot.
     }
   }
 }
