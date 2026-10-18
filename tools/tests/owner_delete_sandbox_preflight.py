@@ -34,7 +34,7 @@ def check_baseline(sql: str) -> list[str]:
     text = re.sub(r"(?m)^\s*--[^\n]*", "", text)
     errors = []
     if not re.search(
-        r'\bCREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?["\']?briskers["\']?\b',
+        r'\bCREATE\s+SCHEMA\s+(?:IF\s+NOT\s+EXISTS\s+)?["\']?briskers\b["\']?',
         text, re.I,
     ):
         errors.append("Missing CREATE SCHEMA briskers; first historical migration cannot run.")
