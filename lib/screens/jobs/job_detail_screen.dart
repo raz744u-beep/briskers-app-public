@@ -1440,14 +1440,16 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         : Map<String, dynamic>.from(assignments.first as Map)['employee_id']
             ?.toString();
 
-    List<Map<String, dynamic>> employees;
-    if (_onlineReady && _employees.isNotEmpty) {
-      employees = _employees;
+    // Always use the newest safe shared roster. The previously loaded Job
+    // detail list can be old even while the phone is connected.
+    List<Map<String, dynamic>> employees =
+        await _offlineJobAdmin.cachedEmployees(widget.businessId);
+    if (!BriskersConnectionModeController.instance.forceOffline) {
       try {
-        await _offlineJobAdmin.refreshEmployees(widget.businessId);
-      } catch (_) {}
-    } else {
-      employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
+        employees = await _offlineJobAdmin.refreshEmployees(widget.businessId);
+      } catch (_) {
+        // Auto fallback: keep last successful authorized roster.
+      }
     }
 
     if (!mounted) return;
