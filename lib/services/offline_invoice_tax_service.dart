@@ -371,7 +371,16 @@ class OfflineInvoiceTaxService {
           "AND state='pending'",
           [_now, id],
         );
-        if (!_canSend()) return;
+        if (!_canSend()) {
+          // Mode changed before any RPC was called. No request was sent;
+          // release the send fence so the original intent may retry later.
+          await _db.customStatement(
+            "UPDATE sync_outbox SET state='pending' WHERE id=? "
+            "AND state='inflight'",
+            [id],
+          );
+          return;
+        }
         await LocalJobQuarantine.guardReplay(
           _db, businessId,
           () => _api.updateInvoiceTaxRate(
@@ -384,6 +393,8 @@ class OfflineInvoiceTaxService {
         if ((int.tryParse(after['row_version']?.toString() ?? '') ?? 0) <= expected ||
             (_value(after['total_amount']) -
                 _value(payload['new_total'])).abs() > 0.011 ||
+            !_sameLines(_lines(after), List<dynamic>.from(payload['lines'] as List),
+                compareRates: false) ||
             _lines(after).any((line) {
               final rate = _value(line['tax_rate']);
               return rate > 0 && (rate - newRate).abs() > 0.0000001;
