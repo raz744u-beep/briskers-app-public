@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'stale_keyboard_inset_guard.dart';
+
 /// A single horizontal dock, reserving its own height above system navigation.
 /// It never writes app state; the shell owns selection and route changes.
 class BriskersModuleDock extends StatefulWidget {
@@ -39,6 +41,7 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
   void initState() {
     super.initState();
     _controller.addListener(_syncArrows);
+    FocusManager.instance.addListener(_onFocusChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelected());
   }
 
@@ -49,6 +52,14 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelected());
     }
   }
+
+  void _onFocusChanged() {
+    // A stale Android IME inset must not leave the entire module dock hidden
+    // when keyboard focus has already returned to the route.
+    if (mounted) setState(() {});
+  }
+
+  bool get _editingText => StaleKeyboardInsetGuard.editableTextHasFocus;
 
   void _syncArrows() {
     if (!mounted || !_controller.hasClients) return;
@@ -71,6 +82,7 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
 
   @override
   void dispose() {
+    FocusManager.instance.removeListener(_onFocusChanged);
     _controller.removeListener(_syncArrows);
     _controller.dispose();
     super.dispose();
@@ -78,7 +90,10 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
 
   @override
   Widget build(BuildContext context) {
-    if (MediaQuery.viewInsetsOf(context).bottom > 0) {
+    // Do not interpret a nonzero inset ALONE as a visible keyboard.
+    // Samsung may retain its last reported IME height after the text field
+    // loses focus; that used to hide all app navigation until a restart.
+    if (MediaQuery.viewInsetsOf(context).bottom > 0 && _editingText) {
       return const SizedBox.shrink();
     }
     return SafeArea(

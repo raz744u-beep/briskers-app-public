@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../widgets/job_compact_card.dart';
+import '../../widgets/stale_keyboard_inset_guard.dart';
 import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
 import '../../core/briskers_i18n.dart';
@@ -15,6 +16,8 @@ import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/customer_detail_cache.dart';
 import '../../services/customer_document_summary_service.dart';
+import '../../services/customer_document_recency.dart';
+import '../../services/customer_job_recency.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/job_summary_visibility.dart';
@@ -153,6 +156,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         'job_id':j.read<String>('id'),
         'title':j.read<String>('title'),
         'number':j.readNullable<String>('job_number') ?? 'Pending sync',
+        'created_at': j.readNullable<DateTime>('created_at')?.toIso8601String(),
         'status':jobStatus,
         'job_snapshot': <String, dynamic>{
           ...j.data,
@@ -551,17 +555,14 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     future: _activeCustomerItems(),
     builder: (context, snapshot) {
       final rows = snapshot.data ?? const <Map<String, dynamic>>[];
-      final jobs = rows.where((item) => item['type'] == 'Job').toList();
+      final jobs = rows.where((item) => item['type'] == 'Job').toList()
+        ..sort(compareCustomerJobRecency);
       final invoices = rows.where((item) => item['type'] == 'invoice').toList();
       final estimates = rows.where((item) => item['type'] == 'estimate').toList();
       final appointments = rows.where((item) => item['type'] == 'Appointment').toList();
       final visits = rows.where((item) => item['type'] == 'Visit').toList();
       final docs = [...invoices, ...estimates];
-      DateTime activityDate(Map<String, dynamic> item) =>
-        DateTime.tryParse(item['server_updated_at']?.toString() ?? '') ??
-        DateTime.tryParse(item['document_date']?.toString() ?? '') ??
-        DateTime(1970);
-      docs.sort((a, b) => activityDate(b).compareTo(activityDate(a)));
+      docs.sort(compareCustomerDocumentRecency);
       final balance = invoices.fold<int>(0, (sum, item) =>
         sum + ((item['balance_due_cents'] as int?) ?? 0));
       final pending = invoices.fold<int>(0, (sum, item) =>
@@ -1432,7 +1433,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ].join(' '),
     ].join('\n');
 
-    return Scaffold(
+    return StaleKeyboardInsetGuard(
+      child: Scaffold(
       appBar: AppBar(
         centerTitle: true,
         backgroundColor: BriskersColors.customers.withValues(alpha: 0.12),
@@ -1454,7 +1456,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ),
       ),
       bottomNavigationBar: widget.sharedBottomNavigationBar,
-      floatingActionButton: _data == null || !_canManageQuickActions
+      // The Overview already has a full-width '+ New' action. Do not
+      // overlay Visits, Payments and the invoice summary with a duplicate FAB.
+      // Keep quick actions available in the other customer tabs.
+      floatingActionButton: _data == null ||
+              !_canManageQuickActions ||
+              _customerTab == 0
           ? null
           : FloatingActionButton(
               onPressed: _showQuickActions,
@@ -1685,6 +1692,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 }
