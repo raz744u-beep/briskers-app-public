@@ -13,9 +13,26 @@ class StaleKeyboardInsetGuard extends StatelessWidget {
 
   static bool get editableTextHasFocus {
     final focused = FocusManager.instance.primaryFocus?.context;
-    return focused != null &&
-        (focused.widget is EditableText ||
-            focused.findAncestorStateOfType<EditableTextState>() != null);
+    if (focused == null) return false;
+    if (focused.widget is EditableText ||
+        focused.findAncestorStateOfType<EditableTextState>() != null) {
+      return true;
+    }
+
+    // Some Flutter TextFields attach their FocusNode to a Focus widget
+    // ABOVE EditableText, so ancestor checks alone miss real keyboard focus.
+    // Inspect only that focused subtree, not the whole application.
+    var containsEditable = false;
+    void scan(Element element) {
+      if (containsEditable) return;
+      if (element.widget is EditableText) {
+        containsEditable = true;
+        return;
+      }
+      element.visitChildren(scan);
+    }
+    scan(focused as Element);
+    return containsEditable;
   }
 
   @override
