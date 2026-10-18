@@ -281,6 +281,26 @@ class OfflineInvoicePaymentLedger {
         throw StateError(
           'Payment may have reached the server. Reconcile before editing.');
       }
+      // Retain pre-sync changes as client-reported history and forward it
+      // with the original UUID. Server records it separately from trusted
+      // server-side edits, rather than pretending the old values never existed.
+      final previousHistory = (value['local_edit_history'] is List)
+          ? List<dynamic>.from(value['local_edit_history'] as List)
+          : <dynamic>[];
+      if (previousHistory.length >= 100) {
+        throw StateError('Too many local edits; reconcile this payment first.');
+      }
+      previousHistory.add({
+        'changed_at_device': DateTime.now().toUtc().toIso8601String(),
+        'old_amount_cents': value['amount_cents'],
+        'new_amount_cents': amountCents,
+        'old_method_id': value['method_id'],
+        'new_method_id': methodId,
+        'old_payment_date': value['payment_date'] ??
+            (value['received_at']?.toString().split('T').first),
+        'new_payment_date': paymentDate,
+      });
+      value['local_edit_history'] = previousHistory;
       value['amount_cents'] = amountCents;
       value['method_id'] = methodId;
       value['method_name'] = methodName.trim();
@@ -547,6 +567,9 @@ class OfflineInvoicePaymentLedger {
                       amount: amount, methodId: methodId,
                       operationId: operationId,
                       paymentDate: payload['payment_date'].toString(),
+                      localEditHistory: payload['local_edit_history'] is List
+                          ? List<dynamic>.from(payload['local_edit_history'] as List)
+                          : const [],
                     )
                   : _api.addPendingInvoicePaymentOnce(
                   businessId, invoiceId,
