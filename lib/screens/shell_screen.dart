@@ -386,7 +386,9 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   void didUpdateWidget(covariant ShellScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.businessId == widget.businessId &&
-        oldWidget.roleCode == widget.roleCode) return;
+        oldWidget.roleCode == widget.roleCode) {
+      return;
+    }
 
     // Do not render cached pages from an earlier tenant or permissions set,
     // including when an offline edit sheet is still on the route stack.
