@@ -93,6 +93,8 @@ GRANT EXECUTE ON FUNCTION public.briskers_add_pending_invoice_payment_once_v2(
 
 -- Server-pending edits use the payment row version and a stable payment ID.
 -- Lock order: invoice, then pending payment (same as finalization).
+-- The original entered_by and entered_at are immutable receipt provenance:
+-- edits record auth.uid() in the separate audit table only.
 CREATE OR REPLACE FUNCTION public.briskers_update_pending_invoice_payment_v2(
   p_business_id uuid, p_payment_id uuid, p_amount numeric,
   p_method_id uuid, p_payment_date date, p_expected_row_version bigint
@@ -168,7 +170,7 @@ BEGIN
   UPDATE briskers.invoice_pending_payments
      SET amount=round(p_amount,2), payment_method_id=p_method_id,
          account_id=v_account, payment_date=p_payment_date,
-         entered_by=auth.uid(), updated_at=clock_timestamp(),
+         updated_at=clock_timestamp(),
          row_version=row_version+1
    WHERE business_id=p_business_id AND id=p_payment_id;
   -- An old, identical replay cannot create a second receipt. Any stale
