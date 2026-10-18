@@ -212,6 +212,16 @@ class OfflineInvoiceTaxService {
     if (!_canSend()) {
       throw StateError('Connect to verify the server before preparing this retry.');
     }
+    String patchLevel;
+    try {
+      patchLevel = await _api.invoiceTaxPatchLevel(businessId);
+    } catch (_) {
+      throw StateError('The repaired server tax function is not verified '
+          'as deployed. This invoice correction remains locked.');
+    }
+    if (patchLevel != 'generated_total_safe_20261018') {
+      throw StateError('Unexpected server tax patch version. Do not retry.');
+    }
     final saved = await _db.customSelect(
       """SELECT entity_id,payload_json,state,attempt_count,last_error
          FROM sync_outbox WHERE business_id=? AND id=?
