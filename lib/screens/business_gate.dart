@@ -337,6 +337,13 @@ class _BusinessGateState extends State<BusinessGate> {
     }
 
     try {
+      await _offlinePayments.flushPendingServerEdits(businessId);
+    } catch (_) {
+      // Corrections to existing pending receipts also remain durable.
+      // An unverified server receipt is never silently overwritten.
+    }
+
+    try {
       await _offlineEstimateInvoice.flush(businessId);
     } catch (_) {
       // Estimate-to-invoice merges stay queued and retry on reconnect.

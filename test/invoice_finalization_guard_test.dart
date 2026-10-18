@@ -95,6 +95,24 @@ void main() {
     );
   }
 
+  for (final state in ['pending', 'inflight', 'failed', 'done']) {
+    test('retained $state server-payment correction blocks finalization', () async {
+      await db.customStatement(
+        'INSERT INTO sync_outbox('
+        'business_id,entity_type,entity_id,operation,payload_json,state) '
+        "VALUES(?,'invoice_pending_payment_edit',?,'edit_pending_payment',?,?)",
+        ['shop', 'invoice', 'not-decodable', state],
+      );
+      await expectLater(attempt(), throwsStateError);
+      expect(calls, 0);
+      final queued = await db.customSelect(
+        'SELECT payload_json,state FROM sync_outbox'
+      ).getSingle();
+      expect(queued.read<String>('payload_json'), 'not-decodable');
+      expect(queued.read<String>('state'), state);
+    });
+  }
+
   test(
     'server acknowledged receipt still blocks until durable queue retirement',
     () async {

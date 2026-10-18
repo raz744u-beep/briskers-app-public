@@ -68,8 +68,8 @@ class InvoicePaymentFeed {
           'invoice_total': row.readNullable<double>('invoice_total'),
           'payment_method': data['method_name'] ?? 'Payment',
           'amount': cents / 100,
-          'transaction_date': (data['received_at']?.toString() ?? '')
-              .split('T').first,
+          'transaction_date': (data['payment_date']?.toString() ??
+                  data['received_at']?.toString() ?? '').split('T').first,
           'received_at': data['received_at'],
           'receipt_state': 'local',
         });
@@ -77,7 +77,74 @@ class InvoicePaymentFeed {
         // Preserve the queue, but never invent a receipt from invalid payload.
       }
     }
-    return mergeReceipts(server, local);
+    final merged = mergeReceipts(server, local);
+    final pendingCorrections = await _db.customSelect(
+      """SELECT payload_json FROM sync_outbox
+      WHERE business_id=? AND entity_type='invoice_pending_payment_edit'
+      AND state IN ('pending','inflight')""",
+      variables:[Variable<String>(businessId)],
+    ).get();
+    final corrections=<Map<String,dynamic>>[];
+    for(final row in pendingCorrections) {
+      try {
+        corrections.add(Map<String,dynamic>.from(
+          jsonDecode(row.read<String>('payload_json')) as Map));
+      } catch (_) {
+        // Invalid corrections cannot create receipt rows or income.
+      }
+    }
+    return overlayPendingPaymentEdits(merged,corrections);
+  }
+
+  /// Read-only view of amount/method/date corrections to server-pending
+  /// receipts. Never fabricate a receipt when its exact ID is absent.
+  static List<Map<String,dynamic>> overlayPendingPaymentEdits(
+    List<Map<String,dynamic>> receipts,
+    Iterable<Map<String,dynamic>> edits,
+  ) {
+    final result=receipts
+        .map((row)=>Map<String,dynamic>.from(row)).toList();
+    final affected=<String>{};
+    for(final edit in edits) {
+      final id=edit['payment_id']?.toString()??'';
+      final invoice=edit['invoice_id']?.toString()??'';
+      final matches=<int>[];
+      for(var i=0;i<result.length;i++) {
+        if(result[i]['receipt_id']?.toString()==id &&
+            result[i]['invoice_id']?.toString()==invoice &&
+            result[i]['receipt_state']?.toString()=='pending') {
+          matches.add(i);
+        }
+      }
+      if(matches.length!=1)continue; // Never guess by amount or customer.
+      final cents=num.tryParse(edit['amount_cents']?.toString()??'')?.round();
+      if(cents==null||cents<=0)continue;
+      final target=result[matches.single];
+      result[matches.single]={
+        ...target,
+        'amount':cents/100,
+        'payment_method':edit['method_name'],
+        'transaction_date':edit['payment_date'],
+        '_local_pending_edit':true,
+      };
+      affected.add(invoice);
+    }
+    for(final invoice in affected) {
+      final related=result.where((r)=>r['invoice_id']?.toString()==invoice)
+          .toList()..sort((a,b)=>
+              (a['received_at']?.toString()??'')
+                .compareTo(b['received_at']?.toString()??''));
+      var totalReceived=0.0;
+      for(final payment in related) {
+        totalReceived+=_amount(payment['amount']);
+        final invoiceTotal=_amount(payment['invoice_total']);
+        if(invoiceTotal>0) {
+          payment['coverage']=totalReceived+0.005>=invoiceTotal
+              ? 'paid' : 'partial';
+        }
+      }
+    }
+    return result;
   }
 
   /// An existing b2286 installation already holds local invoice details.
@@ -149,8 +216,9 @@ class InvoicePaymentFeed {
           'payment_method': payment['payment_method_name'] ?? 'Payment',
           'amount': amount,
           'invoice_total': total,
-          'transaction_date': at.isNotEmpty
-              ? at.split('T').first : detail['document_date'],
+          'transaction_date': (payment['payment_date']?.toString().isNotEmpty == true)
+              ? payment['payment_date'] : (at.isNotEmpty
+                ? at.split('T').first : detail['document_date']),
           'received_at': at,
           'receipt_state': 'pending',
           'coverage': total > 0 && cumulative + 0.005 >= total
