@@ -2,11 +2,11 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'employee_roster_cache.dart';
 import 'local_job_quarantine.dart';
 
 class OfflineJobAdminService {
@@ -19,29 +19,13 @@ class OfflineJobAdminService {
   final BriskersApi _api;
   final BriskersLocalDatabase _database;
 
-  String _employeesKey(String businessId) =>
-      'briskers_job_employees_$businessId';
+  final EmployeeRosterCache _roster = EmployeeRosterCache();
 
-  Future<List<Map<String, dynamic>>> refreshEmployees(String businessId) async {
-    final rows = await _api.assignableEmployees(businessId);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_employeesKey(businessId), jsonEncode(rows));
-    return rows;
-  }
+  Future<List<Map<String, dynamic>>> refreshEmployees(String businessId) =>
+      _roster.refreshAssignable(businessId);
 
-  Future<List<Map<String, dynamic>>> cachedEmployees(String businessId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_employeesKey(businessId));
-    if (raw == null || raw.isEmpty) return const [];
-    try {
-      return List<dynamic>.from(jsonDecode(raw) as List)
-          .whereType<Map>()
-          .map((row) => Map<String, dynamic>.from(row))
-          .toList();
-    } catch (_) {
-      return const [];
-    }
-  }
+  Future<List<Map<String, dynamic>>> cachedEmployees(String businessId) async =>
+      (await _roster.cachedAssignable(businessId))?.rows ?? const [];
 
   static String _newJobId() {
     final bytes = List<int>.generate(16, (_) => Random.secure().nextInt(256));
