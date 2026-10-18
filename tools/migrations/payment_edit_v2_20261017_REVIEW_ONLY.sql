@@ -6,6 +6,11 @@ ALTER TABLE briskers.invoice_pending_payments
   ADD COLUMN IF NOT EXISTS payment_date date;
 ALTER TABLE briskers.invoice_payment_operation_keys
   ADD COLUMN IF NOT EXISTS payment_date date;
+-- Client-reported edits made before the first server receipt. This is an
+-- audit trail, not server-verified financial history.
+ALTER TABLE briskers.invoice_payment_operation_keys
+  ADD COLUMN IF NOT EXISTS local_edit_history jsonb
+  NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE TABLE IF NOT EXISTS briskers.invoice_pending_payment_edit_audit (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -34,7 +39,8 @@ REVOKE ALL ON TABLE briskers.invoice_pending_payment_edit_audit FROM PUBLIC;
 -- update of already accepted legacy operations with a different date.
 CREATE OR REPLACE FUNCTION public.briskers_add_pending_invoice_payment_once_v2(
   p_business_id uuid, p_invoice_id uuid, p_amount numeric,
-  p_method_id uuid, p_operation_id uuid, p_payment_date date
+  p_method_id uuid, p_operation_id uuid, p_payment_date date,
+  p_local_edit_history jsonb DEFAULT '[]'::jsonb
 )
 RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO ''
@@ -46,7 +52,10 @@ DECLARE
 BEGIN
   PERFORM briskers.require_permission(p_business_id, 'payments.create');
   IF p_payment_date IS NULL OR p_payment_date < DATE '1990-01-01'
-     OR p_payment_date > current_date + 1 THEN
+     OR p_payment_date > current_date + 1
+     OR p_local_edit_history IS NULL
+     OR jsonb_typeof(p_local_edit_history) IS DISTINCT FROM 'array'
+     OR jsonb_array_length(p_local_edit_history) > 100 THEN
     RAISE EXCEPTION 'Invalid payment date' USING ERRCODE='22023';
   END IF;
   -- Two concurrent uses of this UUID serialize in the v1 function, which
@@ -57,14 +66,16 @@ BEGIN
   IF FOUND AND (v_existing.payment_date IS DISTINCT FROM p_payment_date
       OR v_existing.invoice_id IS DISTINCT FROM p_invoice_id
       OR v_existing.method_id IS DISTINCT FROM p_method_id
-      OR v_existing.amount IS DISTINCT FROM p_amount) THEN
+      OR v_existing.amount IS DISTINCT FROM p_amount
+      OR v_existing.local_edit_history IS DISTINCT FROM p_local_edit_history) THEN
     RAISE EXCEPTION 'Payment operation key reused with different details'
       USING ERRCODE='23505';
   END IF;
   v_id := public.briskers_add_pending_invoice_payment_once(
     p_business_id, p_invoice_id, p_amount, p_method_id, p_operation_id);
   UPDATE briskers.invoice_payment_operation_keys
-     SET payment_date=p_payment_date
+     SET payment_date=p_payment_date,
+         local_edit_history=p_local_edit_history
    WHERE business_id=p_business_id AND operation_id=p_operation_id
      AND payment_date IS NULL;
   SELECT payment_date INTO v_date
@@ -87,9 +98,9 @@ BEGIN
 END;
 $fn$;
 REVOKE ALL ON FUNCTION public.briskers_add_pending_invoice_payment_once_v2(
-  uuid,uuid,numeric,uuid,uuid,date) FROM PUBLIC;
+  uuid,uuid,numeric,uuid,uuid,date,jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.briskers_add_pending_invoice_payment_once_v2(
-  uuid,uuid,numeric,uuid,uuid,date) TO authenticated;
+  uuid,uuid,numeric,uuid,uuid,date,jsonb) TO authenticated;
 
 -- Server-pending edits use the payment row version and a stable payment ID.
 -- Lock order: invoice, then pending payment (same as finalization).
