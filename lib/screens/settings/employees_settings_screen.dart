@@ -477,11 +477,16 @@ class _EmployeesSettingsScreenState
                       ),
                     ),
                   if (_employees!.isEmpty && !_offlineUnavailable)
-                    const Card(
+                    Card(
                       child: Padding(
-                        padding: EdgeInsets.all(20),
+                        padding: const EdgeInsets.all(20),
                         child: Text(
-                          'No employees yet. Tap Manage to add one.',
+                          _showingSaved
+                            ? (_savedActiveOnly
+                                ? 'No active employees in the saved roster. '
+                                  'Connect to see all employees.'
+                                : 'The saved roster is empty. Connect to refresh.')
+                            : 'No employees yet. Tap Manage to add one.',
                         ),
                       ),
                     )
