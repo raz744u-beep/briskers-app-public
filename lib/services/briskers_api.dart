@@ -4042,6 +4042,16 @@ class BriskersApi {
     return networkSupabase.storage.from(bucket).download(key);
   }
 
+  /// Read-only capability proof that the guarded generated-column tax repair
+  /// is deployed in the same database transaction as its version marker.
+  Future<String> invoiceTaxPatchLevel(String businessId) async {
+    final value = await networkSupabase.rpc(
+      'briskers_invoice_tax_patch_level_v1',
+      params: {'p_business_id': businessId},
+    );
+    return value?.toString() ?? '';
+  }
+
   /// One audited server transaction updates all ordinary taxable invoice lines.
   /// It never edits pending receipts or finalizes any payment.
   Future<Map<String, dynamic>> updateInvoiceTaxRate(
