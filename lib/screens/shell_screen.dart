@@ -15,6 +15,8 @@ import '../services/document_index_sync_service.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/job_sync_service.dart';
 import '../services/owner_job_retirement_service.dart';
+import '../services/owner_job_deletion_service_v3.dart';
+import '../services/owner_local_job_purge_service.dart';
 import '../services/local_appointment_repository.dart';
 import '../services/local_customer_repository.dart';
 import '../services/local_document_repository.dart';
@@ -221,6 +223,19 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     if (actorId == null) return;
     _retirementSyncing = true;
     try {
+      // The verified v3 feed must be observed before replaying any v3 deletes.
+      // When the backend is not yet installed the v3 service fails closed,
+      // without triggering the legacy delete endpoint.
+      final deletionV3 = OwnerJobDeletionServiceV3();
+      await deletionV3.pullTombstones(businessId);
+      if (widget.roleCode == 'owner' && mounted && _foreground &&
+          widget.businessId == businessId &&
+          !BriskersConnectionModeController.instance.forceOffline &&
+          supabase.auth.currentUser?.id == actorId) {
+        await deletionV3.flush(businessId);
+        await OwnerLocalJobPurgeService().flushRegistrations(businessId,
+          actorId: actorId, isOwner: true);
+      }
       final service = OwnerJobRetirementService();
       await service.pullTombstones(businessId);
       if (!mounted || !_foreground || widget.businessId != businessId ||
