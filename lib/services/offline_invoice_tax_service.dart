@@ -362,7 +362,8 @@ class OfflineInvoiceTaxService {
           !_sameLines(_lines(actual), List<dynamic>.from(payload['lines'] as List),
               compareRates: true)) {
         await _db.customStatement(
-          "UPDATE sync_outbox SET state='conflict',last_error=? WHERE id=?",
+          "UPDATE sync_outbox SET state='conflict',last_error=? "
+          "WHERE id=? AND state='pending'",
           ['Server invoice changed. Tax correction needs owner review.', id],
         );
         continue;
