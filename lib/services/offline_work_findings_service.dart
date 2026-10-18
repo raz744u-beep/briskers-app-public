@@ -9,6 +9,8 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
+import 'local_job_deletion_v3.dart';
+import 'offline_job_purge.dart';
 import 'vehicle_finding_actions_service.dart';
 
 typedef WorkFindingMediaDirectoryProvider = Future<Directory> Function();
@@ -126,6 +128,7 @@ class OfflineWorkFindingsService {
         }
         final localVisitId = 'local-work-visit-${_operationId('visit')}';
         final now = DateTime.now().toUtc();
+        await OfflineJobPurge.recordNewIntent(_database, businessId, [localVisitId]);
         await _database.customStatement(
           """INSERT INTO local_job_visits(
             id,business_id,job_id,visit_number,work_summary,opened_at,
@@ -375,11 +378,14 @@ class OfflineWorkFindingsService {
     required String body,
     bool includeOnInvoice = false,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final operationId = _operationId('finding-create');
     final localId = 'local-finding-$operationId';
     final now = DateTime.now().toUtc();
 
     await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [localId, operationId]);
       await _database.customStatement(
         '''
         INSERT INTO local_findings (
@@ -525,6 +531,7 @@ class OfflineWorkFindingsService {
     required String mimeType,
     required Uint8List bytes,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     findingId = _canonicalFindingId(businessId, findingId);
     final finding = await _findingRow(businessId, findingId);
     if (finding == null) {
@@ -552,6 +559,8 @@ class OfflineWorkFindingsService {
 
     try {
       await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [localPhotoId, operationId]);
         // The picker/directory/file write can outlive the create response.
         findingId = _canonicalFindingId(businessId, findingId);
         final current = await _findingRow(businessId, findingId);
@@ -1414,6 +1423,7 @@ class OfflineWorkFindingsService {
     });
 
     if (rows.isEmpty) {
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [operationId]);
       await _database.customStatement(
         '''
         INSERT INTO sync_outbox (
@@ -1490,6 +1500,7 @@ class OfflineWorkFindingsService {
     });
 
     if (rows.isEmpty) {
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [operationId]);
       await _database.customStatement(
         '''
         INSERT INTO sync_outbox (
@@ -1636,3 +1647,4 @@ class OfflineWorkFindingsService {
     return DateTime.tryParse(value.toString())?.toUtc().toIso8601String();
   }
 }
+
