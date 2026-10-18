@@ -44,7 +44,10 @@ void main() {
           .allMatches(source).length,
       greaterThanOrEqualTo(4),
     );
-    expect(source, contains("'_local_pending_tax'"));
+    expect(source, contains("'_local_tax_sync_state'"));
     expect(source, contains('Tax correction saved on this phone'));
+    final service = File('lib/services/offline_invoice_tax_service.dart')
+        .readAsStringSync();
+    expect(service, contains("'_local_pending_tax'"));
   });
 }
