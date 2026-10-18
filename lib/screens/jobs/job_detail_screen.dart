@@ -422,7 +422,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           ? Map<String, dynamic>.from(rawCapabilities)
           : const <String, dynamic>{};
       bool capability(String key) => capabilities[key] == true;
-      final canManage = capability('manage_job');
       final canSeeFinancial = capability('view_financial');
 
       List<Map<String, dynamic>> documents = const [];
