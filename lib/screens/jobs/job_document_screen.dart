@@ -3052,8 +3052,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<void> _showPaymentContextMenu(
     Map<String, dynamic> payment,
   ) async {
-    if (_busy || payment['pending_sync'] == true ||
-        payment['state']?.toString() != 'pending') {
+    if (_busy || payment['state']?.toString() != 'pending' ||
+        payment['reconciliation_required'] == true ||
+        _detail?['_payment_reconciliation_required'] == true) {
       return;
     }
 
@@ -3069,7 +3070,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               title: Text(tr('editPayment')),
               onTap: () => Navigator.pop(sheetContext, 'edit'),
             ),
-            if (widget.isOwner)
+            // A local receipt or queued correction cannot be deleted with
+            // the server-only API. A separate audited removal flow is needed.
+            if (widget.isOwner &&
+                !BriskersConnectionModeController.instance.forceOffline &&
+                payment['pending_sync'] != true)
               ListTile(
                 leading: const Icon(Icons.delete_outline),
                 title: Text(tr('removePayment')),
@@ -3090,7 +3095,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<void> _editPayment(Map<String, dynamic> payment) async {
     if (_estimate || payment['state']?.toString() != 'pending' ||
-        payment['reconciliation_required'] == true) {
+        payment['reconciliation_required'] == true ||
+        _detail?['_payment_reconciliation_required'] == true) {
       return;
     }
 
@@ -3102,8 +3108,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       return;
     }
     if (!mounted || methods.isEmpty) return;
-
-    final localReceipt = payment['pending_sync'] == true;
+    final localReceipt = payment['_local_pending_payment'] == true;
+    final queuedServerEdit = payment['_local_pending_edit'] == true;
     final rawDate = (payment['payment_date'] ??
         payment['entered_at'])?.toString() ?? '';
     final parsedDate = DateTime.tryParse(rawDate);
@@ -3130,13 +3136,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       (m) => m['id']?.toString() == methodId,
     );
     final chosenDate = result['payment_date'].toString();
+    final total = _number(_detail?['total_amount']);
+    final recorded = _number(_detail?['paid_amount']) +
+        _number(_detail?['pending_payment']);
+    final allowableCents =
+        ((total - recorded + _number(payment['amount'])) * 100).round();
 
     if (localReceipt) {
-      final total = _number(_detail?['total_amount']);
-      final recorded = _number(_detail?['paid_amount']) +
-          _number(_detail?['pending_payment']);
-      final allowableCents =
-          ((total - recorded + _number(payment['amount'])) * 100).round();
       await _run(() => _offlinePayments.editNeverSubmittedPayment(
         widget.businessId, widget.documentId, payment['id'].toString(),
         amount: result['amount'] as num,
@@ -3148,25 +3154,46 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       return;
     }
 
-    // Existing v1 server RPC accepts amount and method only. Do not claim
-    // that the date changed until the audited v2 backend is deployed.
-    if (chosenDate != initialDate) {
+    // An already-synced payment needs its authoritative row_version to
+    // queue offline edits, or to perform a guarded direct online change.
+    final version = int.tryParse(payment['row_version']?.toString() ?? '');
+    if (version == null || version < 1) {
       setState(() => _error =
-          'Payment date correction requires the server update. '
-          'The existing payment was not changed.');
+          'Payment edit requires a verified server version. '
+          'Reconnect and refresh this invoice before editing.');
       return;
     }
-    await _run(() => _api.updatePendingInvoicePayment(
-      widget.businessId,
-      payment['id'].toString(),
+
+    if (BriskersConnectionModeController.instance.forceOffline ||
+        queuedServerEdit) {
+      await _run(() => _offlinePayments.queueServerPendingEdit(
+        widget.businessId, widget.documentId, payment['id'].toString(),
+        expectedRowVersion: version,
+        amount: result['amount'] as num,
+        maximumAllowedCents: allowableCents,
+        methodId: methodId,
+        methodName: chosenMethod['name']?.toString() ?? '',
+        paymentDate: chosenDate,
+      ));
+      return;
+    }
+
+    // This v2 server RPC refuses stale versions and finalized payments.
+    // If not deployed, the edit fails closed without changing the receipt.
+    await _run(() => _api.updatePendingInvoicePaymentV2(
+      widget.businessId, payment['id'].toString(),
       amount: result['amount'] as num,
       methodId: methodId,
+      paymentDate: chosenDate,
+      expectedRowVersion: version,
     ));
   }
 
   Future<void> _deletePayment(Map<String, dynamic> payment) async {
     if (!widget.isOwner ||
         _estimate ||
+        BriskersConnectionModeController.instance.forceOffline ||
+        payment['pending_sync'] == true ||
         payment['state']?.toString() != 'pending') {
       return;
     }
