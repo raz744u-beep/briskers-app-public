@@ -4718,8 +4718,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                       Text(problem, style: const TextStyle(color: Colors.red)),
                     if (offline) ...[
                       const SizedBox(height: 8),
-                      const Text('Offline: preview only. Saving requires a verified '
-                        'server connection so the invoice changes atomically.'),
+                      const Text(
+                        'Force Offline: Save Changes records the corrected '
+                        'tax and total on this phone. It stays pending sync '
+                        'until a version-checked server update succeeds. '
+                        'Existing payments will not change.',
+                      ),
                     ],
                   ],
                 ),
@@ -4735,7 +4739,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   child: Text(tr('cancel')),
                 ),
                 FilledButton(
-                  onPressed: offline || proposed == null ||
+                  onPressed: proposed == null ||
                           rate == null || (rate-oldRate).abs() < 0.0000001
                       ? null : () {
                           FocusScope.of(dialogContext).unfocus();
@@ -4749,18 +4753,31 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ),
       );
       if (selectedRate == null || !mounted) return;
+      final savedOffline = BriskersConnectionModeController.instance.forceOffline;
       final applied = await _run(() async {
-        await _api.updateInvoiceTaxRate(
-          widget.businessId, widget.documentId,
-          expectedVersion: currentVersion,
-          oldRate: oldRate,
-          newRate: selectedRate,
-        );
+        if (savedOffline) {
+          await _offlineInvoiceTax.saveOffline(
+            widget.businessId, widget.documentId,
+            expectedVersion: currentVersion,
+            oldRate: oldRate,
+            newRate: selectedRate,
+          );
+        } else {
+          await _api.updateInvoiceTaxRate(
+            widget.businessId, widget.documentId,
+            expectedVersion: currentVersion,
+            oldRate: oldRate,
+            newRate: selectedRate,
+          );
+        }
       });
       if (applied && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text(
-            'Invoice tax updated. Review any pending payment amount separately.')),
+          SnackBar(content: Text(savedOffline
+              ? 'Tax correction saved locally, pending sync. '
+                'Existing payment unchanged; review it separately.'
+              : 'Invoice tax updated. Review any pending payment '
+                'amount separately.')),
         );
       }
     } finally {
@@ -5672,6 +5689,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   label: _taxLabel(lines),
                   value: _money(_detail!['tax_amount']),
                   labelAction: !_estimate && widget.isOwner && !_readOnly && !_busy
+                      && _detail?['_local_pending_tax'] != true
                       ? IconButton(
                           icon: const Icon(Icons.edit_outlined, size: 18),
                           tooltip: 'Edit invoice tax percentage',
@@ -5691,6 +5709,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   value: _money(_detail!['total_amount']),
                   bold: true,
                 ),
+                if (_detail?['_local_pending_tax'] == true)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6, bottom: 8),
+                    child: Text(
+                      _detail?['_local_tax_sync_state'] == 'conflict'
+                          ? 'Tax correction needs sync review. '
+                            'Do not add or finalize another payment.'
+                          : 'Tax correction saved on this phone — pending sync. '
+                            'Existing payments were not changed.',
+                      style: const TextStyle(
+                        color: Color(0xFF9B6400),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
                 if (!_estimate) ...[
                   _AmountRow(
                     label: 'Amount Paid',
