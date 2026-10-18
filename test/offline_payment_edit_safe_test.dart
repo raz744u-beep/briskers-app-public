@@ -18,6 +18,13 @@ void main() {
         remainingBeforePaymentCents: 17560,
         methodId: 'debit-method', methodName: 'Debit Card',
       );
+      final captured = (await ledger.pendingForInvoice(shop, invoice)).single;
+      final actualLocal = DateTime.now();
+      final today = '${actualLocal.year.toString().padLeft(4, '0')}-'
+          '${actualLocal.month.toString().padLeft(2, '0')}-'
+          '${actualLocal.day.toString().padLeft(2, '0')}';
+      expect(captured['payment_date'], today);
+      expect(captured['received_at'], isNotEmpty);
       final before = (await ledger.pendingForInvoice(shop, invoice)).single;
       await ledger.editNeverSubmittedPayment(shop, invoice, op,
         amount: 150.25, maximumAllowedCents: 17560,
