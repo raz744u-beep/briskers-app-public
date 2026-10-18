@@ -611,7 +611,9 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
 
   Future<void> _reviewKnownRejectedTax(int outboxId) async {
     if (!widget.isOwner || _syncing ||
-        BriskersConnectionModeController.instance.forceOffline) return;
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     final approved = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
