@@ -86,9 +86,9 @@ class _Cache extends LocalFinancialCache {
   Future<void> saveTransactionDetail(
     String businessId,
     String transactionId,
-    Map<String, dynamic> value,
-    {int? visibilityGeneration},
-  ) async {
+    Map<String, dynamic> value, {
+    int? visibilityGeneration,
+  }) async {
     expect((businessId, transactionId), (_business, _transaction));
     persisted = Map<String, dynamic>.from(value);
   }
