@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 /// A real, focused EditableText still gets the normal viewInsets and
 /// Scaffold keyboard-resizing behavior. No platform settings or records
 /// are mutated.
-class StaleKeyboardInsetGuard extends StatelessWidget {
+class StaleKeyboardInsetGuard extends StatefulWidget {
   const StaleKeyboardInsetGuard({super.key, required this.child});
 
   final Widget child;
@@ -36,32 +36,47 @@ class StaleKeyboardInsetGuard extends StatelessWidget {
   }
 
   @override
+  State<StaleKeyboardInsetGuard> createState() =>
+      _StaleKeyboardInsetGuardState();
+}
+
+class _StaleKeyboardInsetGuardState extends State<StaleKeyboardInsetGuard> {
+  void _onDescendantFocusChange(bool _) {
+    // FocusManager may notify before its focused EditableText context is
+    // ready. A Focus widget receives descendant transitions and schedules
+    // a second, stable viewport computation after the frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: FocusManager.instance,
-      child: child,
-      builder: (context, child) {
-        final media = MediaQuery.of(context);
-        final insets = media.viewInsets;
-        final shouldRecoverInset =
-            insets.bottom > 0 && !editableTextHasFocus;
-        // Keep the MediaQuery wrapper stable across focus transitions.
-        // Removing/reinserting it could remount an active TextField while
-        // the keyboard is opening, leaving the old inset in place.
-        return MediaQuery(
-          data: shouldRecoverInset
-              ? media.copyWith(
-                  viewInsets: EdgeInsets.fromLTRB(
-                    insets.left,
-                    insets.top,
-                    insets.right,
-                    0,
-                  ),
-                )
-              : media,
-          child: child!,
-        );
-      },
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onFocusChange: _onDescendantFocusChange,
+      child: AnimatedBuilder(
+        animation: FocusManager.instance,
+        child: widget.child,
+        builder: (context, child) {
+          final media = MediaQuery.of(context);
+          final insets = media.viewInsets;
+          final shouldRecoverInset = insets.bottom > 0 &&
+              !StaleKeyboardInsetGuard.editableTextHasFocus;
+          // Retain a stable inherited MediaQuery element in both states.
+          return MediaQuery(
+            data: shouldRecoverInset
+                ? media.copyWith(
+                    viewInsets: EdgeInsets.fromLTRB(
+                      insets.left, insets.top, insets.right, 0,
+                    ),
+                  )
+                : media,
+            child: child!,
+          );
+        },
+      ),
     );
   }
 }
