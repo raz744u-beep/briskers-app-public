@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
+import '../../services/employee_roster_cache.dart';
 
 class EmployeeEditScreen extends StatefulWidget {
   const EmployeeEditScreen({
@@ -201,6 +202,10 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
         active: _active,
         ssn: _ssn.text.trim().isEmpty ? null : _ssn.text.trim(),
       );
+      // The new employee/position/active status invalidates BOTH Jobs and
+      // Appointments assignment snapshots. Settings will fetch authoritative
+      // values on return; if it fails, never expose stale employees.
+      await EmployeeRosterCache().invalidate(widget.businessId);
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
