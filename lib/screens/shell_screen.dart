@@ -28,6 +28,7 @@ import '../widgets/briskers_page_header.dart';
 import '../widgets/connection_header_toggle.dart';
 import '../widgets/briskers_module_dock.dart';
 import '../widgets/stale_keyboard_inset_guard.dart';
+import '../widgets/auth_visibility_shield.dart';
 import 'expenses_screen.dart';
 import 'appointments_screen.dart';
 import 'customers/customers_screen.dart';
@@ -60,6 +61,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   bool _preparingOfflineChoices = false;
   bool _retirementSyncing = false;
   bool _foreground = true;
+  bool _shopContextLocked = false;
   Timer? _retirementRetry;
   StreamSubscription<String>? _retirementChanges;
   static const _sectionColors = [
@@ -381,6 +383,21 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   }
 
   @override
+  void didUpdateWidget(covariant ShellScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId == widget.businessId &&
+        oldWidget.roleCode == widget.roleCode) return;
+
+    // Do not render cached pages from an earlier tenant or permissions set,
+    // including when an offline edit sheet is still on the route stack.
+    _shopContextLocked = true;
+    _lazyPages.clear();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) authVisibilityEpoch.value++;
+    });
+  }
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _retirementRetry?.cancel();
@@ -481,6 +498,13 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    if (_shopContextLocked) {
+      return const Scaffold(
+        body: Center(child: Text(
+          'Shop access changed. Close previous screens to continue.',
+        )),
+      );
+    }
     final activeColor = _sectionColors[_index];
     final isHome = _index == 0;
     final roleStyle = employeeRoleStyle(_roleLabel);
