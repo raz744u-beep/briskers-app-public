@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'stale_keyboard_inset_guard.dart';
+
 /// A single horizontal dock, reserving its own height above system navigation.
 /// It never writes app state; the shell owns selection and route changes.
 class BriskersModuleDock extends StatefulWidget {
@@ -57,12 +59,7 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
     if (mounted) setState(() {});
   }
 
-  bool get _editingText {
-    final focusContext = FocusManager.instance.primaryFocus?.context;
-    return focusContext != null &&
-        (focusContext.widget is EditableText ||
-            focusContext.findAncestorStateOfType<EditableTextState>() != null);
-  }
+  bool get _editingText => StaleKeyboardInsetGuard.editableTextHasFocus;
 
   void _syncArrows() {
     if (!mounted || !_controller.hasClients) return;
