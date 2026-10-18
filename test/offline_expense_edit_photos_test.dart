@@ -126,6 +126,7 @@ class _FailingCache extends LocalFinancialCache {
     String businessId,
     String transactionId,
     Map<String, dynamic> detail,
+    {int? visibilityGeneration},
   ) async {
     if (failNextSave) {
       failNextSave = false;
