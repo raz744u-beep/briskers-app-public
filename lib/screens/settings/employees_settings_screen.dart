@@ -33,6 +33,7 @@ class _EmployeesSettingsScreenState
   List<Map<String, dynamic>>? _employees;
   bool _showingSaved = false;
   bool _offlineUnavailable = false;
+  bool _savedActiveOnly = false;
   DateTime? _savedAt;
   String? _error;
 
@@ -43,13 +44,16 @@ class _EmployeesSettingsScreenState
   }
 
   Future<void> _load() async {
-    final cached = await _roster.cachedSettings(widget.businessId);
+    final fullCached = await _roster.cachedSettings(widget.businessId);
+    final cached = fullCached ??
+        await _roster.cachedAssignable(widget.businessId);
     if (!mounted) return;
     if (cached != null) {
       setState(() {
         // This is deliberately a safe roster, not compensation/settings data.
         _employees = cached.rows;
         _showingSaved = true;
+        _savedActiveOnly = fullCached == null;
         _savedAt = cached.refreshedAt;
         _offlineUnavailable = false;
         _error = null;
@@ -59,6 +63,7 @@ class _EmployeesSettingsScreenState
       setState(() {
         _employees ??= const [];
         _showingSaved = cached != null;
+        _savedActiveOnly = fullCached == null;
         _offlineUnavailable = cached == null;
         _error = null;
       });
@@ -70,6 +75,7 @@ class _EmployeesSettingsScreenState
       setState(() {
         _employees = rows;
         _showingSaved = false;
+        _savedActiveOnly = false;
         _offlineUnavailable = false;
         _savedAt = DateTime.now();
         _error = null;
@@ -79,6 +85,7 @@ class _EmployeesSettingsScreenState
       setState(() {
         _employees ??= const [];
         _showingSaved = cached != null;
+        _savedActiveOnly = fullCached == null;
         _offlineUnavailable = cached == null;
         _error = 'Could not refresh employees. '
             'Connect and pull down to try again.';
@@ -444,8 +451,11 @@ class _EmployeesSettingsScreenState
                   if (_showingSaved)
                     Card(child: ListTile(
                       leading: const Icon(Icons.wifi_off_outlined),
-                      title: const Text('Saved employee roster (read-only)'),
+                      title: Text(_savedActiveOnly
+                          ? 'Saved active roster only (read-only)'
+                          : 'Saved employee roster (read-only)'),
                       subtitle: Text('Last updated: ${_savedAt == null ? 'Unknown' : DateFormat.yMd().add_jm().format(_savedAt!)}. '
+                          '${_savedActiveOnly ? 'Inactive employees are not in this saved list. ' : ''}'
                           'Employee pay, SSN and contact details are available online. '
                           'Changes require a connection.'),
                     )),
