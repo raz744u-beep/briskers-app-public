@@ -198,6 +198,93 @@ class OfflineInvoiceTaxService {
         ],
       ).get();
 
+  /// Explicit owner-invoked recovery for the known PostgreSQL 428C9 rejection.
+  /// The original request failed while setting the generated total_amount
+  /// column. We *still* verify the original server invoice and line identity
+  /// read-only before changing the local send fence. No payment, invoice, or
+  /// server row is mutated by this method, and no network retry is performed.
+  ///
+  /// Only use after deploying the repaired server RPC; an ordinary ambiguous
+  /// timeout or any server-side version change must remain fenced.
+  Future<void> requeueVerifiedGeneratedTotalRejection(
+    String businessId, int outboxId,
+  ) async {
+    if (!_canSend()) {
+      throw StateError('Connect to verify the server before preparing this retry.');
+    }
+    final saved = await _db.customSelect(
+      """SELECT entity_id,payload_json,state,attempt_count,last_error
+         FROM sync_outbox WHERE business_id=? AND id=?
+         AND entity_type='invoice_tax_edit'""",
+      variables: [Variable<String>(businessId), Variable<int>(outboxId)],
+    ).getSingleOrNull();
+    if (saved == null || saved.read<String>('state') != 'inflight' ||
+        saved.read<int>('attempt_count') != 1) {
+      throw StateError('This is not a single known rejected tax operation. '
+          'Its queue remains unchanged.');
+    }
+    final errorText = (saved.readNullable<String>('last_error') ?? '')
+        .toLowerCase();
+    if (!errorText.contains('428c9') ||
+        !errorText.contains('total_amount') ||
+        !errorText.contains('generated column')) {
+      throw StateError('The previous outcome is not a verified generated '
+          'column rejection. Do not retry automatically.');
+    }
+    final invoiceId = saved.read<String>('entity_id');
+    final payload = Map<String,dynamic>.from(
+        jsonDecode(saved.read<String>('payload_json')) as Map);
+    final expected = int.tryParse(payload['expected_version']?.toString() ?? '');
+    final oldRate = _value(payload['old_rate']);
+    final newRate = _value(payload['new_rate']);
+    if (expected == null || expected <= 0 ||
+        !oldRate.isFinite || !newRate.isFinite ||
+        !const ['old_total','new_total','lines']
+            .every(payload.containsKey)) {
+      throw StateError('Tax correction provenance is incomplete.');
+    }
+    final actual = await _api.documentDetail(businessId, invoiceId);
+    if (int.tryParse(actual['row_version']?.toString() ?? '') != expected ||
+        (_value(actual['total_amount']) -
+          _value(payload['old_total'])).abs() > 0.011 ||
+        !_sameLines(_lines(actual), List<dynamic>.from(payload['lines'] as List),
+          compareRates: true)) {
+      throw StateError('Server invoice or line items changed; the tax '
+          'operation remains locked for review.');
+    }
+    final check = _proposal(actual, oldRate: oldRate,
+        newRate: newRate, expectedVersion: expected);
+    if ((_value(check['new_total']) -
+        _value(payload['new_total'])).abs() > 0.011) {
+      throw StateError('The original tax calculation no longer matches.');
+    }
+    await _db.transaction(() async {
+      final latest = await _db.customSelect(
+        """SELECT state,attempt_count,payload_json,last_error
+           FROM sync_outbox WHERE business_id=? AND id=?
+           AND entity_type='invoice_tax_edit'""",
+        variables: [Variable<String>(businessId), Variable<int>(outboxId)],
+      ).getSingleOrNull();
+      if (latest == null || latest.read<String>('state') != 'inflight' ||
+          latest.read<int>('attempt_count') != 1 ||
+          latest.read<String>('payload_json') != saved.read<String>('payload_json') ||
+          latest.readNullable<String>('last_error') !=
+            saved.readNullable<String>('last_error')) {
+        throw StateError('The queued tax correction changed while verifying. '
+            'Nothing has been requeued.');
+      }
+      await LocalJobQuarantine.assertReplayAllowed(_db, businessId,
+          outboxId: outboxId);
+      await _db.customStatement(
+        "UPDATE sync_outbox SET state='pending',last_error=NULL "
+        "WHERE business_id=? AND id=? AND state='inflight'",
+        [businessId, outboxId],
+      );
+    });
+    // A separate, owner-approved normal sync must submit the correction.
+    // Do not call flush() or update any payment from this review operation.
+  }
+
   /// Reconstruct the displayed correction from SQLite after a device restart,
   /// even if SharedPreferences was interrupted before caching the projection.
   Future<Map<String, dynamic>> projectPending(
