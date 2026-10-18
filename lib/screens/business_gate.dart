@@ -23,6 +23,7 @@ import '../services/offline_financial_write_service.dart';
 import '../services/offline_estimate_invoice_service.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/offline_document_edit_service.dart';
+import '../services/offline_invoice_tax_service.dart';
 import '../services/offline_invoice_payment_ledger.dart';
 import '../services/local_tax_settings_cache.dart';
 import '../services/local_invoice_status_styles_cache.dart';
@@ -62,6 +63,8 @@ class _BusinessGateState extends State<BusinessGate> {
       OfflineDocumentDraftService();
   final OfflineDocumentEditService _offlineDocumentEdit =
       OfflineDocumentEditService();
+  final OfflineInvoiceTaxService _offlineInvoiceTax =
+      OfflineInvoiceTaxService();
   final OfflineInvoicePaymentLedger _offlinePayments =
       OfflineInvoicePaymentLedger();
   final LocalTaxSettingsCache _taxSettingsCache =
@@ -328,6 +331,13 @@ class _BusinessGateState extends State<BusinessGate> {
       await _offlineDocumentEdit.flush(businessId);
     } catch (_) {
       // Cached document edits stay queued and retry on reconnect.
+    }
+
+    try {
+      await _offlineInvoiceTax.flush(businessId);
+    } catch (_) {
+      // A tax edit with uncertain or stale server outcome remains fenced
+      // in SQLite; never retry an ambiguous non-idempotent correction.
     }
 
     try {
