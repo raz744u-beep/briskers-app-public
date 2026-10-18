@@ -3064,12 +3064,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<void> _showPaymentContextMenu(
     Map<String, dynamic> payment,
   ) async {
-    if (_busy || payment['state']?.toString() != 'pending' ||
+    if (_busy || !_canManageInvoiceExpenses ||
+        payment['state']?.toString() != 'pending' ||
         payment['reconciliation_required'] == true ||
         _detail?['_payment_reconciliation_required'] == true) {
       return;
     }
 
+    final localReceipt = payment['_local_pending_payment'] == true;
+    final online = !BriskersConnectionModeController.instance.forceOffline;
+    final canRemove = widget.isOwner &&
+        (localReceipt ||
+         (online && payment['pending_sync'] != true &&
+          payment['_local_pending_edit'] != true));
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -3080,24 +3087,28 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             ListTile(
               leading: const Icon(Icons.edit_outlined),
               title: Text(tr('editPayment')),
+              subtitle: const Text('Amount, payment date, and method'),
               onTap: () => Navigator.pop(sheetContext, 'edit'),
             ),
-            // A local receipt or queued correction cannot be deleted with
-            // the server-only API. A separate audited removal flow is needed.
-            if (widget.isOwner &&
-                !BriskersConnectionModeController.instance.forceOffline &&
-                payment['pending_sync'] != true)
+            if (widget.isOwner)
               ListTile(
-                leading: const Icon(Icons.delete_outline),
+                enabled: canRemove,
+                leading: Icon(Icons.delete_outline,
+                    color: canRemove ? Theme.of(context).colorScheme.error : null),
                 title: Text(tr('removePayment')),
-                onTap: () => Navigator.pop(sheetContext, 'remove'),
+                subtitle: canRemove
+                    ? const Text('Unfinalized payment only')
+                    : const Text('Server-recorded payments require an online, '
+                        'verified removal. No offline deletion will be sent.'),
+                onTap: canRemove
+                    ? () => Navigator.pop(sheetContext, 'remove')
+                    : null,
               ),
             const SizedBox(height: 8),
           ],
         ),
       ),
     );
-
     if (action == 'edit') {
       await _editPayment(payment);
     } else if (action == 'remove') {
@@ -3106,7 +3117,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _editPayment(Map<String, dynamic> payment) async {
-    if (_estimate || payment['state']?.toString() != 'pending' ||
+    if (_estimate || !_canManageInvoiceExpenses ||
+        payment['state']?.toString() != 'pending' ||
         payment['reconciliation_required'] == true ||
         _detail?['_payment_reconciliation_required'] == true) {
       return;
@@ -3169,16 +3181,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     // An already-synced payment needs its authoritative row_version to
     // queue offline edits, or to perform a guarded direct online change.
     final version = int.tryParse(payment['row_version']?.toString() ?? '');
-    if (version == null || version < 1) {
-      setState(() => _error =
-          'Payment edit requires a verified server version. '
-          'Reconnect and refresh this invoice before editing.');
-      return;
-    }
-
-    if (BriskersConnectionModeController.instance.forceOffline ||
-        queuedServerEdit) {
-      await _run(() => _offlinePayments.queueServerPendingEdit(
+    final offline = BriskersConnectionModeController.instance.forceOffline;
+    if (offline || queuedServerEdit) {
+      final saved = await _run(() => _offlinePayments.queueServerPendingEdit(
         widget.businessId, widget.documentId, payment['id'].toString(),
         expectedRowVersion: version,
         amount: result['amount'] as num,
@@ -3186,7 +3191,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         methodId: methodId,
         methodName: chosenMethod['name']?.toString() ?? '',
         paymentDate: chosenDate,
+        originalAmountCents: (_number(payment['amount']) * 100).round(),
+        originalMethodId: payment['payment_method_id']?.toString(),
+        originalEnteredAt: payment['entered_at']?.toString(),
+        originalPaymentDate: payment['payment_date']?.toString(),
       ));
+      if (saved && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Payment edit saved locally. Pending safe sync; '
+              'do not finalize this invoice yet.'),
+        ));
+      }
+      return;
+    }
+
+    if (version == null || version < 1) {
+      setState(() => _error =
+          'Refresh this payment online to verify its server version '
+          'before changing it.');
       return;
     }
 
@@ -3202,21 +3224,28 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _deletePayment(Map<String, dynamic> payment) async {
-    if (!widget.isOwner ||
-        _estimate ||
-        BriskersConnectionModeController.instance.forceOffline ||
-        payment['pending_sync'] == true ||
-        payment['state']?.toString() != 'pending') {
+    if (!widget.isOwner || _estimate ||
+        payment['state']?.toString() != 'pending' ||
+        payment['reconciliation_required'] == true ||
+        _detail?['_payment_reconciliation_required'] == true) {
       return;
     }
-
+    final localReceipt = payment['_local_pending_payment'] == true;
+    final online = !BriskersConnectionModeController.instance.forceOffline;
+    if (!localReceipt && (!online || payment['pending_sync'] == true ||
+        payment['_local_pending_edit'] == true)) {
+      setState(() => _error = 'This server-recorded payment cannot be '
+          'deleted offline or during a queued edit. No data was changed.');
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text("${tr('removePayment')}?"),
         content: Text(
           'Remove the ${_money(payment['amount'])} '
-          '${payment['payment_method_name'] ?? 'payment'} entry?',
+          '${payment['payment_method_name'] ?? 'payment'} entry? '
+          'This removes an unfinalized receipt, not a posted transaction.',
         ),
         actions: [
           TextButton(
@@ -3235,11 +3264,16 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       ),
     );
     if (confirmed != true) return;
-
-    await _run(() => _api.deletePendingInvoicePayment(
-          widget.businessId,
-          payment['id'].toString(),
-        ));
+    if (localReceipt) {
+      // A never-sent local receipt can be removed atomically without
+      // contacting Supabase. Any attempted/uncertain send fails closed.
+      await _run(() => _offlinePayments.deleteNeverSubmittedPayment(
+          widget.businessId,widget.documentId,payment['id'].toString()));
+    } else {
+      // The server RPC independently requires owner authorization.
+      await _run(() => _api.deletePendingInvoicePayment(
+          widget.businessId,payment['id'].toString()));
+    }
   }
 
   Future<Map<String, dynamic>?> _pickInvoiceCustomer() async {
@@ -5966,7 +6000,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                         return ListTile(
                           contentPadding:
                               const EdgeInsets.fromLTRB(16, 0, 8, 0),
-                          onLongPress: editable && !_busy
+                          onTap: editable && !_busy && _canManageInvoiceExpenses
+                              ? () => _showPaymentContextMenu(payment)
+                              : null,
+                          onLongPress: editable && !_busy && _canManageInvoiceExpenses
                               ? () => _showPaymentContextMenu(payment)
                               : null,
                           leading: CircleAvatar(
@@ -6004,15 +6041,25 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                               ),
                             );
                           })(),
-                          trailing: Padding(
-                            padding: const EdgeInsets.only(right: 2),
-                            child: Text(
-                              _money(paymentAmount),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w400,
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _money(paymentAmount),
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w400,
+                                ),
                               ),
-                            ),
+                              if (editable && !_busy && _canManageInvoiceExpenses)
+                                IconButton(
+                                  icon: const Icon(Icons.edit_outlined, size: 20),
+                                  tooltip: widget.isOwner
+                                      ? 'Edit or remove payment'
+                                      : 'Edit payment',
+                                  onPressed: () => _showPaymentContextMenu(payment),
+                                ),
+                            ],
                           ),
                         );
                       },
@@ -6044,7 +6091,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     if (widget.isOwner) ...[
                     const SizedBox(height: 10),
                     FilledButton.icon(
-                      onPressed: _busy ? null : _finalizeEnteredPayments,
+                      onPressed: _busy || _detail?['_local_pending_tax'] == true
+                          ? null : _finalizeEnteredPayments,
                       icon: const Icon(Icons.check_circle_outline),
                       label: const Text('Finalize Received Payment'),
                     ),
@@ -7522,19 +7570,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             ],
           ),
         ),
-        // Some Android gesture/navigation configurations report a bottom
-        // system inset that the inner SafeArea does not reserve after the
-        // keyboard closes. Reserve it outside the entire action dock.
-        bottomNavigationBar: Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.viewPaddingOf(context).bottom,
-          ),
-          child: Column(
+        // Only ONE widget owns the physical bottom inset. The shared
+        // BriskersModuleDock already contains SafeArea. Adding viewPadding
+        // outside this column left a large empty strip under invoice detail
+        // and raised the dock above its normal position.
+        bottomNavigationBar: Column(
           mainAxisSize: MainAxisSize.min,
-          children: [SafeArea(
-          top: false,
-          bottom: false,
-          child: Container(
+          children: [
+            SafeArea(
+              top: false,
+              bottom: widget.sharedBottomNavigationBar == null,
+              child: Container(
             decoration: const BoxDecoration(
               color: Colors.white,
               border: Border(
@@ -7614,10 +7660,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ],
             ),
           ),
-        ),          if (widget.sharedBottomNavigationBar != null)
-            widget.sharedBottomNavigationBar!,
+            ),
+            if (widget.sharedBottomNavigationBar != null)
+              widget.sharedBottomNavigationBar!,
           ],
-          ),
         ),
       ),
     );
