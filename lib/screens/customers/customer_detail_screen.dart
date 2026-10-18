@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../widgets/job_compact_card.dart';
+import '../../widgets/stale_keyboard_inset_guard.dart';
 import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
 import '../../core/briskers_i18n.dart';
@@ -1432,7 +1433,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ].join(' '),
     ].join('\n');
 
-    return Scaffold(
+    return StaleKeyboardInsetGuard(
+      child: Scaffold(
       appBar: AppBar(
         centerTitle: true,
         backgroundColor: BriskersColors.customers.withValues(alpha: 0.12),
@@ -1690,6 +1692,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 }
