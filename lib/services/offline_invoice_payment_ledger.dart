@@ -187,14 +187,22 @@ class OfflineInvoicePaymentLedger {
       throw StateError('Payment exceeds the remaining invoice balance.');
     }
     final operationId = _operationId();
-    final now = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+    // Capture the payment's shop-local calendar date before any later sync.
+    // The UTC receipt timestamp stays immutable for provenance.
+    final capturedAt = DateTime.now();
+    final capturedUtc = capturedAt.toUtc();
+    final capturedDate = '${capturedAt.year.toString().padLeft(4, '0')}-'
+        '${capturedAt.month.toString().padLeft(2, '0')}-'
+        '${capturedAt.day.toString().padLeft(2, '0')}';
+    final now = capturedUtc.millisecondsSinceEpoch ~/ 1000;
     final payload = <String, dynamic>{
       'operation_id': operationId,
       'invoice_id': invoiceId,
       'method_id': methodId,
       'method_name': method,
       'amount_cents': amountCents,
-      'received_at': DateTime.now().toUtc().toIso8601String(),
+      'received_at': capturedUtc.toIso8601String(),
+      'payment_date': capturedDate,
     };
     await _database.transaction(() async {
       if (expectedQueuedOperationIds != null) {
