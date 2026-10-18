@@ -39,6 +39,7 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
   void initState() {
     super.initState();
     _controller.addListener(_syncArrows);
+    FocusManager.instance.addListener(_onFocusChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelected());
   }
 
@@ -48,6 +49,19 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
     if (oldWidget.selectedIndex != widget.selectedIndex) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelected());
     }
+  }
+
+  void _onFocusChanged() {
+    // A stale Android IME inset must not leave the entire module dock hidden
+    // when keyboard focus has already returned to the route.
+    if (mounted) setState(() {});
+  }
+
+  bool get _editingText {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    return focusContext != null &&
+        (focusContext.widget is EditableText ||
+            focusContext.findAncestorStateOfType<EditableTextState>() != null);
   }
 
   void _syncArrows() {
@@ -71,6 +85,7 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
 
   @override
   void dispose() {
+    FocusManager.instance.removeListener(_onFocusChanged);
     _controller.removeListener(_syncArrows);
     _controller.dispose();
     super.dispose();
@@ -78,7 +93,10 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
 
   @override
   Widget build(BuildContext context) {
-    if (MediaQuery.viewInsetsOf(context).bottom > 0) {
+    // Do not interpret a nonzero inset ALONE as a visible keyboard.
+    // Samsung may retain its last reported IME height after the text field
+    // loses focus; that used to hide all app navigation until a restart.
+    if (MediaQuery.viewInsetsOf(context).bottom > 0 && _editingText) {
       return const SizedBox.shrink();
     }
     return SafeArea(
