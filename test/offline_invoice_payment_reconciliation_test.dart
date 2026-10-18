@@ -65,6 +65,21 @@ class _UnavailableIdempotentApi extends BriskersApi {
   }
 
   @override
+  Future<String> addPendingInvoicePaymentOnceV2(
+    String businessId,
+    String invoiceId, {
+    required num amount,
+    required String methodId,
+    required String operationId,
+    required String paymentDate,
+    List<dynamic> localEditHistory = const [],
+  }) async {
+    operations.add(operationId);
+    expect(DateTime.tryParse(paymentDate), isNotNull);
+    throw StateError('Date-aware idempotent endpoint unavailable');
+  }
+
+  @override
   Future<String> addPendingInvoicePayment(
     String businessId,
     String invoiceId, {
