@@ -24,7 +24,7 @@ int compareCustomerJobRecency(
   String kind(Map<String, dynamic> row) {
     final number = row['number']?.toString().trim() ?? '';
     if (number.toUpperCase().startsWith('MB-')) return 'mobilebiz';
-    if (RegExp(r'^J[- ]?\d+, caseSensitive: false).hasMatch(number)) {
+    if (RegExp(r'^J[- ]?[0-9]+\$', caseSensitive: false).hasMatch(number)) {
       return 'native';
     }
     return 'other';
@@ -38,31 +38,7 @@ int compareCustomerJobRecency(
   } else {
     int? number(Map<String, dynamic> row) {
       final raw = row['number']?.toString() ?? '';
-      final matches = RegExp(r'\d+').allMatches(raw).toList();
-      return matches.isEmpty ? null : int.tryParse(matches.last.group(0)!);
-    }
-    final an = number(a);
-    final bn = number(b);
-    if (an != null && bn != null && an != bn) return bn.compareTo(an);
-  }
-
-  return (b['id']?.toString() ?? '').compareTo(a['id']?.toString() ?? '');
-}
-, caseSensitive: false).hasMatch(number)) {
-      return 'native';
-    }
-    return 'other';
-  }
-
-  final aKind = kind(a);
-  final bKind = kind(b);
-  if (aKind != bKind) {
-    if (aKind == 'native') return -1;
-    if (bKind == 'native') return 1;
-  } else {
-    int? number(Map<String, dynamic> row) {
-      final raw = row['number']?.toString() ?? '';
-      final matches = RegExp(r'\d+').allMatches(raw).toList();
+      final matches = RegExp(r'[0-9]+').allMatches(raw).toList();
       return matches.isEmpty ? null : int.tryParse(matches.last.group(0)!);
     }
     final an = number(a);
