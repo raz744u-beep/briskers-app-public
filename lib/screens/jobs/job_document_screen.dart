@@ -10,6 +10,7 @@ import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 import '../../core/module_modal_theme.dart';
 import '../../widgets/estimate_merge_confirmation_dialog.dart';
 import '../../widgets/document_identity_app_bar.dart';
+import '../../widgets/stale_keyboard_inset_guard.dart';
 import '../../services/vehicle_finding_actions_service.dart';
 import 'package:flutter/services.dart' show MethodChannel, MissingPluginException, PlatformException;
 import 'package:intl/intl.dart';
@@ -7264,7 +7265,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   @override
-  Widget build(BuildContext context) => JobQuarantineViewGuard(
+  Widget build(BuildContext context) => StaleKeyboardInsetGuard(
+    child: JobQuarantineViewGuard(
     businessId: widget.businessId,
     jobId: '',
     documentId: widget.documentId,
@@ -7274,6 +7276,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       unawaited(_load());
     },
     child: _buildDocumentContent(context),
+    ),
   );
 
   Widget _buildDocumentContent(BuildContext context) {
