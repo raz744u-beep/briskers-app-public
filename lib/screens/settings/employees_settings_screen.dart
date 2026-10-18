@@ -64,13 +64,14 @@ class _EmployeesSettingsScreenState
       }
     }
     if (!mounted) return;
-    if (cached != null) {
+    final available = cached;
+    if (available != null) {
       setState(() {
         // This is deliberately a safe roster, not compensation/settings data.
-        _employees = cached.rows;
+        _employees = available.rows;
         _showingSaved = true;
         _savedActiveOnly = fullCached == null;
-        _savedAt = cached.refreshedAt;
+        _savedAt = available.refreshedAt;
         _offlineUnavailable = false;
         _error = null;
       });
