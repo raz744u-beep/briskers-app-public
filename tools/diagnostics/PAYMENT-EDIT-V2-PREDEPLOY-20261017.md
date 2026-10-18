@@ -32,3 +32,17 @@
 3. Before active schema deployment, obtain explicit owner approval **separate** from synthetic test authorization. Back up/record existing function definitions and deploy atomically with versioned migration; verify RLS/grants and required RPC functions post-deploy.
 4. No production data should be used for synthetic writes. Preserve Janet Williams #6348 $175.60 pending local receipt and Sara Mirza #6345 pending server receipts exactly; they must be reconciled read-only before phone sync.
 5. Only after backend migration is verified should a permanently signed APK be built for testing one step at a time; do not uninstall or clear local data.
+
+## Live function drift fingerprints (read-only; recheck before applying)
+
+MD5 hashes of PostgreSQL `pg_get_functiondef` from the active database on October 17–18 UTC. These are **drift detectors**, not integrity/authenticity guarantees. If any differs at deployment time, stop and review the changed function definitions before proceeding.
+
+| Function | Definition MD5 |
+|---|---|
+| `briskers_add_pending_invoice_payment_once` | `8974d0dea016b4e517662617aaaf6404` |
+| `briskers_document_detail_v3` | `ba0c737c22530b0a9060d81a857be191` |
+| `briskers_finalize_pending_invoice_payment` | `816e2e0a1d03cb3f67c5dba719089b10` |
+| `briskers_invoice_receipts_v1` | `633a79598d697a407e61ad4f5f86c711` |
+| `briskers_update_pending_invoice_payment` | `dbbf7190d3e0ae56a508b62af676c36f` |
+
+No routine was altered by retrieving these fingerprints.
