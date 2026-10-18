@@ -131,6 +131,9 @@ class _EmployeesSettingsScreenState
         ),
       ),
     );
+    // Position changes can alter the assignment list even if employees
+    // themselves did not change.
+    await _roster.invalidate(widget.businessId);
     await _load();
   }
 
