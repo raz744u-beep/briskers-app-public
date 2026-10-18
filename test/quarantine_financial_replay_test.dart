@@ -147,6 +147,21 @@ class _ReplayApi extends BriskersApi {
   }
 
   @override
+  Future<String> addPendingInvoicePaymentOnceV2(
+    String businessId, String invoiceId, {
+    required num amount,
+    required String methodId,
+    required String operationId,
+    required String paymentDate,
+    List<dynamic> localEditHistory = const [],
+  }) async {
+    // New local receipts replay through v2 with original business date.
+    expect(DateTime.tryParse(paymentDate), isNotNull);
+    await _mutate('payment');
+    return 'payment-ack';
+  }
+
+  @override
   Future<Map<String, dynamic>> syncCreateManualTransaction(
     String businessId, {
     required String operationId,
