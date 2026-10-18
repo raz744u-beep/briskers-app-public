@@ -24,7 +24,7 @@ int compareCustomerJobRecency(
   String kind(Map<String, dynamic> row) {
     final number = row['number']?.toString().trim() ?? '';
     if (number.toUpperCase().startsWith('MB-')) return 'mobilebiz';
-    if (RegExp(r'^J[- ]?[0-9]+\$', caseSensitive: false).hasMatch(number)) {
+    if (RegExp(r'^J[- ]?[0-9]+$', caseSensitive: false).hasMatch(number)) {
       return 'native';
     }
     return 'other';
