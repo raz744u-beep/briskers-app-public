@@ -48,6 +48,7 @@ import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../services/local_standard_notes_service.dart';
 import '../../services/offline_document_edit_service.dart';
+import '../../services/offline_invoice_tax_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/invoice_finalization_guard.dart';
@@ -216,6 +217,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       OfflineDocumentDraftService();
   final OfflineDocumentEditService _offlineDocumentEdit =
       OfflineDocumentEditService();
+  final OfflineInvoiceTaxService _offlineInvoiceTax =
+      OfflineInvoiceTaxService();
   final LocalTaxSettingsCache _taxSettingsCache =
       LocalTaxSettingsCache();
   final _catalogSync = CatalogSyncService();
@@ -535,8 +538,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       final repairedCached =
           await _detailCache.load(widget.businessId, widget.documentId) ??
               cached;
-      final datedCached =
-          await _withLocalPayments(await _withRecoveredDocumentDate(repairedCached));
+      final datedCached = await _withLocalPayments(
+        await _withRecoveredDocumentDate(
+          await _offlineInvoiceTax.projectPending(
+              widget.businessId, widget.documentId, repairedCached)));
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _detail = datedCached;
@@ -573,7 +578,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           // These local reads are independent. Start both together so a
           // slow settings lookup cannot serialize cached invoice first paint.
           final local = await Future.wait<dynamic>([
-            _withRecoveredDocumentDate(cached),
+            _withRecoveredDocumentDate(
+              await _offlineInvoiceTax.projectPending(
+                  widget.businessId, widget.documentId, cached)),
             _taxSettingsCache.load(widget.businessId),
           ]);
           final recovered = await _withLocalPayments(
@@ -616,7 +623,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         widget.documentId,
       );
       if (!mounted || generation != _loadGeneration) return;
-      final projected = await _withLocalPayments(detail);
+      final projected = await _withLocalPayments(
+        await _offlineInvoiceTax.projectPending(
+            widget.businessId, widget.documentId, detail));
       debugPrint('PERF-001 document detail RPC: ${openWatch.elapsedMilliseconds}ms');
       unawaited(const InvoicePerformanceMetrics().record(
         widget.businessId,
@@ -770,7 +779,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       if (!mounted || generation != _loadGeneration) return;
       if (cached != null) {
         final datedCached = await _withLocalPayments(
-          await _withRecoveredDocumentDate(cached));
+          await _withRecoveredDocumentDate(
+            await _offlineInvoiceTax.projectPending(
+                widget.businessId, widget.documentId, cached)));
         if (!mounted || generation != _loadGeneration) return;
         setState(() {
           _detail = datedCached;
