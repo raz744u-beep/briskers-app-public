@@ -5689,7 +5689,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   label: _taxLabel(lines),
                   value: _money(_detail!['tax_amount']),
                   labelAction: !_estimate && widget.isOwner && !_readOnly && !_busy
-                      && _detail?['_local_pending_tax'] != true
+                      && _detail?['_local_tax_sync_state'] == null
                       ? IconButton(
                           icon: const Icon(Icons.edit_outlined, size: 18),
                           tooltip: 'Edit invoice tax percentage',
@@ -5709,12 +5709,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   value: _money(_detail!['total_amount']),
                   bold: true,
                 ),
-                if (_detail?['_local_pending_tax'] == true)
+                if (_detail?['_local_tax_sync_state'] != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 6, bottom: 8),
                     child: Text(
-                      _detail?['_local_tax_sync_state'] == 'conflict'
-                          ? 'Tax correction needs sync review. '
+                      const {'inflight', 'conflict'}.contains(
+                              _detail?['_local_tax_sync_state'])
+                          ? 'Tax correction requires sync verification. '
                             'Do not add or finalize another payment.'
                           : 'Tax correction saved on this phone — pending sync. '
                             'Existing payments were not changed.',
