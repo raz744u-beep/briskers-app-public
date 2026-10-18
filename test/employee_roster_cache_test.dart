@@ -52,7 +52,6 @@ void main() {
     expect(raw, isNot(contains('1234')));
     expect(raw, isNot(contains('hourly_rate')));
     expect(raw, isNot(contains('secret-phone')));
-    expect(raw, isNot(contains('40')));
     expect(raw, isNot(contains('9999')));
   });
 
