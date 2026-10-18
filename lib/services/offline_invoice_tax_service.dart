@@ -14,6 +14,9 @@ import 'local_job_quarantine.dart';
 /// Its outbox identity survives restarts and ambiguous server replies. No
 /// payment is created, modified, deleted or finalized by this service.
 class OfflineInvoiceTaxService {
+  // Auto bootstrap and the manual Settings sync share a single replay per
+  // local database and shop. One tax proposal may never be sent twice.
+  static final Expando<Map<String, Future<void>>> _activeFlushes = Expando();
   OfflineInvoiceTaxService({
     BriskersApi api = const BriskersApi(),
     BriskersLocalDatabase? database,
@@ -321,8 +324,19 @@ class OfflineInvoiceTaxService {
     return projected;
   }
 
-  Future<void> flush(String businessId) async {
-    if (!_canSend()) return;
+  Future<void> flush(String businessId) {
+    if (!_canSend()) return Future<void>.value();
+    final active = _activeFlushes[_db] ??= <String, Future<void>>{};
+    final existing = active[businessId];
+    if (existing != null) return existing;
+    final work = _flushInternal(businessId);
+    active[businessId] = work;
+    return work.whenComplete(() {
+      if (identical(active[businessId], work)) active.remove(businessId);
+    });
+  }
+
+  Future<void> _flushInternal(String businessId) async {
     final queued = await _db.customSelect(
       "SELECT * FROM sync_outbox WHERE business_id=? AND entity_type=? "
       "AND state='pending' ORDER BY id",
@@ -365,12 +379,14 @@ class OfflineInvoiceTaxService {
             _db, businessId, outboxId: id);
         // Durably claim the send BEFORE the network request. If a response is
         // lost, never automatically issue this non-idempotent RPC twice.
-        await _db.customStatement(
+        final claimed = await _db.customUpdate(
           "UPDATE sync_outbox SET state='inflight',"
           "attempt_count=attempt_count+1,last_attempt_at=? WHERE id=? "
           "AND state='pending'",
-          [_now, id],
+          variables: [Variable<int>(_now), Variable<int>(id)],
         );
+        // A second trigger cannot claim a row already in-flight.
+        if (claimed != 1) continue;
         if (!_canSend()) {
           // Mode changed before any RPC was called. No request was sent;
           // release the send fence so the original intent may retry later.
