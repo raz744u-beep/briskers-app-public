@@ -25,6 +25,7 @@ import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
 import '../widgets/connection_header_toggle.dart';
 import '../widgets/briskers_module_dock.dart';
+import '../widgets/stale_keyboard_inset_guard.dart';
 import 'expenses_screen.dart';
 import 'appointments_screen.dart';
 import 'customers/customers_screen.dart';
@@ -594,7 +595,8 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
 
     final currentPage = buildPage(_index);
 
-    return Scaffold(
+    return StaleKeyboardInsetGuard(
+      child: Scaffold(
       appBar: isHome ? null : AppBar(
         backgroundColor: activeColor.withValues(alpha: 0.08),
         titleSpacing: 10,
@@ -635,6 +637,7 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
       ),
       body: currentPage,
       bottomNavigationBar: _shellNavigationBar(),
+      ),
     );
   }
 }
