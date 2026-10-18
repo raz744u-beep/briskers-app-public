@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
 import '../../services/employee_roster_cache.dart';
+import '../../widgets/employee_role_menu_item.dart';
 import '../../core/connection_mode.dart';
 
 class AppointmentCreateScreen extends StatefulWidget {
@@ -282,19 +283,25 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
                 helperText:
                     'If selected, the mechanic carries over when the car checks in.',
               ),
-              items: [
+                            items: [
                 const DropdownMenuItem<String?>(
                   value: null,
-                  child: Text('Unassigned'),
+                  child: Row(
+                    children: [
+                      Icon(Icons.person_off_outlined),
+                      SizedBox(width: 12),
+                      Text('Unassigned'),
+                    ],
+                  ),
                 ),
                 ..._employees.map(
                   (employee) => DropdownMenuItem<String?>(
                     value: employee['id']?.toString(),
-                    child: Text(
-                      '${employee['name'] ?? ''} — '
-                      '${employee['position_name'] ?? 'Employee'}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    child: EmployeeRoleMenuItem(
+                      name: employee['name']?.toString() ??
+                          employee['display_name']?.toString() ?? '',
+                      position: employee['position_name']?.toString() ??
+                          employee['position']?.toString() ?? 'Employee',
                     ),
                   ),
                 ),
