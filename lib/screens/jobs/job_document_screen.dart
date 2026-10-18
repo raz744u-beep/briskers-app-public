@@ -4714,13 +4714,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
+                  onPressed: () {
+                    // Release numeric keyboard focus before leaving the tax
+                    // modal, so the previous route does not retain its inset.
+                    FocusScope.of(dialogContext).unfocus();
+                    Navigator.pop(dialogContext);
+                  },
                   child: Text(tr('cancel')),
                 ),
                 FilledButton(
                   onPressed: offline || proposed == null ||
                           rate == null || (rate-oldRate).abs() < 0.0000001
-                      ? null : () => Navigator.pop(dialogContext, rate),
+                      ? null : () {
+                          FocusScope.of(dialogContext).unfocus();
+                          Navigator.pop(dialogContext, rate);
+                        },
                   child: Text(tr('saveChanges')),
                 ),
               ],

@@ -1454,7 +1454,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ),
       ),
       bottomNavigationBar: widget.sharedBottomNavigationBar,
-      floatingActionButton: _data == null || !_canManageQuickActions
+      // The Overview already has a full-width '+ New' action. Do not
+      // overlay Visits, Payments and the invoice summary with a duplicate FAB.
+      // Keep quick actions available in the other customer tabs.
+      floatingActionButton: _data == null ||
+              !_canManageQuickActions ||
+              _customerTab == 0
           ? null
           : FloatingActionButton(
               onPressed: _showQuickActions,

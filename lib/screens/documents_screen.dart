@@ -92,6 +92,7 @@ class DocumentsScreen extends StatefulWidget {
     required this.roleCode,
     this.onPrimaryDestinationSelected,
     this.sharedBottomNavigationBar,
+    this.detailBottomNavigationBar,
     this.customerId,
     this.customerName,
     this.customerVehicles = const [],
@@ -109,6 +110,9 @@ class DocumentsScreen extends StatefulWidget {
   final String roleCode;
   final ValueChanged<int>? onPrimaryDestinationSelected;
   final Widget? sharedBottomNavigationBar;
+  /// Navigation dock for pushed invoice/estimate detail routes only.
+  /// Avoids duplicating the parent Shell dock on the document list.
+  final Widget? detailBottomNavigationBar;
   final String businessId;
   final String kind;
   final bool isOwner;
@@ -560,7 +564,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
-          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
+          sharedBottomNavigationBar: widget.detailBottomNavigationBar ??
+              widget.sharedBottomNavigationBar,
           roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: row['id'].toString(),
@@ -1406,7 +1411,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       context,
       MaterialPageRoute(
         builder: (_) => JobDocumentScreen(
-          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
+          sharedBottomNavigationBar: widget.detailBottomNavigationBar ??
+              widget.sharedBottomNavigationBar,
           roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: invoiceId,
@@ -1439,7 +1445,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         context,
         MaterialPageRoute(
           builder: (_) => JobDocumentScreen(
-          sharedBottomNavigationBar: widget.sharedBottomNavigationBar,
+          sharedBottomNavigationBar: widget.detailBottomNavigationBar ??
+              widget.sharedBottomNavigationBar,
             roleCode: widget.roleCode,
             businessId: widget.businessId,
             documentId: documentId,
