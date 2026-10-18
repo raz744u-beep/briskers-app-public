@@ -12,16 +12,22 @@ class StaleKeyboardInsetGuard extends StatefulWidget {
   final Widget child;
 
   static bool get editableTextHasFocus {
-    final focused = FocusManager.instance.primaryFocus?.context;
-    if (focused == null) return false;
+    final node = FocusManager.instance.primaryFocus;
+    // A route's FocusScope is itself a focus node. Scanning all of its
+    // descendants reports any TextField as "editing", even when none is
+    // focused, and incorrectly removes the dock and shrinks the viewport.
+    if (node == null || node is FocusScopeNode) return false;
+
+    final focused = node.context;
+    if (focused == null || !focused.mounted) return false;
     if (focused.widget is EditableText ||
         focused.findAncestorStateOfType<EditableTextState>() != null) {
       return true;
     }
 
-    // Some Flutter TextFields attach their FocusNode to a Focus widget
-    // ABOVE EditableText, so ancestor checks alone miss real keyboard focus.
-    // Inspect only that focused subtree, not the whole application.
+    // TextField can attach its FocusNode to a Focus widget above its
+    // EditableText. Only inspect the actual *primary* focused subtree,
+    // never the enclosing route-wide FocusScope.
     var containsEditable = false;
     void scan(Element element) {
       if (containsEditable) return;
@@ -41,14 +47,34 @@ class StaleKeyboardInsetGuard extends StatefulWidget {
 }
 
 class _StaleKeyboardInsetGuardState extends State<StaleKeyboardInsetGuard> {
-  void _onDescendantFocusChange(bool _) {
-    // FocusManager may notify before its focused EditableText context is
-    // ready. A Focus widget receives descendant transitions and schedules
-    // a second, stable viewport computation after the frame.
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addListener(_onFocusManagerChanged);
+  }
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeListener(_onFocusManagerChanged);
+    super.dispose();
+  }
+
+  void _recheckAfterFrame() {
+    // During focus handoff the new focused EditableText's Element may not
+    // be attached until the next frame. Recheck after the handoff rather
+    // than locking in the old (zeroed) MediaQuery for the rest of the route.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() {});
     });
   }
+
+  void _onFocusManagerChanged() {
+    if (!mounted) return;
+    setState(() {});
+    _recheckAfterFrame();
+  }
+
+  void _onDescendantFocusChange(bool _) => _recheckAfterFrame();
 
   @override
   Widget build(BuildContext context) {
@@ -56,10 +82,8 @@ class _StaleKeyboardInsetGuardState extends State<StaleKeyboardInsetGuard> {
       canRequestFocus: false,
       skipTraversal: true,
       onFocusChange: _onDescendantFocusChange,
-      child: AnimatedBuilder(
-        animation: FocusManager.instance,
-        child: widget.child,
-        builder: (context, child) {
+      child: Builder(
+        builder: (context) {
           final media = MediaQuery.of(context);
           final insets = media.viewInsets;
           final shouldRecoverInset = insets.bottom > 0 &&
@@ -73,7 +97,7 @@ class _StaleKeyboardInsetGuardState extends State<StaleKeyboardInsetGuard> {
                     ),
                   )
                 : media,
-            child: child!,
+            child: widget.child,
           );
         },
       ),
