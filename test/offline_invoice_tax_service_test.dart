@@ -178,6 +178,28 @@ void main() {
     await db.close();
   });
 
+  test('Auto and manual tax sync share one replay and do not double-post',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final cache = LocalDocumentDetailCache(database: db);
+    final api = _FakeApi();
+    await _dbWithInvoice(cache, db, api.server);
+    final auto = OfflineInvoiceTaxService(
+        api: api, cache: cache, database: db, canSend: () => true);
+    final manual = OfflineInvoiceTaxService(
+        api: api, cache: cache, database: db, canSend: () => true);
+    await auto.saveOffline('shop', 'barbara-6349',
+        expectedVersion: 5, oldRate: 0.0925, newRate: 0.0975);
+    await Future.wait([auto.flush('shop'), manual.flush('shop')]);
+    expect(api.taxCalls, 1);
+    expect(api.server['total_amount'], 175.6);
+    expect(await db.customSelect(
+      "SELECT id FROM sync_outbox WHERE entity_type='invoice_tax_edit'"
+    ).get(), isEmpty);
+    await db.close();
+  });
+
   test('stale server version becomes conflict without any tax RPC',
       () async {
     SharedPreferences.setMockInitialValues({});

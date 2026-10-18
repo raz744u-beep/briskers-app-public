@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_i18n.dart';
+import '../../core/connection_mode.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/appointment_sync_service.dart';
 import '../../services/customer_vehicle_sync_service.dart';
@@ -26,6 +27,8 @@ import '../../services/local_tax_settings_cache.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_work_findings_service.dart';
+import '../../services/offline_invoice_tax_service.dart';
+import '../../services/offline_invoice_payment_ledger.dart';
 
 class LocalSyncStatusScreen extends StatefulWidget {
   const LocalSyncStatusScreen({
@@ -71,10 +74,13 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       LocalInvoiceStatusStylesCache();
   final OfflineEstimateInvoiceService _estimateInvoice =
       OfflineEstimateInvoiceService();
+  final OfflineInvoiceTaxService _invoiceTax = OfflineInvoiceTaxService();
+  final OfflineInvoicePaymentLedger _invoicePayments =
+      OfflineInvoicePaymentLedger();
 
   bool _loading = true;
   bool _syncing = false;
-  static const int _syncStepCount = 19;
+  static const int _syncStepCount = 22;
   int _syncStep = 0;
   String? _syncStage;
   String? _error;
@@ -196,6 +202,77 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
             Variable<String>(jobId),
           ],
         ).getSingle();
+        // Local-only preflight: never contact the server or change a queued
+        // operation while the Owner inspects an unrecognized Job update.
+        final jobAudit = <String>[];
+        if (widget.isOwner && row.read<String>('entity_type') == 'job_admin') {
+          final jobRows = await localDatabase.customSelect(
+            '''SELECT job_number,title,customer_name,vehicle_label,
+                      status,sync_state,assigned_employee_name,planned_hours
+               FROM local_jobs WHERE business_id=? AND id=? LIMIT 1''',
+            variables: [
+              Variable<String>(widget.businessId),
+              Variable<String>(entityId),
+            ],
+          ).get();
+          if (jobRows.isEmpty) {
+            jobAudit.add('Local Job: NOT FOUND — review before replay');
+          } else {
+            final job = jobRows.single;
+            jobAudit.add('Local Job: ${job.readNullable<String>('job_number') ?? 'Unnumbered'}'
+                ' — ${job.read<String>('title')}');
+            jobAudit.add('Customer: ${job.readNullable<String>('customer_name') ?? 'Unknown'}');
+            jobAudit.add('Vehicle: ${job.readNullable<String>('vehicle_label') ?? 'Not cached'}');
+            jobAudit.add('Status: ${job.read<String>('status')}'
+                ' · Local sync: ${job.read<String>('sync_state')}');
+            jobAudit.add('Assigned: ${job.readNullable<String>('assigned_employee_name') ?? 'Unassigned'}'
+                ' · Planned hours: ${job.read<double>('planned_hours')}');
+          }
+
+          final changed = <String>[];
+          if (payload['core_changed'] == true) changed.add('Job details');
+          if (payload.containsKey('planned_hours')) changed.add('Planned hours');
+          if (payload['status_changed'] == true) {
+            changed.add('Status to ${payload['status_code'] ?? 'unspecified'}');
+          }
+          if (payload['assignment_changed'] == true) {
+            changed.add('Assignment to ${payload['employee_name'] ?? 'Unassigned'}');
+          }
+          jobAudit.add('Queued change: ${changed.isEmpty ? 'Unknown — review' : changed.join(', ')}');
+
+          final createRows = await localDatabase.customSelect(
+            '''SELECT state FROM sync_outbox
+               WHERE business_id=? AND entity_type='job_create'
+                 AND entity_id=? AND state IN ('pending','inflight','conflict')
+               LIMIT 1''',
+            variables: [
+              Variable<String>(widget.businessId),
+              Variable<String>(entityId),
+            ],
+          ).get();
+          jobAudit.add('Queued Job creation: '
+              '${createRows.isNotEmpty ? createRows.single.read<String>('state') : 'None found'}');
+
+          final linkedDocs = await localDatabase.customSelect(
+            '''SELECT kind,document_number,status,sync_state
+               FROM local_documents WHERE business_id=? AND job_id=?
+               ORDER BY created_at DESC LIMIT 5''',
+            variables: [
+              Variable<String>(widget.businessId),
+              Variable<String>(entityId),
+            ],
+          ).get();
+          if (linkedDocs.isNotEmpty) {
+            for (final doc in linkedDocs) {
+              jobAudit.add('Linked document: '
+                  '${doc.read<String>('kind')} '
+                  '${doc.readNullable<String>('document_number') ?? 'unnumbered'}'
+                  ' · ${doc.readNullable<String>('status') ?? 'unknown'}'
+                  ' · ${doc.read<String>('sync_state')}');
+            }
+          }
+          jobAudit.add('Review only: this screen has not sent or removed anything.');
+        }
         pendingDetails.add({
           'id': row.read<int>('id'),
           'type': row.read<String>('entity_type'),
@@ -210,6 +287,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
               payload['provisional_job_id']?.toString() ?? '',
           'kind': payload['kind']?.toString() ?? '',
           'error': row.readNullable<String>('last_error') ?? '',
+          'job_audit': jobAudit,
         });
       }
       if (!mounted) return;
@@ -533,6 +611,15 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
 
   Future<void> _syncNow() async {
     if (_syncing) return;
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (mounted) {
+        setState(() {
+          _syncMessage = 'Sync is paused in Force Offline. '
+              'Review pending operations before switching to Auto.';
+        });
+      }
+      return;
+    }
     setState(() {
       _syncing = true;
       _syncStep = 0;
@@ -599,6 +686,20 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       'Cached estimate / invoice edits',
       () => _documentEdits.flush(widget.businessId),
     );
+    // Match the automatic bootstrap's financial replay order. A queued
+    // payment edit is blocked by its tax outbox until the tax is verified.
+    await attempt(
+      'Invoice tax corrections',
+      () => _invoiceTax.flush(widget.businessId),
+    );
+    await attempt(
+      'Recorded invoice payments',
+      () => _invoicePayments.flush(widget.businessId),
+    );
+    await attempt(
+      'Existing pending payment corrections',
+      () => _invoicePayments.flushPendingServerEdits(widget.businessId),
+    );
     await attempt(
       'Estimate / invoice changes',
       () => _estimateInvoice.flush(widget.businessId),
@@ -647,12 +748,33 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       () => _invoiceStatusStyles.refresh(widget.businessId),
     );
 
+    // A successful download is not a completed upload. Some guarded
+    // outbox entries intentionally stay pending or conflicted for review.
+    try {
+      final remaining = await localDatabase.customSelect(
+        '''SELECT entity_type,state,COUNT(*) AS count FROM sync_outbox
+           WHERE business_id=? AND state IN ('pending','inflight','conflict')
+           GROUP BY entity_type,state ORDER BY entity_type,state''',
+        variables: [Variable<String>(widget.businessId)],
+      ).get();
+      if (remaining.isNotEmpty) {
+        final summary = remaining.map((row) =>
+          '${row.read<String>('entity_type')} '
+          '${row.read<String>('state')}: ${row.read<int>('count')}'
+        ).join(', ');
+        failures.add('Unreconciled local operations remain: $summary');
+      }
+    } catch (error) {
+      failures.add('Could not verify remaining uploads: $error');
+    }
+    if (failures.isNotEmpty && failedStages.isEmpty) {
+      failedStages.add('Pending uploads / reconciliation');
+    }
     try {
       await LocalSyncStatusRepository.recordManualRefreshResult(
         widget.businessId, failedStages,
       );
     } catch (error) {
-      // The in-memory warning remains available even if preferences fail.
       failures.add('Saving sync status: $error');
     }
 
@@ -903,6 +1025,8 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                           'Linked local jobs: ${operation['linked_jobs']}',
                           if ((operation['error'] as String).isNotEmpty)
                             'Error: ${operation['error']}',
+                          if (widget.isOwner)
+                            ...(operation['job_audit'] as List<String>),
                         ].join('\n')),
                       ),
                     )),
@@ -1024,8 +1148,18 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                     ),
                   ],
                   const SizedBox(height: 14),
+                  if (BriskersConnectionModeController.instance.forceOffline)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        'Sync is paused while Force Offline is selected. '
+                        'Inspection and saved local work remain available.',
+                      ),
+                    ),
                   FilledButton.icon(
-                    onPressed: _syncing ? null : _syncNow,
+                    onPressed: _syncing ||
+                            BriskersConnectionModeController.instance.forceOffline
+                        ? null : _syncNow,
                     icon: _syncing
                         ? const SizedBox.square(
                             dimension: 18,
