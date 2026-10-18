@@ -449,15 +449,18 @@ class _EmployeesSettingsScreenState
       appBar: AppBar(
         title: const Text('Employees'),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _offlineUnavailable || _showingSaved ||
-                BriskersConnectionModeController.instance.forceOffline
-            ? null : _showManageMenu,
-        backgroundColor: BriskersColors.settings,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.groups_2_outlined),
-        label: const Text('Manage'),
-      ),
+      // A disabled purple Manage button still looks actionable. In saved
+      // offline mode this screen is purely informational.
+      floatingActionButton: _offlineUnavailable || _showingSaved ||
+              BriskersConnectionModeController.instance.forceOffline
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _showManageMenu,
+              backgroundColor: BriskersColors.settings,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.groups_2_outlined),
+              label: const Text('Manage'),
+            ),
       body: _employees == null
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -510,8 +513,12 @@ class _EmployeesSettingsScreenState
                   else
                     ..._employees!.map((employee) {
                       final active = employee['active'] != false;
+                      // Online Settings RPC uses 'position'; the safe offline
+                      // roster intentionally stores the same role as
+                      // 'position_name'. Both should use identical icons.
                       final position =
-                          employee['position']?.toString() ?? 'No position';
+                          (employee['position'] ?? employee['position_name'])
+                                  ?.toString() ?? 'No position';
                       final ssnLast4 = _showingSaved
                           ? null : employee['ssn_last4']?.toString();
                       final roleStyle = employeeRoleStyle(position);
@@ -548,9 +555,8 @@ class _EmployeesSettingsScreenState
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                                TextSpan(
-                                  text: _showingSaved ? ' • Offline roster' : ' • ${_pay(employee)}',
-                                ),
+                                if (!_showingSaved)
+                                  TextSpan(text: ' • ${_pay(employee)}'),
                                 if (ssnLast4 != null && ssnLast4.isNotEmpty)
                                   TextSpan(
                                     text: ' • SSN ***-**-$ssnLast4',
@@ -560,8 +566,9 @@ class _EmployeesSettingsScreenState
                               ],
                             ),
                           ),
-                          trailing: const Icon(Icons.chevron_right,
-                            color: BriskersColors.settings),
+                          trailing: _showingSaved ? null
+                              : const Icon(Icons.chevron_right,
+                                  color: BriskersColors.settings),
                           onTap: _showingSaved ? null : () => _open(employee),
                           onLongPress: _showingSaved
                               ? null : () => _employeeActions(employee),
