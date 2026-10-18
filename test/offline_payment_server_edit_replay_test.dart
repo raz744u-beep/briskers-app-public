@@ -180,7 +180,7 @@ void main() {
       await ledger.flushPendingServerEdits(shop);
       expect(server.editCalls,0);
       final pending=await ledger.pendingEditsForInvoice(shop,invoice);
-      expect(pending,singleElement);
+      expect(pending,hasLength(1));
       expect(pending.single['_queue_state'],'conflict');
       final cached=await server.documentDetailV4(shop,invoice);
       final projected=OfflineInvoicePaymentLedger.projectPendingEdits(
