@@ -50,7 +50,7 @@ class InvoiceFinalizationGuard {
         .customSelect(
           "SELECT entity_id FROM sync_outbox WHERE business_id=? "
           "AND entity_type IN ('invoice_payment_received', "
-          "'invoice_pending_payment_edit')",
+          "'invoice_pending_payment_edit', 'invoice_tax_edit')",
           variables: [Variable<String>(businessId)],
         )
         .get();
