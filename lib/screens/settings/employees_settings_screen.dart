@@ -44,17 +44,34 @@ class _EmployeesSettingsScreenState
   }
 
   Future<void> _load() async {
-    final fullCached = await _roster.cachedSettings(widget.businessId);
-    final cached = fullCached ??
-        await _roster.cachedAssignable(widget.businessId);
+    // Even a broken or hung platform preferences read must not strand the
+    // page on a permanent loading spinner while the shop is Force Offline.
+    EmployeeRosterSnapshot? fullCached;
+    EmployeeRosterSnapshot? cached;
+    try {
+      fullCached = await _roster.cachedSettings(widget.businessId)
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // Continue to the minimal assignable roster or offline-unavailable UI.
+    }
+    cached = fullCached;
+    if (cached == null) {
+      try {
+        cached = await _roster.cachedAssignable(widget.businessId)
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {
+        // Last resort: display offline-unavailable, never invent an empty roster.
+      }
+    }
     if (!mounted) return;
-    if (cached != null) {
+    final available = cached;
+    if (available != null) {
       setState(() {
         // This is deliberately a safe roster, not compensation/settings data.
-        _employees = cached.rows;
+        _employees = available.rows;
         _showingSaved = true;
         _savedActiveOnly = fullCached == null;
-        _savedAt = cached.refreshedAt;
+        _savedAt = available.refreshedAt;
         _offlineUnavailable = false;
         _error = null;
       });
