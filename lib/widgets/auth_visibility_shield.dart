@@ -31,8 +31,11 @@ class _AuthVisibilityShieldState extends State<AuthVisibilityShield> {
       setState(() {
         if (_visibleActor == null && !_locked) {
           _visibleActor = actor;
-        } else {
-          _locked = _accessChanged || actor != _visibleActor;
+        } else if (actor != _visibleActor) {
+          // A changed identity remains locked even if a later auth event
+          // switches back to the original account. Never restore a stale
+          // editor route without an explicit Navigator replacement.
+          _locked = true;
         }
       });
     });
