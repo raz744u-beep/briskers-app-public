@@ -12,6 +12,28 @@ class LocalFinancialCache {
 
   static const _transactionsKey = 'transactions_snapshot';
   static const _optionsKey = 'transaction_options';
+  static const _invoiceReceiptsKey = 'invoice_receipts_v1';
+
+  // Preserve the current receipt-aware payments/invoices screen while applying
+  // the same authenticated visibility/tombstone protections as other caches.
+  Future<void> saveInvoiceReceipts(String businessId,
+      List<Map<String, dynamic>> rows, {int? visibilityGeneration}) =>
+      _save(businessId, _invoiceReceiptsKey, rows,
+          visibilityGeneration: visibilityGeneration);
+
+  Future<bool> hasServerInvoiceReceipts(String businessId) async =>
+      await _load(businessId, _invoiceReceiptsKey) != null;
+
+  Future<List<Map<String, dynamic>>> loadInvoiceReceipts(String businessId) async {
+    final raw = await _load(businessId, _invoiceReceiptsKey);
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      return (jsonDecode(raw) as List).whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row)).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
 
   final BriskersLocalDatabase _database;
 
