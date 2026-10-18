@@ -107,4 +107,38 @@ void main() {
     await expectLater(cache.refreshAssignable('shop'),throwsStateError);
     expect(await cache.cachedAssignable('shop'),isNull);
   });
+  test('local actor roster remains available after switching Force Offline', () async {
+    SharedPreferences.setMockInitialValues({});
+    final api = _FakeEmployeesApi();
+    final online = EmployeeRosterCache(
+      api: api, actorId: () => 'same-local-user',
+      forceOffline: () => false,
+    );
+    await online.refreshSettings('shop');
+    final offline = EmployeeRosterCache(
+      api: api, actorId: () => 'same-local-user',
+      forceOffline: () => true,
+    );
+    final saved = await offline.cachedSettings('shop');
+    expect(saved, isNotNull);
+    expect(saved!.rows.map((r) => r['name']),
+        containsAll(['Chris', 'Former Employee']));
+    expect(saved.rows.first.keys.toSet(),
+        {'id', 'name', 'position_name', 'active'});
+    await expectLater(offline.refreshSettings('shop'), throwsStateError);
+    expect((await offline.cachedAssignable('shop'))!.rows,
+        hasLength(1));
+  });
+
+  test('a session accessor exception yields a cache miss, never an uncaught read error', () async {
+    SharedPreferences.setMockInitialValues({});
+    final brokenSession = EmployeeRosterCache(
+      api: _FakeEmployeesApi(),
+      actorId: () => throw StateError('Session temporarily unavailable'),
+      forceOffline: () => true,
+    );
+    expect(await brokenSession.cachedSettings('shop'), isNull);
+    expect(await brokenSession.cachedAssignable('shop'), isNull);
+  });
+
 }
