@@ -30,7 +30,7 @@ void main() {
     await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
     expect(focus.hasFocus, isTrue);
-    debugPrint('IME-GUARD-AFTER-TAP focus=${focus.hasFocus} primary=${FocusManager.instance.primaryFocus?.debugLabel} primaryWidget=${FocusManager.instance.primaryFocus?.context?.widget.runtimeType} editable=${StaleKeyboardInsetGuard.editableTextHasFocus}');
+    debugPrint('IME-GUARD-AFTER-TAP focus=${focus.hasFocus} primary=${FocusManager.instance.primaryFocus?.debugLabel} primaryWidget=${FocusManager.instance.primaryFocus?.context?.widget.runtimeType} editable=${StaleKeyboardInsetGuard.editableTextHasFocus} labels=${tester.widgetList<Text>(find.byType(Text, skipOffstage: false)).map((t) => t.data).toList()}');
     expect(find.text('bottom inset: 290'), findsOneWidget);
     focus.unfocus();
     await tester.pumpAndSettle();
