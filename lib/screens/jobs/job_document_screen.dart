@@ -48,6 +48,7 @@ import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../services/local_standard_notes_service.dart';
 import '../../services/offline_document_edit_service.dart';
+import '../../services/offline_invoice_tax_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/invoice_finalization_guard.dart';
@@ -216,6 +217,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       OfflineDocumentDraftService();
   final OfflineDocumentEditService _offlineDocumentEdit =
       OfflineDocumentEditService();
+  final OfflineInvoiceTaxService _offlineInvoiceTax =
+      OfflineInvoiceTaxService();
   final LocalTaxSettingsCache _taxSettingsCache =
       LocalTaxSettingsCache();
   final _catalogSync = CatalogSyncService();
@@ -535,8 +538,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       final repairedCached =
           await _detailCache.load(widget.businessId, widget.documentId) ??
               cached;
-      final datedCached =
-          await _withLocalPayments(await _withRecoveredDocumentDate(repairedCached));
+      final datedCached = await _withLocalPayments(
+        await _withRecoveredDocumentDate(
+          await _offlineInvoiceTax.projectPending(
+              widget.businessId, widget.documentId, repairedCached)));
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _detail = datedCached;
@@ -573,7 +578,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           // These local reads are independent. Start both together so a
           // slow settings lookup cannot serialize cached invoice first paint.
           final local = await Future.wait<dynamic>([
-            _withRecoveredDocumentDate(cached),
+            _withRecoveredDocumentDate(
+              await _offlineInvoiceTax.projectPending(
+                  widget.businessId, widget.documentId, cached)),
             _taxSettingsCache.load(widget.businessId),
           ]);
           final recovered = await _withLocalPayments(
@@ -616,7 +623,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         widget.documentId,
       );
       if (!mounted || generation != _loadGeneration) return;
-      final projected = await _withLocalPayments(detail);
+      final projected = await _withLocalPayments(
+        await _offlineInvoiceTax.projectPending(
+            widget.businessId, widget.documentId, detail));
       debugPrint('PERF-001 document detail RPC: ${openWatch.elapsedMilliseconds}ms');
       unawaited(const InvoicePerformanceMetrics().record(
         widget.businessId,
@@ -770,7 +779,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       if (!mounted || generation != _loadGeneration) return;
       if (cached != null) {
         final datedCached = await _withLocalPayments(
-          await _withRecoveredDocumentDate(cached));
+          await _withRecoveredDocumentDate(
+            await _offlineInvoiceTax.projectPending(
+                widget.businessId, widget.documentId, cached)));
         if (!mounted || generation != _loadGeneration) return;
         setState(() {
           _detail = datedCached;
@@ -4707,8 +4718,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                       Text(problem, style: const TextStyle(color: Colors.red)),
                     if (offline) ...[
                       const SizedBox(height: 8),
-                      const Text('Offline: preview only. Saving requires a verified '
-                        'server connection so the invoice changes atomically.'),
+                      const Text(
+                        'Force Offline: Save Changes records the corrected '
+                        'tax and total on this phone. It stays pending sync '
+                        'until a version-checked server update succeeds. '
+                        'Existing payments will not change.',
+                      ),
                     ],
                   ],
                 ),
@@ -4724,7 +4739,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   child: Text(tr('cancel')),
                 ),
                 FilledButton(
-                  onPressed: offline || proposed == null ||
+                  onPressed: proposed == null ||
                           rate == null || (rate-oldRate).abs() < 0.0000001
                       ? null : () {
                           FocusScope.of(dialogContext).unfocus();
@@ -4738,18 +4753,31 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ),
       );
       if (selectedRate == null || !mounted) return;
+      final savedOffline = BriskersConnectionModeController.instance.forceOffline;
       final applied = await _run(() async {
-        await _api.updateInvoiceTaxRate(
-          widget.businessId, widget.documentId,
-          expectedVersion: currentVersion,
-          oldRate: oldRate,
-          newRate: selectedRate,
-        );
+        if (savedOffline) {
+          await _offlineInvoiceTax.saveOffline(
+            widget.businessId, widget.documentId,
+            expectedVersion: currentVersion,
+            oldRate: oldRate,
+            newRate: selectedRate,
+          );
+        } else {
+          await _api.updateInvoiceTaxRate(
+            widget.businessId, widget.documentId,
+            expectedVersion: currentVersion,
+            oldRate: oldRate,
+            newRate: selectedRate,
+          );
+        }
       });
       if (applied && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text(
-            'Invoice tax updated. Review any pending payment amount separately.')),
+          SnackBar(content: Text(savedOffline
+              ? 'Tax correction saved locally, pending sync. '
+                'Existing payment unchanged; review it separately.'
+              : 'Invoice tax updated. Review any pending payment '
+                'amount separately.')),
         );
       }
     } finally {
@@ -5661,6 +5689,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   label: _taxLabel(lines),
                   value: _money(_detail!['tax_amount']),
                   labelAction: !_estimate && widget.isOwner && !_readOnly && !_busy
+                      && _detail?['_local_tax_sync_state'] == null
                       ? IconButton(
                           icon: const Icon(Icons.edit_outlined, size: 18),
                           tooltip: 'Edit invoice tax percentage',
@@ -5680,6 +5709,23 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   value: _money(_detail!['total_amount']),
                   bold: true,
                 ),
+                if (_detail?['_local_tax_sync_state'] != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6, bottom: 8),
+                    child: Text(
+                      const {'inflight', 'conflict'}.contains(
+                              _detail?['_local_tax_sync_state'])
+                          ? 'Tax correction requires sync verification. '
+                            'Do not add or finalize another payment.'
+                          : 'Tax correction saved on this phone — pending sync. '
+                            'Existing payments were not changed.',
+                      style: const TextStyle(
+                        color: Color(0xFF9B6400),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
                 if (!_estimate) ...[
                   _AmountRow(
                     label: 'Amount Paid',
