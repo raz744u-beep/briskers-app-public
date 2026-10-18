@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_retirement.dart';
+import 'local_job_deletion_v3.dart';
 
 class LocalSyncStatusSnapshot {
   const LocalSyncStatusSnapshot({
@@ -22,10 +23,12 @@ class LocalSyncStatusSnapshot {
 /// Read-only overview of actual persisted downloads and outstanding uploads.
 /// A successful scope never implies that every other scope or upload succeeded.
 class LocalSyncStatusRepository {
-  LocalSyncStatusRepository({BriskersLocalDatabase? database})
-    : _database = database ?? localDatabase;
+  LocalSyncStatusRepository({BriskersLocalDatabase? database, String? Function()? currentActorId})
+    : _database = database ?? localDatabase, _currentActorId = currentActorId;
 
   final BriskersLocalDatabase _database;
+  final String? Function()? _currentActorId;
+  String? _actor() => (_currentActorId ?? LocalJobDeletionV3.currentActorIdProvider)?.call();
   static final _refreshEvents = StreamController<String>.broadcast();
   static Stream<String> get refreshEvents => _refreshEvents.stream;
   static void notifyStateChanged(String businessId) =>
@@ -51,6 +54,7 @@ class LocalSyncStatusRepository {
   }
 
   Future<LocalSyncStatusSnapshot> load(String businessId) async {
+    final actor = _actor();
     final rows = await _database
         .customSelect(
           'SELECT scope, last_pull_at, last_error, bootstrapped '
@@ -126,6 +130,60 @@ class LocalSyncStatusRepository {
         '${held.read<int>('n')} preserved operation(s) require review after Job deletion',
       );
     }
+    final scopeExists = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_job_deletion_v3_scope'").get();
+    if (scopeExists.isNotEmpty) {
+      final scopes = await _database.customSelect(
+        'SELECT state FROM local_job_deletion_v3_scope WHERE business_id=?',
+        variables: [Variable<String>(businessId)]).get();
+      if (scopes.any((row) => row.read<String>('state') == 'authorized_reconciliation_required')) {
+        issues.add('Some saved offline work is hidden until its original account access is verified.');
+      }
+    }
+    var pendingV3 = 0;
+    final v3Exists = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_job_deletion_v3_requests'").get();
+    if (v3Exists.isNotEmpty) {
+      final requests = await _database.customSelect(
+        "SELECT state,last_error FROM local_job_deletion_v3_requests WHERE business_id=? AND state IN ('queued','pending','purging','rejected')",
+        variables: [Variable<String>(businessId)]).get();
+      for (final row in requests) {
+        final state = row.read<String>('state');
+        if (state != 'rejected') pendingV3++;
+        issues.add(switch (state) {
+          'purging' => 'Job deletion accepted; attachment or device cleanup pending',
+          'rejected' => row.readNullable<String>('last_error') ?? 'Job deletion requires renewed review',
+          _ => 'Job deletion awaiting verified server confirmation',
+        });
+      }
+    }
+    final cleanupExists = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_job_deletion_v3_cleanup'").get();
+    if (cleanupExists.isNotEmpty) {
+      final cleanup = await _database.customSelect(
+        "SELECT COUNT(*) AS n FROM local_job_deletion_v3_cleanup WHERE business_id=? AND state<>'complete'",
+        variables: [Variable<String>(businessId)]).getSingle();
+      if (cleanup.read<int>('n') > 0) {
+        issues.add('${cleanup.read<int>('n')} deleted Job cleanup(s) still need completion or review');
+      }
+    }
+    var pendingLocalRegistrations = 0;
+    final localCancellationExists = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_offline_job_purge_requests'").get();
+    if (actor != null && localCancellationExists.isNotEmpty) {
+      final local = await _database.customSelect(
+        "SELECT registration_state,cleanup_state FROM local_offline_job_purge_requests "
+        "WHERE business_id=? AND actor_id=? AND (registration_state<>'registered' OR cleanup_state<>'complete')",
+        variables: [Variable<String>(businessId), Variable<String>(actor)]).get();
+      pendingLocalRegistrations = local.where((row) => row.read<String>('registration_state') != 'registered').length;
+      final pendingCleanup = local.where((row) => row.read<String>('cleanup_state') != 'complete').length;
+      if (pendingLocalRegistrations > 0) {
+        issues.add('$pendingLocalRegistrations local Job cancellation(s) await server registration');
+      }
+      if (pendingCleanup > 0) {
+        issues.add('$pendingCleanup local Job cancellation cleanup(s) require completion or review');
+      }
+    }
     final prefs = await SharedPreferences.getInstance();
     final manualFailures =
         _manualFailures[businessId] ??
@@ -136,10 +194,13 @@ class LocalSyncStatusRepository {
         'Last manual refresh incomplete: ${manualFailures.join(', ')}',
       );
     }
+    if (_actor() != actor) {
+      return const LocalSyncStatusSnapshot(issues: ['Account changed; refresh synchronization status.']);
+    }
     return LocalSyncStatusSnapshot(
       lastSuccessfulPull: latest,
       issues: List<String>.unmodifiable(issues),
-      pendingUploads: uploads.read<int>('pending') + pendingRetirements,
+      pendingUploads: uploads.read<int>('pending') + pendingRetirements + pendingV3 + pendingLocalRegistrations,
     );
   }
 }
