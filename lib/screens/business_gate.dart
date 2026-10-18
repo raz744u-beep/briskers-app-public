@@ -412,6 +412,17 @@ class _BusinessGateState extends State<BusinessGate> {
       // Customer/vehicle browsing keeps the previous local snapshot.
     }
 
+    // Employee roster is shop/actor-scoped and contains NO pay, SSN, contact
+    // or login data. Refresh even when the Owner hasn't opened a Job; an
+    // updated office roster should be ready before the next offline period.
+    if (<String>{'owner', 'manager', 'office'}.contains(roleCode)) {
+      try {
+        await EmployeeRosterCache().refreshAssignable(businessId);
+      } catch (_) {
+        // Keep the last successfully saved roster if Auto loses connectivity.
+      }
+    }
+
     try {
       await _catalogSync.flush(businessId);
     } catch (_) {
