@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:drift/drift.dart' show Variable;
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -46,6 +48,13 @@ class _FakeApi extends BriskersApi {
   Map<String, dynamic> server = _invoice();
   int taxCalls = 0;
   bool lostReply = false;
+  bool patchDeployed = true;
+
+  @override
+  Future<String> invoiceTaxPatchLevel(String businessId) async {
+    if (!patchDeployed) throw StateError('Patch missing');
+    return 'generated_total_safe_20261018';
+  }
 
   @override
   Future<Map<String, dynamic>> documentDetail(String businessId,
@@ -244,6 +253,102 @@ void main() {
         api: api, cache: cache, database: db, canSend: () => true);
     await restarted.flush('shop');
     expect(api.taxCalls, 1);
+    await db.close();
+  });
+
+  test('428C9 rejected tax can be requeued only after server attestation '
+      'and original-version confirmation', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final cache = LocalDocumentDetailCache(database: db);
+    final api = _FakeApi();
+    await _dbWithInvoice(cache, db, api.server);
+    final service = OfflineInvoiceTaxService(
+      api: api, cache: cache, database: db, canSend: () => true);
+    await service.saveOffline('shop', 'barbara-6349',
+      expectedVersion: 5, oldRate: 0.0925, newRate: 0.0975);
+    final id = (await db.customSelect(
+      "SELECT id FROM sync_outbox WHERE entity_type='invoice_tax_edit'"
+    ).getSingle()).read<int>('id');
+    await db.customStatement(
+      "UPDATE sync_outbox SET state='inflight',attempt_count=1,"
+      "last_error=? WHERE id=?",
+      ['Tax correction outcome uncertain: PostgrestException('
+       'column "total_amount" can only be updated to DEFAULT, '
+       'code: 428C9, details: generated column)', id],
+    );
+
+    // A missing migration means NO local requeue and NO server write.
+    api.patchDeployed = false;
+    await expectLater(service.requeueVerifiedGeneratedTotalRejection(
+      'shop', id), throwsStateError);
+    var state = await db.customSelect(
+      "SELECT state FROM sync_outbox WHERE id=?", variables: [Variable<int>(id)]
+    ).getSingle();
+    expect(state.read<String>('state'), 'inflight');
+    api.patchDeployed = true;
+    await service.requeueVerifiedGeneratedTotalRejection('shop', id);
+    state = await db.customSelect(
+      "SELECT state,attempt_count FROM sync_outbox WHERE id=?",
+      variables: [Variable<int>(id)]
+    ).getSingle();
+    expect(state.read<String>('state'), 'pending');
+    expect(state.read<int>('attempt_count'), 1);
+    expect(api.taxCalls, 0);
+    expect(api.server['total_amount'], 174.8);
+    await expectLater(service.requeueVerifiedGeneratedTotalRejection(
+      'shop', id), throwsStateError);
+    await db.close();
+  });
+
+  test('rejected tax recovery keeps fence if server changed', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final cache = LocalDocumentDetailCache(database: db);
+    final api = _FakeApi();
+    await _dbWithInvoice(cache, db, api.server);
+    final service = OfflineInvoiceTaxService(
+      api: api, cache: cache, database: db, canSend: () => true);
+    await service.saveOffline('shop', 'barbara-6349',
+      expectedVersion: 5, oldRate: 0.0925, newRate: 0.0975);
+    final id = (await db.customSelect(
+      "SELECT id FROM sync_outbox WHERE entity_type='invoice_tax_edit'"
+    ).getSingle()).read<int>('id');
+    await db.customStatement(
+      "UPDATE sync_outbox SET state='inflight',attempt_count=1,"
+      "last_error=? WHERE id=?",
+      ['column "total_amount", code: 428C9; generated column',id]);
+    api.server['row_version'] = 6;
+    await expectLater(service.requeueVerifiedGeneratedTotalRejection(
+      'shop', id), throwsStateError);
+    expect((await db.customSelect(
+      "SELECT state FROM sync_outbox WHERE id=?",
+      variables:[Variable<int>(id)]).getSingle()).read<String>('state'),
+      'inflight');
+    expect(api.taxCalls, 0);
+    await db.close();
+  });
+
+  test('unverified timeout cannot be released as generated-total rejection',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final cache = LocalDocumentDetailCache(database: db);
+    final api = _FakeApi();
+    await _dbWithInvoice(cache, db, api.server);
+    final service = OfflineInvoiceTaxService(
+      api: api, cache: cache, database: db, canSend: () => true);
+    await service.saveOffline('shop', 'barbara-6349',
+      expectedVersion: 5, oldRate: 0.0925, newRate: 0.0975);
+    final id = (await db.customSelect(
+      "SELECT id FROM sync_outbox WHERE entity_type='invoice_tax_edit'"
+    ).getSingle()).read<int>('id');
+    await db.customStatement(
+      "UPDATE sync_outbox SET state='inflight',attempt_count=1,"
+      "last_error='Remote request timeout' WHERE id=?", [id]);
+    await expectLater(service.requeueVerifiedGeneratedTotalRejection(
+      'shop', id), throwsStateError);
+    expect(api.taxCalls, 0);
     await db.close();
   });
 
