@@ -26,18 +26,22 @@ class StaleKeyboardInsetGuard extends StatelessWidget {
       builder: (context, child) {
         final media = MediaQuery.of(context);
         final insets = media.viewInsets;
-        if (insets.bottom <= 0 || editableTextHasFocus) {
-          return child!;
-        }
+        final shouldRecoverInset =
+            insets.bottom > 0 && !editableTextHasFocus;
+        // Keep the MediaQuery wrapper stable across focus transitions.
+        // Removing/reinserting it could remount an active TextField while
+        // the keyboard is opening, leaving the old inset in place.
         return MediaQuery(
-          data: media.copyWith(
-            viewInsets: EdgeInsets.fromLTRB(
-              insets.left,
-              insets.top,
-              insets.right,
-              0,
-            ),
-          ),
+          data: shouldRecoverInset
+              ? media.copyWith(
+                  viewInsets: EdgeInsets.fromLTRB(
+                    insets.left,
+                    insets.top,
+                    insets.right,
+                    0,
+                  ),
+                )
+              : media,
           child: child!,
         );
       },
