@@ -393,7 +393,9 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     _shopContextLocked = true;
     _lazyPages.clear();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) authVisibilityEpoch.value++;
+      if (mounted) {
+        authVisibilityEpoch.value++;
+      }
     });
   }
 
