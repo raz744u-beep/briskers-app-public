@@ -38,6 +38,12 @@ void main() {
       expect(after.single['method_id'], 'cash-method');
       expect(after.single['method_name'], 'Cash');
       expect(after.single['payment_date'], '2026-10-16');
+      final audit = List<dynamic>.from(after.single['local_edit_history'] as List);
+      expect(audit, hasLength(1));
+      expect(audit.single['old_amount_cents'], 17560);
+      expect(audit.single['new_amount_cents'], 15025);
+      expect(audit.single['old_method_id'], 'debit-method');
+      expect(audit.single['new_method_id'], 'cash-method');
       final projected = OfflineInvoicePaymentLedger.projectPendingPayments(
         {'total_amount': 175.60, 'paid_amount': 0, 'pending_payment': 0},
         after);
