@@ -3,7 +3,7 @@ name: Build Android debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, feat/combined-118-20261014, fix/oct15-independent-ui-20261015, recovery/latest-feature-startup-20261017, feature/invoice-payments-expenses-feed-20261017, fix/expenses-offline-targeted-reporting-20261017, feature/oct17-stability-navigation-tax-20261017, release/payment-v2-apk-20261018, release/navigation-sort-verified-20261018]
+    branches: [main, feat/combined-118-20261014, fix/oct15-independent-ui-20261015, recovery/latest-feature-startup-20261017, feature/invoice-payments-expenses-feed-20261017, fix/expenses-offline-targeted-reporting-20261017, feature/oct17-stability-navigation-tax-20261017, release/payment-v2-apk-20261018, release/navigation-sort-verified-20261018, release/offline-tax-save-20261018]
     paths-ignore:
       - '.github/workflows/**'
 
