@@ -42,10 +42,10 @@ void main() {
     );
     await repo.applyConfirmedServerClose(
       'shop','unsynced',closedAt:'2026-10-18T16:12:00Z',rowVersion:5);
-    final row=(await db.customSelect(
-      "SELECT display_status_code FROM local_documents WHERE id='unsynced'"))
+    final row=await db.customSelect(
+      "SELECT display_status_code FROM local_documents WHERE id='unsynced'")
       .getSingle();
-    expect((await row).read<String>('display_status_code'),'pending_close');
+    expect(row.read<String>('display_status_code'),'pending_close');
     await expectLater(repo.applyConfirmedServerClose(
       'shop','unsynced',closedAt:'',rowVersion:6),throwsStateError);
     await db.close();
