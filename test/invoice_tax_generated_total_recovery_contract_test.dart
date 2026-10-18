@@ -4,9 +4,16 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('generated total tax migration does not assign total_amount', () async {
-    final sql = await File(
+    // CI executes Flutter tests from generated/, while this migration
+    // remains in the parent repository's tools/ directory.
+    final direct = File(
       'tools/migrations/invoice_tax_generated_total_fix_20261018.sql',
-    ).readAsString();
+    );
+    final migratedSql = await direct.exists()
+        ? direct.readAsString()
+        : File('../tools/migrations/invoice_tax_generated_total_fix_20261018.sql')
+            .readAsString();
+    final sql = migratedSql;
     expect(sql, contains("a.attgenerated='s'"));
     expect(sql, contains('perform briskers.recalculate_native_document('));
     expect(sql, contains('select x.total_amount,x.tax_amount into v_total,v_tax'));
