@@ -8,18 +8,23 @@ from pathlib import Path
 import re
 import sys
 
-# The earliest historical migration references appointment_requests before
-# creating Briskers tables. A fresh Supabase branch without the underlying
+# The earliest historical migration indexes existing Briskers tables
+# before creating the underlying base schema. A fresh Supabase branch without the underlying
 # schema fails before it can become a usable isolated test.
 REQUIRED_BEFORE_REPLAY = (
+    # Names read from pg_catalog / the FIRST historical migration's index
+    # targets only. A later migration may legitimately create other tables.
     "appointment_requests",
-    "businesses",
-    "customers",
-    "jobs",
-    "job_visits",
-    "sales_documents",
+    "conversation_members",
+    "customer_user_links",
+    "device_tokens",
+    "employees",
     "financial_transactions",
-    "document_number_reuse",
+    "memberships",
+    "messages",
+    "notification_outbox",
+    "permission_overrides",
+    "role_permissions",
 )
 SENSITIVE_TABLES = (
     "businesses", "customers", "vehicles", "jobs", "sales_documents",
