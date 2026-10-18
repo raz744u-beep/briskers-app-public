@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
+import '../core/connection_mode.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
 import 'local_document_detail_cache.dart';
@@ -317,68 +318,94 @@ class OfflineInvoicePaymentLedger {
 
   /// Offline corrections to server-pending receipts retain the payment ID
   /// and the originally read server version. No payment is created or charged.
+  /// Queue changes to a server-pending receipt without changing its UUID.
+  /// Older v3 snapshots did not carry payment row_version. In that case keep
+  /// the original amount/method/timestamp and fail closed at replay unless
+  /// the authoritative receipt remains a pristine version-1 match.
   Future<void> queueServerPendingEdit(
     String businessId, String invoiceId, String paymentId, {
-    required int expectedRowVersion,
+    required int? expectedRowVersion,
     required num amount,
     required int maximumAllowedCents,
     required String methodId,
     required String methodName,
     required String paymentDate,
+    int? originalAmountCents,
+    String? originalMethodId,
+    String? originalEnteredAt,
+    String? originalPaymentDate,
   }) async {
-    final amountCents=cents(amount);
-    final date=DateTime.tryParse(paymentDate);
-    if (expectedRowVersion<1 || amountCents>maximumAllowedCents ||
+    final amountCents = cents(amount);
+    final date = DateTime.tryParse(paymentDate);
+    if ((expectedRowVersion != null && expectedRowVersion < 1) ||
+        amountCents > maximumAllowedCents ||
         methodId.isEmpty || methodName.trim().isEmpty ||
         !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(paymentDate) ||
-        date==null ||
-        date.toIso8601String().substring(0,10)!=paymentDate) {
+        date == null || date.toIso8601String().substring(0, 10) != paymentDate) {
       throw ArgumentError('Invalid payment correction or balance.');
     }
     await _database.transaction(() async {
-      final rows=await _database.customSelect(
+      final rows = await _database.customSelect(
         """SELECT id,state,attempt_count,last_attempt_at,payload_json
            FROM sync_outbox WHERE business_id=? AND entity_id=?
            AND entity_type='invoice_pending_payment_edit'
-           AND state IN ('pending','inflight')""",
-        variables:[Variable<String>(businessId),Variable<String>(invoiceId)],
+           AND state IN ('pending','inflight','conflict')""",
+        variables: [Variable<String>(businessId),Variable<String>(invoiceId)],
       ).get();
-      final matched=rows.where((row) {
+      final matched = rows.where((row) {
         try {
-          final payload=jsonDecode(row.read<String>('payload_json')) as Map;
-          return payload['payment_id']?.toString()==paymentId;
-        }catch(_){ return false; }
+          final p = jsonDecode(row.read<String>('payload_json')) as Map;
+          return p['payment_id']?.toString() == paymentId;
+        } catch (_) { return false; }
       }).toList();
-      if(matched.length>1) {
+      if (matched.length > 1) {
         throw StateError('Conflicting queued payment corrections.');
       }
-      final row=matched.isEmpty?null:matched.single;
-      if(row!=null && (
-        row.read<String>('state')!='pending' ||
-        row.read<int>('attempt_count')!=0 ||
-        row.readNullable<int>('last_attempt_at')!=null
-      )){
-        throw StateError(
-          'Correction may already have reached the server. Reconcile first.');
+      final row = matched.isEmpty ? null : matched.single;
+      if (row != null &&
+          (row.read<String>('state') != 'pending' ||
+           row.read<int>('attempt_count') != 0 ||
+           row.readNullable<int>('last_attempt_at') != null)) {
+        throw StateError('Correction may have reached the server. Reconcile first.');
       }
-      final previous=row==null?null:Map<String,dynamic>.from(
-        jsonDecode(row.read<String>('payload_json')) as Map);
-      if(previous!=null && previous['expected_row_version']!=expectedRowVersion){
+      final previous = row == null ? null : Map<String,dynamic>.from(
+          jsonDecode(row.read<String>('payload_json')) as Map);
+      if (previous != null &&
+          previous['expected_row_version'] != expectedRowVersion) {
         throw StateError('Pending payment changed; refresh before editing.');
       }
-      final now=DateTime.now().toUtc();
-      final payload=<String,dynamic>{
-        'invoice_id':invoiceId,
-        'payment_id':paymentId,
-        'expected_row_version':expectedRowVersion,
-        'amount_cents':amountCents,
-        'method_id':methodId,
-        'method_name':methodName.trim(),
-        'payment_date':paymentDate,
-        'created_at':previous?['created_at']??now.toIso8601String(),
-        'local_edit_at':now.toIso8601String(),
+      final baseAmount = previous?['original_amount_cents'] ??
+          originalAmountCents;
+      final baseMethod = previous?['original_method_id'] ??
+          originalMethodId;
+      final baseEntered = previous?['original_entered_at'] ??
+          originalEnteredAt;
+      final baseDate = previous == null
+          ? originalPaymentDate : previous['original_payment_date'];
+      if (expectedRowVersion == null &&
+          ((num.tryParse(baseAmount?.toString() ?? '') ?? 0) <= 0 ||
+           (baseMethod?.toString().isEmpty ?? true) ||
+           (baseEntered?.toString().isEmpty ?? true))) {
+        throw StateError('Original payment details are missing. '
+            'Open this invoice online once before editing.');
+      }
+      final now = DateTime.now().toUtc();
+      final payload = <String,dynamic>{
+        'invoice_id': invoiceId,
+        'payment_id': paymentId,
+        'expected_row_version': expectedRowVersion,
+        'original_amount_cents': baseAmount,
+        'original_method_id': baseMethod,
+        'original_entered_at': baseEntered,
+        'original_payment_date': baseDate,
+        'amount_cents': amountCents,
+        'method_id': methodId,
+        'method_name': methodName.trim(),
+        'payment_date': paymentDate,
+        'created_at': previous?['created_at'] ?? now.toIso8601String(),
+        'local_edit_at': now.toIso8601String(),
       };
-      if(row==null){
+      if (row == null) {
         await _database.customStatement(
           """INSERT INTO sync_outbox
              (business_id,entity_type,entity_id,operation,payload_json,
@@ -387,9 +414,9 @@ class OfflineInvoicePaymentLedger {
              VALUES (?,'invoice_pending_payment_edit',?,'edit_pending_payment',
                      ?,?,'pending',0,?,NULL,NULL)""",
           [businessId,invoiceId,jsonEncode(payload),
-           expectedRowVersion,now.millisecondsSinceEpoch~/1000],
+           expectedRowVersion,now.millisecondsSinceEpoch ~/ 1000],
         );
-      }else{
+      } else {
         await _database.customStatement(
           'UPDATE sync_outbox SET payload_json=?,last_error=NULL WHERE id=?',
           [jsonEncode(payload),row.read<int>('id')],
@@ -401,16 +428,19 @@ class OfflineInvoicePaymentLedger {
   Future<List<Map<String,dynamic>>> pendingEditsForInvoice(
     String businessId,String invoiceId,
   ) async {
-    final rows=await _database.customSelect(
-      """SELECT payload_json FROM sync_outbox
+    final rows = await _database.customSelect(
+      """SELECT payload_json,state FROM sync_outbox
       WHERE business_id=? AND entity_id=?
         AND entity_type='invoice_pending_payment_edit'
-        AND state IN ('pending','inflight')
+        AND state IN ('pending','inflight','conflict')
       ORDER BY id""",
-      variables:[Variable<String>(businessId),Variable<String>(invoiceId)],
+      variables: [Variable<String>(businessId),Variable<String>(invoiceId)],
     ).get();
-    return rows.map((row)=>Map<String,dynamic>.from(
-      jsonDecode(row.read<String>('payload_json')) as Map)).toList();
+    return rows.map((row) => <String,dynamic>{
+      ...Map<String,dynamic>.from(
+        jsonDecode(row.read<String>('payload_json')) as Map),
+      '_queue_state': row.read<String>('state'),
+    }).toList();
   }
 
   /// Pure local preview of corrections to already-server-pending receipts.
@@ -428,6 +458,10 @@ class OfflineInvoicePaymentLedger {
     var conflict=false;
     final identities=<String>{};
     for(final edit in pendingEdits){
+      if (edit['_queue_state'] == 'conflict') {
+        conflict = true; // Show original receipt; never project rejected data.
+        continue;
+      }
       final id=edit['payment_id']?.toString()??'';
       if(id.isEmpty||!identities.add(id)){conflict=true;continue;}
       final i=payments.indexWhere((p)=>p['id']?.toString()==id &&
@@ -436,7 +470,16 @@ class OfflineInvoicePaymentLedger {
       final previous=payments[i];
       final version=int.tryParse(previous['row_version']?.toString()??'');
       final expected=int.tryParse(edit['expected_row_version']?.toString()??'');
-      if(version==null||expected==null||version!=expected){
+      if (expected != null && (version == null || version != expected)) {
+        conflict=true;continue;
+      }
+      if (expected == null &&
+          ((num.tryParse(edit['original_amount_cents']?.toString() ?? '') ?? -1)
+                  .round() != (_number(previous['amount']) * 100).round() ||
+           edit['original_method_id']?.toString() !=
+                  previous['payment_method_id']?.toString() ||
+           !_sameEnteredAt(edit['original_entered_at']?.toString(),
+                  previous['entered_at']?.toString()))) {
         conflict=true;continue;
       }
       final newCents=(num.tryParse(edit['amount_cents'].toString())??0).round();
@@ -457,6 +500,51 @@ class OfflineInvoicePaymentLedger {
     updated['payments']=payments;
     if(conflict) updated['_payment_reconciliation_required']=true;
     return updated;
+  }
+
+  /// Equivalent timestamps can have different zone/fractional formats.
+  static bool _sameEnteredAt(String? a, String? b) {
+    if (a == null || b == null || a.isEmpty || b.isEmpty) return false;
+    final first = DateTime.tryParse(a);
+    final second = DateTime.tryParse(b);
+    return first != null && second != null && first.isAtSameMomentAs(second);
+  }
+
+  /// Owner-only UI may discard a local receipt that is proven never sent.
+  /// A submitted/uncertain receipt cannot be removed through this operation.
+  Future<void> deleteNeverSubmittedPayment(
+    String businessId, String invoiceId, String operationId,
+  ) async {
+    await _database.transaction(() async {
+      final rows = await _database.customSelect(
+        """SELECT id,state,attempt_count,last_attempt_at,payload_json
+        FROM sync_outbox WHERE business_id=? AND entity_id=?
+          AND entity_type='invoice_payment_received'""",
+        variables: [Variable<String>(businessId),Variable<String>(invoiceId)],
+      ).get();
+      final matched = rows.where((row) {
+        try {
+          final p = jsonDecode(row.read<String>('payload_json')) as Map;
+          return p['operation_id']?.toString() == operationId;
+        } catch (_) { return false; }
+      }).toList();
+      if (matched.length != 1) {
+        throw StateError('Local payment not found. Reload before removing.');
+      }
+      final row = matched.single;
+      final p = Map<String,dynamic>.from(
+          jsonDecode(row.read<String>('payload_json')) as Map);
+      if (row.read<String>('state') != 'pending' ||
+          row.read<int>('attempt_count') != 0 ||
+          row.readNullable<int>('last_attempt_at') != null ||
+          p['replay_attempted'] == true ||
+          (p['server_payment_id']?.toString().isNotEmpty ?? false)) {
+        throw StateError('This payment may have reached the server. '
+            'Removal requires verified reconciliation.');
+      }
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE id=?', [row.read<int>('id')]);
+    });
   }
 
   /// Replace a local invoice reference only after the authoritative server
@@ -648,80 +736,204 @@ class OfflineInvoicePaymentLedger {
     }
   }
 
-  /// Replay corrections to existing payments only, never create receipts.
-  /// Lost responses are reconciled by payment UUID and expected version+1.
+  /// Replay corrections to the same pending payment UUID; no new receipt.
+  /// Never send a correction while that invoice's offline tax update remains
+  /// unresolved. The payment amount could exceed the old server invoice total.
+  ///
+  /// A legacy cached receipt without row_version is editable locally, but
+  /// may be submitted only if the server has a pristine matching version 1.
+  /// Once a send has possibly occurred, later runs verify the answer by UUID,
+  /// amount, method, date and version. They NEVER send a second request.
   Future<void> flushPendingServerEdits(String businessId) async {
+    if (BriskersConnectionModeController.instance.forceOffline) return;
     final rows = await _database.customSelect(
       """SELECT id,entity_id FROM sync_outbox
       WHERE business_id=? AND entity_type='invoice_pending_payment_edit'
       AND state IN ('pending','inflight') ORDER BY id""",
-      variables:[Variable<String>(businessId)],
+      variables: [Variable<String>(businessId)],
     ).get();
-    for(final row in rows) {
-      final id=row.read<int>('id');
-      final invoiceId=row.read<String>('entity_id');
-      if(invoiceId.startsWith('local-'))continue;
+
+    for (final row in rows) {
+      if (BriskersConnectionModeController.instance.forceOffline) return;
+      final id = row.read<int>('id');
+      final invoiceId = row.read<String>('entity_id');
+      if (invoiceId.startsWith('local-')) continue;
+
+      // Invoice tax must reach the server before its increased payment can.
+      // Neither tax nor receipt is silently changed to unblock the other.
+      final blocked = await _database.customSelect(
+        """SELECT 1 FROM sync_outbox WHERE business_id=? AND entity_id=?
+           AND entity_type='invoice_tax_edit'
+           AND state IN ('pending','inflight','conflict') LIMIT 1""",
+        variables: [Variable<String>(businessId),Variable<String>(invoiceId)],
+      ).get();
+      if (blocked.isNotEmpty) continue;
+
+      var mayHaveSent = false;
       try {
         await LocalJobQuarantine.assertReplayAllowed(
-          _database,businessId,outboxId:id);
-        final payload=await _database.transaction(() async {
-          final current=await _database.customSelect(
-            'SELECT payload_json FROM sync_outbox WHERE id=? AND business_id=?',
-            variables:[Variable<int>(id),Variable<String>(businessId)],
-          ).getSingleOrNull();
-          if(current==null)throw StateError('Correction no longer queued.');
-          final p=Map<String,dynamic>.from(
+            _database, businessId, outboxId: id);
+        final current = await _database.customSelect(
+          """SELECT state,attempt_count,payload_json FROM sync_outbox
+             WHERE id=? AND business_id=?""",
+          variables: [Variable<int>(id),Variable<String>(businessId)],
+        ).getSingleOrNull();
+        if (current == null) continue;
+        final payload = Map<String,dynamic>.from(
             jsonDecode(current.read<String>('payload_json')) as Map);
+        final paymentId = payload['payment_id']?.toString() ?? '';
+        final amountCents = (num.tryParse(
+            payload['amount_cents']?.toString() ?? '') ?? -1).round();
+        if (paymentId.isEmpty || amountCents <= 0) {
+          throw StateError('Payment correction identity is incomplete.');
+        }
+        final desiredMethod = payload['method_id']?.toString() ?? '';
+        final desiredDate = payload['payment_date']?.toString() ?? '';
+        var expectedVersion = int.tryParse(
+            payload['resolved_row_version']?.toString() ??
+            payload['expected_row_version']?.toString() ?? '');
+        final attempted = current.read<String>('state') == 'inflight' ||
+            current.read<int>('attempt_count') > 0;
+
+        final server = await _api.documentDetailV4(businessId,invoiceId);
+        final payments = server['payments'] is List
+            ? (server['payments'] as List).whereType<Map>().toList()
+            : const <Map>[];
+        final matches = payments.where((p) =>
+            p['id']?.toString() == paymentId &&
+            p['state']?.toString() == 'pending').toList();
+        final serverPayment = matches.length == 1 ? matches.single : null;
+        final serverVersion = int.tryParse(
+            serverPayment?['row_version']?.toString() ?? '');
+        final acknowledged = serverPayment != null &&
+            expectedVersion != null &&
+            serverVersion == expectedVersion + 1 &&
+            (_number(serverPayment['amount']) * 100).round() == amountCents &&
+            serverPayment['payment_method_id']?.toString() == desiredMethod &&
+            serverPayment['payment_date']?.toString() == desiredDate;
+
+        if (acknowledged) {
+          // Authoritative read, local durable cache, then retirement by ID.
+          await _database.transaction(() async {
+            await LocalJobQuarantine.assertReplayAllowed(
+                _database,businessId,outboxId:id);
+            final cache = LocalDocumentDetailCache(database:_database);
+            final oldDetail = await cache.load(businessId,invoiceId);
+            final refreshed = Map<String,dynamic>.from(server);
+            if (!refreshed.containsKey('offline_warranty_detail') &&
+                oldDetail?['offline_warranty_detail'] != null) {
+              refreshed['offline_warranty_detail'] =
+                  oldDetail!['offline_warranty_detail'];
+            }
+            await cache.save(businessId,invoiceId,refreshed);
+            await _database.customStatement(
+              'DELETE FROM sync_outbox WHERE id=?',[id]);
+          });
+          continue;
+        }
+
+        if (attempted) {
+          // Response loss or conflict: never issue this non-idempotent
+          // correction a second time. Keep a visible review requirement.
           await _database.customStatement(
-            """UPDATE sync_outbox
-            SET last_attempt_at=?,attempt_count=attempt_count+1,
-                state='inflight' WHERE id=?""",
-            [DateTime.now().toUtc().millisecondsSinceEpoch~/1000,id],
+            """UPDATE sync_outbox SET state='conflict',last_error=?
+               WHERE id=?""",
+            ['Prior correction outcome not confirmed; owner review required.',id],
           );
-          return p;
+          continue;
+        }
+        if (serverPayment == null || serverVersion == null) {
+          await _database.customStatement(
+            "UPDATE sync_outbox SET state='conflict',last_error=? WHERE id=?",
+            ['Server receipt is no longer pending or version is unavailable.',id],
+          );
+          continue;
+        }
+
+        if (expectedVersion == null) {
+          final originalCents = (num.tryParse(
+              payload['original_amount_cents']?.toString() ?? '') ?? -1).round();
+          final originalMethod = payload['original_method_id']?.toString();
+          final originalEntered = payload['original_entered_at']?.toString();
+          // Without a cached version, require a never-edited payment and
+          // compare its immutable original business receipt snapshot.
+          final pristine = serverVersion == 1 &&
+              originalCents == (_number(serverPayment['amount']) * 100).round() &&
+              originalMethod == serverPayment['payment_method_id']?.toString() &&
+              _sameEnteredAt(originalEntered,
+                  serverPayment['entered_at']?.toString()) &&
+              (payload['original_payment_date'] == null ||
+               payload['original_payment_date']?.toString() ==
+                   serverPayment['payment_date']?.toString());
+          if (!pristine) {
+            await _database.customStatement(
+              "UPDATE sync_outbox SET state='conflict',last_error=? WHERE id=?",
+              ['Original payment has changed. Refresh and review.',id],
+            );
+            continue;
+          }
+          expectedVersion = serverVersion;
+        } else if (serverVersion != expectedVersion) {
+          await _database.customStatement(
+            "UPDATE sync_outbox SET state='conflict',last_error=? WHERE id=?",
+            ['Payment was revised on another device. Review required.',id],
+          );
+          continue;
+        }
+        if (BriskersConnectionModeController.instance.forceOffline) return;
+
+        final versionToSend = expectedVersion;
+        // Save which version we intended to change BEFORE contacting the
+        // network, so a lost response can be verified on the next run.
+        await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+              _database,businessId,outboxId:id);
+          final updated = <String,dynamic>{
+            ...payload,
+            'resolved_row_version':versionToSend,
+          };
+          await _database.customStatement(
+            """UPDATE sync_outbox SET payload_json=?,state='inflight',
+               attempt_count=attempt_count+1,last_attempt_at=? WHERE id=?
+               AND state='pending' AND attempt_count=0""",
+            [jsonEncode(updated),
+             DateTime.now().toUtc().millisecondsSinceEpoch~/1000,id],
+          );
         });
-        final paymentId=payload['payment_id'].toString();
-        final version=(payload['expected_row_version'] as num).toInt();
+        mayHaveSent = true;
         try {
           await LocalJobQuarantine.guardReplay(
-            _database,businessId,()=>
+            _database,businessId,() =>
               _api.updatePendingInvoicePaymentV2(
-                businessId,paymentId,
-                amount:(payload['amount_cents'] as num)/100,
-                methodId:payload['method_id'].toString(),
-                paymentDate:payload['payment_date'].toString(),
-                expectedRowVersion:version,
+                businessId,paymentId,amount:amountCents/100,
+                methodId:desiredMethod,paymentDate:desiredDate,
+                expectedRowVersion:versionToSend,
               ),
             outboxId:id,
           );
         } catch (_) {
-          // A lost successful response can be reconciled below; a real
-          // rejection keeps this correction queued and blocks later edits.
+          // A reply may be lost after commit. Read server before deciding.
         }
-        final server=await _api.documentDetailV4(businessId,invoiceId);
-        final payments=server['payments'] is List
-          ? (server['payments'] as List).whereType<Map>().toList()
-          : const <Map>[];
-        final matches=payments.where((p)=>
-          p['id']?.toString()==paymentId &&
-          p['state']?.toString()=='pending').toList();
-        final acknowledged=matches.length==1 &&
-          int.tryParse(matches.single['row_version']?.toString()??'')==version+1 &&
-          (_number(matches.single['amount'])*100).round()==
-            (payload['amount_cents'] as num).round() &&
-          matches.single['payment_method_id']?.toString()==
-            payload['method_id'].toString() &&
-          matches.single['payment_date']?.toString()==
-            payload['payment_date'].toString();
-        if(!acknowledged){
-          throw StateError('Payment correction not yet confirmed.');
+        final after = await _api.documentDetailV4(businessId,invoiceId);
+        final afterPayments = after['payments'] is List
+            ? (after['payments'] as List).whereType<Map>().toList()
+            : const <Map>[];
+        final accepted = afterPayments.where((p) =>
+          p['id']?.toString() == paymentId &&
+          p['state']?.toString() == 'pending' &&
+          int.tryParse(p['row_version']?.toString() ?? '') == versionToSend+1 &&
+          (_number(p['amount'])*100).round()==amountCents &&
+          p['payment_method_id']?.toString()==desiredMethod &&
+          p['payment_date']?.toString()==desiredDate).toList();
+        if (accepted.length != 1) {
+          throw StateError('Payment edit outcome uncertain; no automatic retry.');
         }
         await _database.transaction(() async {
           await LocalJobQuarantine.assertReplayAllowed(
-            _database,businessId,outboxId:id);
-          final cache=LocalDocumentDetailCache(database:_database);
-          final oldDetail=await cache.load(businessId,invoiceId);
-          final refreshed=Map<String,dynamic>.from(server);
+              _database,businessId,outboxId:id);
+          final cache = LocalDocumentDetailCache(database:_database);
+          final oldDetail = await cache.load(businessId,invoiceId);
+          final refreshed = Map<String,dynamic>.from(after);
           if (!refreshed.containsKey('offline_warranty_detail') &&
               oldDetail?['offline_warranty_detail'] != null) {
             refreshed['offline_warranty_detail'] =
@@ -731,13 +943,15 @@ class OfflineInvoicePaymentLedger {
           await _database.customStatement(
             'DELETE FROM sync_outbox WHERE id=?',[id]);
         });
-      } catch(error) {
+      } catch (error) {
         await _database.customStatement(
-          """UPDATE sync_outbox SET state='pending',last_error=?
-          WHERE id=?""",
-          [error.toString(),id],
+          """UPDATE sync_outbox SET
+            state=CASE WHEN state='inflight' OR ?=1
+              THEN 'inflight' ELSE state END,
+            last_error=? WHERE id=?""",
+          [mayHaveSent?1:0,error.toString(),id],
         );
-        break; // Hold all later corrections on an unresolved conflict.
+        break;
       }
     }
   }
