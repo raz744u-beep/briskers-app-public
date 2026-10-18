@@ -7,6 +7,7 @@ import '../../core/connection_mode.dart';
 import '../../services/appointment_sync_service.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/briskers_api.dart';
+import '../../services/employee_roster_cache.dart';
 
 class AppointmentManageScreen extends StatefulWidget {
   const AppointmentManageScreen({
@@ -87,6 +88,9 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   }
 
   Future<void> _load() async {
+    final roster = EmployeeRosterCache();
+    final saved = await roster.cachedAssignable(widget.businessId);
+    final savedEmployees = saved?.rows ?? <Map<String, dynamic>>[];
     if (_offlineEditing || BriskersConnectionModeController.instance.forceOffline) {
       final item = widget.appointment ?? const <String,dynamic>{};
       final cachedCustomers = _pendingCreate || !_editing ||
@@ -104,9 +108,17 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
             'make': item['vehicle_make'], 'model': item['vehicle_model'],
           }];
         }
-        _employees = _employeeId == null ? const [] : [{
-          'id':_employeeId, 'display_name':item['mechanic'] ?? 'Assigned',
-        }];
+        _employees = [
+          ...savedEmployees,
+          if (_employeeId != null &&
+              !savedEmployees.any((e) => e['id']?.toString() == _employeeId))
+            {
+              'id': _employeeId,
+              'name': item['mechanic'] ?? 'Previously assigned',
+              'position_name': 'Previously assigned',
+              'active': false,
+            },
+        ];
         _loading = false;
       });
       return;
@@ -118,15 +130,23 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
       final customers = localCustomers.isNotEmpty
           ? localCustomers
           : await _api.customers(widget.businessId, limit: 100);
-      List<Map<String, dynamic>> employees;
+      List<Map<String, dynamic>> employees = savedEmployees;
       try {
-        employees = await _api.assignableEmployees(widget.businessId);
+        employees = await roster.refreshAssignable(widget.businessId);
       } catch (_) {
-        employees = _employeeId == null ? <Map<String, dynamic>>[] : [{
-          'id': _employeeId,
-          'name': widget.appointment?['mechanic'] ?? 'Assigned',
-          'position_name': 'Employee',
-        }];
+        // Cached mechanics remain selectable when Auto loses connectivity.
+      }
+      if (_employeeId != null &&
+          !employees.any((e) => e['id']?.toString() == _employeeId)) {
+        employees = [
+          ...employees,
+          {
+            'id': _employeeId,
+            'name': widget.appointment?['mechanic'] ?? 'Previously assigned',
+            'position_name': 'Previously assigned',
+            'active': false,
+          },
+        ];
       }
 
       if (_editing &&

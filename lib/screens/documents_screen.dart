@@ -20,6 +20,7 @@ import '../services/local_job_retirement.dart';
 import '../local/local_database_provider.dart';
 import '../services/local_financial_cache.dart';
 import '../services/local_document_repository.dart';
+import '../services/confirmed_invoice_list_events.dart';
 import '../services/local_document_detail_cache.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
@@ -142,6 +143,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   List<Map<String, dynamic>>? _rows;
   int _loadEpoch = 0;
   StreamSubscription<({String businessId, Set<String> jobIds})>? _retirement;
+  StreamSubscription<ConfirmedInvoiceClosed>? _closedInvoices;
+  final Map<String, ConfirmedInvoiceClosed> _confirmedClosed = {};
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
   Map<String, num> _receiptTotals = const {};
@@ -152,6 +155,31 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   final FocusNode _searchFocus = FocusNode(debugLabel: 'document-search');
 
   bool get _estimate => widget.kind == 'estimate';
+
+  /// A recent *server confirmed* close outranks a stale local index or a
+  /// slower list response. A genuinely newer server version can still reopen.
+  List<Map<String, dynamic>> _withConfirmedClosures(
+      List<Map<String, dynamic>> rows) {
+    if (_estimate || _confirmedClosed.isEmpty) return rows;
+    return rows.map((row) {
+      final id = row['id']?.toString() ?? '';
+      final event = _confirmedClosed[id];
+      if (event == null) return row;
+      final version = int.tryParse(row['row_version']?.toString() ?? '') ?? 0;
+      if (version > event.rowVersion) {
+        _confirmedClosed.remove(id);
+        return row;
+      }
+      return <String, dynamic>{
+        ...row,
+        'display_status_code': 'closed',
+        'closed_at': event.closedAt,
+        'row_version': event.rowVersion,
+        'paid_amount': row['total_amount'] ?? row['total'],
+        'pending_payment': 0,
+      };
+    }).toList();
+  }
 
   String _invoiceStage(Map<String, dynamic> row) {
     if (_estimate) {
@@ -279,6 +307,15 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if (!_estimate && cachedStyles != null) {
       _invoiceStyles = List<Map<String, dynamic>>.from(cachedStyles);
     }
+    _closedInvoices = ConfirmedInvoiceListEvents.closed.listen((event) {
+      if (!mounted || _estimate || event.businessId != widget.businessId) {
+        return;
+      }
+      setState(() {
+        _confirmedClosed[event.invoiceId] = event;
+        if (_rows != null) _rows = _withConfirmedClosures(_rows!);
+      });
+    });
     _retirement = LocalJobRetirement.events.listen((event) {
       if (event.businessId == widget.businessId && mounted) {
         // Invalidate any response captured before the durable tombstone.
@@ -296,6 +333,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         oldWidget.kind != widget.kind) {
       _loadEpoch++;
       _rows = null;
+      _confirmedClosed.clear();
       _receiptTotals = const {};
       _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
       _invoiceStyles = const [];
@@ -313,6 +351,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
 
   @override
   void dispose() {
+    _closedInvoices?.cancel();
     _retirement?.cancel();
     _search.dispose();
     _searchFocus.dispose();
@@ -380,7 +419,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         if (mounted && epoch == _loadEpoch) {
           localShown = true;
           setState(() {
-            _rows = local.map(documentListIndexPresentation).toList();
+            _rows = _withConfirmedClosures(
+                local.map(documentListIndexPresentation).toList());
             _error = null;
           });
           if (_estimate) unawaited(_enrichEstimateDescriptions(epoch, _rows!));
@@ -433,7 +473,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
 
       if (!mounted || epoch != _loadEpoch) return;
       setState(() {
-        _rows = rows;
+        _rows = _withConfirmedClosures(rows);
         _invoiceStyles = styles;
         _error = null;
       });

@@ -134,6 +134,34 @@ class LocalDocumentRepository {
     });
   }
 
+  /// Confirmed server closeout must update the local list immediately,
+  /// without waiting for a full documents bootstrap. This never calls a
+  /// payment/close RPC and cannot turn a still-open invoice into Closed.
+  Future<void> applyConfirmedServerClose(
+    String businessId,
+    String invoiceId, {
+    required String closedAt,
+    required int rowVersion,
+  }) async {
+    final when = DateTime.tryParse(closedAt);
+    if (when == null || rowVersion < 1) {
+      throw StateError('Missing verified server invoice closure.');
+    }
+    await LocalJobRetirement.ensureSchema(_database);
+    await _database.customStatement(
+      """UPDATE local_documents SET closed_at=?,display_status_code='closed',
+         row_version=?,server_updated_at=?,sync_state='synced'
+         WHERE business_id=? AND id=? AND kind='invoice' AND sync_state='synced'
+           AND (row_version IS NULL OR row_version<=?)
+           AND ${_visibleDocumentSql('local_documents')}""",
+      [
+        _unix(when), rowVersion, DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+        businessId, invoiceId, rowVersion,
+      ],
+    );
+    _database.notifyUpdates({const TableUpdate('local_documents')});
+  }
+
   Future<void> upsertFromServer(
     String businessId,
     List<Map<String, dynamic>> documents,

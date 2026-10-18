@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/connection_mode.dart';
+import '../../services/employee_roster_cache.dart';
+
 import '../../core/employee_role_style.dart';
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
@@ -25,8 +28,13 @@ class EmployeesSettingsScreen extends StatefulWidget {
 class _EmployeesSettingsScreenState
     extends State<EmployeesSettingsScreen> {
   static const _api = BriskersApi();
+  final EmployeeRosterCache _roster = EmployeeRosterCache();
 
   List<Map<String, dynamic>>? _employees;
+  bool _showingSaved = false;
+  bool _offlineUnavailable = false;
+  bool _savedActiveOnly = false;
+  DateTime? _savedAt;
   String? _error;
 
   @override
@@ -36,18 +44,51 @@ class _EmployeesSettingsScreenState
   }
 
   Future<void> _load() async {
+    final fullCached = await _roster.cachedSettings(widget.businessId);
+    final cached = fullCached ??
+        await _roster.cachedAssignable(widget.businessId);
+    if (!mounted) return;
+    if (cached != null) {
+      setState(() {
+        // This is deliberately a safe roster, not compensation/settings data.
+        _employees = cached.rows;
+        _showingSaved = true;
+        _savedActiveOnly = fullCached == null;
+        _savedAt = cached.refreshedAt;
+        _offlineUnavailable = false;
+        _error = null;
+      });
+    }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      setState(() {
+        _employees ??= const [];
+        _showingSaved = cached != null;
+        _savedActiveOnly = fullCached == null;
+        _offlineUnavailable = cached == null;
+        _error = null;
+      });
+      return;
+    }
     try {
-      final rows = await _api.employeesSettings(widget.businessId);
+      final rows = await _roster.refreshSettings(widget.businessId);
       if (!mounted) return;
       setState(() {
         _employees = rows;
+        _showingSaved = false;
+        _savedActiveOnly = false;
+        _offlineUnavailable = false;
+        _savedAt = DateTime.now();
         _error = null;
       });
-    } catch (error) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
-        _employees = const [];
-        _error = error.toString();
+        _employees ??= const [];
+        _showingSaved = cached != null;
+        _savedActiveOnly = fullCached == null;
+        _offlineUnavailable = cached == null;
+        _error = 'Could not refresh employees. '
+            'Connect and pull down to try again.';
       });
     }
   }
@@ -71,6 +112,10 @@ class _EmployeesSettingsScreenState
   }
 
   Future<void> _open([Map<String, dynamic>? employee]) async {
+    if (_showingSaved ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -85,6 +130,10 @@ class _EmployeesSettingsScreenState
   }
 
   Future<void> _positions() async {
+    if (_showingSaved ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
@@ -93,6 +142,9 @@ class _EmployeesSettingsScreenState
         ),
       ),
     );
+    // Position changes can alter the assignment list even if employees
+    // themselves did not change.
+    await _roster.invalidate(widget.businessId);
     await _load();
   }
 
@@ -128,6 +180,8 @@ class _EmployeesSettingsScreenState
         widget.businessId,
         employee['id'].toString(),
       );
+      // An old cache must not leave this deleted employee assignable.
+      await _roster.invalidate(widget.businessId);
       await _load();
     } catch (error) {
       if (!mounted) return;
@@ -148,7 +202,10 @@ class _EmployeesSettingsScreenState
   }
 
   Future<void> _manageEmployees() async {
-    if (_employees == null) return;
+    if (_employees == null || _showingSaved ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
 
     await showModalBottomSheet<void>(
       context: context,
@@ -196,7 +253,7 @@ class _EmployeesSettingsScreenState
                     children: _employees!.map((employee) {
                       final active = employee['active'] != false;
                       final position =
-                          employee['position']?.toString() ?? 'No position';
+                          (employee['position'] ?? employee['position_name'])?.toString() ?? 'No position';
                       final roleStyle = employeeRoleStyle(position);
                       final name = employee['name']?.toString() ?? '';
 
@@ -251,6 +308,10 @@ class _EmployeesSettingsScreenState
   }
 
   Future<void> _employeeActions(Map<String, dynamic> employee) async {
+    if (_showingSaved ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -294,6 +355,10 @@ class _EmployeesSettingsScreenState
   }
 
   Future<void> _showManageMenu() async {
+    if (_showingSaved ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -368,7 +433,9 @@ class _EmployeesSettingsScreenState
         title: const Text('Employees'),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showManageMenu,
+        onPressed: _offlineUnavailable || _showingSaved ||
+                BriskersConnectionModeController.instance.forceOffline
+            ? null : _showManageMenu,
         backgroundColor: BriskersColors.settings,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.groups_2_outlined),
@@ -381,6 +448,24 @@ class _EmployeesSettingsScreenState
               child: ListView(
                 padding: const EdgeInsets.all(12),
                 children: [
+                  if (_showingSaved)
+                    Card(child: ListTile(
+                      leading: const Icon(Icons.wifi_off_outlined),
+                      title: Text(_savedActiveOnly
+                          ? 'Saved active roster only (read-only)'
+                          : 'Saved employee roster (read-only)'),
+                      subtitle: Text('Last updated: ${_savedAt == null ? 'Unknown' : DateFormat.yMd().add_jm().format(_savedAt!)}. '
+                          '${_savedActiveOnly ? 'Inactive employees are not in this saved list. ' : ''}'
+                          'Employee pay, SSN and contact details are available online. '
+                          'Changes require a connection.'),
+                    )),
+                  if (_offlineUnavailable)
+                    const Card(child: ListTile(
+                      leading: Icon(Icons.info_outline),
+                      title: Text('Employee list not available offline yet'),
+                      subtitle: Text('Connect once and refresh Employees to save '
+                          'a minimal roster for offline viewing and Job assignment.'),
+                    )),
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 10),
@@ -391,12 +476,17 @@ class _EmployeesSettingsScreenState
                         ),
                       ),
                     ),
-                  if (_employees!.isEmpty)
-                    const Card(
+                  if (_employees!.isEmpty && !_offlineUnavailable)
+                    Card(
                       child: Padding(
-                        padding: EdgeInsets.all(20),
+                        padding: const EdgeInsets.all(20),
                         child: Text(
-                          'No employees yet. Tap Manage to add one.',
+                          _showingSaved
+                            ? (_savedActiveOnly
+                                ? 'No active employees in the saved roster. '
+                                  'Connect to see all employees.'
+                                : 'The saved roster is empty. Connect to refresh.')
+                            : 'No employees yet. Tap Manage to add one.',
                         ),
                       ),
                     )
@@ -405,7 +495,8 @@ class _EmployeesSettingsScreenState
                       final active = employee['active'] != false;
                       final position =
                           employee['position']?.toString() ?? 'No position';
-                      final ssnLast4 = employee['ssn_last4']?.toString();
+                      final ssnLast4 = _showingSaved
+                          ? null : employee['ssn_last4']?.toString();
                       final roleStyle = employeeRoleStyle(position);
 
                       return Card(
@@ -441,7 +532,7 @@ class _EmployeesSettingsScreenState
                                   ),
                                 ),
                                 TextSpan(
-                                  text: ' • ${_pay(employee)}',
+                                  text: _showingSaved ? ' • Offline roster' : ' • ${_pay(employee)}',
                                 ),
                                 if (ssnLast4 != null && ssnLast4.isNotEmpty)
                                   TextSpan(
@@ -454,8 +545,9 @@ class _EmployeesSettingsScreenState
                           ),
                           trailing: const Icon(Icons.chevron_right,
                             color: BriskersColors.settings),
-                          onTap: () => _open(employee),
-                          onLongPress: () => _employeeActions(employee),
+                          onTap: _showingSaved ? null : () => _open(employee),
+                          onLongPress: _showingSaved
+                              ? null : () => _employeeActions(employee),
                         ),
                       );
                     }),

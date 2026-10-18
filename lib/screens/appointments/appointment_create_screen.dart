@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
+import '../../services/employee_roster_cache.dart';
+import '../../core/connection_mode.dart';
 
 class AppointmentCreateScreen extends StatefulWidget {
   const AppointmentCreateScreen({
@@ -61,8 +63,20 @@ class _AppointmentCreateScreenState extends State<AppointmentCreateScreen> {
   }
 
   Future<void> _loadEmployees() async {
+    final roster = EmployeeRosterCache();
+    final cached = await roster.cachedAssignable(widget.businessId);
+    if (mounted && cached != null) {
+      setState(() {
+        _employees = cached.rows;
+        _loadingEmployees = false;
+      });
+    }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (mounted) setState(() => _loadingEmployees = false);
+      return;
+    }
     try {
-      final rows = await _api.assignableEmployees(widget.businessId);
+      final rows = await roster.refreshAssignable(widget.businessId);
       if (!mounted) return;
       setState(() {
         _employees = rows;

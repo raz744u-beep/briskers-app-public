@@ -40,6 +40,7 @@ import '../settings/catalog_settings_screen.dart';
 import '../../services/local_catalog_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_document_repository.dart';
+import '../../services/confirmed_invoice_list_events.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
@@ -2921,6 +2922,32 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       action: () => _api.closeInvoice(
         widget.businessId, widget.documentId),
     );
+    // Only the backend-confirmed Closed status may remove this invoice from
+    // a Pending Close list. Publish it and persist the index without waiting
+    // for a complete network list refresh. No extra payment or close RPC.
+    try {
+      final confirmed = await _api.documentDetail(
+        widget.businessId, widget.documentId);
+      final closedAt = confirmed['closed_at']?.toString() ?? '';
+      final version = int.tryParse(confirmed['row_version']?.toString() ?? '');
+      if (DateTime.tryParse(closedAt) != null &&
+          version != null && version > 0) {
+        await LocalDocumentRepository().applyConfirmedServerClose(
+          widget.businessId, widget.documentId,
+          closedAt: closedAt, rowVersion: version,
+        );
+        ConfirmedInvoiceListEvents.publishClosed(ConfirmedInvoiceClosed(
+          businessId: widget.businessId,
+          invoiceId: widget.documentId,
+          closedAt: closedAt,
+          rowVersion: version,
+        ));
+      }
+    } catch (_) {
+      // Invoice was already confirmed closed by the server. A failed local
+      // notification must not turn a completed payment into an error or
+      // issue another financial mutation. The list will refresh normally.
+    }
   }
 
   Future<void> _finalizeEnteredPayments() async {

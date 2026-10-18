@@ -17,6 +17,7 @@ import '../services/local_financial_cache.dart';
 import '../services/linked_expense_sync_service.dart';
 import '../services/offline_preinspection_service.dart';
 import '../services/offline_job_admin_service.dart';
+import '../services/employee_roster_cache.dart';
 import '../services/offline_customer_vehicle_admin_service.dart';
 import '../services/offline_customer_detail_write_service.dart';
 import '../services/offline_financial_write_service.dart';
@@ -409,6 +410,17 @@ class _BusinessGateState extends State<BusinessGate> {
       await _customerVehicleSync.pull(businessId);
     } catch (_) {
       // Customer/vehicle browsing keeps the previous local snapshot.
+    }
+
+    // Employee roster is shop/actor-scoped and contains NO pay, SSN, contact
+    // or login data. Refresh even when the Owner hasn't opened a Job; an
+    // updated office roster should be ready before the next offline period.
+    if (<String>{'owner', 'manager', 'office'}.contains(roleCode)) {
+      try {
+        await EmployeeRosterCache().refreshAssignable(businessId);
+      } catch (_) {
+        // Keep the last successfully saved roster if Auto loses connectivity.
+      }
     }
 
     try {

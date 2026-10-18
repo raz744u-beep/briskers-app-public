@@ -92,7 +92,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   Map<String, dynamic>? _job;
   Map<String, dynamic>? _profitability;
   Map<String, dynamic>? _preInspection;
-  List<Map<String, dynamic>> _employees = const [];
   List<Map<String, dynamic>> _statuses = const [];
   List<Map<String, dynamic>> _documents = const [];
   Future<String>? _automaticInvoiceLabor;
@@ -136,7 +135,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       _profitability = null;
       _profitabilityError = null;
       _preInspection = null;
-      _employees = const [];
       _statuses = const [];
       _documents = const [];
       _findings = const [];
@@ -424,23 +422,13 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           ? Map<String, dynamic>.from(rawCapabilities)
           : const <String, dynamic>{};
       bool capability(String key) => capabilities[key] == true;
-      final canManage = capability('manage_job');
       final canSeeFinancial = capability('view_financial');
 
-      List<Map<String, dynamic>> employees = const [];
       List<Map<String, dynamic>> documents = const [];
       List<Map<String, dynamic>> findings = const [];
       List<Map<String, dynamic>> jobExpenses = const [];
       Map<String, dynamic>? profitability;
       Map<String, dynamic>? preInspection;
-
-      if (canManage) {
-        try {
-          employees = await _api.assignableEmployees(widget.businessId);
-        } catch (_) {
-          employees = const [];
-        }
-      }
 
       if (canSeeFinancial) {
         try {
@@ -650,7 +638,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         _job = job;
         _profitability = profitability;
         _preInspection = preInspection;
-        _employees = employees;
         _statuses = statuses;
         _documents = documents;
         _findings = findings;
@@ -1440,14 +1427,16 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         : Map<String, dynamic>.from(assignments.first as Map)['employee_id']
             ?.toString();
 
-    List<Map<String, dynamic>> employees;
-    if (_onlineReady && _employees.isNotEmpty) {
-      employees = _employees;
+    // Always use the newest safe shared roster. The previously loaded Job
+    // detail list can be old even while the phone is connected.
+    List<Map<String, dynamic>> employees =
+        await _offlineJobAdmin.cachedEmployees(widget.businessId);
+    if (!BriskersConnectionModeController.instance.forceOffline) {
       try {
-        await _offlineJobAdmin.refreshEmployees(widget.businessId);
-      } catch (_) {}
-    } else {
-      employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
+        employees = await _offlineJobAdmin.refreshEmployees(widget.businessId);
+      } catch (_) {
+        // Auto fallback: keep last successful authorized roster.
+      }
     }
 
     if (!mounted) return;
