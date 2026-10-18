@@ -748,15 +748,6 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       () => _invoiceStatusStyles.refresh(widget.businessId),
     );
 
-    try {
-      await LocalSyncStatusRepository.recordManualRefreshResult(
-        widget.businessId, failedStages,
-      );
-    } catch (error) {
-      // The in-memory warning remains available even if preferences fail.
-      failures.add('Saving sync status: $error');
-    }
-
     // A successful download is not a completed upload. Some guarded
     // outbox entries intentionally stay pending or conflicted for review.
     try {
@@ -776,6 +767,17 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     } catch (error) {
       failures.add('Could not verify remaining uploads: $error');
     }
+    if (failures.isNotEmpty && failedStages.isEmpty) {
+      failedStages.add('Pending uploads / reconciliation');
+    }
+    try {
+      await LocalSyncStatusRepository.recordManualRefreshResult(
+        widget.businessId, failedStages,
+      );
+    } catch (error) {
+      failures.add('Saving sync status: $error');
+    }
+
     await _load();
     if (!mounted) return;
 
