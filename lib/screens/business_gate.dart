@@ -17,6 +17,7 @@ import '../services/local_financial_cache.dart';
 import '../services/linked_expense_sync_service.dart';
 import '../services/offline_preinspection_service.dart';
 import '../services/offline_job_admin_service.dart';
+import '../services/employee_roster_cache.dart';
 import '../services/offline_customer_vehicle_admin_service.dart';
 import '../services/offline_customer_detail_write_service.dart';
 import '../services/offline_financial_write_service.dart';
