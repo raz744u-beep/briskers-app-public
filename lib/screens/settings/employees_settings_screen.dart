@@ -106,7 +106,9 @@ class _EmployeesSettingsScreenState
 
   Future<void> _open([Map<String, dynamic>? employee]) async {
     if (_showingSaved ||
-        BriskersConnectionModeController.instance.forceOffline) return;
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
@@ -122,7 +124,9 @@ class _EmployeesSettingsScreenState
 
   Future<void> _positions() async {
     if (_showingSaved ||
-        BriskersConnectionModeController.instance.forceOffline) return;
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
@@ -192,7 +196,9 @@ class _EmployeesSettingsScreenState
 
   Future<void> _manageEmployees() async {
     if (_employees == null || _showingSaved ||
-        BriskersConnectionModeController.instance.forceOffline) return;
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
 
     await showModalBottomSheet<void>(
       context: context,
@@ -296,7 +302,9 @@ class _EmployeesSettingsScreenState
 
   Future<void> _employeeActions(Map<String, dynamic> employee) async {
     if (_showingSaved ||
-        BriskersConnectionModeController.instance.forceOffline) return;
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -341,7 +349,9 @@ class _EmployeesSettingsScreenState
 
   Future<void> _showManageMenu() async {
     if (_showingSaved ||
-        BriskersConnectionModeController.instance.forceOffline) return;
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
