@@ -26,6 +26,7 @@ import '../services/local_invoice_status_styles_cache.dart';
 import '../services/invoice_finalization_guard.dart';
 import '../widgets/briskers_page_header.dart';
 import '../widgets/connection_header_toggle.dart';
+import '../widgets/stale_keyboard_inset_guard.dart';
 import 'jobs/blank_invoice_setup_screen.dart';
 import 'shell_screen.dart';
 import 'jobs/job_document_screen.dart';
@@ -1473,7 +1474,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         .where((row) => widget.customerId == null ||
             row['customer_id']?.toString() == widget.customerId).toList();
 
-    return Scaffold(
+    return StaleKeyboardInsetGuard(
+      child: Scaffold(
       backgroundColor: Colors.white,
       appBar: widget.customerId != null
           ? AppBar(
@@ -2040,6 +2042,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               }),
           ],
         ),
+      ),
       ),
     );
   }
