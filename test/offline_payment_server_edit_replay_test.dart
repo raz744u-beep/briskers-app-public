@@ -11,6 +11,7 @@ class _PaymentServerFixture extends BriskersApi {
   num amount=100;
   String method='old-method';
   String? date;
+  String enteredAt='2026-10-16T21:18:33.879364Z';
   int editCalls=0;
   bool loseResponse=false;
   bool rejectConflict=false;
@@ -52,6 +53,7 @@ class _PaymentServerFixture extends BriskersApi {
       'payment_method_id':method,
       'payment_method_name':'Cash',
       'payment_date':date,
+      'entered_at':enteredAt,
     }],
   };
 }
@@ -114,4 +116,133 @@ void main() {
       expect(server.amount,100);
     }finally{ await db.close(); }
   });
+  test('legacy cached pending receipt edits offline with original identity', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    final server=_PaymentServerFixture()
+      ..version=1
+      ..amount=174.80
+      ..method='cash';
+    try {
+      const shop='legacy-payment-shop',invoice='barbara-invoice';
+      final ledger=OfflineInvoicePaymentLedger(database:db,api:server);
+      final snapshot=await server.documentDetailV4(shop,invoice);
+      final oldReceipt=Map<String,dynamic>.from(
+          (snapshot['payments'] as List).single as Map);
+      oldReceipt.remove('row_version'); // Cached before v4 existed.
+      final cached=<String,dynamic>{
+        ...snapshot,'payments':[oldReceipt],
+      };
+      await ledger.queueServerPendingEdit(shop,invoice,
+        'server-pending-payment',
+        expectedRowVersion:null,
+        originalAmountCents:17480,
+        originalMethodId:'cash',
+        originalEnteredAt:server.enteredAt,
+        originalPaymentDate:null,
+        amount:175.60,maximumAllowedCents:17560,
+        methodId:'cash',methodName:'Cash',paymentDate:'2026-10-16');
+      final pending=await ledger.pendingEditsForInvoice(shop,invoice);
+      final preview=OfflineInvoicePaymentLedger.projectPendingEdits(
+          cached,pending);
+      expect((preview['payments'] as List).single['id'],
+          'server-pending-payment');
+      expect((preview['payments'] as List).single['amount'],175.60);
+      expect(preview['_payment_reconciliation_required'],isNot(true));
+      expect(server.editCalls,0); // Force Offline capture never calls network.
+      // Synthetic server replay uses verified version 1 and same payment ID.
+      await ledger.flushPendingServerEdits(shop);
+      expect(server.editCalls,1);
+      expect(server.version,2);
+      expect(server.amount,175.60);
+      expect((await ledger.pendingEditsForInvoice(shop,invoice)),isEmpty);
+    }finally{await db.close();}
+  });
+
+  test('legacy cached receipt blocks changed server version without writing', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    final server=_PaymentServerFixture()
+      ..version=2
+      ..amount=174.80
+      ..method='cash';
+    try {
+      const shop='legacy-stale-shop',invoice='legacy-stale-invoice';
+      final ledger=OfflineInvoicePaymentLedger(database:db,api:server);
+      await ledger.queueServerPendingEdit(shop,invoice,
+        'server-pending-payment',
+        expectedRowVersion:null,
+        originalAmountCents:17480,
+        originalMethodId:'cash',
+        originalEnteredAt:server.enteredAt,
+        amount:175.60,maximumAllowedCents:17560,
+        methodId:'cash',methodName:'Cash',paymentDate:'2026-10-16');
+      await ledger.flushPendingServerEdits(shop);
+      expect(server.editCalls,0);
+      final pending=await ledger.pendingEditsForInvoice(shop,invoice);
+      expect(pending,singleElement);
+      expect(pending.single['_queue_state'],'conflict');
+      final cached=await server.documentDetailV4(shop,invoice);
+      final projected=OfflineInvoicePaymentLedger.projectPendingEdits(
+          cached,pending);
+      expect(projected['_payment_reconciliation_required'],true);
+      expect((projected['payments'] as List).single['amount'],174.80);
+    }finally{await db.close();}
+  });
+
+  test('tax outbox blocks pending-payment replay until tax acknowledged', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    final server=_PaymentServerFixture()..amount=174.80..method='cash';
+    try {
+      const shop='tax-before-payment-shop',invoice='invoice-6349';
+      final ledger=OfflineInvoicePaymentLedger(database:db,api:server);
+      await ledger.queueServerPendingEdit(shop,invoice,
+        'server-pending-payment',expectedRowVersion:4,
+        amount:175.60,maximumAllowedCents:17560,
+        methodId:'cash',methodName:'Cash',paymentDate:'2026-10-16');
+      await db.customStatement(
+        """INSERT INTO sync_outbox
+           (business_id,entity_type,entity_id,operation,payload_json,
+            state,attempt_count,created_at)
+           VALUES (?,'invoice_tax_edit',?,'change_tax_rate','{}',
+                   'pending',0,1)""",
+        [shop,invoice]);
+      await ledger.flushPendingServerEdits(shop);
+      expect(server.editCalls,0);
+      expect((await ledger.pendingEditsForInvoice(shop,invoice)).single
+        ['_queue_state'],'pending');
+      await db.customStatement(
+        "DELETE FROM sync_outbox WHERE entity_type='invoice_tax_edit'");
+      await ledger.flushPendingServerEdits(shop);
+      expect(server.editCalls,1);
+      expect(server.amount,175.60);
+    }finally{await db.close();}
+  });
+
+  test('owner local remove discards only a never-submitted receipt', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    try {
+      const shop='local-remove-shop',invoice='local-remove-invoice';
+      final ledger=OfflineInvoicePaymentLedger(database:db);
+      final id=await ledger.recordReceivedPayment(shop,invoice,
+        amount:20,remainingBeforePaymentCents:2000,
+        methodId:'cash',methodName:'Cash');
+      expect((await ledger.pendingForInvoice(shop,invoice)),hasLength(1));
+      await ledger.deleteNeverSubmittedPayment(shop,invoice,id);
+      expect((await ledger.pendingForInvoice(shop,invoice)),isEmpty);
+      final secondId=await ledger.recordReceivedPayment(shop,invoice,
+        amount:20,remainingBeforePaymentCents:2000,
+        methodId:'cash',methodName:'Cash');
+      await db.customStatement(
+        """UPDATE sync_outbox SET attempt_count=1
+           WHERE business_id=? AND entity_type='invoice_payment_received'""",
+        [shop]);
+      await expectLater(ledger.deleteNeverSubmittedPayment(
+          shop,invoice,secondId),throwsStateError);
+      expect((await ledger.pendingForInvoice(shop,invoice)),hasLength(1));
+    }finally{await db.close();}
+  });
+
 }
