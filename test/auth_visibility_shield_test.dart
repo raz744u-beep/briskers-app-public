@@ -24,6 +24,10 @@ void main() {
     expect(closes, 0);
     expect(draft.text, 'private draft');
     actor = 'owner'; changes.add(actor); await tester.idle(); await tester.pump();
+    expect(find.text('private draft'), findsNothing,
+        reason: 'Returning to the same account must not reopen an old route');
+    await tester.tap(find.text('Close previous screens')); await tester.pump();
+    expect(closes, 1);
     expect(find.text('private draft'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     draft.dispose(); await changes.close();
