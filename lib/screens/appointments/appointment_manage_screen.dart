@@ -8,6 +8,7 @@ import '../../services/appointment_sync_service.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/briskers_api.dart';
 import '../../services/employee_roster_cache.dart';
+import '../../widgets/employee_role_menu_item.dart';
 
 class AppointmentManageScreen extends StatefulWidget {
   const AppointmentManageScreen({
@@ -485,19 +486,25 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
             decoration: const InputDecoration(
               labelText: 'Planned mechanic (optional)',
             ),
-            items: [
+                        items: [
               const DropdownMenuItem<String?>(
                 value: null,
-                child: Text('Unassigned'),
+                child: Row(
+                  children: [
+                    Icon(Icons.person_off_outlined),
+                    SizedBox(width: 12),
+                    Text('Unassigned'),
+                  ],
+                ),
               ),
               ..._employees.map(
                 (employee) => DropdownMenuItem<String?>(
                   value: employee['id']?.toString(),
-                  child: Text(
-                    '${employee['name'] ?? ''} — '
-                    '${employee['position_name'] ?? 'Employee'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  child: EmployeeRoleMenuItem(
+                    name: employee['name']?.toString() ??
+                        employee['display_name']?.toString() ?? '',
+                    position: employee['position_name']?.toString() ??
+                        employee['position']?.toString() ?? 'Employee',
                   ),
                 ),
               ),
