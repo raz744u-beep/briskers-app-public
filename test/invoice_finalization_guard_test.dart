@@ -113,6 +113,24 @@ void main() {
     });
   }
 
+  for (final state in ['pending', 'inflight', 'conflict']) {
+    test('queued $state invoice tax correction blocks payment finalization', () async {
+      await db.customStatement(
+        'INSERT INTO sync_outbox('
+        'business_id,entity_type,entity_id,operation,payload_json,state) '
+        "VALUES(?,'invoice_tax_edit',?,'change_tax_rate',?,?)",
+        ['shop', 'invoice', 'non-decodable-original-tax', state],
+      );
+      await expectLater(attempt(), throwsStateError);
+      expect(calls, 0);
+      final queued = await db.customSelect(
+        'SELECT payload_json,state FROM sync_outbox'
+      ).getSingle();
+      expect(queued.read<String>('payload_json'), 'non-decodable-original-tax');
+      expect(queued.read<String>('state'), state);
+    });
+  }
+
   test(
     'server acknowledged receipt still blocks until durable queue retirement',
     () async {
