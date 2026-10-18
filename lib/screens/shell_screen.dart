@@ -530,6 +530,9 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
           showAppBar: false,
           sharedBottomNavigationBar:
               index == 3 ? _shellNavigationBar(nested: true) : null,
+          // The Shell owns the list dock. Detail routes are pushed above
+          // this Shell and need their own navigation dock to leave invoices.
+          detailBottomNavigationBar: _shellNavigationBar(nested: true),
           dockDefaultsToOpen: true,
           dockResetToken: index == 3 ? _estimatesDockReset : _invoicesDockReset,
         );
