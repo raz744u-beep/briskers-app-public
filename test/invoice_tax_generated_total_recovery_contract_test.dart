@@ -9,11 +9,10 @@ void main() {
     final direct = File(
       'tools/migrations/invoice_tax_generated_total_fix_20261018.sql',
     );
-    final migratedSql = await direct.exists()
-        ? direct.readAsString()
-        : File('../tools/migrations/invoice_tax_generated_total_fix_20261018.sql')
-            .readAsString();
-    final sql = migratedSql;
+    final sqlFile = await direct.exists()
+        ? direct
+        : File('../tools/migrations/invoice_tax_generated_total_fix_20261018.sql');
+    final sql = await sqlFile.readAsString();
     expect(sql, contains("a.attgenerated='s'"));
     expect(sql, contains('perform briskers.recalculate_native_document('));
     expect(sql, contains('select x.total_amount,x.tax_amount into v_total,v_tax'));
