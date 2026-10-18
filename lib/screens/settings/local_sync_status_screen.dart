@@ -609,6 +609,59 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     }
   }
 
+  Future<void> _reviewKnownRejectedTax(int outboxId) async {
+    if (!widget.isOwner || _syncing ||
+        BriskersConnectionModeController.instance.forceOffline) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Verify rejected invoice tax correction?'),
+        content: const Text(
+          'This is only for a previously rejected PostgreSQL 428C9 '
+          'generated-total operation. The app will verify that the '
+          'corrected server function is deployed, that the original '
+          'invoice and line versions are unchanged, and that the '
+          'operation was rejected before marking the SAME local request '
+          'ready for a separate controlled sync. No payment is edited '
+          'or finalized by this verification. If anything differs, '
+          'the operation stays locked.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Verify and prepare retry'),
+          ),
+        ],
+      ),
+    ) ?? false;
+    if (!approved || !mounted) return;
+    setState(() {
+      _syncing = true;
+      _error = null;
+      _syncMessage = null;
+    });
+    try {
+      await _invoiceTax.requeueVerifiedGeneratedTotalRejection(
+        widget.businessId, outboxId,
+      );
+      await _load();
+      if (mounted) {
+        setState(() => _syncMessage =
+            'Server patch and original invoice verified. The SAME tax '
+            'operation is prepared for controlled sync; no retry or '
+            'payment finalization was performed by this action.');
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
   Future<void> _syncNow() async {
     if (_syncing) return;
     if (BriskersConnectionModeController.instance.forceOffline) {
@@ -1031,9 +1084,29 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                       ),
                     )),
                     const Text(
-                      'Inspection only. No pending data is removed here.',
+                      'Operation details are read-only. No pending data is removed here.',
                       style: TextStyle(fontSize: 12),
                     ),
+                    if (widget.isOwner)
+                      ..._pendingDetails.where((operation) {
+                        final error =
+                            (operation['error']?.toString() ?? '').toLowerCase();
+                        return operation['type'] == 'invoice_tax_edit' &&
+                            operation['state'] == 'inflight' &&
+                            error.contains('428c9') &&
+                            error.contains('generated column') &&
+                            error.contains('total_amount');
+                      }).map((operation) => Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: OutlinedButton.icon(
+                          onPressed: _syncing ||
+                              BriskersConnectionModeController.instance.forceOffline
+                              ? null
+                              : () => _reviewKnownRejectedTax(operation['id'] as int),
+                          icon: const Icon(Icons.fact_check_outlined),
+                          label: Text('Verify rejected tax update #${operation['id']}'),
+                        ),
+                      )),
                   ],
                   // Show the action on Owner's screen even when the cached
                   // eligibility summary is stale. The transactional handler
