@@ -34,6 +34,6 @@ class _AuthGateState extends State<AuthGate> {
   Widget build(BuildContext context) {
     return supabase.auth.currentSession == null
         ? const LoginScreen()
-        : const BusinessGate();
+        : BusinessGate(key: ValueKey(supabase.auth.currentUser?.id));
   }
 }
