@@ -88,6 +88,12 @@ class _StaleKeyboardInsetGuardState extends State<StaleKeyboardInsetGuard> {
           final insets = media.viewInsets;
           final shouldRecoverInset = insets.bottom > 0 &&
               !StaleKeyboardInsetGuard.editableTextHasFocus;
+          assert(() {
+            if (insets.bottom > 0) {
+              debugPrint('IME-GUARD-BUILD raw=${insets.bottom} focused=${StaleKeyboardInsetGuard.editableTextHasFocus} recover=$shouldRecoverInset');
+            }
+            return true;
+          }());
           // Retain a stable inherited MediaQuery element in both states.
           return MediaQuery(
             data: shouldRecoverInset
