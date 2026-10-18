@@ -21,7 +21,10 @@ class EmployeeRosterCache {
     String? Function()? actorId,
     bool Function()? forceOffline,
   })  : _api = api,
-        _actorId = actorId ?? (() => networkSupabase.auth.currentUser?.id),
+        // Supabase's cached session is accessible without network calls.
+        // networkSupabase deliberately throws in Force Offline, including
+        // for harmless auth.currentUser reads; never use it for cache keys.
+        _actorId = actorId ?? (() => supabase.auth.currentUser?.id),
         _forceOffline = forceOffline ??
             (() => BriskersConnectionModeController.instance.forceOffline);
 
@@ -78,9 +81,9 @@ class EmployeeRosterCache {
   }
 
   Future<EmployeeRosterSnapshot?> _read(String businessId, String scope) async {
-    final key = _key(businessId, scope);
-    if (key == null) return null;
     try {
+      final key = _key(businessId, scope);
+      if (key == null) return null;
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(key);
       if (raw == null) return null; // No cache is not a true empty roster.
