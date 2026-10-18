@@ -49,6 +49,7 @@ void main() {
     addTearDown(focus.dispose);
     await tester.pumpWidget(buildDock(body: TextField(focusNode: focus)));
     await tester.pumpAndSettle();
+    debugPrint('IME-DOCK-INITIAL focus=${focus.hasFocus} primary=${FocusManager.instance.primaryFocus?.debugLabel} primaryWidget=${FocusManager.instance.primaryFocus?.context?.widget.runtimeType}');
     expect(find.byKey(const ValueKey('dock-Home')), findsOneWidget);
     await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
