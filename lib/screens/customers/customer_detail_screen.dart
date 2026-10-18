@@ -16,6 +16,7 @@ import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/customer_detail_cache.dart';
 import '../../services/customer_document_summary_service.dart';
+import '../../services/customer_document_recency.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/job_summary_visibility.dart';
@@ -558,11 +559,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       final appointments = rows.where((item) => item['type'] == 'Appointment').toList();
       final visits = rows.where((item) => item['type'] == 'Visit').toList();
       final docs = [...invoices, ...estimates];
-      DateTime activityDate(Map<String, dynamic> item) =>
-        DateTime.tryParse(item['server_updated_at']?.toString() ?? '') ??
-        DateTime.tryParse(item['document_date']?.toString() ?? '') ??
-        DateTime(1970);
-      docs.sort((a, b) => activityDate(b).compareTo(activityDate(a)));
+      docs.sort(compareCustomerDocumentRecency);
       final balance = invoices.fold<int>(0, (sum, item) =>
         sum + ((item['balance_due_cents'] as int?) ?? 0));
       final pending = invoices.fold<int>(0, (sum, item) =>
