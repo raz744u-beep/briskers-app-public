@@ -51,7 +51,8 @@ class _AuthVisibilityShieldState extends State<AuthVisibilityShield> {
   }
   @override
   Widget build(BuildContext context) {
-    final locked = _locked || (_visibleActor != null && widget.actorId() != _visibleActor);
+    final locked = _locked || _accessChanged ||
+        (_visibleActor != null && widget.actorId() != _visibleActor);
     return Stack(children: [
       Offstage(offstage: locked, child: TickerMode(enabled: !locked, child: widget.child)),
       if (locked) Positioned.fill(child: Material(color: Colors.white,
