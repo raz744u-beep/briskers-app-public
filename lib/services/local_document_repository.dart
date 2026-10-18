@@ -159,6 +159,7 @@ class LocalDocumentRepository {
         businessId, invoiceId, rowVersion,
       ],
     );
+    _database.notifyUpdates({const TableUpdate('local_documents')});
   }
 
   Future<void> upsertFromServer(
