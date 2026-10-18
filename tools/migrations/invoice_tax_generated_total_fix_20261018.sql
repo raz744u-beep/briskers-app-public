@@ -140,3 +140,24 @@ revoke all on function public.briskers_update_invoice_tax_rate_v1(uuid,uuid,bigi
   from public,anon;
 grant execute on function public.briskers_update_invoice_tax_rate_v1(uuid,uuid,bigint,numeric,numeric)
   to authenticated;
+
+-- The client must be able to prove this complete migration is deployed
+-- before resetting an old, already-rejected 428C9 local outbox fence.
+-- No invoice/payment data is touched by this read-only capability endpoint.
+create or replace function public.briskers_invoice_tax_patch_level_v1(
+  p_business_id uuid
+) returns text
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+begin
+  perform briskers.require_permission(p_business_id, 'invoices.edit');
+  return 'generated_total_safe_20261018';
+end;
+$function$;
+
+revoke all on function public.briskers_invoice_tax_patch_level_v1(uuid)
+  from public, anon;
+grant execute on function public.briskers_invoice_tax_patch_level_v1(uuid)
+  to authenticated;
