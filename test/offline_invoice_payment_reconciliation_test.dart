@@ -561,7 +561,7 @@ void main() {
       final row = await db.customSelect('SELECT attempt_count,last_error FROM sync_outbox')
           .getSingle();
       expect(row.read<int>('attempt_count'), 2);
-      expect(row.read<String>('last_error'), contains('Idempotent endpoint unavailable'));
+      expect(row.read<String>('last_error'), contains('Date-aware idempotent endpoint unavailable'));
     });
   });
 
