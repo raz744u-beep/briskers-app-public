@@ -49,7 +49,6 @@ void main() {
     addTearDown(focus.dispose);
     await tester.pumpWidget(buildDock(body: TextField(focusNode: focus)));
     await tester.pumpAndSettle();
-    debugPrint('IME-DOCK-INITIAL focus=${focus.hasFocus} primary=${FocusManager.instance.primaryFocus?.debugLabel} primaryWidget=${FocusManager.instance.primaryFocus?.context?.widget.runtimeType} dockExists=${find.byType(BriskersModuleDock).evaluate().length} keyedOffstage=${find.byKey(const ValueKey('dock-Home'), skipOffstage: false).evaluate().length} labels=${tester.widgetList<Text>(find.byType(Text, skipOffstage: false)).map((t) => t.data).toList()}');
     expect(find.byKey(const ValueKey('dock-Home')), findsOneWidget);
     await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
