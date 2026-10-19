@@ -4305,6 +4305,32 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     });
   }
 
+  // Refresh just the invoice's findings banner after the sheet closes.
+  // Avoid reloading invoice items, payments, notes, and header metadata.
+  int _findingsRefreshToken = 0;
+
+  Future<void> _refreshInvoiceFindingsBanner() async {
+    final vehicleId = _detail?['vehicle_id']?.toString() ?? '';
+    if (!mounted || _estimate || vehicleId.isEmpty) return;
+    final token = ++_findingsRefreshToken;
+    try {
+      final active = await _api.vehicleFindings(
+        widget.businessId, vehicleId, includeResolved: false,
+      );
+      if (!mounted || token != _findingsRefreshToken) return;
+      setState(() {
+        _openFindings = active
+            .where((item) => _findingNeedsInvoiceAttention(item))
+            .toList();
+      });
+    } catch (error) {
+      if (!mounted || token != _findingsRefreshToken) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not refresh findings: $error')),
+      );
+    }
+  }
+
   Future<void> _showInvoiceFindings() async {
     if (_estimate || _detail == null || _busy) return;
 
@@ -4418,7 +4444,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ),
       ),
     );
-    if (mounted) await _load();
+    if (mounted) await _refreshInvoiceFindingsBanner();
   }
 
   Future<void> _emailPdf() async {
