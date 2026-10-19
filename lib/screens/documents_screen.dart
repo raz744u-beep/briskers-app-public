@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
@@ -432,12 +433,22 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       }
 
       if (!mounted || epoch != _loadEpoch) return;
-      setState(() {
-        _rows = rows;
-        _invoiceStyles = styles;
-        _error = null;
-      });
-      if (_estimate) unawaited(_enrichEstimateDescriptions(epoch, rows));
+      // Preserve first paint and scroll position when the remote response
+      // contains no visible changes.
+      final oldRows = _rows;
+      final sameRows = oldRows != null &&
+          jsonEncode(oldRows) == jsonEncode(rows);
+      final sameStyles = jsonEncode(_invoiceStyles) == jsonEncode(styles);
+      if (!sameRows || !sameStyles || _error != null) {
+        setState(() {
+          _rows = rows;
+          _invoiceStyles = styles;
+          _error = null;
+        });
+      }
+      if (_estimate && !sameRows) {
+        unawaited(_enrichEstimateDescriptions(epoch, rows));
+      }
     } catch (_) {
       if (!mounted || epoch != _loadEpoch) return;
       setState(() {
