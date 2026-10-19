@@ -19,7 +19,6 @@ import '../../services/briskers_api.dart';
 import '../../services/job_sync_service.dart';
 import '../../services/local_job_quarantine.dart';
 import '../../services/local_job_retirement.dart';
-import '../../local/local_database_provider.dart';
 import 'job_quarantine_view_guard.dart';
 import 'owner_job_delete_dialog.dart';
 import '../../services/owner_job_retirement_service.dart';
@@ -4635,8 +4634,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           children: [
             Padding(
               padding: const EdgeInsets.all(12),
-              child: Text(done.toString() + '/' + required.toString() +
-                  ' required tasks complete'),
+              child: Text('$done/$required required tasks complete'),
             ),
             ...tasks.map((task) => ListTile(
               leading: Icon(task['status'] == 'completed'
@@ -4646,7 +4644,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               subtitle: Text(task['is_billable'] == 1
                   ? 'Repair task' : 'Internal task'),
               trailing: Text(task['payroll_hours'] == null
-                  ? '' : task['payroll_hours'].toString() + 'h'),
+                  ? '' : '${task['payroll_hours']}h'),
             )),
           ],
         );
