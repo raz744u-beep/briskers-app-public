@@ -441,7 +441,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
         );
 
   @override
-  int get schemaVersion => 21;
+  int get schemaVersion => 22;
 
   // v18 introduced the ExpenseIQ photo queue but omitted its onUpgrade
   // migration, so user_version may be 18 while the tables are missing.
@@ -475,10 +475,51 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
     ''');
   }
 
+  // Local-only task cache foundation. No task sync is enabled until the
+  // server contract and role-gated authorization are deployed.
+  Future<void> ensureJobTaskSchema() async {
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS local_job_tasks (
+        id TEXT NOT NULL PRIMARY KEY,
+        business_id TEXT NOT NULL,
+        job_id TEXT NOT NULL,
+        description TEXT NOT NULL,
+        source_line_id TEXT NULL,
+        is_billable INTEGER NOT NULL DEFAULT 0,
+        is_required INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'not_started',
+        billed_hours REAL NULL,
+        payroll_hours REAL NULL,
+        sync_state TEXT NOT NULL DEFAULT 'local_only',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    ''');
+    await customStatement('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_task_source_line
+      ON local_job_tasks (business_id, job_id, source_line_id)
+      WHERE source_line_id IS NOT NULL
+    ''');
+    await customStatement('''
+      CREATE INDEX IF NOT EXISTS idx_local_job_tasks_job
+      ON local_job_tasks (business_id, job_id, status)
+    ''');
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS local_job_task_assignees (
+        task_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        payroll_hours REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (task_id, employee_id),
+        FOREIGN KEY (task_id) REFERENCES local_job_tasks(id)
+      )
+    ''');
+  }
+
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (migrator) async {
           await migrator.createAll();
+          await ensureJobTaskSchema();
           await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_status_created ON local_jobs (business_id, status, created_at DESC)');
           await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_number ON local_jobs (business_id, job_number)');
           await customStatement('CREATE INDEX IF NOT EXISTS idx_local_jobs_business_customer ON local_jobs (business_id, customer_name)');
@@ -597,6 +638,7 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
           }
           if (from < 19) {
             await ensureExpenseIqSchema();
+          await ensureJobTaskSchema();
           }
           if (from < 20) {
             // Existing imported documents cannot derive their historical date
@@ -623,7 +665,10 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
               "UPDATE local_sync_states SET bootstrapped = 0 "
               "WHERE scope = 'documents'",
             );
-          }          if (from < 21) {
+          }          if (from < 22) {
+            await ensureJobTaskSchema();
+          }
+          if (from < 21) {
             final columns = await customSelect(
               'PRAGMA table_info(local_documents)',
             ).get();

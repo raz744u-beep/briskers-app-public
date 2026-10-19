@@ -11,12 +11,14 @@ import '../../core/module_modal_theme.dart';
 import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/employee_role_style.dart';
+import '../../core/task_payroll_foundation.dart';
+import '../../local/local_database_provider.dart';
+import '../../local/local_job_task_store.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/job_sync_service.dart';
 import '../../services/local_job_quarantine.dart';
 import '../../services/local_job_retirement.dart';
-import '../../local/local_database_provider.dart';
 import 'job_quarantine_view_guard.dart';
 import 'owner_job_delete_dialog.dart';
 import '../../services/owner_job_retirement_service.dart';
@@ -2800,7 +2802,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }) {
     final employeeName = assignment == null
         ? 'Unassigned'
-        : assignment['employee_name']?.toString() ?? 'Assigned';
+        : EmployeeNickname.display(
+            fullName: assignment['employee_name']?.toString() ?? 'Assigned',
+            nickname: assignment['employee_nickname']?.toString(),
+          );
     final employeePosition =
         assignment?['position']?.toString() ?? 'Mechanic';
     final roleStyle = employeeRoleStyle(employeePosition);
@@ -4600,6 +4605,53 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     );
   }
 
+  Widget _tasksDrawer() {
+    return FutureBuilder<List<Map<String, Object?>>>(
+      future: LocalJobTaskStore(localDatabase)
+          .listForJob(widget.businessId, widget.jobId),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('Tasks could not be loaded.'),
+          );
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final tasks = snapshot.data!;
+        if (tasks.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('No saved tasks on this device yet.'),
+          );
+        }
+        final required = tasks.where((t) => t['is_required'] == 1).length;
+        final done = tasks.where((t) =>
+            t['is_required'] == 1 && t['status'] == 'completed').length;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text('$done/$required required tasks complete'),
+            ),
+            ...tasks.map((task) => ListTile(
+              leading: Icon(task['status'] == 'completed'
+                  ? Icons.check_circle_outline
+                  : Icons.radio_button_unchecked),
+              title: Text(task['description']?.toString() ?? 'Task'),
+              subtitle: Text(task['is_billable'] == 1
+                  ? 'Repair task' : 'Internal task'),
+              trailing: Text(task['payroll_hours'] == null
+                  ? '' : '${task['payroll_hours']}h'),
+            )),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _drawerForSection(
     String key, {
     required String complaint,
@@ -4608,6 +4660,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     required List<Map<String, dynamic>> visits,
   }) {
     switch (key) {
+      case 'tasks':
+        return _tasksDrawer();
       case 'complaint':
         return _complaintDrawer(complaint);
       case 'inspection':
@@ -4629,6 +4683,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
   String _sectionTitle(String key) {
     switch (key) {
+      case 'tasks':
+        return 'Tasks';
       case 'inspection':
         return tr('preInspection');
       case 'complaint':
@@ -4650,6 +4706,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
   IconData _sectionIcon(String key) {
     switch (key) {
+      case 'tasks':
+        return Icons.checklist;
       case 'inspection':
         return Icons.search;
       case 'complaint':
@@ -5264,6 +5322,23 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   ),
                 ],
               ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: categoryTile(
+                  'tasks',
+                  'Tasks',
+                  Icons.checklist,
+                  const Color(0xFF15988F),
+                  null,
+                ),
+              ),
+              const Expanded(child: SizedBox()),
+              const Expanded(child: SizedBox()),
+              const Expanded(child: SizedBox()),
             ],
           ),
           if (_error != null) ...[
