@@ -33,6 +33,9 @@ class LocalJobDeletionV3 {
     'document_attachment', 'job_attachment', 'job_assignment_request',
     'job_visit_assignment', 'job_labor', 'job_internal_note', 'job_status_event',
     'payment_allocation', 'expense_allocation', 'payroll_allocation',
+    // Explicit identity-only fence for optional server audit-graph support.
+    // No local audit-table deletion is implied by receiving this identity.
+    'payment_edit_audit',
     'expense_attachment', 'receipt_item', 'appointment_request', 'conversation',
     'conversation_member', 'message', 'message_attachment', 'activity_event',
     'notification', 'kiosk_registration', 'legacy_link', 'finding_attachment_link',
