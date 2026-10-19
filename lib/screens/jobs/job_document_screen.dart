@@ -1271,6 +1271,92 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (changed == true) await _load();
   }
 
+  Future<List<Map<String, dynamic>>> _invoiceTabExpenses() async {
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      final cached = await LocalFinancialCache().loadLinkedExpenses(
+        widget.businessId,
+      );
+      if (cached == null) {
+        throw StateError('Linked expenses are not available offline yet.');
+      }
+      final jobId = _detail?['job_id']?.toString() ?? '';
+      final seen = <String>{};
+      return cached.where((row) {
+        final linked = row['document_id']?.toString() == widget.documentId ||
+            (jobId.isNotEmpty && row['job_id']?.toString() == jobId);
+        if (!linked) return false;
+        final key = row['id']?.toString() ?? '';
+        return key.isEmpty || seen.add(key);
+      }).toList();
+    }
+    return _api.documentExpenses(widget.businessId, widget.documentId);
+  }
+
+  Widget _invoiceExpensesTab() {
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+        child: Row(children: [
+          const Expanded(child: Text('Linked expenses',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800))),
+          IconButton(
+            tooltip: 'Add expense',
+            icon: const Icon(Icons.add_circle_outline),
+            color: BriskersColors.expenses,
+            onPressed: _canManageInvoiceExpenses && !_busy
+                ? _addInvoiceExpense : null,
+          ),
+        ]),
+      ),
+      Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _invoiceTabExpenses(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData && !snapshot.hasError) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('Linked expenses could not be loaded: ${snapshot.error}'),
+            ));
+          }
+          final expenses = snapshot.data ?? const <Map<String, dynamic>>[];
+          if (expenses.isEmpty) {
+            return const Center(child: Text('No expenses linked to this invoice or job.'));
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 18),
+            itemCount: expenses.length,
+            itemBuilder: (context, index) {
+              final item = expenses[index];
+              final id = item['id']?.toString() ?? '';
+              final vendor = (item['vendor'] ?? item['counterparty'] ?? 'Expense').toString();
+              final income = item['direction']?.toString() == 'income';
+              final color = income ? const Color(0xFF169B62) : BriskersColors.expenses;
+              return Card(child: ListTile(
+                leading: Icon(income ? Icons.south_west : Icons.north_east, color: color),
+                title: Text(vendor, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(item['transaction_date']?.toString() ?? ''),
+                trailing: Text('${income ? '+' : '-'}${_money(item['amount'])}',
+                  style: TextStyle(fontWeight: FontWeight.w800, color: color)),
+                onTap: id.isEmpty ? null : () async {
+                  await Navigator.push<void>(context, MaterialPageRoute(
+                    builder: (_) => ExpenseDetailScreen(
+                      businessId: widget.businessId,
+                      transactionId: id,
+                    ),
+                  ));
+                  if (mounted) setState(() {});
+                },
+              ));
+            },
+          );
+        },
+      )),
+    ]);
+  }
+
   Future<void> _showInvoiceExpenses() async {
     if (_estimate || !_canManageInvoiceExpenses) return;
     try {
@@ -7556,7 +7642,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             finalizedPaid: finalizedPaid,
             pendingPaid: pendingPaid,
           );
-    final tabCount = _estimate ? 2 : 3;
+    final tabCount = _estimate ? 2 : 4;
 
     return DefaultTabController(
       length: tabCount,
@@ -7701,6 +7787,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   balance: balance,
                 ),
               _notesTab(),
+              if (!_estimate) _invoiceExpensesTab(),
             ],
           ),
         ),
@@ -7840,6 +7927,8 @@ class _DocumentTabsHeaderDelegate
         ),
         child: TabBar(
           onTap: onTap,
+          isScrollable: !isEstimate,
+          tabAlignment: !isEstimate ? TabAlignment.start : null,
           indicatorColor: accent,
           indicatorWeight: 3,
           labelColor: accent,
@@ -7852,6 +7941,7 @@ class _DocumentTabsHeaderDelegate
             Tab(text: tr('itemsTab')),
             if (!isEstimate) Tab(text: tr('paymentTab')),
             Tab(text: tr('notesTab')),
+            if (!isEstimate) const Tab(text: 'Expenses'),
           ],
         ),
       ),
