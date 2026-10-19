@@ -11,6 +11,7 @@ import '../../core/module_modal_theme.dart';
 import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/employee_role_style.dart';
+import '../../core/task_payroll_foundation.dart';
 import '../../core/job_status_style.dart';
 import '../../services/briskers_api.dart';
 import '../../services/job_sync_service.dart';
@@ -2800,7 +2801,10 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }) {
     final employeeName = assignment == null
         ? 'Unassigned'
-        : assignment['employee_name']?.toString() ?? 'Assigned';
+        : EmployeeNickname.display(
+            fullName: assignment['employee_name']?.toString() ?? 'Assigned',
+            nickname: assignment['employee_nickname']?.toString(),
+          );
     final employeePosition =
         assignment?['position']?.toString() ?? 'Mechanic';
     final roleStyle = employeeRoleStyle(employeePosition);
