@@ -7,10 +7,12 @@ class ExistingTaskLink {
     required this.taskId,
     required this.jobId,
     required this.sourceLineId,
+    this.invoiceLineId,
   });
   final String taskId;
   final String jobId;
   final String sourceLineId;
+  final String? invoiceLineId;
 }
 
 class LaborTaskDecision {
@@ -34,6 +36,9 @@ class LaborTaskReconciler {
     final byKey = <String, String>{};
     for (final entry in existing) {
       byKey['${entry.jobId}:${entry.sourceLineId}'] = entry.taskId;
+      if (entry.invoiceLineId != null) {
+        byKey['${entry.jobId}:${entry.invoiceLineId}'] = entry.taskId;
+      }
     }
     final seen = <String>{};
     final result = <LaborTaskDecision>[];
