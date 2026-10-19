@@ -817,7 +817,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (changed == true && mounted) {
+      // Keep the existing list visible while the locally saved transaction
+      // is picked up and the authoritative server snapshot reconciles.
+      // A full-screen spinner here made successful saves appear delayed.
+      unawaited(_load(showLoading: false));
+    }
   }
 
   Future<void> _chooseQuick() async {
