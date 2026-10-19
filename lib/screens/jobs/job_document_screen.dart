@@ -113,6 +113,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
   bool _loading = true;
   bool _busy = false;
   bool _initialActionHandled = false;
+  Future<List<Map<String, dynamic>>>? _invoiceExpensesFuture;
   Timer? _pendingInvoiceResolution;
   bool _notesDirty = false;
   String? _error;
@@ -1093,7 +1094,162 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (changed == true) {
+      _invoiceExpensesFuture = null;
+      await _load();
+    }
+  }
+
+
+  Future<List<Map<String, dynamic>>> _loadInvoiceTabExpenses() async {
+    final offline = BriskersConnectionModeController.instance.forceOffline;
+    if (!offline) {
+      return _api.documentExpenses(widget.businessId, widget.documentId);
+    }
+    final cached = await LocalFinancialCache().loadLinkedExpenses(
+      widget.businessId,
+    );
+    if (cached == null) {
+      throw StateError(
+        'Linked expenses are not cached on this phone. '
+        'Connect using Auto and run Local Database Sync.',
+      );
+    }
+    final jobId = _detail?['job_id']?.toString();
+    final seen = <String>{};
+    return cached.where((expense) {
+      final linked = expense['document_id']?.toString() == widget.documentId ||
+          (jobId != null && jobId.isNotEmpty &&
+              expense['job_id']?.toString() == jobId);
+      if (!linked) return false;
+      final id = expense['id']?.toString() ?? '';
+      return id.isEmpty || seen.add(id);
+    }).toList();
+  }
+
+  Widget _invoiceExpensesTab() {
+    if (!_canManageInvoiceExpenses) {
+      return const Center(
+        child: Text('You do not have permission to view linked expenses.'),
+      );
+    }
+    _invoiceExpensesFuture ??= _loadInvoiceTabExpenses();
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 12, 8),
+          child: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Job / Invoice Expenses',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Refresh expenses',
+                onPressed: () => setState(() => _invoiceExpensesFuture = null),
+                icon: const Icon(Icons.refresh),
+              ),
+              IconButton(
+                tooltip: 'Add expense',
+                color: BriskersColors.expenses,
+                onPressed: _busy ? null : _addInvoiceExpense,
+                icon: const Icon(Icons.add_circle_outline),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: FutureBuilder<List<Map<String, dynamic>>>(
+            future: _invoiceExpensesFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Center(
+                    child: Text(
+                      'Expenses could not be loaded.\\n${snapshot.error}',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                );
+              }
+              final expenses = snapshot.data ?? const <Map<String, dynamic>>[];
+              if (expenses.isEmpty) {
+                return const Center(
+                  child: Text('No expenses are linked to this job or invoice.'),
+                );
+              }
+              return ListView.builder(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 20),
+                itemCount: expenses.length,
+                itemBuilder: (context, index) {
+                  final expense = expenses[index];
+                  final id = expense['id']?.toString() ?? '';
+                  final vendor = (expense['vendor'] ??
+                          expense['counterparty'] ?? 'Expense').toString();
+                  final category = expense['category']?.toString() ?? '';
+                  final date = expense['transaction_date']?.toString() ?? '';
+                  final scope = expense['scope']?.toString() ?? '';
+                  final income = expense['direction']?.toString() == 'income';
+                  final amountColor = income
+                      ? const Color(0xFF169B62)
+                      : BriskersColors.expenses;
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: amountColor.withValues(alpha: 0.1),
+                        child: Icon(
+                          income ? Icons.south_west : Icons.north_east,
+                          color: amountColor,
+                        ),
+                      ),
+                      title: Text(
+                        vendor,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      subtitle: Text(
+                        [if (scope.isNotEmpty) scope,
+                         if (category.isNotEmpty) category,
+                         if (date.isNotEmpty) date].join(' • '),
+                        maxLines: 2,
+                      ),
+                      trailing: Text(
+                        '${income ? '+' : '-'}${_money(expense['amount'])}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          color: amountColor,
+                        ),
+                      ),
+                      onTap: id.isEmpty ? null : () async {
+                        await Navigator.push<void>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ExpenseDetailScreen(
+                              businessId: widget.businessId,
+                              transactionId: id,
+                            ),
+                          ),
+                        );
+                        if (!mounted) return;
+                        setState(() => _invoiceExpensesFuture = null);
+                      },
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
   }
 
   Future<void> _showInvoiceExpenses() async {
@@ -6592,7 +6748,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
             finalizedPaid: finalizedPaid,
             pendingPaid: pendingPaid,
           );
-    final tabCount = _estimate ? 2 : 3;
+    final tabCount = _estimate ? 2 : 4;
 
     return DefaultTabController(
       length: tabCount,
@@ -6755,6 +6911,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                   balance: balance,
                 ),
               _notesTab(),
+              if (!_estimate) _invoiceExpensesTab(),
             ],
           ),
         ),
@@ -6882,6 +7039,8 @@ class _DocumentTabsHeaderDelegate
         ),
         child: TabBar(
           onTap: onTap,
+          isScrollable: !isEstimate,
+          tabAlignment: !isEstimate ? TabAlignment.start : null,
           indicatorColor: accent,
           indicatorWeight: 3,
           labelColor: accent,
@@ -6894,6 +7053,7 @@ class _DocumentTabsHeaderDelegate
             Tab(text: tr('itemsTab')),
             if (!isEstimate) Tab(text: tr('paymentTab')),
             Tab(text: tr('notesTab')),
+            if (!isEstimate) const Tab(text: 'Expenses'),
           ],
         ),
       ),
