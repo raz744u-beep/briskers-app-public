@@ -9,6 +9,7 @@ import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
 import 'local_job_retirement.dart';
+import 'local_job_deletion_v3.dart';
 import 'owner_job_retirement_service.dart';
 import 'test_job_cleanup_gateway.dart';
 import 'test_job_cleanup_policy.dart';
@@ -165,6 +166,7 @@ class JobSyncService {
 
       while (hasMore) {
         final beforeSnapshot = await _snapshotBaseline(businessId);
+        final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
         final requestGeneration = await LocalJobQuarantine.captureGeneration(
           _database,
           businessId,
@@ -173,6 +175,7 @@ class JobSyncService {
           businessId,
           afterCursor: pageCursor,
         );
+        await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
 
         final retired = await LocalJobRetirement.blockedJobIds(
           _database,
@@ -232,6 +235,7 @@ class JobSyncService {
         );
 
         await _database.transaction(() async {
+          await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
           if (mode == 'bootstrap') {
             await _clearBusinessJobCache(businessId);
           }
@@ -246,6 +250,7 @@ class JobSyncService {
               businessId,
               Map<String, dynamic>.from(raw),
               requestGeneration: requestGeneration,
+              visibilityGeneration: visibilityGeneration,
             );
           }
 
@@ -318,7 +323,8 @@ class JobSyncService {
 
     try {
       final beforeSnapshot = await _snapshotBaseline(businessId);
-      final requestGeneration = await LocalJobQuarantine.captureGeneration(
+      final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+        final requestGeneration = await LocalJobQuarantine.captureGeneration(
         _database,
         businessId,
       );
@@ -327,6 +333,7 @@ class JobSyncService {
           throw StateError('Job bootstrap exceeded page safety limit.');
         }
         final response = await _fetchBootstrapPage(businessId, afterJobId);
+        await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
         if (response['mode']?.toString() != 'bootstrap') {
           throw StateError('Invalid server job bootstrap response.');
         }
@@ -394,6 +401,7 @@ class JobSyncService {
         observedGeneration: classificationGeneration,
       );
       await _database.transaction(() async {
+        await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
         await _clearBusinessJobCache(businessId);
         for (final bundle in completeBundles) {
           final job = bundle['job'] as Map;
@@ -402,9 +410,11 @@ class JobSyncService {
             businessId,
             bundle,
             requestGeneration: requestGeneration,
+              visibilityGeneration: visibilityGeneration,
           );
         }
       });
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
       await _writeSyncState(
         businessId,
         cursor: initialCursor ?? 0,
@@ -569,6 +579,7 @@ class JobSyncService {
     String businessId,
     Map<String, dynamic> bundle, {
     required int requestGeneration,
+    required int visibilityGeneration,
   }) async {
     final rawJob = bundle['job'];
     if (rawJob is! Map) return;
@@ -576,6 +587,41 @@ class JobSyncService {
     final job = Map<String, dynamic>.from(rawJob);
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;
+    final scopedEntities = <Map<String, dynamic>>[];
+    void add(String kind, Object? id) {
+      if (id is String && id.isNotEmpty) {
+        scopedEntities.add({'entity_kind': kind, 'entity_id': id});
+      }
+    }
+    add('job', jobId);
+    for (final row in (job['assignments'] as List? ?? const [])) {
+      if (row is Map) { add('job_assignment', row['assignment_id']); }
+    }
+    for (final row in (job['visits'] as List? ?? const [])) {
+      if (row is Map) { add('job_visit', row['id']); }
+    }
+    final scopedInspection = bundle['pre_inspection'];
+    if (scopedInspection is Map) {
+      add('pre_inspection', scopedInspection['id']);
+      for (final row in (scopedInspection['photos'] as List? ?? const [])) {
+        if (row is Map) {
+          add('pre_inspection_photo', row['id']);
+          add('attachment', row['attachment_id']);
+        }
+      }
+    }
+    for (final finding in (bundle['findings'] as List? ?? const [])) {
+      if (finding is! Map) { continue; }
+      add('finding', finding['id']);
+      for (final row in (finding['attachments'] as List? ?? const [])) {
+        if (row is Map) {
+          add('finding_photo', row['attachment_id']);
+          add('attachment', row['attachment_id']);
+        }
+      }
+    }
+    await LocalJobDeletionV3.authorizeScopedEntities(_database, businessId,
+      visibilityGeneration, scopedEntities);
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return;
     }
@@ -1290,3 +1336,4 @@ class JobSyncService {
   int? _unix(DateTime? value) =>
       value == null ? null : value.toUtc().millisecondsSinceEpoch ~/ 1000;
 }
+

@@ -7,6 +7,7 @@ import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_access_history.dart';
 import 'local_job_retirement.dart';
+import 'local_job_deletion_v3.dart';
 
 class LocalJobDetailSnapshot {
   const LocalJobDetailSnapshot({
@@ -52,13 +53,21 @@ class LocalJobRepository {
       WHERE r.business_id = $alias.business_id AND r.entity_kind = 'job'
         AND r.entity_id = $alias.id
         AND r.state IN ('pending','accepted','locally_cancelled'))
+    AND NOT EXISTS (SELECT 1 FROM local_job_deletion_v3_fences v3
+      WHERE v3.business_id=$alias.business_id AND v3.entity_kind='job'
+        AND v3.entity_id=$alias.id)
   """;
+
+  static String _visibleChildSql(String alias, String kindSql, {String idColumn = 'id'}) =>
+      "NOT EXISTS(SELECT 1 FROM local_job_deletion_v3_fences hidden "
+      "WHERE hidden.business_id=$alias.business_id AND hidden.entity_kind=$kindSql "
+      "AND hidden.entity_id=$alias.$idColumn)";
 
   static const _finishedStatuses = "('completed','cancelled','closed')";
 
   // Import time is not business activity. MB jobs with no reliable historical
   // date sort last; a later edit still counts. Job number only breaks ties.
-  static const _jobActivitySql = """
+  static final _jobActivitySql = """
     MAX(
       COALESCE(j.completed_at, 0),
       CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
@@ -72,7 +81,8 @@ class LocalJobRepository {
           AND v.server_updated_at <= j.created_at THEN 0
           ELSE COALESCE(v.server_updated_at, 0) END
       )) FROM local_job_visits v
-        WHERE v.business_id = j.business_id AND v.job_id = j.id), 0),
+        WHERE v.business_id = j.business_id AND v.job_id = j.id
+          AND ${_visibleChildSql('v', "'job_visit'")}), 0),
       COALESCE((SELECT MAX(MAX(
         COALESCE(CAST(strftime('%s', d.document_date) AS INTEGER), 0),
         COALESCE(d.closed_at, 0),
@@ -82,14 +92,16 @@ class LocalJobRepository {
           ELSE MAX(COALESCE(d.server_updated_at, 0),
                    COALESCE(d.created_at, 0)) END
       )) FROM local_documents d
-        WHERE d.business_id = j.business_id AND d.job_id = j.id), 0),
+        WHERE d.business_id = j.business_id AND d.job_id = j.id
+          AND ${_visibleChildSql('d', 'd.kind')}), 0),
       COALESCE((SELECT MAX(MAX(
         COALESCE(i.inspected_at, 0),
         CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
           AND i.server_updated_at <= j.created_at THEN 0
           ELSE COALESCE(i.server_updated_at, 0) END
       )) FROM local_pre_inspections i
-        WHERE i.business_id = j.business_id AND i.job_id = j.id), 0),
+        WHERE i.business_id = j.business_id AND i.job_id = j.id
+          AND ${_visibleChildSql('i', "'pre_inspection'")}), 0),
       COALESCE((SELECT MAX(MAX(
         COALESCE(f.resolved_at, 0),
         CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
@@ -100,37 +112,46 @@ class LocalJobRepository {
           ELSE COALESCE(f.server_updated_at, 0) END
       )) FROM local_findings f
         WHERE f.business_id = j.business_id
+          AND ${_visibleChildSql('f', "'finding'")}
           AND (f.found_job_id = j.id OR f.repair_job_id = j.id)), 0),
       COALESCE((SELECT MAX(p.captured_at)
         FROM local_pre_inspection_photos p
         JOIN local_pre_inspections i ON i.business_id = p.business_id
           AND i.id = p.inspection_id
-        WHERE i.business_id = j.business_id AND i.job_id = j.id), 0),
+          AND ${_visibleChildSql('p', "'pre_inspection_photo'")}
+          AND ${_visibleChildSql('p', "'attachment'", idColumn: 'attachment_id')}
+        WHERE i.business_id = j.business_id AND i.job_id = j.id
+          AND ${_visibleChildSql('i', "'pre_inspection'")}), 0),
       COALESCE((SELECT MAX(p.captured_at)
         FROM local_finding_photos p
         JOIN local_findings f ON f.business_id = p.business_id
           AND f.id = p.finding_id
+          AND ${_visibleChildSql('p', "'finding_photo'")}
+          AND ${_visibleChildSql('p', "'attachment'", idColumn: 'attachment_id')}
         WHERE f.business_id = j.business_id
+          AND ${_visibleChildSql('f', "'finding'")}
           AND (f.found_job_id = j.id OR f.repair_job_id = j.id)), 0),
       COALESCE((SELECT MAX(MAX(COALESCE(o.created_at, 0),
         CASE WHEN json_valid(o.payload_json)
           THEN COALESCE(CAST(json_extract(o.payload_json, '\$._activity_at') AS INTEGER), 0)
           ELSE 0 END)) FROM sync_outbox o
         WHERE o.business_id = j.business_id AND o.state = 'pending'
+          AND NOT EXISTS(SELECT 1 FROM local_job_deletion_v3_scope_outbox hidden_outbox
+            WHERE hidden_outbox.business_id=o.business_id AND hidden_outbox.outbox_id=o.id)
           AND ((o.entity_id = j.id AND o.entity_type IN
             ('job_create', 'job_admin', 'work_summary', 'preinspection'))
           OR (o.entity_type IN ('invoice_payment_received', 'document_edit',
             'document_draft_create', 'estimate_add_to_invoice') AND EXISTS (
             SELECT 1 FROM local_documents pd
             WHERE pd.business_id = j.business_id AND pd.job_id = j.id
-              AND pd.id = o.entity_id
+              AND pd.id = o.entity_id AND ${_visibleChildSql('pd', 'pd.kind')}
           ))
           OR (o.entity_type IN ('finding_create', 'finding_update',
             'finding_action') AND EXISTS (
             SELECT 1 FROM local_findings pf
             WHERE pf.business_id = j.business_id
               AND (pf.found_job_id = j.id OR pf.repair_job_id = j.id)
-              AND pf.id = o.entity_id
+              AND pf.id = o.entity_id AND ${_visibleChildSql('pf', "'finding'")}
           )))), 0)
     )
   """;
@@ -140,13 +161,15 @@ class LocalJobRepository {
   // of the work itself. Invoice settlement and visit container creation may be
   // later administrative activity. An undated MB import must not use its import
   // timestamp.
-  static const _jobDateSql = """
+  static final _jobDateSql = """
     COALESCE(NULLIF(j.completed_at, 0),
       (SELECT MIN(CAST(strftime('%s', d.document_date) AS INTEGER))
         FROM local_documents d
-        WHERE d.business_id = j.business_id AND d.job_id = j.id),
+        WHERE d.business_id = j.business_id AND d.job_id = j.id
+          AND ${_visibleChildSql('d', 'd.kind')}),
       (SELECT MIN(NULLIF(v.closed_at, 0)) FROM local_job_visits v
-        WHERE v.business_id = j.business_id AND v.job_id = j.id),
+        WHERE v.business_id = j.business_id AND v.job_id = j.id
+          AND ${_visibleChildSql('v', "'job_visit'")}),
       CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
         THEN 0 ELSE COALESCE(j.created_at, 0) END)
   """;
@@ -220,6 +243,7 @@ class LocalJobRepository {
     int offset = 0,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     await LocalJobAccessHistory(database: _database).ensureTable();
     // Activity is sorted before paging. Keep related lookups indexed even on
     // older installed databases so a large imported history stays usable.
@@ -261,7 +285,8 @@ class LocalJobRepository {
           CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'MB-%'
             THEN COALESCE((SELECT MIN(CAST(strftime('%s', d.document_date) AS INTEGER))
               FROM local_documents d
-              WHERE d.business_id = j.business_id AND d.job_id = j.id), 0)
+              WHERE d.business_id = j.business_id AND d.job_id = j.id
+          AND ${_visibleChildSql('d', 'd.kind')}), 0)
             ELSE COALESCE(j.created_at, 0) END DESC,
         """
         : view == JobListView.all || sort == JobListSort.lastModified
@@ -295,7 +320,7 @@ class LocalJobRepository {
         COALESCE(s.sort_order, 9999) AS status_sort_order,
         (SELECT COUNT(*) FROM local_findings f
           WHERE f.business_id = j.business_id AND f.vehicle_id = j.vehicle_id
-            AND f.status = 'open') AS open_findings
+            AND f.status = 'open' AND ${_visibleChildSql('f', "'finding'")}) AS open_findings
       FROM job_activity j
       LEFT JOIN local_job_statuses s
         ON s.business_id = j.business_id AND s.code = j.status
@@ -315,6 +340,7 @@ class LocalJobRepository {
           ],
         )
         .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return rows.map(_jobListMap).toList();
   }
 
@@ -322,6 +348,7 @@ class LocalJobRepository {
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;
     }
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final rows = await _database
         .customSelect(
           "SELECT job_number FROM local_jobs j WHERE business_id = ? AND id = ? "
@@ -329,6 +356,7 @@ class LocalJobRepository {
           variables: [Variable<String>(businessId), Variable<String>(jobId)],
         )
         .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     if (rows.isEmpty) return null;
     final number = rows.single.readNullable<String>('job_number')?.trim();
     return number == null || number.isEmpty ? null : number;
@@ -493,6 +521,7 @@ class LocalJobRepository {
     JobListView view = JobListView.all,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final filters = _filters(
       businessId,
       status: status,
@@ -505,11 +534,13 @@ class LocalJobRepository {
           variables: filters.variables,
         )
         .getSingle();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return row.read<int>('count');
   }
 
   Stream<int> watchJobCount(String businessId, {String? status}) async* {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final where = <String>['j.business_id = ?', _visibleJobSql('j')];
     final variables = <Variable<Object>>[Variable<String>(businessId)];
     if (status != null && status.isNotEmpty) {
@@ -524,7 +555,10 @@ class LocalJobRepository {
           readsFrom: {_database.localJobs},
         )
         .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .asyncMap((row) async {
+          await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+          return row.read<int>('count');
+        });
   }
 
   Future<List<Map<String, dynamic>>> unassignedOpenJobs(
@@ -532,6 +566,7 @@ class LocalJobRepository {
     int limit = 25,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final rows = await _database
         .customSelect(
           '''
@@ -548,6 +583,7 @@ class LocalJobRepository {
         )
         .get();
 
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return rows
         .map(
           (row) => <String, dynamic>{
@@ -565,6 +601,7 @@ class LocalJobRepository {
 
   Future<int> unassignedOpenJobCount(String businessId) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final row = await _database
         .customSelect(
           '''
@@ -578,11 +615,13 @@ class LocalJobRepository {
           variables: [Variable<String>(businessId)],
         )
         .getSingle();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return row.read<int>('count');
   }
 
   Future<int> activeJobCount(String businessId) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final row = await _database
         .customSelect(
           '''
@@ -595,11 +634,13 @@ class LocalJobRepository {
           variables: [Variable<String>(businessId)],
         )
         .getSingle();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return row.read<int>('count');
   }
 
   Stream<int> watchActiveJobCount(String businessId) async* {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     yield* _database
         .customSelect(
           '''
@@ -613,7 +654,10 @@ class LocalJobRepository {
           readsFrom: {_database.localJobs},
         )
         .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .asyncMap((row) async {
+          await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+          return row.read<int>('count');
+        });
   }
 
   Future<Map<String, int>> jobStatusCounts(
@@ -621,6 +665,7 @@ class LocalJobRepository {
     JobListView view = JobListView.all,
   }) async {
     await LocalJobRetirement.ensureSchema(_database);
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     final rows = await _database
         .customSelect(
           '''
@@ -634,6 +679,7 @@ class LocalJobRepository {
           variables: [Variable<String>(businessId)],
         )
         .get();
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return {
       for (final row in rows)
         row.read<String>('status'): row.read<int>('count'),
@@ -731,6 +777,7 @@ class LocalJobRepository {
     String businessId,
     String jobId,
   ) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;
     }
@@ -761,7 +808,9 @@ class LocalJobRepository {
         )
         .get();
 
+    final blockedAssignments = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_job_assignments');
     final assignments = assignmentRows
+        .where((assignment) => !blockedAssignments.contains(assignment.read<String>('assignment_id')))
         .map(
           (assignment) => <String, dynamic>{
             'assignment_id': assignment.read<String>('assignment_id'),
@@ -787,7 +836,9 @@ class LocalJobRepository {
         )
         .get();
 
+    final blockedVisits = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_job_visits');
     final visits = visitRows
+        .where((visit) => !blockedVisits.contains(visit.read<String>('id')))
         .map(
           (visit) => <String, dynamic>{
             'id': visit.read<String>('id'),
@@ -852,6 +903,7 @@ class LocalJobRepository {
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;
     }
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
     return LocalJobDetailSnapshot(
       job: job,
       preInspection: preInspection,
@@ -921,6 +973,7 @@ class LocalJobRepository {
     if (rows.isEmpty) return null;
     final row = rows.first;
     final inspectionId = row.read<String>('id');
+    if ((await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_pre_inspections')).contains(inspectionId)) { return null; }
 
     final photoRows = await _database
         .customSelect(
@@ -937,6 +990,7 @@ class LocalJobRepository {
         )
         .get();
 
+    final blockedPhotos = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_pre_inspection_photos');
     return <String, dynamic>{
       'id': inspectionId,
       'job_id': jobId,
@@ -949,6 +1003,7 @@ class LocalJobRepository {
       'row_version': row.readNullable<int>('row_version'),
       'sync_state': row.read<String>('sync_state'),
       'photos': photoRows
+          .where((photo) => !blockedPhotos.contains(photo.read<String>('id')))
           .map(
             (photo) => <String, dynamic>{
               'id': photo.read<String>('id'),
@@ -998,9 +1053,12 @@ class LocalJobRepository {
         )
         .get();
 
+    final blockedFindings = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_findings');
+    final blockedPhotos = await LocalJobDeletionV3.blockedIdsForTable(_database, businessId, 'local_finding_photos');
     final result = <Map<String, dynamic>>[];
     for (final row in rows) {
       final findingId = row.read<String>('id');
+      if (blockedFindings.contains(findingId)) { continue; }
       final photoRows = await _database
           .customSelect(
             '''
@@ -1033,6 +1091,7 @@ class LocalJobRepository {
         'can_delete': false,
         'sync_state': row.read<String>('sync_state'),
         'attachments': photoRows
+            .where((photo) => !blockedPhotos.contains(photo.read<String>('id')))
             .map(
               (photo) => <String, dynamic>{
                 'id': photo.read<String>('id'),
@@ -1091,3 +1150,4 @@ class LocalJobRepository {
     return DateTime.tryParse(value.toString())?.toUtc().toIso8601String();
   }
 }
+

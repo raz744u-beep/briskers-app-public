@@ -9,6 +9,10 @@ on:
       - '.github/workflows/diagnostics.yml'
       - 'tools/tests/test_apk_certificate_verification.py'
       - 'tools/audit_ui_actions.py'
+      - 'tools/validate_local_deletion_v3_sql.py'
+      - 'tools/validate_offline_job_purge_sql.py'
+      - 'tools/tests/owner_delete_sandbox_preflight.py'
+      - 'tools/tests/test_owner_delete_sandbox_preflight.py'
 
 # Build/test commands never transmit Flutter or Dart analytics.
 env:
@@ -61,6 +65,14 @@ jobs:
 
       - name: Verify release certificate output parser
         run: python3 tools/tests/test_apk_certificate_verification.py
+
+      - name: Verify isolated sandbox bootstrap preflight
+        run: python3 tools/tests/test_owner_delete_sandbox_preflight.py
+
+      - name: Verify local deletion and offline cancellation SQL fences
+        run: |
+          python3 tools/validate_local_deletion_v3_sql.py
+          python3 tools/validate_offline_job_purge_sql.py
 
       - name: Analyze Dart
         working-directory: generated

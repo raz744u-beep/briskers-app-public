@@ -8,6 +8,8 @@ import '../local/local_database_provider.dart';
 import '../core/connection_mode.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
+import 'local_job_deletion_v3.dart';
+import 'offline_job_purge.dart';
 import 'local_document_detail_cache.dart';
 
 /// Durable *local* payment capture and idempotent replay. This class records
@@ -178,6 +180,7 @@ class OfflineInvoicePaymentLedger {
     required String methodName,
     Iterable<String>? expectedQueuedOperationIds,
   }) async {
+    final visibilityGeneration = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     if (businessId.isEmpty || invoiceId.isEmpty || methodId.isEmpty) {
       throw ArgumentError('Business, invoice and payment method are required.');
     }
@@ -206,6 +209,8 @@ class OfflineInvoicePaymentLedger {
       'payment_date': capturedDate,
     };
     await _database.transaction(() async {
+      await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, visibilityGeneration);
+      await OfflineJobPurge.recordNewIntent(_database, businessId, [operationId]);
       if (expectedQueuedOperationIds != null) {
         final current = await pendingForInvoice(businessId, invoiceId);
         final currentIds = current
@@ -979,4 +984,5 @@ class OfflineInvoicePaymentLedger {
     }).toList();
   }
 }
+
 

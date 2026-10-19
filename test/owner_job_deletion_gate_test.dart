@@ -16,7 +16,8 @@ void main() {
       final deletion = screen.substring(start, end);
       expect(deletion, contains('if (!_owner || _busy) return;'));
       expect(deletion, contains('_jobRetirement.preview('));
-      expect(deletion, contains('showOwnerJobDeleteConfirmation('));
+      expect(deletion, contains('showOwnerJobDeleteV3Confirmation('));
+      expect(deletion, contains('OwnerLocalJobPurgeService()'));
       expect(deletion, contains('_jobRetirement.queueConfirmed('));
       expect(deletion, contains('supabase.auth.currentUser?.id != actorId'));
       expect(deletion, isNot(contains('_api.jobDeletionPlan(')));

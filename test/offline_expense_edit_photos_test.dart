@@ -125,8 +125,9 @@ class _FailingCache extends LocalFinancialCache {
   Future<void> saveTransactionDetail(
     String businessId,
     String transactionId,
-    Map<String, dynamic> detail,
-  ) async {
+    Map<String, dynamic> detail, {
+    int? visibilityGeneration,
+  }) async {
     if (failNextSave) {
       failNextSave = false;
       throw StateError('Synthetic interrupted cache write');

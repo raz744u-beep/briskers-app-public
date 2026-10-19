@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import 'local_cleanup_safety.dart';
+import 'local_job_deletion_v3.dart';
 
 /// Durable visibility/replay fences. Rows, photos and shared findings are kept.
 /// Pending is reversible; accepted tombstones are permanent, including on restart.
@@ -13,12 +14,16 @@ class LocalJobRetirement {
       StreamController<({String businessId, Set<String> jobIds})>.broadcast(
         sync: true,
       );
-  static Stream<({String businessId, Set<String> jobIds})> get events =>
-      _events.stream;
+  static StreamSubscription<({String businessId, Set<String> jobIds})>? _v3Events;
+  static Stream<({String businessId, Set<String> jobIds})> get events {
+    _v3Events ??= LocalJobDeletionV3.events.listen(_events.add);
+    return _events.stream;
+  }
   static const blockedStates = "('pending','accepted','locally_cancelled')";
 
   static final _installed = Expando<bool>('retirement_schema');
   static Future<void> ensureSchema(BriskersLocalDatabase db) async {
+    await LocalJobDeletionV3.ensureSchema(db);
     if (_installed[db] == true &&
         (await db
                 .customSelect(
@@ -134,6 +139,7 @@ class LocalJobRetirement {
     String kind,
   ) async {
     await ensureSchema(db);
+    await LocalJobDeletionV3.assertVisibilityActor(db, businessId);
     return (await db
             .customSelect(
               'SELECT entity_id FROM local_job_retirement_entities '
@@ -147,13 +153,17 @@ class LocalJobRetirement {
 
   static Future<Set<String>> blockedJobIds(
     BriskersLocalDatabase db,
-    String businessId,
-  ) => _ids(db, businessId, 'job');
+    String businessId, {
+    bool includeVisibilityScope = true,
+  }) async => {...await _ids(db, businessId, 'job'),
+      ...await LocalJobDeletionV3.blockedJobIds(db, businessId, includeVisibilityScope: includeVisibilityScope)};
   static Future<Set<String>> blockedDocumentIds(
     BriskersLocalDatabase db,
-    String businessId,
-  ) async {
+    String businessId, {
+    bool includeVisibilityScope = true,
+  }) async {
     final ids = await _ids(db, businessId, 'invoice');
+    ids.addAll(await LocalJobDeletionV3.blockedDocumentIds(db, businessId, includeVisibilityScope: includeVisibilityScope));
     final linked = await db
         .customSelect(
           "SELECT d.id FROM local_documents d WHERE d.business_id=? AND d.kind='invoice' "
@@ -318,7 +328,7 @@ class LocalJobRetirement {
       changed = false;
       for (final row in rows) {
         final id = row.read<int>('id');
-        if (selected.contains(id)) continue;
+        if (selected.contains(id)) { continue; }
         Object? payload;
         try {
           payload = jsonDecode(row.read<String>('payload_json'));
@@ -370,14 +380,14 @@ class LocalJobRetirement {
     int? outboxId,
   }) async {
     await ensureSchema(db);
-    if (outboxId == null) return;
+    if (outboxId == null) { return; }
     final rows = await db
         .customSelect(
           'SELECT entity_id,payload_json,state FROM sync_outbox WHERE business_id=? AND id=?',
           variables: [Variable<String>(businessId), Variable<int>(outboxId)],
         )
         .get();
-    if (rows.isEmpty) return;
+    if (rows.isEmpty) { return; }
     final row = rows.single;
     final ids = {
       ...await blockedJobIds(db, businessId),
@@ -408,3 +418,4 @@ class LocalJobRetirement {
     }
   }
 }
+

@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
+import 'local_job_deletion_v3.dart';
 
 class LocalFinancialCache {
   LocalFinancialCache({BriskersLocalDatabase? database})
@@ -13,33 +14,39 @@ class LocalFinancialCache {
   static const _optionsKey = 'transaction_options';
   static const _invoiceReceiptsKey = 'invoice_receipts_v1';
 
-  Future<void> saveInvoiceReceipts(String businessId, List<Map<String,dynamic>> rows) =>
-      _save(businessId, _invoiceReceiptsKey, jsonEncode(rows));
+  // Preserve the current receipt-aware payments/invoices screen while applying
+  // the same authenticated visibility/tombstone protections as other caches.
+  Future<void> saveInvoiceReceipts(String businessId,
+      List<Map<String, dynamic>> rows, {int? visibilityGeneration}) =>
+      _save(businessId, _invoiceReceiptsKey, rows,
+          visibilityGeneration: visibilityGeneration);
 
-  /// Distinguish "RPC cache never populated" from "server has no receipts".
   Future<bool> hasServerInvoiceReceipts(String businessId) async =>
       await _load(businessId, _invoiceReceiptsKey) != null;
 
-  Future<List<Map<String,dynamic>>> loadInvoiceReceipts(String businessId) async {
+  Future<List<Map<String, dynamic>>> loadInvoiceReceipts(String businessId) async {
     final raw = await _load(businessId, _invoiceReceiptsKey);
     if (raw == null || raw.isEmpty) return const [];
     try {
       return (jsonDecode(raw) as List).whereType<Map>()
-          .map((row) => Map<String,dynamic>.from(row)).toList();
-    } catch (_) { return const []; }
+          .map((row) => Map<String, dynamic>.from(row)).toList();
+    } catch (_) {
+      return const [];
+    }
   }
-
 
   final BriskersLocalDatabase _database;
 
   Future<void> saveTransactions(
     String businessId,
-    List<Map<String, dynamic>> rows,
-  ) async {
+    List<Map<String, dynamic>> rows, {
+    int? visibilityGeneration,
+  }) async {
     await _save(
       businessId,
       _transactionsKey,
-      jsonEncode(rows),
+      rows,
+      visibilityGeneration: visibilityGeneration,
     );
   }
 
@@ -54,7 +61,7 @@ class LocalFinancialCache {
     String? counterpartyId,
   }) async {
     final raw = await _load(businessId, _transactionsKey);
-    if (raw == null || raw.isEmpty) return const [];
+    if (raw == null || raw.isEmpty) { return const []; }
 
     List<Map<String, dynamic>> rows;
     try {
@@ -90,8 +97,8 @@ class LocalFinancialCache {
       );
       if (date != null) {
         final day = DateTime(date.year, date.month, date.day);
-        if (startDate != null && day.isBefore(startDate)) return false;
-        if (endDate != null && day.isAfter(endDate)) return false;
+        if (startDate != null && day.isBefore(startDate)) { return false; }
+        if (endDate != null && day.isAfter(endDate)) { return false; }
       }
 
       if (needle.isNotEmpty) {
@@ -107,7 +114,7 @@ class LocalFinancialCache {
           row['amount'],
           row['transaction_date'],
         ].whereType<Object>().map((v) => v.toString().toLowerCase()).join(' ');
-        if (!haystack.contains(needle)) return false;
+        if (!haystack.contains(needle)) { return false; }
       }
 
       return true;
@@ -120,9 +127,10 @@ class LocalFinancialCache {
 
   Future<void> saveLinkedExpenses(
     String businessId,
-    List<Map<String, dynamic>> rows,
-  ) async {
-    await _save(businessId, _linkedExpensesKey, jsonEncode(rows));
+    List<Map<String, dynamic>> rows, {
+    int? visibilityGeneration,
+  }) async {
+    await _save(businessId, _linkedExpensesKey, rows, visibilityGeneration: visibilityGeneration);
   }
 
   Future<List<Map<String, dynamic>>?> loadLinkedExpenses(
@@ -153,7 +161,7 @@ class LocalFinancialCache {
         (row['id']?.toString().startsWith('local-') ?? false) &&
         (row['job_id'] != null || row['document_id'] != null)));
 
-    if (raw == null && rows.isEmpty) return null;
+    if (raw == null && rows.isEmpty) { return null; }
     return rows.where((row) =>
         (jobId == null || row['job_id']?.toString() == jobId) &&
         (documentId == null ||
@@ -163,12 +171,14 @@ class LocalFinancialCache {
   Future<void> saveTransactionDetail(
     String businessId,
     String transactionId,
-    Map<String, dynamic> detail,
-  ) async {
+    Map<String, dynamic> detail, {
+    int? visibilityGeneration,
+  }) async {
     await _save(
       businessId,
       'transaction_detail_$transactionId',
-      jsonEncode(detail),
+      detail,
+      visibilityGeneration: visibilityGeneration,
     );
   }
 
@@ -180,7 +190,7 @@ class LocalFinancialCache {
       businessId,
       'transaction_detail_$transactionId',
     );
-    if (raw == null || raw.isEmpty) return null;
+    if (raw == null || raw.isEmpty) { return null; }
     try {
       final decoded = jsonDecode(raw);
       return decoded is Map
@@ -193,14 +203,15 @@ class LocalFinancialCache {
 
   Future<void> saveOptions(
     String businessId,
-    Map<String, dynamic> options,
-  ) async {
-    await _save(businessId, _optionsKey, jsonEncode(options));
+    Map<String, dynamic> options, {
+    int? visibilityGeneration,
+  }) async {
+    await _save(businessId, _optionsKey, options, visibilityGeneration: visibilityGeneration);
   }
 
   Future<Map<String, dynamic>> loadOptions(String businessId) async {
     final raw = await _load(businessId, _optionsKey);
-    if (raw == null || raw.isEmpty) return const {};
+    if (raw == null || raw.isEmpty) { return const {}; }
     try {
       final decoded = jsonDecode(raw);
       return decoded is Map
@@ -214,27 +225,43 @@ class LocalFinancialCache {
   Future<void> _save(
     String businessId,
     String key,
-    String payload,
-  ) async {
+    Object value, {
+    int? visibilityGeneration,
+  }) => _database.transaction(() async {
+    await LocalJobDeletionV3.ensureSchema(_database);
+    final scopeKey = 'financial:$key';
+    final generation = await LocalJobDeletionV3.validateVisibilityCacheWrite(
+        _database, businessId, scopeKey, value, visibilityGeneration: visibilityGeneration);
+    if (generation == null) {
+          if (visibilityGeneration != null) { throw StateError('Cache scope changed or retained work requires reconciliation'); }
+          return;
+        }
+    final decoded = LocalJobDeletionV3.stripVisibilityMetadata(value);
+    final ids = {...await LocalJobDeletionV3.blockedIds(_database, businessId, includeVisibilityScope: false),
+      ...await LocalJobDeletionV3.scopeDirtyIds(_database, businessId)};
+    String payload;
+    if (decoded is List) {
+      payload = jsonEncode(decoded.where((row) => !LocalJobDeletionV3.referencesAny(row, ids)).toList());
+    } else if (LocalJobDeletionV3.referencesAny(decoded, ids)) {
+      return;
+    } else { payload = jsonEncode(decoded); }
+    if (key.startsWith('transaction_detail_') &&
+        ids.contains(key.substring('transaction_detail_'.length))) { return; }
     await _database.customStatement(
-      '''
-      INSERT INTO local_financial_cache (
+      '''INSERT INTO local_financial_cache (
         business_id, cache_key, payload_json, updated_at
       ) VALUES (?, ?, ?, ?)
       ON CONFLICT(business_id, cache_key) DO UPDATE SET
         payload_json=excluded.payload_json,
-        updated_at=excluded.updated_at
-      ''',
-      [
-        businessId,
-        key,
-        payload,
-        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
-      ],
+        updated_at=excluded.updated_at''',
+      [businessId, key, payload, DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000],
     );
-  }
+    await LocalJobDeletionV3.markVisibilityCacheWritten(_database, businessId, scopeKey, generation);
+  });
 
-  Future<String?> _load(String businessId, String key) async {
+  Future<String?> _load(String businessId, String key) => _database.transaction(() async {
+    final generation = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
+    if (!await LocalJobDeletionV3.visibilityCacheReadable(_database, businessId, 'financial:$key')) { return null; }
     final rows = await _database.customSelect(
       '''
       SELECT payload_json
@@ -247,7 +274,22 @@ class LocalFinancialCache {
         Variable<String>(key),
       ],
     ).get();
-    if (rows.isEmpty) return null;
-    return rows.first.read<String>('payload_json');
-  }
+    if (rows.isEmpty) { return null; }
+    final raw = rows.first.read<String>('payload_json');
+    final ids = {...await LocalJobDeletionV3.blockedIds(_database, businessId, includeVisibilityScope: false),
+      ...await LocalJobDeletionV3.scopeDirtyIds(_database, businessId)};
+    if (key.startsWith('transaction_detail_') &&
+        ids.contains(key.substring('transaction_detail_'.length))) { return null; }
+    await LocalJobDeletionV3.assertVisibilityGeneration(_database, businessId, generation);
+    try {
+      final decoded = jsonDecode(raw);
+      Object? stamp(Object? item) => generation > 0 && item is Map
+          ? {...item, '_local_visibility_generation': generation} : item;
+      if (decoded is List) {
+        return jsonEncode(decoded.where((row) => !LocalJobDeletionV3.referencesAny(row, ids)).map(stamp).toList());
+      }
+      return LocalJobDeletionV3.referencesAny(decoded, ids) ? null : jsonEncode(stamp(decoded));
+    } catch (_) { return null; }
+  });
 }
+
