@@ -4331,6 +4331,104 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
+  Future<void> _manageFindingFromInvoice(Map<String, dynamic> finding) async {
+    final id = finding['id']?.toString() ?? '';
+    if (id.isEmpty || _busy) return;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit finding'),
+            onTap: () => Navigator.pop(sheetContext, 'edit'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.check_circle_outline),
+            title: const Text('Resolve finding'),
+            onTap: () => Navigator.pop(sheetContext, 'resolve'),
+          ),
+          if (widget.isOwner)
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text('Delete finding',
+                style: TextStyle(color: Colors.red)),
+              onTap: () => Navigator.pop(sheetContext, 'delete'),
+            ),
+        ]),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    try {
+      if (choice == 'edit') {
+        final controller =
+            TextEditingController(text: finding['body']?.toString() ?? '');
+        final revised = await showDialog<String>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Edit finding'),
+            content: TextField(
+              controller: controller, autofocus: true,
+              minLines: 2, maxLines: 6,
+              decoration: const InputDecoration(labelText: 'Description'),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final text = controller.text.trim();
+                  if (text.isNotEmpty) Navigator.pop(dialogContext, text);
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          ),
+        );
+        controller.dispose();
+        if (revised == null ||
+            revised == (finding['body']?.toString() ?? '')) return;
+        await _api.updateVehicleFinding(widget.businessId, id, body: revised);
+      } else if (choice == 'resolve') {
+        await _api.resolveVehicleFindingByInvoice(
+            widget.businessId, id, widget.documentId);
+      } else if (choice == 'delete' && widget.isOwner) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Delete finding?'),
+            content: const Text(
+              'Only delete incorrectly entered findings. '
+              'Use Resolve for completed repairs to preserve history.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+        await _api.deleteVehicleFinding(widget.businessId, id);
+      }
+      await _refreshInvoiceFindingsBanner();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Finding change failed: $error')),
+        );
+      }
+    }
+  }
+
   Future<void> _showInvoiceFindings() async {
     if (_estimate || _detail == null || _busy) return;
 
@@ -4409,6 +4507,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                   '';
 
                           return ListTile(
+                            onTap: () async {
+                              Navigator.pop(sheetContext);
+                              await _manageFindingFromInvoice(finding);
+                            },
+                            onLongPress: () async {
+                              Navigator.pop(sheetContext);
+                              await _manageFindingFromInvoice(finding);
+                            },
                             leading: const Icon(
                               Icons.warning_amber_rounded,
                               color: Colors.deepOrange,
