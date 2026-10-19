@@ -45,6 +45,9 @@ const deletionV3UuidKinds = {
   'document_revision', 'document_attachment', 'job_attachment',
   'job_assignment_request', 'job_visit_assignment', 'job_labor',
   'job_internal_note', 'job_status_event', 'payment_allocation',
+  // A payment edit-audit row has its own immutable UUID and must be listed
+  // separately from the payment; never silently classify it as a transaction.
+  'payment_edit_audit',
   'expense_allocation', 'payroll_allocation', 'expense_attachment', 'receipt_item',
   'appointment_request', 'conversation', 'conversation_member', 'message',
   'message_attachment', 'activity_event', 'notification', 'kiosk_registration',
