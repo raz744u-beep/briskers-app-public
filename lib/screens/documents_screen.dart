@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -264,11 +265,17 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       }
 
       if (!mounted) return;
-      setState(() {
-        _rows = rows;
-        _invoiceStyles = styles;
-        _error = null;
-      });
+      // A background refresh must not replace an identical snapshot and
+      // cause the entire visible list to flicker several seconds after entry.
+      final sameRows = _rows != null && jsonEncode(_rows) == jsonEncode(rows);
+      final sameStyles = jsonEncode(_invoiceStyles) == jsonEncode(styles);
+      if (!sameRows || !sameStyles || _error != null) {
+        setState(() {
+          _rows = rows;
+          _invoiceStyles = styles;
+          _error = null;
+        });
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {

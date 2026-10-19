@@ -87,15 +87,55 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
 
   Future<void> _load() async {
     try {
-      final results = await Future.wait<dynamic>([
-        _api.transactionDetail(
-          widget.businessId,
-          widget.transactionId,
-        ),
-        _api.myPermissions(widget.businessId),
-      ]);
-      final detail = Map<String, dynamic>.from(results[0] as Map);
-      final permissions = List<String>.from(results[1] as List);
+      // The transaction is independently readable. Do not wait for permission
+      // lookups, disk caching, or receipt prefetch before the first paint.
+      final detail = Map<String, dynamic>.from(
+        await _api.transactionDetail(widget.businessId, widget.transactionId),
+      );
+      if (!mounted) return;
+      setState(() {
+        _detail = detail;
+        _canDeleteRecords = false; // Fail closed until permissions resolve.
+        _loading = false;
+        _error = null;
+      });
+      // Follow-up work should never turn a readable transaction into a
+      // full-screen loading indicator or hide it when a receipt fetch fails.
+      _loadPermissions();
+      _prepareDetailCache(detail);
+    } catch (error) {
+      // A previously cached transaction can still be read offline.
+      final saved = await _localFinancial.loadTransactionDetail(
+        widget.businessId,
+        widget.transactionId,
+      );
+      if (saved != null) {
+        await _loadCached(saved);
+        return;
+      }
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = error.toString();
+      });
+    }
+  }
+
+  Future<void> _loadPermissions() async {
+    try {
+      final permissions = await _api.myPermissions(widget.businessId);
+      if (mounted) {
+        setState(() {
+          _canDeleteRecords = permissions.contains('records.delete');
+        });
+      }
+    } catch (_) {
+      // The detail remains readable; privileged delete stays unavailable.
+    }
+  }
+
+  Future<void> _prepareDetailCache(Map<String, dynamic> detail) async {
+    try {
       await _localFinancial.saveTransactionDetail(
         widget.businessId,
         widget.transactionId,
@@ -107,19 +147,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen> {
             .map((row) => Map<String, dynamic>.from(row))
             .toList(),
       );
-      if (!mounted) return;
-      setState(() {
-        _detail = detail;
-        _canDeleteRecords = permissions.contains('records.delete');
-        _loading = false;
-        _error = null;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = error.toString();
-      });
+    } catch (_) {
+      // Saving a local copy or warming receipt thumbnails is best-effort.
     }
   }
 
