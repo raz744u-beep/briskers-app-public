@@ -1268,8 +1268,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (changed == true) {
+      _invoiceExpensesTabFuture = null;
+      await _load();
+    }
   }
+
+  Future<List<Map<String, dynamic>>>? _invoiceExpensesTabFuture;
 
   Future<List<Map<String, dynamic>>> _invoiceTabExpenses() async {
     if (BriskersConnectionModeController.instance.forceOffline) {
@@ -1309,7 +1314,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ]),
       ),
       Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _invoiceTabExpenses(),
+        future: _invoiceExpensesTabFuture ??= _invoiceTabExpenses(),
         builder: (context, snapshot) {
           if (!snapshot.hasData && !snapshot.hasError) {
             return const Center(child: CircularProgressIndicator());
@@ -1347,7 +1352,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                       transactionId: id,
                     ),
                   ));
-                  if (mounted) setState(() {});
+                  if (mounted) {
+                    setState(() => _invoiceExpensesTabFuture = null);
+                  }
                 },
               ));
             },
