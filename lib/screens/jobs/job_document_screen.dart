@@ -1298,6 +1298,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Widget _invoiceExpensesTab() {
+    if (!_canManageInvoiceExpenses) {
+      return const Center(child: Text('Expenses access is not permitted.'));
+    }
     return Column(children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
