@@ -43,4 +43,38 @@ void main() {
       await db.close();
     }
   });
+  test('mechanic allocation splits hours without changing invoice hours', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    try {
+      final store = LocalJobTaskStore(db);
+      await store.createIfMissing(
+        id:'task-2', businessId:'shop-1', jobId:'job-12',
+        description:'Replace oil pan', sourceLineId:'line-2',
+        billedHours:4, payrollHours:4,
+      );
+      await store.replaceLocalAssignees(
+        businessId:'shop-1', jobId:'job-12', taskId:'task-2',
+        hoursByEmployeeId:{'kam':2.5,'chris':1.5},
+      );
+      expect(await store.assigneesForTask(
+        businessId:'shop-1', jobId:'job-12', taskId:'task-2',
+      ), {'kam':2.5,'chris':1.5});
+      final task = (await store.listForJob('shop-1','job-12')).single;
+      expect(task['billed_hours'],4);
+      expect(task['payroll_hours'],4);
+      await expectLater(
+        store.replaceLocalAssignees(
+          businessId:'other-shop', jobId:'job-12', taskId:'task-2',
+          hoursByEmployeeId:{'outsider':9},
+        ),
+        throwsStateError,
+      );
+      expect(await store.assigneesForTask(
+        businessId:'shop-1', jobId:'job-12', taskId:'task-2',
+      ), {'kam':2.5,'chris':1.5});
+    } finally {
+      await db.close();
+    }
+  });
+
 }
