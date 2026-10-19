@@ -4390,7 +4390,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         );
         controller.dispose();
         if (revised == null ||
-            revised == (finding['body']?.toString() ?? '')) return;
+            revised == (finding['body']?.toString() ?? '')) {
+          return;
+        }
         await _api.updateVehicleFinding(widget.businessId, id, body: revised);
       } else if (choice == 'resolve') {
         await _api.resolveVehicleFindingByInvoice(
