@@ -159,3 +159,35 @@ for table, root_id in [('local_job_deletion_v3_entities','deleted-parent'),
     db.execute(f'INSERT INTO {table} VALUES (?,?,?,?,?)', ['scope',root_id,'op-'+root_id,'job',root_id])
     blocked("UPDATE local_documents SET job_id=? WHERE business_id='scope' AND id='clean-invoice'", [root_id])
 print('PASS: 8 independent document/hidden-parent checks; refreshed document allowed, parent hidden, permanent/pending/local-cancel parent INSERT and UPDATE blocked.')
+
+# Payment edit history is a distinct, server-confirmed identity. A stale
+# financial response may contain only that audit UUID, without its payment or
+# Job ID, so exercise the real JSON1 fences rather than assuming parent matches.
+audit_id = '00000000-0000-4000-8000-000000000099'
+db.execute('INSERT INTO local_job_deletion_v3_entities VALUES (?,?,?,?,?)',
+           ['audit-scope', 'synthetic-job', 'synthetic-op', 'payment_edit_audit', audit_id])
+audit_payload = json.dumps({'edit_history': [{'audit_id': audit_id}]})
+for table, key in [('sync_outbox', 'entity_id'), ('local_financial_cache', 'cache_key')]:
+    blocked(f'INSERT INTO {table}(business_id,{key},payload_json) VALUES (?,?,?)',
+            ['audit-scope', 'stale-audit', audit_payload])
+    db.execute(f'INSERT INTO {table}(business_id,{key},payload_json) VALUES (?,?,?)',
+               ['audit-scope', 'unrelated-audit', '{}'])
+    blocked(f'UPDATE {table} SET payload_json=? WHERE business_id=? AND {key}=?',
+            [audit_payload, 'audit-scope', 'unrelated-audit'])
+    # Tenant isolation: the same reference in another business is not fenced.
+    db.execute(f'INSERT INTO {table}(business_id,{key},payload_json) VALUES (?,?,?)',
+               ['audit-other', 'other-business-audit', audit_payload])
+    assert db.execute(f'SELECT payload_json FROM {table} WHERE business_id=? AND {key}=?',
+                      ['audit-scope', 'unrelated-audit']).fetchone()[0] == '{}'
+    assert db.execute(f'SELECT payload_json FROM {table} WHERE business_id=? AND {key}=?',
+                      ['audit-other', 'other-business-audit']).fetchone()[0] == audit_payload
+assert db.execute('SELECT entity_kind FROM local_job_deletion_v3_fences '
+                  'WHERE business_id=? AND entity_id=?',
+                  ['audit-scope', audit_id]).fetchall() == [('payment_edit_audit',)]
+blocked('UPDATE local_job_deletion_v3_entities SET entity_kind=? '
+        'WHERE business_id=? AND entity_id=?', ['payment', 'audit-scope', audit_id])
+blocked('DELETE FROM local_job_deletion_v3_entities WHERE business_id=? AND entity_id=?',
+        ['audit-scope', audit_id])
+print('PASS: 11 payment-edit audit checks; nested audit-only INSERT/UPDATE replay blocked, '
+      'unrelated work and other businesses preserved, distinct audit identity immutable.')
+
