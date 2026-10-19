@@ -3918,6 +3918,160 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
     });
   }
 
+  int _findingRefreshGeneration = 0;
+
+  Future<void> _refreshInvoiceFindingsOnly() async {
+    final vehicleId = _detail?['vehicle_id']?.toString() ?? '';
+    if (!mounted || _estimate || vehicleId.isEmpty) return;
+    final generation = ++_findingRefreshGeneration;
+    try {
+      final findings = await _api.vehicleFindings(
+        widget.businessId, vehicleId, includeResolved: false,
+      );
+      if (!mounted || generation != _findingRefreshGeneration) return;
+      setState(() {
+        _openFindings = findings
+            .where((finding) => _findingNeedsInvoiceAttention(
+              finding, detail: _detail,
+            ))
+            .toList();
+      });
+    } catch (error) {
+      if (mounted && generation == _findingRefreshGeneration) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not refresh findings: $error')),
+        );
+      }
+    }
+  }
+
+  Future<void> _manageInvoiceFinding(Map<String, dynamic> finding) async {
+    if (!mounted) return;
+    final id = finding['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit finding'),
+              onTap: () => Navigator.pop(sheetContext, 'edit'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline),
+              title: const Text('Resolve finding'),
+              onTap: () => Navigator.pop(sheetContext, 'resolve'),
+            ),
+            if (widget.isOwner)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text('Delete finding',
+                    style: TextStyle(color: Colors.red)),
+                onTap: () => Navigator.pop(sheetContext, 'delete'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    try {
+      if (choice == 'edit') {
+        final controller = TextEditingController(
+          text: finding['body']?.toString() ?? '',
+        );
+        final revised = await showDialog<String>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Edit finding'),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              minLines: 2,
+              maxLines: 6,
+              decoration: const InputDecoration(labelText: 'Finding'),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final value = controller.text.trim();
+                  if (value.isNotEmpty) Navigator.pop(dialogContext, value);
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          ),
+        );
+        controller.dispose();
+        if (revised == null || revised == (finding['body']?.toString() ?? '')) {
+          return;
+        }
+        await _api.updateVehicleFinding(
+          widget.businessId, id, body: revised,
+        );
+      } else if (choice == 'resolve') {
+        await _api.resolveVehicleFindingByInvoice(
+          widget.businessId, id, widget.documentId,
+        );
+      } else if (choice == 'delete' && widget.isOwner) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Delete finding?'),
+            content: const Text(
+              'Delete an incorrectly entered finding? '
+              'Resolved findings should normally be kept as vehicle history.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+        await _api.deleteVehicleFinding(widget.businessId, id);
+      }
+      await _refreshInvoiceFindingsOnly();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Finding was not changed: $error')),
+        );
+      }
+    }
+  }
+
+  Future<void> _manageInvoiceFindingActionResolve(
+      Map<String, dynamic> finding) async {
+    try {
+      await _api.resolveVehicleFindingByInvoice(
+        widget.businessId,
+        finding['id'].toString(),
+        widget.documentId,
+      );
+      await _refreshInvoiceFindingsOnly();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not resolve finding: $error')),
+        );
+      }
+    }
+  }
+
   Future<void> _showInvoiceFindings() async {
     if (_estimate || _detail == null || _busy) return;
 
@@ -3996,6 +4150,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                                   '';
 
                           return ListTile(
+                            onLongPress: () async {
+                              Navigator.pop(sheetContext);
+                              await _manageInvoiceFinding(finding);
+                            },
+                            onTap: () async {
+                              Navigator.pop(sheetContext);
+                              await _manageInvoiceFinding(finding);
+                            },
                             leading: const Icon(
                               Icons.warning_amber_rounded,
                               color: Colors.deepOrange,
@@ -4013,12 +4175,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
                             trailing: TextButton(
                               onPressed: () async {
                                 Navigator.pop(sheetContext);
-                                await _run(() =>
-                                    _api.resolveVehicleFindingByInvoice(
-                                      widget.businessId,
-                                      finding['id'].toString(),
-                                      widget.documentId,
-                                    ));
+                                await _manageInvoiceFindingActionResolve(finding);
                               },
                               child: const Text('Resolve'),
                             ),
@@ -4031,7 +4188,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen> {
         ),
       ),
     );
-    if (mounted) await _load();
+    if (mounted) await _refreshInvoiceFindingsOnly();
   }
 
   Future<void> _emailPdf() async {
