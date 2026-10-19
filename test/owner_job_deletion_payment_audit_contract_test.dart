@@ -94,7 +94,7 @@ void main() {
       throwsFormatException);
     final duplicated = auditedPreview();
     (duplicated['related_records'] as List).add(
-      Map<String, dynamic>.from((duplicated['related_records'] as List).first),
+      Map<String, String>.from((duplicated['related_records'] as List).first as Map),
     );
     expect(() => validateDeletionV3Preview(duplicated, business, job, actor),
       throwsFormatException);
