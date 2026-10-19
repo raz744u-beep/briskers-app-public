@@ -26,6 +26,28 @@ void main() {
     expect(decisions.single.needsCreation, true);
   });
 
+  test('converted invoice line reuses task from accepted estimate', () {
+    const invoiceLine = LaborLineCandidate(
+      lineId: 'invoice-line-9', jobId: 'job-12',
+      name: 'Labor', description: 'Replace oil pan',
+      lineKind: 'labor', quantity: 2,
+    );
+    final decisions = LaborTaskReconciler.plan(
+      lines: [invoiceLine],
+      existing: [
+        const ExistingTaskLink(
+          taskId: 'oil-pan-task',
+          jobId: 'job-12',
+          sourceLineId: 'estimate-line-2',
+          invoiceLineId: 'invoice-line-9',
+        ),
+      ],
+    );
+    expect(decisions, hasLength(1));
+    expect(decisions.single.existingTaskId, 'oil-pan-task');
+    expect(decisions.single.needsCreation, isFalse);
+  });
+
   test('unknown eligible labor line proposes one new task', () {
     final decisions = LaborTaskReconciler.plan(lines: [oil], existing: []);
     expect(decisions.single.needsCreation, true);
