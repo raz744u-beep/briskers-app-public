@@ -15,10 +15,10 @@ void main() {
     expect(read, contains('unawaited(metadata);'));
     expect(read, contains('visibility.blockedJobIds()'));
     expect(read, contains('visibility.isCurrent(generation)'));
-    // Metadata no longer holds the first usable frame.
-    expect(read.indexOf('_rows = visibleRows;'),
-        lessThan(read.indexOf('if (!mode.forceOnline')), reason:
-            'First job cards must paint without waiting on secondary counts.');
+    // Metadata is intentionally started and detached before the primary
+    // awaited rows query completes; current-load guards apply to both.
+    expect(read.indexOf('unawaited(metadata);'),
+        lessThan(read.indexOf('final rows = await _localJobs.listJobs(')));
   });
 
   test('Saved Jobs banner is not confused with Auto cached-first paint', () {
