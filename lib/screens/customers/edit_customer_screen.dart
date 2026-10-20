@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/briskers_colors.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
@@ -238,6 +239,10 @@ class _EditCustomerScreenState extends State<EditCustomerScreen> {
           ],
           const SizedBox(height: 18),
           FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: BriskersColors.customerSave,
+              foregroundColor: Colors.white,
+            ),
             onPressed: _busy ? null : _save,
             icon: _busy
                 ? const SizedBox(
