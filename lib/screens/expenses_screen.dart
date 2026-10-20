@@ -319,8 +319,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       final receipts = await _invoiceFeed.load(widget.businessId);
       if (_isCurrentLoad(epoch, businessId)) {
         setState(() {
-          _invoiceReceipts = receipts;
-          if (receipts.isNotEmpty) _loading = false;
+          // A search must not replace a newly fetched server receipt with
+          // an older on-disk snapshot while background reconciliation runs.
+          _invoiceReceipts = _invoiceReceipts.isEmpty
+              ? receipts
+              : InvoicePaymentFeed.mergeReceipts(_invoiceReceipts, receipts);
+          if (_invoiceReceipts.isNotEmpty) _loading = false;
         });
       }
     } catch (_) {
