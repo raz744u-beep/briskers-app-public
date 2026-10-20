@@ -648,6 +648,26 @@ class BriskersLocalDatabase extends _$BriskersLocalDatabase {
           // A previous APK may have advanced user_version without making the
           // tables. Self-heal without dropping any local records.
           await ensureExpenseIqSchema();
+          // Sidecar tables used only by the separate local-only Tasks Lab.
+          // No tracked-table schema change or remote sync behavior is altered.
+          await customStatement('''
+            CREATE TABLE IF NOT EXISTS local_job_tasks_lab (
+              business_id TEXT NOT NULL, job_id TEXT NOT NULL,
+              document_id TEXT NOT NULL, line_id TEXT NOT NULL,
+              source_description TEXT NOT NULL, custom_description TEXT,
+              employee_id TEXT, payroll_hours REAL,
+              status TEXT NOT NULL DEFAULT 'planned',
+              completed_at INTEGER, source_missing INTEGER NOT NULL DEFAULT 0,
+              updated_at INTEGER NOT NULL,
+              PRIMARY KEY (business_id, job_id, document_id, line_id)
+            )
+          ''');
+          await customStatement('''
+            CREATE TABLE IF NOT EXISTS local_employee_nicknames_lab (
+              business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+              nickname TEXT NOT NULL, PRIMARY KEY (business_id, employee_id)
+            )
+          ''');
         },
       );
 }
