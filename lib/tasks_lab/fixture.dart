@@ -9,11 +9,15 @@ class BriskersLabFixture {
     {'id': 'lab-sonata', 'year': '2004', 'make': 'Hyundai',
       'model': 'Sonata', 'job': ''},
   ];
+  // Sanitized test roster. Roles are used to prevent non-mechanics from
+  // appearing in labor assignment and mechanic payroll previews.
   static const employees = [
-    {'id':'lab-kam','name':'Kamerron Smith','nickname':'Kam'},
-    {'id':'lab-chris','name':'Chris Rideaux','nickname':'Chris'},
-    {'id':'lab-adam','name':'Adam Bourgeois','nickname':'Adam'},
-    {'id':'lab-raz','name':'Raz','nickname':'Raz'},
+    {'id':'lab-kam','name':'Kamerron Smith','nickname':'Kam','role':'mechanic'},
+    {'id':'lab-chris','name':'Chris Rideaux','nickname':'Chris','role':'mechanic'},
+    {'id':'lab-adam','name':'Adam Bourgeois','nickname':'Adam','role':'mechanic'},
+    {'id':'lab-raz','name':'Raz','nickname':'Raz','role':'owner'},
+    {'id':'lab-secretary','name':'Secretary (TEST)',
+      'nickname':'Secretary','role':'secretary'},
   ];
   static const jobId = 'lab-job-richard-j24';
   static const invoiceId = 'lab-invoice-6342';
