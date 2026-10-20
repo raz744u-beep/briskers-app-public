@@ -76,6 +76,37 @@ void main() {
       'Replace airmatic compressor, valve block and filter',
     );
   });
+  test('labor edits and removals recalculate without stale copied descriptions', () {
+    final invoice = <String, dynamic>{
+      'kind': 'invoice',
+      'lines': [
+        {'line_kind': 'labor', 'description': 'Replace oil pan gasket'},
+        {'line_kind': 'labor', 'description': 'Replace front brakes'},
+        {'line_kind': 'part', 'description': 'Oil pan gasket'},
+      ],
+    };
+    const manual = 'Customer approved repair; road test pending.';
+    expect(
+      appendInvoiceLaborWorkSummary(manual, invoiceLaborWorkSummary(invoice)),
+      '$manual\\nReplace oil pan gasket\\nReplace front brakes',
+    );
+    invoice['lines'] = [
+      {'line_kind': 'labor', 'description': 'Reseal oil pan and replace O-ring'},
+      {'line_kind': 'part', 'description': 'Oil pan gasket'},
+    ];
+    expect(
+      appendInvoiceLaborWorkSummary(manual, invoiceLaborWorkSummary(invoice)),
+      '$manual\\nReseal oil pan and replace O-ring',
+    );
+    invoice['lines'] = [
+      {'line_kind': 'part', 'description': 'Oil pan gasket'},
+    ];
+    expect(
+      appendInvoiceLaborWorkSummary(manual, invoiceLaborWorkSummary(invoice)),
+      manual,
+    );
+  });
+
   test('estimates and missing labor produce no draft', () {
     expect(
       invoiceLaborWorkSummary({
