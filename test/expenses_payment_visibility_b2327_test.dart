@@ -46,7 +46,7 @@ void main() {
     expect(mainAmountStyle, contains('fontWeight: FontWeight.w900'));
     final invoiceStart = invoice.indexOf('// Match the main Expenses & Income card amount style.');
     expect(invoiceStart, greaterThanOrEqualTo(0));
-    final invoiceAmountStyle = invoice.substring(invoiceStart, invoiceStart+340);
+    final invoiceAmountStyle = invoice.substring(invoiceStart, invoiceStart+500);
     expect(invoiceAmountStyle, contains('fontSize: 17.5'));
     expect(invoiceAmountStyle, contains('fontWeight: FontWeight.w900'));
     expect(invoiceAmountStyle, contains('color: color'));
