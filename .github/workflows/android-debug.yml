@@ -3,7 +3,7 @@ name: Build Android debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, feat/combined-118-20261014, fix/oct15-independent-ui-20261015, recovery/latest-feature-startup-20261017, feature/invoice-payments-expenses-feed-20261017, fix/expenses-offline-targeted-reporting-20261017, feature/oct17-stability-navigation-tax-20261017, release/payment-v2-apk-20261018, release/navigation-sort-verified-20261018, release/offline-tax-save-20261018, release/payment-actions-invoice-dock-20261018, recovery/oct19-modern-ui-b2322-candidate, fix/oct19-b2322-stability-consolidated]
+    branches: [main, feat/combined-118-20261014, fix/oct15-independent-ui-20261015, recovery/latest-feature-startup-20261017, feature/invoice-payments-expenses-feed-20261017, fix/expenses-offline-targeted-reporting-20261017, feature/oct17-stability-navigation-tax-20261017, release/payment-v2-apk-20261018, release/navigation-sort-verified-20261018, release/offline-tax-save-20261018, release/payment-actions-invoice-dock-20261018, recovery/oct19-modern-ui-b2322-candidate, fix/oct19-b2322-stability-consolidated, fix/b2326-cache-navigation-performance-20261020]
     paths-ignore:
       - '.github/workflows/**'
 
@@ -17,15 +17,53 @@ permissions:
   contents: read
 
 jobs:
+  candidate-prerequisites:
+    if: github.ref == 'refs/heads/fix/b2326-cache-navigation-performance-20261020'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out exact candidate source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Test fail-closed candidate gate
+        run: python3 tools/tests/test_candidate_checks.py
+
+      - name: Require exact-head Diagnostics and iOS success
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/require_candidate_checks.py --timeout-seconds 2400
+
   build:
+    needs: candidate-prerequisites
+    # A skipped candidate-only gate preserves every existing branch's behavior.
+    # Cancellation/failure can never enable the isolated candidate build.
+    if: >-
+      ${{ !cancelled() &&
+          (github.ref != 'refs/heads/fix/b2326-cache-navigation-performance-20261020' ||
+           needs.candidate-prerequisites.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
     env:
       ANDROID_USER_HOME: ${{ github.workspace }}/.android
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Revalidate exact-head checks before Android work
+        if: github.ref == 'refs/heads/fix/b2326-cache-navigation-performance-20261020'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/require_candidate_checks.py --timeout-seconds 30
 
       - name: Install Flutter stable
         uses: subosito/flutter-action@v2

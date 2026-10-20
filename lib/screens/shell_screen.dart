@@ -9,6 +9,7 @@ import '../core/supabase_config.dart';
 import '../core/connection_mode.dart';
 import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
+import '../core/navigation_content_timing.dart';
 import '../services/customer_vehicle_sync_service.dart';
 import '../services/customer_notification_service.dart';
 import '../services/document_index_sync_service.dart';
@@ -26,6 +27,7 @@ import '../widgets/briskers_page_header.dart';
 import '../widgets/connection_header_toggle.dart';
 import '../widgets/briskers_module_dock.dart';
 import '../widgets/stale_keyboard_inset_guard.dart';
+import '../widgets/retained_module_stack.dart';
 import 'expenses_screen.dart';
 import 'appointments_screen.dart';
 import 'customers/customers_screen.dart';
@@ -423,6 +425,17 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
 
   void _goTo(int index) {
     FocusManager.instance.primaryFocus?.unfocus();
+    final timedModule = switch (index) {
+      3 => 'estimates',
+      4 => 'invoices',
+      5 => 'appointments',
+      _ => null,
+    };
+    if (timedModule != null) {
+      NavigationContentTiming.start(timedModule);
+    } else {
+      NavigationContentTiming.cancel();
+    }
     final request = ++_customerNavigationRequest;
     if (index == 1) {
       unawaited(_openCustomers(request));
@@ -593,8 +606,6 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
       });
     }
 
-    final currentPage = buildPage(_index);
-
     return StaleKeyboardInsetGuard(
       child: Scaffold(
       appBar: isHome ? null : AppBar(
@@ -635,7 +646,12 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
             ),
         ],
       ),
-      body: currentPage,
+      body: RetainedModuleStack(
+        key: ValueKey('${widget.businessId}:${widget.roleCode}'),
+        index: _index,
+        itemCount: _sectionColors.length,
+        itemBuilder: (_, index) => buildPage(index),
+      ),
       bottomNavigationBar: _shellNavigationBar(),
       ),
     );

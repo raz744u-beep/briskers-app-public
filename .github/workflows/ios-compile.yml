@@ -8,6 +8,9 @@ on:
       - 'test/**'
       - 'pubspec.yaml'
       - '.github/workflows/ios-compile.yml'
+      - '.github/workflows/android-debug.yml'
+      - 'tools/require_candidate_checks.py'
+      - 'tools/tests/test_candidate_checks.py'
 
 # Build/test commands never transmit Flutter or Dart analytics.
 env:

@@ -9,6 +9,7 @@ import '../local/local_database_provider.dart';
 import '../core/briskers_colors.dart';
 import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
+import '../core/navigation_content_timing.dart';
 import '../core/appointment_action_policy.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/briskers_api.dart';
@@ -24,26 +25,37 @@ class AppointmentsScreen extends StatefulWidget {
     required this.businessId,
     required this.roleCode,
     this.dockResetToken = 0,
+    this.repository,
+    this.appointmentSync,
+    this.api = const BriskersApi(),
+    this.visibilityFactory,
   });
 
   final int dockResetToken;
   final String businessId;
   final String roleCode;
+  final LocalAppointmentRepository? repository;
+  final AppointmentSyncService? appointmentSync;
+  final BriskersApi api;
+  final JobSummaryVisibility Function(
+    String businessId,
+    ValueChanged<Set<String>> onQuarantine,
+  )? visibilityFactory;
 
   @override
   State<AppointmentsScreen> createState() => _AppointmentsScreenState();
 }
 
 class _AppointmentsScreenState extends State<AppointmentsScreen> {
-  static const _api = BriskersApi();
+  BriskersApi get _api => widget.api;
   // Avoid full remote reload each time the Appointments tab is reopened.
   static final Map<String, DateTime> _lastSuccessfulPull = {};
   static const _entryRefreshInterval = Duration(minutes: 2);
-  final AppointmentSyncService _appointmentSync =
-      AppointmentSyncService();
-  final JobSyncService _jobSync = JobSyncService();
-  final LocalAppointmentRepository _localAppointments =
-      LocalAppointmentRepository();
+  late final AppointmentSyncService _appointmentSync =
+      widget.appointmentSync ?? AppointmentSyncService();
+  late final JobSyncService _jobSync = JobSyncService();
+  late final LocalAppointmentRepository _localAppointments =
+      widget.repository ?? LocalAppointmentRepository();
 
   late JobSummaryVisibility _jobVisibility;
   List<Map<String, dynamic>>? _appointments;
@@ -54,6 +66,11 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   int _pending = 0;
   bool _onlineReady = false;
   bool _showingLocal = false;
+  bool _refreshFailed = false;
+  int _localLoadGeneration = 0;
+  int _connectionGeneration = 0;
+  Future<void>? _refreshFuture;
+  late final StreamSubscription<String> _syncSubscription;
 
   bool get _canManage =>
       widget.roleCode == 'owner' ||
@@ -65,6 +82,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   @override
   void dispose() {
+    BriskersConnectionModeController.instance.removeListener(
+      _onConnectionModeChanged,
+    );
+    unawaited(_syncSubscription.cancel());
     _jobVisibility.dispose();
     _search.dispose();
     super.dispose();
@@ -74,30 +95,69 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   void initState() {
     super.initState();
     _listenForQuarantine();
+    _syncSubscription = AppointmentSyncService.syncEvents.listen((businessId) {
+      if (mounted && businessId == widget.businessId) {
+        unawaited(_loadLocal());
+      }
+    });
+    BriskersConnectionModeController.instance.addListener(
+      _onConnectionModeChanged,
+    );
     _load(initialEntry: true);
   }
 
   void _listenForQuarantine() {
-    _jobVisibility = JobSummaryVisibility(
-      businessId: widget.businessId,
-      onQuarantine: (jobIds) {
-        if (!mounted) return;
-        _lastSuccessfulPull.remove(widget.businessId);
-        setState(() {
-          if (_appointments != null) {
-            final hidden = _appointments!.where(
-                (row) => jobIds.contains(row['job_id']?.toString()));
-            if (hidden.any((row) => row['id']?.toString() == _checkingInId)) {
-              _checkingInId = null;
-            }
-            _appointments = JobSummaryVisibility.withoutJobs(
-                _appointments!, jobIds, jobIdKey: 'job_id');
+    void onQuarantine(Set<String> jobIds) {
+      if (!mounted) return;
+      _lastSuccessfulPull.remove(widget.businessId);
+      setState(() {
+        if (_appointments != null) {
+          final hidden = _appointments!.where(
+              (row) => jobIds.contains(row['job_id']?.toString()));
+          if (hidden.any((row) => row['id']?.toString() == _checkingInId)) {
+            _checkingInId = null;
           }
-          _onlineReady = false;
-          _showingLocal = _appointments != null;
-        });
-      },
-    );
+          _appointments = JobSummaryVisibility.withoutJobs(
+              _appointments!, jobIds, jobIdKey: 'job_id');
+        }
+        _onlineReady = false;
+        _showingLocal = _appointments != null;
+      });
+    }
+
+    _jobVisibility = widget.visibilityFactory?.call(
+          widget.businessId, onQuarantine,
+        ) ??
+        JobSummaryVisibility(
+          businessId: widget.businessId,
+          onQuarantine: onQuarantine,
+        );
+  }
+
+  void _onConnectionModeChanged() {
+    final generation = ++_connectionGeneration;
+    setState(() {
+      _onlineReady = false;
+      _refreshFailed = false;
+      _showingLocal = _appointments != null;
+    });
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // A stalled online request must not keep offline cache behind a spinner.
+      unawaited(() async {
+        await _loadLocal(reportError: true);
+        if (!mounted || generation != _connectionGeneration) return;
+        setState(() => _appointments ??= const []);
+      }());
+    }
+    // Let a current replay finish before starting another refresh. Changing
+    // modes must not dispatch concurrent flushes of the same pending work.
+    unawaited(() async {
+      final running = _refreshFuture;
+      await running;
+      if (!mounted || generation != _connectionGeneration) return;
+      if (identical(_refreshFuture, running)) _refreshFuture = null;
+      await _load();
+    }());
   }
 
   @override
@@ -105,100 +165,159 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.businessId != widget.businessId) {
       _jobVisibility.dispose();
+      _localLoadGeneration++;
+      _refreshFuture = null;
       _appointments = null;
       _pending = 0;
       _onlineReady = false;
+      _showingLocal = false;
+      _refreshFailed = false;
+      _error = null;
+      _checkingInId = null;
       _listenForQuarantine();
       _load(initialEntry: true);
     } else if (oldWidget.dockResetToken != widget.dockResetToken) {
-      _filter = 'confirmed_today';
-      _search.clear();
+      // Tab re-entry keeps the current filter, search and scroll position.
       _load(initialEntry: true);
     }
   }
 
-  Future<void> _load({bool initialEntry = false}) async {
+  Future<bool> _loadLocal({bool reportError = false}) async {
     final visibility = _jobVisibility;
-    final generation = visibility.beginLoad();
-    var localAvailable = false;
-    final forceOnline = BriskersConnectionModeController.instance.forceOnline;
-
-    if (!forceOnline) {
-      try {
+    final generation = visibility.epoch;
+    final localGeneration = ++_localLoadGeneration;
+    final businessId = widget.businessId;
+    final filter = _filter;
+    final search = _search.text.trim();
+    try {
       final localRows = await visibility.filter(
-          await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim()),
-          jobIdKey: 'job_id');
-      final bootstrapped =
-          await _localAppointments.hasBootstrap(widget.businessId);
-      localAvailable = bootstrapped || localRows.isNotEmpty;
-
-      if (mounted && localAvailable && visibility.isCurrent(generation)) {
+        await _localAppointments.appointments(
+          businessId,
+          filter: filter,
+          search: search.isEmpty ? null : search,
+        ),
+        jobIdKey: 'job_id',
+      );
+      final bootstrapped = await _localAppointments.hasBootstrap(businessId);
+      final available = bootstrapped || localRows.isNotEmpty;
+      if (mounted && visibility.isCurrent(generation) &&
+          localGeneration == _localLoadGeneration &&
+          (available || _appointments != null)) {
         setState(() {
           _appointments = localRows;
-          _showingLocal = true;
-          _onlineReady = false;
+          if (!bootstrapped) {
+            _lastSuccessfulPull.remove(businessId);
+            _onlineReady = false;
+            _pending = 0;
+          }
+          _showingLocal = !_onlineReady;
           _error = null;
         });
       }
-    } catch (_) {
-      // Online refresh below can still populate the local appointment cache.
+      return available;
+    } catch (error) {
+      if (reportError && mounted && visibility.isCurrent(generation) &&
+          localGeneration == _localLoadGeneration) {
+        setState(() => _error = error.toString());
       }
+      return false;
     }
+  }
 
+  Future<void> _load({
+    bool initialEntry = false,
+    bool afterMutation = false,
+  }) async {
+    final running = _refreshFuture;
+    if (running != null) {
+      if (!afterMutation) return running;
+      final businessId = widget.businessId;
+      await _loadLocal(reportError: true);
+      await running;
+      if (!mounted || businessId != widget.businessId) return;
+      // Work queued after the active flush started needs its own replay.
+      if (identical(_refreshFuture, running)) _refreshFuture = null;
+      return _load();
+    }
+    final refresh = _refresh(initialEntry: initialEntry);
+    _refreshFuture = refresh;
+    try {
+      await refresh;
+    } finally {
+      if (identical(_refreshFuture, refresh)) _refreshFuture = null;
+    }
+  }
+
+  Future<void> _refresh({required bool initialEntry}) async {
+    final visibility = _jobVisibility;
+    // Query changes have their own generation. They must not discard the
+    // result of a background sync, while quarantine/disposal still must.
+    final generation = visibility.epoch;
+    final businessId = widget.businessId;
+    final mode = BriskersConnectionModeController.instance;
+    final forceOnline = mode.forceOnline;
+    final localAvailable = !forceOnline && await _loadLocal();
     if (!mounted || !visibility.isCurrent(generation)) return;
 
-    // Local rows were displayed first. Manual refresh and mutations still sync.
-    final lastPull = _lastSuccessfulPull[widget.businessId];
+    if (mode.forceOffline) {
+      setState(() {
+        _onlineReady = false;
+        _showingLocal = localAvailable || _appointments != null;
+        _refreshFailed = false;
+        _appointments ??= const [];
+      });
+      return;
+    }
+
+    final lastPull = _lastSuccessfulPull[businessId];
     if (initialEntry && !forceOnline && localAvailable && lastPull != null &&
         DateTime.now().difference(lastPull) < _entryRefreshInterval) {
       return;
     }
 
     try {
-      final appliedJobs =
-          await _appointmentSync.flush(widget.businessId);
+      final appliedJobs = await _appointmentSync.flush(businessId);
       if (appliedJobs.isNotEmpty) {
         try {
-          await _jobSync.pull(widget.businessId);
+          await _jobSync.pull(businessId);
         } catch (_) {}
       }
+      await _appointmentSync.pull(businessId);
+      if (!mounted || !visibility.isCurrent(generation)) return;
 
-      await _appointmentSync.pull(widget.businessId);
-      final localRows = await visibility.filter(
-          await _localAppointments.appointments(widget.businessId, filter: _filter, search: _search.text.trim().isEmpty ? null : _search.text.trim()),
-          jobIdKey: 'job_id');
-      final bootstrapped =
-          await _localAppointments.hasBootstrap(widget.businessId);
-
-      final now = DateTime.now();
-      var pending = 0;
-      if (_canManage) {
-        try {
-          final dashboard = await _api.dashboard(
-            widget.businessId,
-            DateFormat('yyyy-MM-dd').format(now),
-          );
-          pending = int.tryParse(
-                dashboard['pending_appointment_requests']?.toString() ?? '',
-              ) ??
-              0;
-        } catch (_) {}
-      }
-
+      // Re-read the latest query, not the query captured before the network
+      // request. Saved cards can render before the dashboard count is ready.
+      await _loadLocal(reportError: true);
+      final bootstrapped = await _localAppointments.hasBootstrap(businessId);
       if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
-        _lastSuccessfulPull[widget.businessId] = DateTime.now();
-        _appointments = localRows;
-        _pending = pending;
-        _onlineReady = bootstrapped;
-        _showingLocal = !bootstrapped;
-        _error = null;
+        _lastSuccessfulPull[businessId] = DateTime.now();
+        _onlineReady = bootstrapped && !mode.forceOffline;
+        _appointments ??= const [];
+        _showingLocal = !_onlineReady;
+        _refreshFailed = false;
       });
+
+      if (_canManage && !mode.forceOffline) {
+        try {
+          final dashboard = await _api.dashboard(
+            businessId,
+            DateFormat('yyyy-MM-dd').format(DateTime.now()),
+          );
+          if (!mounted || !visibility.isCurrent(generation)) return;
+          setState(() {
+            _pending = int.tryParse(
+                  dashboard['pending_appointment_requests']?.toString() ?? '',
+                ) ?? 0;
+          });
+        } catch (_) {}
+      }
     } catch (error) {
       if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _onlineReady = false;
-        if (localAvailable && !forceOnline) {
+        _refreshFailed = !mode.forceOffline;
+        if (_appointments != null && !forceOnline) {
           _showingLocal = true;
           _error = null;
         } else {
@@ -267,7 +386,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (changed == true) await _load(afterMutation: true);
   }
 
   Future<void> _editAppointment(Map<String, dynamic> item) async {
@@ -283,7 +402,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (changed == true) await _load(afterMutation: true);
   }
 
   Future<bool> _confirm({
@@ -327,7 +446,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     if (!ok) return;
     try {
       await _api.cancelAppointment(widget.businessId, item['id'].toString());
-      await _load();
+      await _load(afterMutation: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
@@ -521,7 +640,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
           widget.businessId,item['id'].toString(),isOwner:true,
         );
       }
-      await _load();
+      await _load(afterMutation: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
@@ -550,7 +669,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
           widget.businessId,item['id'].toString(),status,
         );
       }
-      await _load();
+      await _load(afterMutation: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
@@ -568,50 +687,62 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       return;
     }
 
+    final businessId = widget.businessId;
+    final visibility = _jobVisibility;
+    final generation = visibility.epoch;
     final confirmed = await _confirm(
       title: 'Check in vehicle?',
       message:
           'Briskers will save the check-in on this device immediately. If offline, the linked job will be created when the connection returns.',
       action: 'Check In',
     );
-    if (!confirmed) return;
+    if (!confirmed || !mounted || !_canCheckIn ||
+        widget.businessId != businessId || !visibility.isCurrent(generation)) {
+      return;
+    }
 
     final appointmentId = item['id'].toString();
     setState(() => _checkingInId = appointmentId);
 
     try {
-      await _appointmentSync.queueCheckIn(
-        widget.businessId,
-        appointmentId,
-      );
-
-      final local = await _localAppointments.appointments(
-        widget.businessId,
-        filter: _filter,
-        search: _search.text.trim().isEmpty ? null : _search.text.trim(),
-      );
-      if (mounted) {
-        setState(() {
-          _appointments = local;
-          _error = null;
-        });
+      await _appointmentSync.queueCheckIn(businessId, appointmentId);
+      if (!mounted || widget.businessId != businessId ||
+          !visibility.isCurrent(generation)) {
+        return;
       }
 
-      Map<String, String> appliedJobs = const {};
-      try {
-        appliedJobs = await _appointmentSync.flush(widget.businessId);
-        await _appointmentSync.pull(widget.businessId);
-        if (appliedJobs.isNotEmpty) {
-          try {
-            await _jobSync.pull(widget.businessId);
-          } catch (_) {}
-        }
-      } catch (_) {
-        // Offline is expected. The check-in stays queued locally.
+      await _loadLocal(reportError: true);
+      if (!mounted || widget.businessId != businessId ||
+          !visibility.isCurrent(generation)) {
+        return;
       }
-
-      final jobId = appliedJobs[appointmentId];
-      if (!mounted) return;
+      // Use the same serialized refresh as mode changes and manual refreshes.
+      // An active replay may already apply this check-in, so recover its Job
+      // from the durable row rather than only the next flush's return value.
+      await _load(afterMutation: true);
+      if (!mounted || widget.businessId != businessId ||
+          !visibility.isCurrent(generation)) {
+        return;
+      }
+      final appointment = await _localAppointments.appointment(
+        businessId, appointmentId,
+      );
+      if (!mounted || widget.businessId != businessId ||
+          !visibility.isCurrent(generation)) {
+        return;
+      }
+      final visible = await visibility.filter(
+        appointment == null ? const [] : [appointment],
+        jobIdKey: 'job_id',
+      );
+      if (!mounted || widget.businessId != businessId ||
+          !visibility.isCurrent(generation)) {
+        return;
+      }
+      final local = visible.isEmpty ? null : visible.single;
+      final jobId = local != null && local['sync_state'] == 'synced'
+          ? local['job_id']?.toString()
+          : null;
 
       if (jobId == null || jobId.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -624,9 +755,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         return;
       }
 
-      await _load();
-      if (!mounted) return;
-
       if (widget.roleCode == 'kiosk') {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Check-in completed.')),
@@ -638,17 +766,25 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => JobDetailScreen(
-            businessId: widget.businessId,
+            businessId: businessId,
             jobId: jobId,
             roleCode: widget.roleCode,
           ),
         ),
       );
-      await _load();
+      if (mounted && widget.businessId == businessId &&
+          visibility.isCurrent(generation)) {
+        await _load(afterMutation: true);
+      }
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted && widget.businessId == businessId) {
+        setState(() => _error = error.toString());
+      }
     } finally {
-      if (mounted) setState(() => _checkingInId = null);
+      if (mounted && widget.businessId == businessId &&
+          _checkingInId == appointmentId) {
+        setState(() => _checkingInId = null);
+      }
     }
   }
 
@@ -886,6 +1022,13 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   Widget build(BuildContext context) {
     final visible = _visibleAppointments;
     final total = _appointments?.length ?? 0;
+    if (_appointments != null) {
+      NavigationContentTiming.contentVisible(
+        'appointments',
+        context: context,
+        source: _showingLocal ? 'local' : 'retained',
+      );
+    }
 
     return Column(
       children: [
@@ -961,7 +1104,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                           onSelected: (_) {
                             if (_filter == option) return;
                             setState(() => _filter = option);
-                            _load();
+                            _loadLocal(reportError: true);
                           },
                           selectedColor:
                               BriskersColors.actionBlue.withValues(alpha: 0.16),
@@ -993,14 +1136,14 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                           onPressed: () {
                             _search.clear();
                             setState(() {});
-                            _load();
+                            _loadLocal(reportError: true);
                           },
                           icon: const Icon(Icons.close),
                         ),
                     ],
                     onChanged: (_) {
                       setState(() {});
-                      _load();
+                      _loadLocal(reportError: true);
                     },
                   )),
                   const SizedBox(width: 8),
@@ -1063,11 +1206,20 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.cloud_off_outlined, size: 18),
+                        Icon(
+                          BriskersConnectionModeController.instance.forceOffline
+                              ? Icons.cloud_off_outlined
+                              : Icons.storage_outlined,
+                          size: 18,
+                        ),
                         const SizedBox(width: 7),
                         Expanded(
                                 child: Text(
-                                  tr('savedAppointmentsOffline'),
+                                  BriskersConnectionModeController.instance.forceOffline
+                                      ? tr('savedAppointmentsOffline')
+                                      : _refreshFailed
+                                          ? 'Unable to refresh. Showing saved appointments.'
+                                          : 'Showing saved appointments.',
                                   style: const TextStyle(fontWeight: FontWeight.w700),
                                 ),
                         ),
