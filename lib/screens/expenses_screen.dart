@@ -90,6 +90,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   bool _showingLocal = false;
   // A newer search, filter or module entry invalidates older network results.
   int _loadEpoch = 0;
+  int _receiptEpoch = 0;
+
+  bool _isCurrentReceipt(int epoch, String businessId) =>
+      mounted && epoch == _receiptEpoch && widget.businessId == businessId;
 
   bool _isCurrentLoad(int epoch, String businessId) =>
       mounted && epoch == _loadEpoch && widget.businessId == businessId;
@@ -328,7 +332,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     // or expensive cache persistence. The first receipt page paints immediately.
     if (showLoading || refreshReceipts) {
       if (!BriskersConnectionModeController.instance.forceOffline) {
-        unawaited(_refreshInvoiceReceipts(epoch, businessId));
+        unawaited(_refreshInvoiceReceipts(businessId));
       }
     }
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
@@ -500,24 +504,24 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
   }
 
-  Future<void> _refreshInvoiceReceipts(
-    int epoch,
-    String businessId,
-  ) async {
+  Future<void> _refreshInvoiceReceipts(String businessId) async {
+    // A user searching invoices must not cancel a payment that is still
+    // arriving from the server. Receipt refresh has its own lifecycle.
+    final epoch = ++_receiptEpoch;
     try {
       const pageSize = 250;
       final rows = <Map<String, dynamic>>[];
       var exhausted = false;
       // Never replace the saved receipt inventory with a truncated response.
       for (var offset = 0; offset < 20000; offset += pageSize) {
-        if (!_isCurrentLoad(epoch, businessId) ||
+        if (!_isCurrentReceipt(epoch, businessId) ||
             BriskersConnectionModeController.instance.forceOffline) {
           return;
         }
         final page = await _api.invoiceReceipts(
           businessId, limit: pageSize, offset: offset,
         );
-        if (!_isCurrentLoad(epoch, businessId)) return;
+        if (!_isCurrentReceipt(epoch, businessId)) return;
         rows.addAll(page);
         if (offset == 0) {
           // Show the latest server payments after the first short page;
@@ -541,14 +545,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         }
       }
       if (!exhausted ||
-          !_isCurrentLoad(epoch, businessId) ||
+          !_isCurrentReceipt(epoch, businessId) ||
           BriskersConnectionModeController.instance.forceOffline) {
         return;
       }
       await _invoiceFeed.saveServerReceipts(businessId, rows);
-      if (!_isCurrentLoad(epoch, businessId)) return;
+      if (!_isCurrentReceipt(epoch, businessId)) return;
       final merged = await _invoiceFeed.load(businessId);
-      if (_isCurrentLoad(epoch, businessId)) {
+      if (_isCurrentReceipt(epoch, businessId)) {
         setState(() => _invoiceReceipts = merged);
       }
     } catch (_) {
