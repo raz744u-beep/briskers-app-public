@@ -214,7 +214,7 @@ void main() {
     (tester) async {
       sync.delayedPull = Completer<void>();
       await show(tester);
-      expect(find.text('Saved confirmed_today '), findsOneWidget);
+      expect(find.text('Saved today '), findsOneWidget);
       expect(find.text('Showing saved appointments.'), findsOneWidget);
       expect(find.text(tr('savedAppointmentsOffline')), findsNothing);
       expect(find.byType(CircularProgressIndicator), findsNothing);
@@ -269,7 +269,7 @@ void main() {
       sync.delayedPull!.complete();
       await tester.pumpAndSettle();
       expect(find.text('Fresh all current'), findsOneWidget);
-      expect(find.text('Saved confirmed_today '), findsNothing);
+      expect(find.text('Saved today '), findsNothing);
       expect(sync.flushes, 1);
       expect(sync.pulls, 1);
       expect(api.dashboards, 1);
@@ -284,11 +284,11 @@ void main() {
     repository.delayedSearch = Completer<List<Map<String, dynamic>>>();
     await search(tester, 'old');
     await search(tester, 'new');
-    expect(find.text('Saved confirmed_today new'), findsOneWidget);
+    expect(find.text('Saved today new'), findsOneWidget);
     repository.delayedSearch!.complete([appointmentRow('Stale result')]);
     await tester.pumpAndSettle();
     expect(find.text('Stale result'), findsNothing);
-    expect(find.text('Saved confirmed_today new'), findsOneWidget);
+    expect(find.text('Saved today new'), findsOneWidget);
     expect(sync.pulls, 1);
   });
 
@@ -375,7 +375,7 @@ void main() {
           .widget<RefreshIndicator>(find.byType(RefreshIndicator))
           .onRefresh();
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Saved confirmed_today '));
+      await tester.tap(find.text('Saved today '));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Check in'));
       await tester.pumpAndSettle();
@@ -404,13 +404,13 @@ void main() {
       sync.delayedPull = Completer<void>();
       await show(tester, settle: false);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
-      expect(find.text('Saved confirmed_today '), findsNothing);
+      expect(find.text('Saved today '), findsNothing);
 
       await BriskersConnectionModeController.instance.setMode(
         BriskersConnectionMode.offline,
       );
       await tester.pumpAndSettle();
-      expect(find.text('Saved confirmed_today '), findsOneWidget);
+      expect(find.text('Saved today '), findsOneWidget);
       expect(find.text(tr('savedAppointmentsOffline')), findsOneWidget);
       expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(sync.pulls, 1);
@@ -425,7 +425,7 @@ void main() {
   ) async {
     sync.fail = true;
     await show(tester);
-    expect(find.text('Saved confirmed_today '), findsOneWidget);
+    expect(find.text('Saved today '), findsOneWidget);
     expect(
       find.text('Unable to refresh. Showing saved appointments.'),
       findsOneWidget,
@@ -457,7 +457,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(sync.flushes, 1);
     expect(sync.pulls, 1);
-    expect(find.text('Saved confirmed_today offline query'), findsOneWidget);
+    expect(find.text('Saved today offline query'), findsOneWidget);
     expect(find.text(tr('savedAppointmentsOffline')), findsNothing);
     expect(find.byType(PopupMenuButton<String>), findsOneWidget);
 

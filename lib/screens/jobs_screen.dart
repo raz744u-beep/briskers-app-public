@@ -128,6 +128,7 @@ class _JobsScreenState extends State<JobsScreen>
   String? _busyJobId;
   bool _onlineReady = false;
   bool _showingLocal = false;
+  bool _refreshFailed = false;
 
   bool get _canManage =>
       widget.roleCode == 'owner' ||
@@ -328,46 +329,51 @@ class _JobsScreenState extends State<JobsScreen>
     final mode = BriskersConnectionModeController.instance;
 
     Future<void> readSavedJobs({required bool online}) async {
-      final results = await Future.wait<dynamic>([
-        _localJobs.listJobs(
-          businessId,
-          status: status,
-          search: query,
-          view: view,
-          sort: JobListSort.lastModified,
-          userId: userId,
-          limit: limit,
-        ),
+      // Start secondary counters/search lookups concurrently, but do not
+      // block the first usable Jobs list frame on all five SQLite reads.
+      final metadata = Future.wait<dynamic>([
         _localJobs.jobStatuses(businessId),
         _localJobs.jobCount(
-          businessId,
-          status: status,
-          search: query,
-          view: view,
+          businessId, status: status, search: query, view: view,
         ),
         _localJobs.jobStatusCounts(businessId, view: JobListView.all),
         query.isEmpty
             ? Future.value(<Map<String, dynamic>>[])
             : _localDocuments.search(businessId, query, limit: 30),
-      ]);
-      if (!mounted || !visibility.isCurrent(generation)) return;
-      final visibleRows = await visibility.filter(
-        List<Map<String, dynamic>>.from(results[0] as List),
+      ]).then<void>((results) async {
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        final blocked = await visibility.blockedJobIds();
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        setState(() {
+          _statuses = List<Map<String, dynamic>>.from(results[0] as List);
+          _totalCount = results[1] as int;
+          _statusCounts = Map<String, int>.from(results[2] as Map);
+          _documentMatches = _withoutJobLabels(
+            List<Map<String, dynamic>>.from(results[3] as List), blocked,
+          );
+        });
+      }).catchError((Object _) {
+        // A stale/failed count may not hide already-rendered job cards.
+      });
+      unawaited(metadata);
+      final rows = await _localJobs.listJobs(
+        businessId,
+        status: status,
+        search: query,
+        view: view,
+        sort: JobListSort.lastModified,
+        userId: userId,
+        limit: limit,
       );
-      final blockedJobIds = await visibility.blockedJobIds();
+      if (!mounted || !visibility.isCurrent(generation)) return;
+      final visibleRows = await visibility.filter(rows);
       if (!mounted || !visibility.isCurrent(generation)) return;
       localAvailable = true;
       setState(() {
         _rows = visibleRows;
-        _statuses = List<Map<String, dynamic>>.from(results[1] as List);
-        _totalCount = results[2] as int;
-        _statusCounts = Map<String, int>.from(results[3] as Map);
-        _documentMatches = _withoutJobLabels(
-          List<Map<String, dynamic>>.from(results[4] as List),
-          blockedJobIds,
-        );
         _showingLocal = !online;
         _onlineReady = online;
+        if (online) _refreshFailed = false;
         _error = null;
       });
     }
@@ -413,6 +419,7 @@ class _JobsScreenState extends State<JobsScreen>
       if (!mounted || !visibility.isCurrent(generation)) return;
       setState(() {
         _onlineReady = false;
+        _refreshFailed = true;
         _showingLocal = localAvailable && !mode.forceOnline;
         if (_showingLocal) {
           _error = null;
@@ -1210,7 +1217,9 @@ class _JobsScreenState extends State<JobsScreen>
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 80),
               children: [
-                if (_showingLocal)
+                if (_showingLocal &&
+                    (BriskersConnectionModeController.instance.forceOffline ||
+                     _refreshFailed))
                   Container(
                     margin: const EdgeInsets.symmetric(vertical: 8),
                     padding: const EdgeInsets.symmetric(
@@ -1228,8 +1237,12 @@ class _JobsScreenState extends State<JobsScreen>
                         Expanded(
                           child: Text(
                             _text(
-                              'Showing saved jobs · changes sync when connected',
-                              'Trabajos guardados · los cambios se sincronizarán al conectar',
+                              _refreshFailed
+                                  ? 'Showing saved jobs · refresh needs attention'
+                                  : 'Offline · showing saved jobs',
+                              _refreshFailed
+                                  ? 'Trabajos guardados · revisar actualización'
+                                  : 'Sin conexión · mostrando trabajos guardados',
                             ),
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),

@@ -62,6 +62,7 @@ import '../customers/customer_detail_screen.dart';
 import 'customer_invoice_signature_screen.dart';
 import 'invoice_warranty_panel.dart';
 import 'invoice_note_draft_rules.dart';
+import '../../widgets/document_tab_label.dart';
 import 'standard_note_editor_sheet.dart';
 import 'standard_note_picker_sheet.dart';
 import 'job_detail_screen.dart';
@@ -7992,6 +7993,7 @@ class _DocumentTabsHeaderDelegate
         child: TabBar(
           onTap: onTap,
           isScrollable: false,
+          labelPadding: EdgeInsets.zero,
           indicatorColor: accent,
           indicatorWeight: 3,
           labelColor: accent,
@@ -8001,10 +8003,17 @@ class _DocumentTabsHeaderDelegate
             fontWeight: FontWeight.w800,
           ),
           tabs: [
-            Tab(text: tr('itemsTab')),
-            if (!isEstimate) Tab(text: tr('paymentTab')),
-            Tab(text: tr('notesTab')),
-            if (!isEstimate) const Tab(text: 'Expenses'),
+            DocumentTabLabel(
+              label: tr('itemsTab'), alignment: Alignment.centerLeft),
+            if (!isEstimate)
+              DocumentTabLabel(label: tr('paymentTab')),
+            DocumentTabLabel(
+              label: tr('notesTab'),
+              alignment: isEstimate
+                  ? Alignment.centerRight : Alignment.center),
+            if (!isEstimate)
+              const DocumentTabLabel(
+                label: 'Expenses', alignment: Alignment.centerRight),
           ],
         ),
       ),

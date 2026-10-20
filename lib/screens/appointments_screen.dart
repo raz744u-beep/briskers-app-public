@@ -59,7 +59,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
   late JobSummaryVisibility _jobVisibility;
   List<Map<String, dynamic>>? _appointments;
-  String _filter = 'confirmed_today';
+  String _filter = 'today';
   final TextEditingController _search = TextEditingController();
   String? _error;
   String? _checkingInId;
@@ -1075,53 +1075,64 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Wrap(
-                    spacing: 7,
-                    runSpacing: 6,
-                    children: [
-                      for (final option in const <String>[
-                        'confirmed_today',
-                        'today',
-                        'upcoming',
-                        'past',
-                        'all',
-                      ])
-                        ChoiceChip(
-                          label: Text(
-                            option == 'confirmed_today'
-                                ? tr('today')
-                                : option == 'today'
-                                    ? 'All today'
-                                : option == 'upcoming'
-                                    ? tr('upcoming')
-                                    : option == 'past'
-                                        ? tr('past')
-                                        : tr('all'),
-                          ),
-                          selected: _filter == option,
-                          onSelected: (_) {
-                            if (_filter == option) return;
-                            setState(() => _filter = option);
-                            _loadLocal(reportError: true);
-                          },
-                          selectedColor:
-                              BriskersColors.actionBlue.withValues(alpha: 0.16),
-                          side: BorderSide(
-                            color: BriskersColors.actionBlue.withValues(
-                              alpha: _filter == option ? 0.75 : 0.34,
+                // Four compact filters stay on one row. "Today" includes all
+                // appointment statuses; confirmed-only remains an internal
+                // query for kiosk and other workflows, not a duplicate tab.
+                Row(
+                  children: [
+                    for (final option in const <String>[
+                      'today',
+                      'upcoming',
+                      'past',
+                      'all',
+                    ])
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: ChoiceChip(
+                            label: SizedBox(
+                              width: double.infinity,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  option == 'today'
+                                      ? tr('today')
+                                      : option == 'upcoming'
+                                          ? tr('upcoming')
+                                          : option == 'past'
+                                              ? tr('past')
+                                              : tr('all'),
+                                  maxLines: 1,
+                                ),
+                              ),
+                            ),
+                            labelPadding: const EdgeInsets.symmetric(
+                              horizontal: 3,
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 7),
+                            selected: _filter == option,
+                            onSelected: (_) {
+                              if (_filter == option) return;
+                              setState(() => _filter = option);
+                              unawaited(_loadLocal(reportError: true));
+                            },
+                            selectedColor: BriskersColors.actionBlue
+                                .withValues(alpha: 0.16),
+                            side: BorderSide(
+                              color: BriskersColors.actionBlue.withValues(
+                                alpha: _filter == option ? 0.75 : 0.34,
+                              ),
+                            ),
+                            labelStyle: TextStyle(
+                              color: BriskersColors.actionBlue,
+                              fontWeight: _filter == option
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
                             ),
                           ),
-                          labelStyle: TextStyle(
-                            color: BriskersColors.actionBlue,
-                            fontWeight: _filter == option
-                                ? FontWeight.w800
-                                : FontWeight.w600,
-                          ),
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 10),
                 Row(children: [

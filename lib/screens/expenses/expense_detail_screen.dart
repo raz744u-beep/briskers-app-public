@@ -1055,6 +1055,10 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: BriskersColors.expenses,
+                        foregroundColor: Colors.white,
+                      ),
                       onPressed: () async {
                         if (!_isCurrent(generation) || _busy) return;
                         final parsed = num.tryParse(
