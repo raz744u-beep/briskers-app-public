@@ -149,6 +149,12 @@ class _JobTasksLabScreenState extends State<JobTasksLabScreen> {
                   labelText:'Mechanic',border:OutlineInputBorder()),
                 items:[
                   const DropdownMenuItem(value:'',child:Text('Unassigned')),
+                  // Keep an existing offline assignment even if the roster
+                  // has not finished loading on this test phone.
+                  if (mechanic.isNotEmpty &&
+                      !_employees.any((e) => _id(e) == mechanic))
+                    DropdownMenuItem(value:mechanic,
+                      child:const Text('Previously assigned mechanic')),
                   ..._employees.where((x)=>_id(x).isNotEmpty).map((e)=>
                     DropdownMenuItem<String>(value:_id(e),
                       child:Text(_employeeName(e)))),
