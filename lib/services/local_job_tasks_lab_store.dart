@@ -29,6 +29,12 @@ class LocalJobTasksLabStore {
         nickname TEXT NOT NULL, PRIMARY KEY (business_id, employee_id)
       )
     ''');
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_employee_full_names_lab (
+        business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+        full_name TEXT NOT NULL, PRIMARY KEY (business_id, employee_id)
+      )
+    ''');
   }
 
   Future<List<Map<String, dynamic>>> list(String businessId, String jobId) async {
@@ -168,6 +174,45 @@ class LocalJobTasksLabStore {
       'DO UPDATE SET nickname=excluded.nickname',
       [businessId, employeeId, nickname.trim()],
     );
+  }
+
+  Future<Map<String, String>> fullNames(String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT employee_id, full_name FROM local_employee_full_names_lab '
+      'WHERE business_id=?', variables: [Variable<String>(businessId)],
+    ).get();
+    return {for (final row in rows)
+      row.read<String>('employee_id'): row.read<String>('full_name')};
+  }
+
+  /// Only changes the local display profile for a synthetic test employee.
+  /// Employee IDs and job/task assignments remain unchanged.
+  Future<void> saveEmployeeProfile({
+    required String businessId, required String employeeId,
+    required String fullName, required String displayName,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, employeeId, fullName, displayName]
+        .any((part) => part.trim().isEmpty)) {
+      throw ArgumentError('Employee name and display name are required');
+    }
+    await db.transaction(() async {
+      await db.customStatement(
+        'INSERT INTO local_employee_full_names_lab '
+        '(business_id, employee_id, full_name) VALUES (?, ?, ?) '
+        'ON CONFLICT(business_id, employee_id) '
+        'DO UPDATE SET full_name=excluded.full_name',
+        [businessId, employeeId, fullName.trim()],
+      );
+      await db.customStatement(
+        'INSERT INTO local_employee_nicknames_lab '
+        '(business_id, employee_id, nickname) VALUES (?, ?, ?) '
+        'ON CONFLICT(business_id, employee_id) '
+        'DO UPDATE SET nickname=excluded.nickname',
+        [businessId, employeeId, displayName.trim()],
+      );
+    });
   }
 
   /// Labor only: never parts, discounts, tax or price-only invoice lines.
