@@ -20,7 +20,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 CANDIDATE_BRANCH = "lab/richard-isolated-vertical-b2327-20261020"
-BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
+BUILD_WORKFLOW = ".github/workflows/android-tasks-test.yml"
 REQUIRED_WORKFLOWS = {
     "diagnostics.yml": "Briskers Diagnostics",
     "ios-compile.yml": "Briskers iOS compile check",
