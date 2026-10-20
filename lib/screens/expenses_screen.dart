@@ -1567,8 +1567,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                 ? 'Calculating complete posted totals for the selected filters…'
                                 : _searchController.text.trim().isNotEmpty
                                     ? 'Search totals include all dates.'
-                                    : 'Complete posted totals for ' + _rangeLabel +
-                                      ' · pending offline entries excluded'),
+                                    : 'Complete posted totals for $_rangeLabel · pending offline entries excluded'),
                         style: const TextStyle(
                           fontSize: 12,
                           color: Color(0xFF667085),
