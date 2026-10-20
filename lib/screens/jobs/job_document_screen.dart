@@ -7209,6 +7209,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       _notesController.text,
       _detail?['memo']?.toString(),
     );
+    // Invoice mileage is one saved header value, not duplicated in the
+    // editable memo. Its PDF value already comes from this same field.
+    final savedMileage = _detail?['odometer_in']?.toString().trim() ?? '';
     // Derived from current invoice lines, never written into manual notes.
     final derivedLabor = !_estimate && _detail != null
         ? invoiceLaborWorkSummary(_detail!) : '';
@@ -7224,6 +7227,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   fontWeight: FontWeight.w800,
                 ),
           ),
+          if (!_estimate && savedMileage.isNotEmpty)
+            Card(
+              key: const ValueKey('invoice-notes-automatic-mileage'),
+              margin: const EdgeInsets.only(top: 10),
+              color: const Color(0xFFF7FAFC),
+              child: ListTile(
+                dense: true,
+                leading: const Icon(Icons.speed_outlined),
+                title: Text('Mileage: ${_quantity(savedMileage)} mi',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: const Text('Automatic from Invoice Details'),
+                trailing: _readOnly ? null
+                    : const Icon(Icons.chevron_right),
+                onTap: _readOnly ? null : _editDocumentHeader,
+              ),
+            ),
           if (derivedLabor.isNotEmpty) ...[
             const SizedBox(height: 8),
             Card(
