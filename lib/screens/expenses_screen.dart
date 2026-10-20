@@ -88,6 +88,15 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   Timer? _searchDebounce;
   String? _error;
   bool _showingLocal = false;
+  // A newer search, filter or module entry invalidates older network results.
+  int _loadEpoch = 0;
+  int _receiptEpoch = 0;
+
+  bool _isCurrentReceipt(int epoch, String businessId) =>
+      mounted && epoch == _receiptEpoch && widget.businessId == businessId;
+
+  bool _isCurrentLoad(int epoch, String businessId) =>
+      mounted && epoch == _loadEpoch && widget.businessId == businessId;
 
   bool get _owner => widget.roleCode == 'owner';
   bool get _showFinancialSummary =>
@@ -288,10 +297,16 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
   }
 
-  Future<void> _load({bool showLoading = true}) async {
+  Future<void> _load({
+    bool showLoading = true,
+    bool refreshReceipts = false,
+  }) async {
+    final epoch = ++_loadEpoch;
+    final businessId = widget.businessId;
     if (showLoading) {
       setState(() {
-        _loading = true;
+        // Never blank a previously displayed financial list while refreshing.
+        _loading = _transactions.isEmpty && _invoiceReceipts.isEmpty;
         _visibleCount = _pageSize;
         _error = null;
       });
@@ -302,11 +317,28 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     // Reload the durable offline payment queue on every entry/refresh.
     try {
       final receipts = await _invoiceFeed.load(widget.businessId);
-      if (mounted) setState(() => _invoiceReceipts = receipts);
+      if (_isCurrentLoad(epoch, businessId)) {
+        setState(() {
+          // A search must not replace a newly fetched server receipt with
+          // an older on-disk snapshot while background reconciliation runs.
+          _invoiceReceipts = _invoiceReceipts.isEmpty
+              ? receipts
+              : InvoicePaymentFeed.mergeReceipts(_invoiceReceipts, receipts);
+          if (_invoiceReceipts.isNotEmpty) _loading = false;
+        });
+      }
     } catch (_) {
       // Preserve the existing financial list if cache access fails.
     }
 
+    if (!_isCurrentLoad(epoch, businessId)) return;
+    // Receipt visibility must never wait on full transaction-history downloads
+    // or expensive cache persistence. The first receipt page paints immediately.
+    if (showLoading || refreshReceipts) {
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        unawaited(_refreshInvoiceReceipts(businessId));
+      }
+    }
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
     if (!forceOnline) {
@@ -336,7 +368,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           widget.businessId,
         );
 
-        if (mounted && (localRows.isNotEmpty || localOptions.isNotEmpty)) {
+        if (_isCurrentLoad(epoch, businessId) &&
+            (localRows.isNotEmpty || localOptions.isNotEmpty)) {
           setState(() {
             _transactions = localRows.take(_pageSize).toList();
             _hasMore = hasMoreLocal;
@@ -363,9 +396,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
 
     if (BriskersConnectionModeController.instance.forceOffline) {
-      if (mounted) {
+      if (_isCurrentLoad(epoch, businessId)) {
         setState(() {
-          if (!_showingLocal) _transactions = const [];
+          if (!_showingLocal && _transactions.isEmpty) {
+            _transactions = const [];
+          }
           _hasMore = false;
           _loading = false;
           _error = null;
@@ -382,55 +417,77 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
 
     try {
-      final results = await Future.wait<dynamic>([
-        _fetchTransactions(offset: 0),
-        _api.transactionOptions(widget.businessId),
-        _api.transactions(widget.businessId, limit: 1000),
-      ]);
-      final rows = List<Map<String, dynamic>>.from(results[0] as List);
-      final options = Map<String, dynamic>.from(results[1] as Map);
-      final verifiedRows = {for (final row in rows) row['id']?.toString(): row};
-      final snapshot = List<Map<String, dynamic>>.from(results[2] as List)
-          .map((row) => verifiedRows[row['id']?.toString()] ?? row)
-          .toList();
-
-      await _localFinancial.saveTransactions(widget.businessId, snapshot);
-      await _localFinancial.saveOptions(widget.businessId, options);
-      unawaited(_prefetchReceiptDetails(snapshot));
-
-      if (!mounted) return;
+      // Fetch just the visible page first. Waiting for historical 1,000-row
+      // snapshots made newly posted invoice payments appear very late.
+      final rows = await _fetchTransactions(offset: 0);
+      if (!_isCurrentLoad(epoch, businessId)) return;
       setState(() {
         _transactions = rows;
         _hasMore = rows.length == _pageSize;
-        _quickTemplates = List<dynamic>.from(
-          options['quick_templates'] ?? const [],
-        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
-        _accounts = List<dynamic>.from(options['accounts'] ?? const [])
-            .map((raw) => Map<String, dynamic>.from(raw as Map))
-            .toList();
-        _categories = List<dynamic>.from(options['categories'] ?? const [])
-            .map((raw) => Map<String, dynamic>.from(raw as Map))
-            .toList();
-        _counterparties = List<dynamic>.from(
-          options['counterparties'] ?? const [],
-        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
         _loading = false;
         _showingLocal = false;
         _error = null;
       });
-      unawaited(_refreshInvoiceReceipts());
+      // Options and the complete offline cache are not prerequisites for
+      // showing a transaction or an invoice payment in Expenses & Income.
+      unawaited(_hydrateFinancialHistory(epoch, businessId, rows));
     } catch (error) {
-      if (!mounted) return;
+      if (!_isCurrentLoad(epoch, businessId)) return;
       final forceOffline =
           BriskersConnectionModeController.instance.forceOffline;
       setState(() {
         _loading = false;
-        if (_showingLocal || forceOffline) {
+        if (_showingLocal || forceOffline ||
+            _transactions.isNotEmpty || _invoiceReceipts.isNotEmpty) {
           _error = null;
         } else {
           _error = error.toString();
         }
       });
+    }
+  }
+
+  Future<void> _hydrateFinancialHistory(
+    int epoch,
+    String businessId,
+    List<Map<String, dynamic>> firstPage,
+  ) async {
+    try {
+      final results = await Future.wait<dynamic>([
+        _api.transactionOptions(businessId),
+        _api.transactions(businessId, limit: 1000),
+      ]);
+      if (!_isCurrentLoad(epoch, businessId) ||
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
+      final options = Map<String, dynamic>.from(results[0] as Map);
+      final verified = {for (final row in firstPage)
+        row['id']?.toString(): row};
+      final snapshot = List<Map<String, dynamic>>.from(results[1] as List)
+          .map((row) => verified[row['id']?.toString()] ?? row)
+          .toList();
+      setState(() {
+        _quickTemplates = List<dynamic>.from(
+          options['quick_templates'] ?? const [],
+        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        _accounts = List<dynamic>.from(options['accounts'] ?? const [])
+            .map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        _categories = List<dynamic>.from(options['categories'] ?? const [])
+            .map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+        _counterparties = List<dynamic>.from(
+          options['counterparties'] ?? const [],
+        ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
+      });
+      // The offline cache remains durable, but does not block first paint.
+      await _localFinancial.saveTransactions(businessId, snapshot);
+      if (!_isCurrentLoad(epoch, businessId)) return;
+      await _localFinancial.saveOptions(businessId, options);
+      if (_isCurrentLoad(epoch, businessId)) {
+        unawaited(_prefetchReceiptDetails(snapshot));
+      }
+    } catch (_) {
+      // Keep already visible authoritative rows, receipts and cached options.
     }
   }
 
@@ -451,22 +508,26 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
   }
 
-  Future<void> _refreshInvoiceReceipts() async {
+  Future<void> _refreshInvoiceReceipts(String businessId) async {
+    // A user searching invoices must not cancel a payment that is still
+    // arriving from the server. Receipt refresh has its own lifecycle.
+    final epoch = ++_receiptEpoch;
     try {
       const pageSize = 250;
       final rows = <Map<String, dynamic>>[];
       var exhausted = false;
       // Never replace the saved receipt inventory with a truncated response.
       for (var offset = 0; offset < 20000; offset += pageSize) {
-        if (!mounted ||
+        if (!_isCurrentReceipt(epoch, businessId) ||
             BriskersConnectionModeController.instance.forceOffline) {
           return;
         }
         final page = await _api.invoiceReceipts(
-          widget.businessId, limit: pageSize, offset: offset,
+          businessId, limit: pageSize, offset: offset,
         );
+        if (!_isCurrentReceipt(epoch, businessId)) return;
         rows.addAll(page);
-        if (offset == 0 && mounted) {
+        if (offset == 0) {
           // Show the latest server payments after the first short page;
           // continue filling the historical offline snapshot in background.
           final saved = _invoiceReceipts
@@ -475,9 +536,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           final queued = _invoiceReceipts
               .where((r) => r['receipt_state']?.toString() == 'local')
               .toList();
-          setState(() => _invoiceReceipts = InvoicePaymentFeed.mergeReceipts(
-            [...page, ...saved], queued,
-          ));
+          setState(() {
+            _invoiceReceipts = InvoicePaymentFeed.mergeReceipts(
+              [...page, ...saved], queued,
+            );
+            if (_invoiceReceipts.isNotEmpty) _loading = false;
+          });
         }
         if (page.length < pageSize) {
           exhausted = true;
@@ -485,12 +549,16 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         }
       }
       if (!exhausted ||
+          !_isCurrentReceipt(epoch, businessId) ||
           BriskersConnectionModeController.instance.forceOffline) {
         return;
       }
-      await _invoiceFeed.saveServerReceipts(widget.businessId, rows);
-      final merged = await _invoiceFeed.load(widget.businessId);
-      if (mounted) setState(() => _invoiceReceipts = merged);
+      await _invoiceFeed.saveServerReceipts(businessId, rows);
+      if (!_isCurrentReceipt(epoch, businessId)) return;
+      final merged = await _invoiceFeed.load(businessId);
+      if (_isCurrentReceipt(epoch, businessId)) {
+        setState(() => _invoiceReceipts = merged);
+      }
     } catch (_) {
       // Keep locally recorded payments visible on old/unavailable backends.
     }
@@ -514,7 +582,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    if (mounted) unawaited(_load(showLoading: false));
+    if (mounted) {
+      unawaited(_load(showLoading: false, refreshReceipts: true));
+    }
   }
 
   Future<void> _viewInvoiceReceipt(Map<String, dynamic> row) async {
