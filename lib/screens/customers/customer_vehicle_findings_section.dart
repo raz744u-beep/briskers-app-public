@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/connection_mode.dart';
+import '../../core/briskers_colors.dart';
 import '../../local/local_database_provider.dart';
 import '../../widgets/vehicle_findings.dart';
 import '../../services/offline_work_findings_service.dart';
@@ -841,6 +842,10 @@ class _CustomerVehicleFindingsSectionState
                         child: const Text('Cancel'),
                       ),
                       FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: BriskersColors.vehicles,
+                          foregroundColor: Colors.white,
+                        ),
                         onPressed: () {
                           final value = controller.text.trim();
                           if (value.isNotEmpty) {
