@@ -3,7 +3,7 @@ name: Build Android debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, feat/combined-118-20261014, fix/oct15-independent-ui-20261015, recovery/latest-feature-startup-20261017, feature/invoice-payments-expenses-feed-20261017, fix/expenses-offline-targeted-reporting-20261017, feature/oct17-stability-navigation-tax-20261017, release/payment-v2-apk-20261018, release/navigation-sort-verified-20261018, release/offline-tax-save-20261018, release/payment-actions-invoice-dock-20261018, recovery/oct19-modern-ui-b2322-candidate, fix/oct19-b2322-stability-consolidated, fix/b2326-cache-navigation-performance-20261020, fix/b2327-payment-feed-first-paint-invoice-expense-amounts]
+    branches: [main, feat/combined-118-20261014, fix/oct15-independent-ui-20261015, recovery/latest-feature-startup-20261017, feature/invoice-payments-expenses-feed-20261017, fix/expenses-offline-targeted-reporting-20261017, feature/oct17-stability-navigation-tax-20261017, release/payment-v2-apk-20261018, release/navigation-sort-verified-20261018, release/offline-tax-save-20261018, release/payment-actions-invoice-dock-20261018, recovery/oct19-modern-ui-b2322-candidate, fix/oct19-b2322-stability-consolidated, fix/b2326-cache-navigation-performance-20261020, fix/b2327-payment-feed-first-paint-invoice-expense-amounts, release/bugs13-b2328-consolidated-20261020]
     paths-ignore:
       - '.github/workflows/**'
 
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   candidate-prerequisites:
-    if: github.ref == 'refs/heads/fix/b2327-payment-feed-first-paint-invoice-expense-amounts'
+    if: github.ref == 'refs/heads/release/bugs13-b2328-consolidated-20261020'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -45,7 +45,7 @@ jobs:
     # Cancellation/failure can never enable the isolated candidate build.
     if: >-
       ${{ !cancelled() &&
-          (github.ref != 'refs/heads/fix/b2327-payment-feed-first-paint-invoice-expense-amounts' ||
+          (github.ref != 'refs/heads/release/bugs13-b2328-consolidated-20261020' ||
            needs.candidate-prerequisites.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Revalidate exact-head checks before Android work
-        if: github.ref == 'refs/heads/fix/b2327-payment-feed-first-paint-invoice-expense-amounts'
+        if: github.ref == 'refs/heads/release/bugs13-b2328-consolidated-20261020'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 tools/require_candidate_checks.py --timeout-seconds 30
