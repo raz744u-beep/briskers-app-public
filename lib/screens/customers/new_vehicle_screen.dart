@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/briskers_colors.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
@@ -298,7 +299,7 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
           const SizedBox(height: 18),
           FilledButton.icon(
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF18529A),
+              backgroundColor: BriskersColors.customerSave,
               foregroundColor: Colors.white,
             ),
             onPressed: _busy ? null : _save,
