@@ -87,7 +87,7 @@ void main() {
       ExpensesPeriodTotals.calculate(
         pageSize: 2,
         maxPages: 1,
-        readPage: (_, __) async => [
+        readPage: (_, _) async => [
           {'id': 'a', 'direction': 'expense', 'amount': 1},
           {'id': 'b', 'direction': 'expense', 'amount': 1},
         ],
@@ -99,7 +99,7 @@ void main() {
       ExpensesPeriodTotals.calculate(
         pageSize: 1,
         isCurrent: () => valid,
-        readPage: (_, __) async {
+        readPage: (_, _) async {
           valid = false;
           return [{'id': 'a', 'direction': 'expense', 'amount': 1}];
         },
@@ -108,7 +108,7 @@ void main() {
     );
     await expectLater(
       ExpensesPeriodTotals.calculate(
-        readPage: (_, __) async => [
+        readPage: (_, _) async => [
           {'direction': 'income', 'amount': 5},
         ],
       ),
