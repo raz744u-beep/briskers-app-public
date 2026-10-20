@@ -111,7 +111,9 @@ class _JobTasksLabScreenState extends State<JobTasksLabScreen> {
 
   Future<void> _seed(String id, Map<String,dynamic> detail) async {
     if(detail['kind']!='invoice' ||
-        detail['job_id']?.toString()!=widget.jobId) return;
+        detail['job_id']?.toString()!=widget.jobId) {
+      return;
+    }
     await _store.reconcileDocument(
       businessId:widget.businessId,jobId:widget.jobId,documentId:id,
       laborLines:LocalJobTasksLabStore.laborLines(detail));
