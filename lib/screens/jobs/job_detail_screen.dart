@@ -45,6 +45,7 @@ import '../expenses/expense_entry_screen.dart';
 import '../customers/customer_detail_screen.dart';
 import 'identifix_estimate_import_screen.dart';
 import 'job_document_screen.dart';
+import 'job_tasks_lab_screen.dart';
 import 'job_edit_screen.dart';
 
 class JobDetailScreen extends StatefulWidget {
@@ -2644,6 +2645,22 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
   }
 
+  Future<void> _openTasksLab() async {
+    if (!_owner || _contentBlocked || _job == null) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JobTasksLabScreen(
+          businessId: widget.businessId,
+          jobId: widget.jobId,
+          jobLabel: _job?['job_number']?.toString() ?? 'Job',
+          documents: List<Map<String, dynamic>>.from(_documents),
+          employees: List<Map<String, dynamic>>.from(_employees),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openDocument(String documentId) async {
     await Navigator.push<void>(
       context,
@@ -5050,6 +5067,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               if (value == 'edit') await _editJob();
               if (value == 'change_customer') await _changeCustomer();
               if (value == 'assignment') await _changeAssignment();
+              if (value == 'tasks_lab') await _openTasksLab();
               if (value == 'refresh') await _load();
               if (value == 'delete_unused') await _deleteUnusedJob();
             },
@@ -5082,6 +5100,16 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.person_outline),
                     title: Text('Assign / unassign mechanic'),
+                  ),
+                ),
+              if (_owner)
+                const PopupMenuItem(
+                  value: 'tasks_lab',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.list_alt_outlined),
+                    title: Text('Assign labor tasks (TEST)'),
                   ),
                 ),
               if (_owner) ...[
@@ -5128,6 +5156,16 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             vin: vin,
             jobTitle: jobTitle,
             assignment: assignment,
+          ),
+          if (_owner) Card(
+            child: ListTile(
+              leading: const Icon(Icons.person_add_alt_1_outlined,
+                color: BriskersColors.jobs),
+              title: const Text('Assign invoice labor to mechanics'),
+              subtitle: const Text('Tasks test · saved on this phone only'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _openTasksLab,
+            ),
           ),
           if (_onlineReady &&
               _job?['status']?.toString() == 'completed') ...[
