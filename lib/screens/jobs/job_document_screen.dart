@@ -7967,8 +7967,7 @@ class _DocumentTabsHeaderDelegate
         ),
         child: TabBar(
           onTap: onTap,
-          isScrollable: !isEstimate,
-          tabAlignment: !isEstimate ? TabAlignment.start : null,
+          isScrollable: false,
           indicatorColor: accent,
           indicatorWeight: 3,
           labelColor: accent,
