@@ -89,6 +89,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   Timer? _searchDebounce;
   String? _error;
   bool _showingLocal = false;
+  // Only a server-returned transaction ID is an affirmative cloud receipt.
+  // The API currently omits sync_state: unknown must remain unknown.
+  final Set<String> _serverConfirmedTransactionIds = {};
+  String? _serverConfirmedBusinessId;
   // A newer search, filter or module entry invalidates older network results.
   int _loadEpoch = 0;
   int _receiptEpoch = 0;
@@ -308,6 +312,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }) async {
     final epoch = ++_loadEpoch;
     final businessId = widget.businessId;
+    if (_serverConfirmedBusinessId != businessId) {
+      _serverConfirmedTransactionIds.clear();
+      _serverConfirmedBusinessId = businessId;
+    }
     // Totals are independent of the visible page; never display stale 50-row
     // sums as though they represented the selected accounting period.
     unawaited(_refreshPeriodTotals());
@@ -430,6 +438,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       final rows = await _fetchTransactions(offset: 0);
       if (!_isCurrentLoad(epoch, businessId)) return;
       setState(() {
+        _serverConfirmedTransactionIds.addAll(
+          rows.map((row) => row['id']?.toString() ?? '')
+              .where((id) => id.isNotEmpty),
+        );
         _transactions = rows;
         _hasMore = rows.length == _pageSize;
         _loading = false;
@@ -536,6 +548,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           .map((row) => verified[row['id']?.toString()] ?? row)
           .toList();
       setState(() {
+        _serverConfirmedTransactionIds.addAll(
+          snapshot.map((row) => row['id']?.toString() ?? '')
+              .where((id) => id.isNotEmpty),
+        );
         _quickTemplates = List<dynamic>.from(
           options['quick_templates'] ?? const [],
         ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
@@ -697,6 +713,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       final rows = await _fetchTransactions(offset: _transactions.length);
       if (!mounted) return;
       setState(() {
+        _serverConfirmedTransactionIds.addAll(
+          rows.map((row) => row['id']?.toString() ?? '')
+              .where((id) => id.isNotEmpty),
+        );
         _transactions = [..._transactions, ...rows];
         _hasMore = rows.length == _pageSize;
         _loadingMore = false;
@@ -2045,7 +2065,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                         // Do not infer transaction sync from
                                         // the list switching cache -> server.
                                         // An unreported state stays unknown.
-                                        final synced = state == 'synced';
+                                        final verifiedId =
+                                            transaction['id']?.toString() ?? '';
+                                        final synced = state == 'synced' ||
+                                            (!pending && !failed &&
+                                              verifiedId.isNotEmpty &&
+                                              _serverConfirmedTransactionIds
+                                                .contains(verifiedId));
                                         return Tooltip(
                                           message: failed
                                               ? 'Transaction sync needs attention'
