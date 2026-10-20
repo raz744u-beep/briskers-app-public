@@ -33,6 +33,7 @@ import '../../services/invoice_tax_proposal.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/document_pdf_service.dart';
 import '../../services/invoice_performance_metrics.dart';
+import '../../services/invoice_labor_work_summary.dart';
 import '../../services/gmail_compose_service.dart';
 import '../../services/email_draft_templates.dart';
 import '../../services/catalog_sync_service.dart';
@@ -7203,6 +7204,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       _notesController.text,
       _detail?['memo']?.toString(),
     );
+    // Derived from current invoice lines, never written into manual notes.
+    final derivedLabor = !_estimate && _detail != null
+        ? invoiceLaborWorkSummary(_detail!) : '';
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -7215,6 +7219,32 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   fontWeight: FontWeight.w800,
                 ),
           ),
+          if (derivedLabor.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Card(
+              color: const Color(0xFFF2F8FC),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Invoice labor · automatic Work Performed',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(derivedLabor),
+                    const SizedBox(height: 5),
+                    const Text(
+                      'Updates with invoice labor changes. '
+                      'Manual notes remain separate.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
           TextField(
             controller: _notesController,
