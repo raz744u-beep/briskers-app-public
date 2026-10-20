@@ -1884,6 +1884,46 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                         ),
                                       ]),
                                     ],
+                                    if (!invoiceReceipt) ...[
+                                      const SizedBox(height: 6),
+                                      Builder(builder: (context) {
+                                        final state = transaction['sync_state']
+                                            ?.toString().toLowerCase() ?? '';
+                                        final pending = state == 'pending' ||
+                                            state == 'pending_sync' ||
+                                            state == 'queued';
+                                        final failed = state == 'error' ||
+                                            state == 'failed' ||
+                                            state == 'conflict';
+                                        final synced = !pending && !failed &&
+                                            (state == 'synced' ||
+                                             (!_showingLocal && state.isEmpty));
+                                        return Tooltip(
+                                          message: failed
+                                              ? 'Transaction sync needs attention'
+                                              : pending
+                                                  ? 'Transaction awaiting sync'
+                                                  : synced
+                                                      ? 'Transaction loaded from cloud'
+                                                      : 'Transaction sync not verified',
+                                          child: Icon(
+                                            failed
+                                                ? Icons.cloud_off_outlined
+                                                : pending
+                                                    ? Icons.cloud_upload_outlined
+                                                    : synced
+                                                        ? Icons.cloud_done
+                                                        : Icons.cloud_outlined,
+                                            color: failed
+                                                ? const Color(0xFFC62828)
+                                                : synced
+                                                    ? const Color(0xFF169B62)
+                                                    : const Color(0xFF667085),
+                                            size: 26,
+                                          ),
+                                        );
+                                      }),
+                                    ],
                                     if (!invoiceReceipt && (num.tryParse(
                                               transaction['reporting_processor_fee']
                                                       ?.toString() ??
