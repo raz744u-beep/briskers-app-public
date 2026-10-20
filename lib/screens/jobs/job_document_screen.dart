@@ -33,6 +33,7 @@ import '../../services/invoice_tax_proposal.dart';
 import '../../services/local_financial_cache.dart';
 import '../../services/document_pdf_service.dart';
 import '../../services/invoice_performance_metrics.dart';
+import '../../services/invoice_labor_work_summary.dart';
 import '../../services/gmail_compose_service.dart';
 import '../../services/email_draft_templates.dart';
 import '../../services/catalog_sync_service.dart';
@@ -1268,7 +1269,103 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (changed == true) {
+      _invoiceExpensesTabFuture = null;
+      await _load();
+    }
+  }
+
+  Future<List<Map<String, dynamic>>>? _invoiceExpensesTabFuture;
+
+  Future<List<Map<String, dynamic>>> _invoiceTabExpenses() async {
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      final cached = await LocalFinancialCache().loadLinkedExpenses(
+        widget.businessId,
+      );
+      if (cached == null) {
+        throw StateError('Linked expenses are not available offline yet.');
+      }
+      final jobId = _detail?['job_id']?.toString() ?? '';
+      final seen = <String>{};
+      return cached.where((row) {
+        final linked = row['document_id']?.toString() == widget.documentId ||
+            (jobId.isNotEmpty && row['job_id']?.toString() == jobId);
+        if (!linked) return false;
+        final key = row['id']?.toString() ?? '';
+        return key.isEmpty || seen.add(key);
+      }).toList();
+    }
+    return _api.documentExpenses(widget.businessId, widget.documentId);
+  }
+
+  Widget _invoiceExpensesTab() {
+    if (!_canManageInvoiceExpenses) {
+      return const Center(child: Text('Expenses access is not permitted.'));
+    }
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+        child: Row(children: [
+          const Expanded(child: Text('Linked expenses',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800))),
+          IconButton(
+            tooltip: 'Add expense',
+            icon: const Icon(Icons.add_circle_outline),
+            color: BriskersColors.expenses,
+            onPressed: _canManageInvoiceExpenses && !_busy
+                ? _addInvoiceExpense : null,
+          ),
+        ]),
+      ),
+      Expanded(child: FutureBuilder<List<Map<String, dynamic>>>(
+        future: _invoiceExpensesTabFuture ??= _invoiceTabExpenses(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData && !snapshot.hasError) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('Linked expenses could not be loaded: ${snapshot.error}'),
+            ));
+          }
+          final expenses = snapshot.data ?? const <Map<String, dynamic>>[];
+          if (expenses.isEmpty) {
+            return const Center(child: Text('No expenses linked to this invoice or job.'));
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 18),
+            itemCount: expenses.length,
+            itemBuilder: (context, index) {
+              final item = expenses[index];
+              final id = item['id']?.toString() ?? '';
+              final vendor = (item['vendor'] ?? item['counterparty'] ?? 'Expense').toString();
+              final income = item['direction']?.toString() == 'income';
+              final color = income ? const Color(0xFF169B62) : BriskersColors.expenses;
+              return Card(child: ListTile(
+                leading: Icon(income ? Icons.south_west : Icons.north_east, color: color),
+                title: Text(vendor, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(item['transaction_date']?.toString() ?? ''),
+                trailing: Text('${income ? '+' : '-'}${_money(item['amount'])}',
+                  style: TextStyle(fontWeight: FontWeight.w800, color: color)),
+                onTap: id.isEmpty ? null : () async {
+                  await Navigator.push<void>(context, MaterialPageRoute(
+                    builder: (_) => ExpenseDetailScreen(
+                      businessId: widget.businessId,
+                      transactionId: id,
+                    ),
+                  ));
+                  if (mounted) {
+                    setState(() => _invoiceExpensesTabFuture = null);
+                  }
+                },
+              ));
+            },
+          );
+        },
+      )),
+    ]);
   }
 
   Future<void> _showInvoiceExpenses() async {
@@ -4305,6 +4402,132 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     });
   }
 
+  // Refresh just the invoice's findings banner after the sheet closes.
+  // Avoid reloading invoice items, payments, notes, and header metadata.
+  int _findingsRefreshToken = 0;
+
+  Future<void> _refreshInvoiceFindingsBanner() async {
+    final vehicleId = _detail?['vehicle_id']?.toString() ?? '';
+    if (!mounted || _estimate || vehicleId.isEmpty) return;
+    final token = ++_findingsRefreshToken;
+    try {
+      final active = await _api.vehicleFindings(
+        widget.businessId, vehicleId, includeResolved: false,
+      );
+      if (!mounted || token != _findingsRefreshToken) return;
+      setState(() {
+        _openFindings = active
+            .where((item) => _findingNeedsInvoiceAttention(item))
+            .toList();
+      });
+    } catch (error) {
+      if (!mounted || token != _findingsRefreshToken) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not refresh findings: $error')),
+      );
+    }
+  }
+
+  Future<void> _manageFindingFromInvoice(Map<String, dynamic> finding) async {
+    final id = finding['id']?.toString() ?? '';
+    if (id.isEmpty || _busy) return;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit finding'),
+            onTap: () => Navigator.pop(sheetContext, 'edit'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.check_circle_outline),
+            title: const Text('Resolve finding'),
+            onTap: () => Navigator.pop(sheetContext, 'resolve'),
+          ),
+          if (widget.isOwner)
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text('Delete finding',
+                style: TextStyle(color: Colors.red)),
+              onTap: () => Navigator.pop(sheetContext, 'delete'),
+            ),
+        ]),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    try {
+      if (choice == 'edit') {
+        final controller =
+            TextEditingController(text: finding['body']?.toString() ?? '');
+        final revised = await showDialog<String>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Edit finding'),
+            content: TextField(
+              controller: controller, autofocus: true,
+              minLines: 2, maxLines: 6,
+              decoration: const InputDecoration(labelText: 'Description'),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final text = controller.text.trim();
+                  if (text.isNotEmpty) Navigator.pop(dialogContext, text);
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          ),
+        );
+        controller.dispose();
+        if (revised == null ||
+            revised == (finding['body']?.toString() ?? '')) {
+          return;
+        }
+        await _api.updateVehicleFinding(widget.businessId, id, body: revised);
+      } else if (choice == 'resolve') {
+        await _api.resolveVehicleFindingByInvoice(
+            widget.businessId, id, widget.documentId);
+      } else if (choice == 'delete' && widget.isOwner) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Delete finding?'),
+            content: const Text(
+              'Only delete incorrectly entered findings. '
+              'Use Resolve for completed repairs to preserve history.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+        await _api.deleteVehicleFinding(widget.businessId, id);
+      }
+      await _refreshInvoiceFindingsBanner();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Finding change failed: $error')),
+        );
+      }
+    }
+  }
+
   Future<void> _showInvoiceFindings() async {
     if (_estimate || _detail == null || _busy) return;
 
@@ -4383,6 +4606,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                   '';
 
                           return ListTile(
+                            onTap: () async {
+                              Navigator.pop(sheetContext);
+                              await _manageFindingFromInvoice(finding);
+                            },
+                            onLongPress: () async {
+                              Navigator.pop(sheetContext);
+                              await _manageFindingFromInvoice(finding);
+                            },
                             leading: const Icon(
                               Icons.warning_amber_rounded,
                               color: Colors.deepOrange,
@@ -4418,7 +4649,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ),
       ),
     );
-    if (mounted) await _load();
+    if (mounted) await _refreshInvoiceFindingsBanner();
   }
 
   Future<void> _emailPdf() async {
@@ -6973,6 +7204,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       _notesController.text,
       _detail?['memo']?.toString(),
     );
+    // Derived from current invoice lines, never written into manual notes.
+    final derivedLabor = !_estimate && _detail != null
+        ? invoiceLaborWorkSummary(_detail!) : '';
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -6985,6 +7219,32 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   fontWeight: FontWeight.w800,
                 ),
           ),
+          if (derivedLabor.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Card(
+              color: const Color(0xFFF2F8FC),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Invoice labor · automatic Work Performed',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(derivedLabor),
+                    const SizedBox(height: 5),
+                    const Text(
+                      'Updates with invoice labor changes. '
+                      'Manual notes remain separate.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
           TextField(
             controller: _notesController,
@@ -7422,7 +7682,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             finalizedPaid: finalizedPaid,
             pendingPaid: pendingPaid,
           );
-    final tabCount = _estimate ? 2 : 3;
+    final tabCount = _estimate ? 2 : 4;
 
     return DefaultTabController(
       length: tabCount,
@@ -7567,6 +7827,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   balance: balance,
                 ),
               _notesTab(),
+              if (!_estimate) _invoiceExpensesTab(),
             ],
           ),
         ),
@@ -7706,6 +7967,7 @@ class _DocumentTabsHeaderDelegate
         ),
         child: TabBar(
           onTap: onTap,
+          isScrollable: false,
           indicatorColor: accent,
           indicatorWeight: 3,
           labelColor: accent,
@@ -7718,6 +7980,7 @@ class _DocumentTabsHeaderDelegate
             Tab(text: tr('itemsTab')),
             if (!isEstimate) Tab(text: tr('paymentTab')),
             Tab(text: tr('notesTab')),
+            if (!isEstimate) const Tab(text: 'Expenses'),
           ],
         ),
       ),

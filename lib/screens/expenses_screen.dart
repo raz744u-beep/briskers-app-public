@@ -817,7 +817,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    if (changed == true) await _load();
+    if (changed == true && mounted) {
+      // Keep the existing list visible while the locally saved transaction
+      // is picked up and the authoritative server snapshot reconciles.
+      // A full-screen spinner here made successful saves appear delayed.
+      unawaited(_load(showLoading: false));
+    }
   }
 
   Future<void> _chooseQuick() async {
@@ -1878,6 +1883,47 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                               : Colors.white,
                                         ),
                                       ]),
+                                    ],
+                                    if (!invoiceReceipt) ...[
+                                      const SizedBox(height: 6),
+                                      Builder(builder: (context) {
+                                        final state = transaction['sync_state']
+                                            ?.toString().toLowerCase() ?? '';
+                                        final pending = state == 'pending' ||
+                                            state == 'pending_sync' ||
+                                            state == 'queued';
+                                        final failed = state == 'error' ||
+                                            state == 'failed' ||
+                                            state == 'conflict';
+                                        // Do not infer transaction sync from
+                                        // the list switching cache -> server.
+                                        // An unreported state stays unknown.
+                                        final synced = state == 'synced';
+                                        return Tooltip(
+                                          message: failed
+                                              ? 'Transaction sync needs attention'
+                                              : pending
+                                                  ? 'Transaction awaiting sync'
+                                                  : synced
+                                                      ? 'Transaction loaded from cloud'
+                                                      : 'Transaction sync not verified',
+                                          child: Icon(
+                                            failed
+                                                ? Icons.cloud_off_outlined
+                                                : pending
+                                                    ? Icons.cloud_upload_outlined
+                                                    : synced
+                                                        ? Icons.cloud_done
+                                                        : Icons.cloud_outlined,
+                                            color: failed
+                                                ? const Color(0xFFC62828)
+                                                : synced
+                                                    ? const Color(0xFF169B62)
+                                                    : const Color(0xFF667085),
+                                            size: 26,
+                                          ),
+                                        );
+                                      }),
                                     ],
                                     if (!invoiceReceipt && (num.tryParse(
                                               transaction['reporting_processor_fee']

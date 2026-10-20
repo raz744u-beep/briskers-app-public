@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -143,14 +144,12 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       widget.businessId,
       widget.transactionId,
     );
-    final detail = await _withReceiptReporting(saved ?? summary);
-    detail
-      ..['editable'] = true
+    final raw = saved ?? summary;
+    final detail = Map<String, dynamic>.from(raw)
+      ..['editable'] = saved != null
       ..['deletable'] = false
-      ..['date'] =
-          (saved ?? summary)['date'] ?? (saved ?? summary)['transaction_date']
-      ..['attachments'] =
-          (saved ?? summary)['attachments'] ?? const <dynamic>[];
+      ..['date'] = raw['date'] ?? raw['transaction_date']
+      ..['attachments'] = raw['attachments'] ?? const <dynamic>[];
 
     if (!mounted) return;
     setState(() {
@@ -158,43 +157,66 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       _loading = false;
       _error = null;
     });
+    // Rendering a cached expense should not wait for reporting enrichment.
+    unawaited(_enrichVisibleExpense(raw));
+  }
+
+  Future<void> _enrichVisibleExpense(Map<String, dynamic> raw) async {
+    final enriched = await _withReceiptReporting(raw);
+    if (!mounted) return;
+    setState(() {
+      _detail = {...?_detail, ...enriched};
+    });
   }
 
   Future<void> _load() async {
     try {
-      final results = await Future.wait<dynamic>([
-        _api.transactionDetail(widget.businessId, widget.transactionId),
-        _api.myPermissions(widget.businessId),
-      ]);
-      final rawDetail = Map<String, dynamic>.from(results[0] as Map);
-      final detail = await _withReceiptReporting(rawDetail, refresh: true);
-      final permissions = List<String>.from(results[1] as List);
-      await _localFinancial.saveTransactionDetail(
-        widget.businessId,
-        widget.transactionId,
-        // Persist the authoritative ledger response only. Reporting projection
-        // is ephemeral and revalidated for every fresh/cached/offline view.
-        rawDetail,
-      );
-      await _prefetchLocalAttachments(
-        List<dynamic>.from(detail['attachments'] ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList(),
+      final rawDetail = Map<String, dynamic>.from(
+        await _api.transactionDetail(widget.businessId, widget.transactionId),
       );
       if (!mounted) return;
       setState(() {
-        _detail = detail;
-        _canDeleteRecords = permissions.contains('records.delete');
+        _detail = rawDetail;
         _loading = false;
         _error = null;
+        _canDeleteRecords = false;
       });
+      unawaited(_enrichVisibleExpense(rawDetail));
+      unawaited(_finishExpenseBackgroundLoad(rawDetail));
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _loading = false;
         _error = error.toString();
       });
+    }
+  }
+
+  Future<void> _finishExpenseBackgroundLoad(
+    Map<String, dynamic> rawDetail,
+  ) async {
+    try {
+      final permissions = await _api.myPermissions(widget.businessId);
+      if (mounted) {
+        setState(() {
+          _canDeleteRecords = permissions.contains('records.delete');
+        });
+      }
+    } catch (_) {
+      // Permission-dependent actions remain disabled.
+    }
+    try {
+      await _localFinancial.saveTransactionDetail(
+        widget.businessId, widget.transactionId, rawDetail,
+      );
+      await _prefetchLocalAttachments(
+        List<dynamic>.from(rawDetail['attachments'] ?? const [])
+            .whereType<Map>()
+            .map((row) => Map<String, dynamic>.from(row))
+            .toList(),
+      );
+    } catch (_) {
+      // Receipt/cache warming must not block the visible transaction.
     }
   }
 
