@@ -73,9 +73,13 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     _localExpenseIq = widget.localPhotoSync ?? ExpenseIqLocalPhotoSync();
     final cached = widget.cachedDetail;
     if (BriskersConnectionModeController.instance.forceOffline) {
-      // The same local detail path must work from Jobs → Job Expenses,
-      // even when the caller has no summary to pass in.
-      _loadOffline();
+      // A cached list row paints immediately; only local storage may
+      // hydrate the detail when connectivity is explicitly disabled.
+      if (cached != null) {
+        _loadCached(cached, offline: true);
+      } else {
+        _loadOffline();
+      }
     } else if (cached != null) {
       _loadCached(cached);
     } else {
@@ -139,26 +143,26 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     }
   }
 
-  Future<void> _loadCached(Map<String, dynamic> summary) async {
-    final saved = await _localFinancial.loadTransactionDetail(
-      widget.businessId,
-      widget.transactionId,
-    );
-    final raw = saved ?? summary;
-    final detail = Map<String, dynamic>.from(raw)
-      ..['editable'] = saved != null
+  // Paint the tapped list row without waiting for disk or network. It is a
+  // display-only preview: permission-sensitive actions stay disabled until
+  // the authoritative detail is loaded. The background read can safely fail
+  // without hiding a transaction the user already saw in the list.
+  void _loadCached(Map<String, dynamic> summary, {bool offline = false}) {
+    final raw = Map<String, dynamic>.from(summary);
+    _detail = raw
+      ..['editable'] = false
       ..['deletable'] = false
       ..['date'] = raw['date'] ?? raw['transaction_date']
       ..['attachments'] = raw['attachments'] ?? const <dynamic>[];
-
-    if (!mounted) return;
-    setState(() {
-      _detail = detail;
-      _loading = false;
-      _error = null;
-    });
-    // Rendering a cached expense should not wait for reporting enrichment.
-    unawaited(_enrichVisibleExpense(raw));
+    _loading = false;
+    _error = null;
+    _canDeleteRecords = false;
+    if (offline) {
+      unawaited(_loadOffline());
+    } else {
+      // A list summary must never replace the server's complete detail.
+      unawaited(_load());
+    }
   }
 
   Future<void> _enrichVisibleExpense(Map<String, dynamic> raw) async {
