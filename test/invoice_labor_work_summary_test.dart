@@ -88,7 +88,7 @@ void main() {
     const manual = 'Customer approved repair; road test pending.';
     expect(
       appendInvoiceLaborWorkSummary(manual, invoiceLaborWorkSummary(invoice)),
-      '$manual\\nReplace oil pan gasket\\nReplace front brakes',
+      '$manual\nReplace oil pan gasket\nReplace front brakes',
     );
     invoice['lines'] = [
       {'line_kind': 'labor', 'description': 'Reseal oil pan and replace O-ring'},
@@ -96,7 +96,7 @@ void main() {
     ];
     expect(
       appendInvoiceLaborWorkSummary(manual, invoiceLaborWorkSummary(invoice)),
-      '$manual\\nReseal oil pan and replace O-ring',
+      '$manual\nReseal oil pan and replace O-ring',
     );
     invoice['lines'] = [
       {'line_kind': 'part', 'description': 'Oil pan gasket'},
