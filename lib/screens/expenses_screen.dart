@@ -1895,9 +1895,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                         final failed = state == 'error' ||
                                             state == 'failed' ||
                                             state == 'conflict';
-                                        final synced = !pending && !failed &&
-                                            (state == 'synced' ||
-                                             (!_showingLocal && state.isEmpty));
+                                        // Do not infer transaction sync from
+                                        // the list switching cache -> server.
+                                        // An unreported state stays unknown.
+                                        final synced = state == 'synced';
                                         return Tooltip(
                                           message: failed
                                               ? 'Transaction sync needs attention'
