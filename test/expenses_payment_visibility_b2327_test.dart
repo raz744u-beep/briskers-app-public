@@ -18,6 +18,8 @@ void main() {
         lessThan(load.indexOf('unawaited(_hydrateFinancialHistory(')));
     expect(load, isNot(contains('await _api.transactions(businessId, limit: 1000)')));
     expect(load, contains('_loading = _transactions.isEmpty && _invoiceReceipts.isEmpty'));
+    expect(load, contains('InvoicePaymentFeed.mergeReceipts(_invoiceReceipts, receipts)'));
+
   });
 
   test('Searching history does not cancel in-flight payment receipt refresh', () {
