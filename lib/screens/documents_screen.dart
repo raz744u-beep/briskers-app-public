@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:async';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
@@ -12,6 +11,8 @@ import '../core/connection_mode.dart';
 import '../core/invoice_status_style.dart';
 import '../core/briskers_i18n.dart';
 import '../core/document_search.dart';
+import '../core/document_list_refresh.dart';
+import '../core/navigation_content_timing.dart';
 import '../core/document_future_date.dart';
 import '../core/document_presentation.dart';
 import '../core/estimate_list_description.dart';
@@ -100,8 +101,16 @@ class DocumentsScreen extends StatefulWidget {
     this.customerVehicles = const [],
     this.dockDefaultsToOpen = false,
     this.dockResetToken = 0,
+    this.localDocuments,
+    this.paymentFeed,
+    this.api,
+    this.blockedDocumentIds,
   });
 
+  final LocalDocumentRepository? localDocuments;
+  final InvoicePaymentFeed? paymentFeed;
+  final BriskersApi? api;
+  final Future<Set<String>> Function(String businessId)? blockedDocumentIds;
   final bool dockDefaultsToOpen;
   final int dockResetToken;
   final String? customerId;
@@ -129,24 +138,38 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   @override
   Color get modalAccent =>
       _estimate ? BriskersColors.estimates : BriskersColors.invoices;
-  static const _api = BriskersApi();
-  final LocalDocumentRepository _localDocuments = LocalDocumentRepository();
+  late final BriskersApi _api = widget.api ?? const BriskersApi();
+  late final LocalDocumentRepository _localDocuments =
+      widget.localDocuments ?? LocalDocumentRepository();
   final LocalDocumentDetailCache _localDetailCache = const LocalDocumentDetailCache();
-  final OfflineDocumentDraftService _offlineDrafts =
+  late final OfflineDocumentDraftService _offlineDrafts =
       OfflineDocumentDraftService();
   final LocalInvoiceStatusStylesCache _localInvoiceStyles =
       LocalInvoiceStatusStylesCache();
   static final Map<String, List<Map<String, dynamic>>> _styleCache = {};
-  final InvoiceFinalizationGuard _finalizationGuard =
+  late final InvoiceFinalizationGuard _finalizationGuard =
       InvoiceFinalizationGuard();
 
   List<Map<String, dynamic>>? _rows;
+  // Keep authoritative snapshots separate from local description enrichment.
+  // A warm refresh need not rewrite the complete SQLite index.
+  List<Map<String, dynamic>>? _serverRows;
+  List<Map<String, dynamic>>? _indexRows;
+  List<Map<String, dynamic>>? _savedRows;
+  List<Map<String, dynamic>>? _savedStyles;
+  List<Map<String, dynamic>>? _orderedSource;
+  List<Map<String, dynamic>> _orderedRows = const [];
+  bool? _orderedEstimate;
+  final DocumentListRefresh _refresh = DocumentListRefresh();
   int _loadEpoch = 0;
+  int _descriptionEpoch = 0;
+  int _receiptEpoch = 0;
   StreamSubscription<({String businessId, Set<String> jobIds})>? _retirement;
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
   Map<String, num> _receiptTotals = const {};
-  final InvoicePaymentFeed _paymentFeed = InvoicePaymentFeed();
+  late final InvoicePaymentFeed _paymentFeed =
+      widget.paymentFeed ?? InvoicePaymentFeed();
   bool _futureDatedOnly = false;
   String? _error;
   final TextEditingController _search = TextEditingController();
@@ -175,12 +198,22 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     return _invoiceStage(row) == status;
   }
 
-  Future<void> _refreshReceiptTotals(int epoch) async {
-    if (_estimate) return;
+  Future<void> _refreshReceiptTotals(
+    int epoch,
+    String businessId, {
+    required bool estimate,
+  }) async {
+    if (estimate) return;
+    final receiptEpoch = ++_receiptEpoch;
     try {
-      final receipts = await _paymentFeed.load(widget.businessId);
-      if (!mounted || epoch != _loadEpoch) return;
-      setState(() => _receiptTotals = invoiceRecordedReceiptTotals(receipts));
+      final receipts = await _paymentFeed.load(businessId);
+      if (!mounted || epoch != _loadEpoch || receiptEpoch != _receiptEpoch) {
+        return;
+      }
+      final totals = invoiceRecordedReceiptTotals(receipts);
+      if (!documentListDataEquals(_receiptTotals, totals)) {
+        setState(() => _receiptTotals = totals);
+      }
     } catch (_) {
       // Unknown payment data never fabricates a fully paid state.
     }
@@ -282,12 +315,44 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     }
     _retirement = LocalJobRetirement.events.listen((event) {
       if (event.businessId == widget.businessId && mounted) {
-        // Invalidate any response captured before the durable tombstone.
-        _loadEpoch++;
+        // Hide known retired jobs immediately, even when a pre-retirement
+        // network request is still pending or its replacement will fail.
+        if (!_estimate && _rows != null) {
+          setState(() {
+            _rows = _rows!.where((row) =>
+                !event.jobIds.contains(row['job_id']?.toString())).toList();
+            _serverRows = null;
+            _indexRows = null;
+            _descriptionEpoch++;
+          });
+        }
         unawaited(_load());
+        // The repository also enforces exact invoice tombstones (including
+        // stale reassignment rows). Do not wait for the serialized network
+        // request before applying that durable visibility fence.
+        unawaited(_loadLocalRows(
+          _loadEpoch, widget.businessId, widget.kind, estimate: _estimate,
+        ));
       }
     });
+    BriskersConnectionModeController.instance.addListener(_connectionChanged);
+    unawaited(_load(freshAfterCurrent: false));
+  }
+
+  void _connectionChanged() {
+    if (!mounted) return;
     unawaited(_load());
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // A stalled remote read must not delay switching to usable offline
+      // content. Its epoch has already been invalidated by _load above.
+      final epoch = _loadEpoch;
+      unawaited(_loadLocalRows(
+        epoch, widget.businessId, widget.kind, estimate: _estimate,
+      ));
+      unawaited(_refreshReceiptTotals(
+        epoch, widget.businessId, estimate: _estimate,
+      ));
+    }
   }
 
   @override
@@ -295,25 +360,30 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.businessId != widget.businessId ||
         oldWidget.kind != widget.kind) {
-      _loadEpoch++;
       _rows = null;
+      _descriptionEpoch++;
+      _serverRows = null;
+      _indexRows = null;
+      _savedRows = null;
+      _savedStyles = null;
       _receiptTotals = const {};
       _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
+      _futureDatedOnly = false;
+      _search.clear();
       _invoiceStyles = const [];
       _error = null;
       unawaited(_load());
     } else if (oldWidget.dockResetToken != widget.dockResetToken) {
-      setState(() {
-        _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
-        _futureDatedOnly = false;
-        _search.clear();
-      });
+      // The Shell retains this page. Returning to it checks freshness without
+      // discarding the user's status, search, or scroll position. Edits may
+      // have happened in another module after an existing read started.
       unawaited(_load());
     }
   }
 
   @override
   void dispose() {
+    BriskersConnectionModeController.instance.removeListener(_connectionChanged);
     _retirement?.cancel();
     _search.dispose();
     _searchFocus.dispose();
@@ -330,7 +400,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         : snapshot.where((row) => _matchesStatus(row, _selectedStatus!)).toList();
     final summaries = <String, String>{};
     for (final row in shown.take(75)) {
-      if (!mounted || epoch != _loadEpoch) return;
+      if (!mounted || epoch != _descriptionEpoch) return;
       final id = row['id']?.toString() ?? '';
       if (id.isEmpty) continue;
       final indexed = estimateListDescription(row);
@@ -347,48 +417,76 @@ class _DocumentsScreenState extends State<DocumentsScreen>
         // Missing detail must not block opening Estimates.
       }
     }
-    if (!mounted || epoch != _loadEpoch || summaries.isEmpty) return;
+    if (!mounted || epoch != _descriptionEpoch || summaries.isEmpty) return;
     setState(() {
-      for (final row in _rows ?? <Map<String, dynamic>>[]) {
-        final summary = summaries[row['id']?.toString()];
-        if (summary != null) row['_estimate_list_description'] = summary;
-      }
+      _rows = [
+        for (final row in _rows ?? <Map<String, dynamic>>[])
+          if (summaries.containsKey(row['id']?.toString()))
+            {...row, '_estimate_list_description': summaries[row['id']?.toString()]}
+          else
+            row,
+      ];
     });
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool freshAfterCurrent = true}) {
+    if (freshAfterCurrent) {
+      // Manual refresh and return from a mutation/detail must supersede a
+      // request that started before that action, even if it is still running.
+      _loadEpoch++;
+    }
+    return _refresh.run(_loadOnce, afterCurrent: freshAfterCurrent);
+  }
+
+  Future<void> _loadOnce() async {
+    if (!mounted) return;
     final epoch = ++_loadEpoch;
-    unawaited(_refreshReceiptTotals(epoch));
+    final businessId = widget.businessId;
+    final kind = widget.kind;
+    final estimate = _estimate;
+    final receipts = _refreshReceiptTotals(
+      epoch,
+      businessId,
+      estimate: estimate,
+    );
+    try {
+      await _loadRows(epoch, businessId, kind, estimate: estimate);
+    } finally {
+      // Receipt work participates in coalescing and cannot outlive the pass
+      // that promises fresh status/payment state to the caller.
+      await receipts;
+    }
+  }
+
+  Future<void> _loadRows(
+    int epoch,
+    String businessId,
+    String kind, {
+    required bool estimate,
+  }) async {
     var localShown = false;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
     final forceOffline = BriskersConnectionModeController.instance.forceOffline;
 
-    if (!_estimate && !forceOnline) {
+    if (!estimate && !forceOnline && _invoiceStyles.isEmpty) {
       try {
-        final cachedStyles = await _localInvoiceStyles.load(widget.businessId);
-        if (mounted && cachedStyles.isNotEmpty) {
+        final cachedStyles = await _localInvoiceStyles.load(businessId);
+        if (mounted && epoch == _loadEpoch && cachedStyles.isNotEmpty) {
           setState(() => _invoiceStyles = cachedStyles);
         }
       } catch (_) {}
     }
 
-    if (!forceOnline) {
-      try {
-        final local = await _localDocuments.listByKind(
-          widget.businessId,
-          kind: widget.kind,
-        );
-        if (mounted && epoch == _loadEpoch) {
-          localShown = true;
-          setState(() {
-            _rows = local.map(documentListIndexPresentation).toList();
-            _error = null;
-          });
-          if (_estimate) unawaited(_enrichEstimateDescriptions(epoch, _rows!));
-        }
-      } catch (_) {}
+    // Warm online refreshes never replace richer API rows with index-only
+    // placeholders. Offline entries must read the index to pick up edits made
+    // in another module, since there is no server refresh in that mode.
+    if (!forceOnline && (_rows == null || forceOffline)) {
+      localShown = await _loadLocalRows(
+        epoch, businessId, kind, estimate: estimate,
+      );
     }
 
+    if (!mounted || epoch != _loadEpoch) return;
     if (forceOffline) {
       if (mounted && epoch == _loadEpoch && !localShown) {
         setState(() {
@@ -401,55 +499,80 @@ class _DocumentsScreenState extends State<DocumentsScreen>
 
     try {
       final results = await Future.wait<dynamic>([
-        _api.documents(widget.businessId, kind: widget.kind),
-        if (!_estimate)
-          _api.invoiceStatusStyles(widget.businessId)
+        _api.documents(businessId, kind: kind),
+        if (!estimate)
+          _api.invoiceStatusStyles(businessId)
         else
           Future.value(const <Map<String, dynamic>>[]),
       ]);
 
-      final blocked = await LocalJobRetirement.blockedDocumentIds(
-        localDatabase,
-        widget.businessId,
-      );
+      if (!mounted || epoch != _loadEpoch) return;
+      final blocked = await (widget.blockedDocumentIds?.call(businessId) ??
+          LocalJobRetirement.blockedDocumentIds(localDatabase, businessId));
       final rows = List<Map<String, dynamic>>.from(results[0] as List)
           .where((row) => !blocked.contains('${row['id'] ?? ''}'))
           .toList();
       if (!mounted || epoch != _loadEpoch) return;
       final styles = List<Map<String, dynamic>>.from(results[1] as List);
 
-      // A complete server snapshot must evict stale synced MobileBiz rows.
-      // Any locally pending documents are preserved by the repository.
-      await _localDocuments.replaceFromServer(
-        widget.businessId,
-        rows,
-        kind: widget.kind,
-      );
-      if (!_estimate) {
-        _styleCache[widget.businessId] = List<Map<String, dynamic>>.from(
-          styles,
-        );
-        await _localInvoiceStyles.save(widget.businessId, styles);
-      }
-
-      if (!mounted || epoch != _loadEpoch) return;
       // Preserve first paint and scroll position when the remote response
-      // contains no visible changes.
-      final oldRows = _rows;
-      final sameRows = oldRows != null &&
-          jsonEncode(oldRows) == jsonEncode(rows);
-      final sameStyles = jsonEncode(_invoiceStyles) == jsonEncode(styles);
+      // contains no changes, including financial fields absent in the index.
+      final sameRows = documentListDataEquals(_serverRows, rows);
+      final sameStyles = documentListDataEquals(_invoiceStyles, styles);
       if (!sameRows || !sameStyles || _error != null) {
         setState(() {
-          _rows = rows;
+          if (!sameRows) {
+            _rows = rows;
+            _descriptionEpoch++;
+          }
+          _serverRows = rows;
           _invoiceStyles = styles;
           _error = null;
         });
       }
-      if (_estimate && !sameRows) {
-        unawaited(_enrichEstimateDescriptions(epoch, rows));
+      if (estimate && !sameRows) {
+        unawaited(_enrichEstimateDescriptions(_descriptionEpoch, rows));
+      }
+
+      // Paint the authoritative result before doing potentially expensive
+      // persistence. Only changed snapshots replace the complete index; local
+      // pending documents remain protected by the repository.
+      if (!documentListDataEquals(_savedRows, rows)) {
+        try {
+          await _localDocuments.replaceFromServer(businessId, rows, kind: kind);
+          // Track what actually reached disk even if a later refresh has
+          // invalidated this read. Otherwise A -> B (saving) -> A could skip
+          // the final write while the index incorrectly still contains B.
+          if (mounted && widget.businessId == businessId && widget.kind == kind) {
+            _savedRows = rows;
+          }
+        } catch (_) {
+          // Keep the server result; a later refresh retries the failed cache.
+        }
+      }
+      if (!mounted || epoch != _loadEpoch) return;
+      if (!estimate) {
+        _styleCache[businessId] = styles;
+        if (!documentListDataEquals(_savedStyles, styles)) {
+          try {
+            await _localInvoiceStyles.save(businessId, styles);
+            if (mounted && widget.businessId == businessId && widget.kind == kind) {
+              _savedStyles = styles;
+            }
+          } catch (_) {
+            // A cache failure must not hide a successfully refreshed list.
+          }
+        }
       }
     } catch (_) {
+      if (!mounted || epoch != _loadEpoch) return;
+      if (!forceOnline) {
+        // Auto may have lost connectivity while another module changed local
+        // work. Re-read protected local state only after online refresh fails.
+        localShown = await _loadLocalRows(
+          epoch, businessId, kind, estimate: estimate,
+        ) || localShown;
+      }
       if (!mounted || epoch != _loadEpoch) return;
       setState(() {
         _rows ??= const [];
@@ -457,6 +580,42 @@ class _DocumentsScreenState extends State<DocumentsScreen>
             ? 'Could not refresh documents. Pull down to try again.'
             : null;
       });
+    }
+  }
+
+  Future<bool> _loadLocalRows(
+    int epoch,
+    String businessId,
+    String kind, {
+    required bool estimate,
+  }) async {
+    final authoritativeAtStart = _serverRows;
+    try {
+      final local = await _localDocuments.listByKind(businessId, kind: kind);
+      if (!mounted || epoch != _loadEpoch ||
+          !identical(_serverRows, authoritativeAtStart)) {
+        return false;
+      }
+      final rows = local.map(documentListIndexPresentation).toList();
+      final sameRows = _serverRows == null &&
+          documentListDataEquals(_indexRows, rows);
+      if (!sameRows || _error != null) {
+        setState(() {
+          if (!sameRows) {
+            _rows = rows;
+            _descriptionEpoch++;
+          }
+          _indexRows = rows;
+          _serverRows = null;
+          _error = null;
+        });
+      }
+      if (estimate && !sameRows) {
+        unawaited(_enrichEstimateDescriptions(_descriptionEpoch, _rows!));
+      }
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -470,9 +629,13 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           .where(_hasFutureDateTag).length;
 
   List<Map<String, dynamic>> get _visibleRows {
-    final rows = List<Map<String, dynamic>>.from(
-      _rows ?? const <Map<String, dynamic>>[],
-    ).where((row) => widget.customerId == null ||
+    final source = _rows ?? const <Map<String, dynamic>>[];
+    if (!identical(_orderedSource, source) || _orderedEstimate != _estimate) {
+      _orderedSource = source;
+      _orderedEstimate = _estimate;
+      _orderedRows = orderDocumentListRows(source, estimate: _estimate);
+    }
+    final rows = _orderedRows.where((row) => widget.customerId == null ||
         row['customer_id']?.toString() == widget.customerId).toList();
 
     var filtered = _selectedStatus == null
@@ -489,63 +652,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           .where((row) => matchesDocumentSearch(row, query))
           .toList();
     }
-
-    if (!_estimate) {
-      // The invoice number sequence must agree online and offline.
-      // Import timestamps and anomalous legacy dates are not list order.
-      int? invoiceNumber(Map<String, dynamic> row) {
-        final value = row['document_number']?.toString() ?? '';
-        final matches = RegExp(r'[0-9]+').allMatches(value).toList();
-        if (matches.isEmpty) return null;
-        return int.tryParse(matches.last.group(0)!);
-      }
-
-      filtered.sort((a, b) {
-        final aNumber = invoiceNumber(a);
-        final bNumber = invoiceNumber(b);
-        if (aNumber != null && bNumber != null) {
-          final order = bNumber.compareTo(aNumber);
-          if (order != 0) return order;
-        } else if (aNumber == null && bNumber != null) {
-          return -1;
-        } else if (aNumber != null && bNumber == null) {
-          return 1;
-        }
-        return (b['created_at']?.toString() ?? '').compareTo(
-          a['created_at']?.toString() ?? '',
-        );
-      });
-      return filtered;
-    }
-
-    // Keep All Estimates and status-filtered Estimates in newest document
-    // number order. Grouping Draft before Issued hid newer E-2002 records.
-    int? estimateNumber(Map<String, dynamic> row) {
-      final raw = row['document_number']?.toString().trim() ?? '';
-      final matches = RegExp(r'[0-9]+').allMatches(raw).toList();
-      return matches.isEmpty ? null
-          : int.tryParse(matches.last.group(0)!);
-    }
-
-    filtered.sort((a, b) {
-      final aNumber = estimateNumber(a);
-      final bNumber = estimateNumber(b);
-      if (aNumber != null && bNumber != null) {
-        final order = bNumber.compareTo(aNumber);
-        if (order != 0) return order;
-      } else if (aNumber != null) {
-        return -1;
-      } else if (bNumber != null) {
-        return 1;
-      }
-      // Deterministic fallback for imported/un-numbered documents.
-      final aDate = a['document_date']?.toString() ?? '';
-      final bDate = b['document_date']?.toString() ?? '';
-      final byDate = bDate.compareTo(aDate);
-      if (byDate != 0) return byDate;
-      return (b['created_at']?.toString() ?? '')
-          .compareTo(a['created_at']?.toString() ?? '');
-    });
 
     return filtered;
   }
@@ -1473,6 +1579,13 @@ class _DocumentsScreenState extends State<DocumentsScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (_rows != null) {
+      NavigationContentTiming.contentVisible(
+        _estimate ? 'estimates' : 'invoices',
+        context: context,
+        source: _serverRows == null ? 'local-or-retained' : 'server-or-retained',
+      );
+    }
     final visible = _visibleRows;
     final selectedLabel = _futureDatedOnly
         ? 'Future-dated'
@@ -1622,9 +1735,15 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           : null,
       body: RefreshIndicator(
         onRefresh: _load,
-        child: ListView(
+        child: ListView.builder(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 84),
-          children: [
+          itemCount: visible.length + 1,
+          itemBuilder: (context, index) {
+            if (index > 0) return _documentCard(visible[index - 1]);
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
             Row(
               children: [
                 Text(
@@ -1839,221 +1958,223 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   ),
                 ),
               )
-            else
-              ...visible.map((row) {
-                final status = _invoiceStage(row);
-                final statusLabel = _localizedStatusLabel(status);
-                final color = _statusColor(status);
-                final number = row['document_number']?.toString() ?? '';
-                final customer = row['customer_name']?.toString() ?? '';
-                final documentTitle =
-                    (row['title'] ?? row['job_title'])?.toString().trim() ?? '';
-                final estimateDescription = _estimate
-                    ? (row['_estimate_list_description']?.toString().trim() ??
-                        estimateListDescription(row))
-                    : '';
-                final vehicle = row['vehicle']?.toString() ?? '';
-                final jobNumber = row['job_number']?.toString() ?? '';
-                final documentDate = _shortDate(row['document_date']);
-                final displayNumber = number.isEmpty
-                    ? ''
-                    : (_estimate
-                          ? (number.toUpperCase().startsWith('E-')
-                                ? number
-                                : 'E-$number')
-                          : (number.toUpperCase().startsWith('I-')
-                                ? number
-                                : 'I-$number'));
+              ],
+            );
+          },
+        ),
+      ),
+      ),
+    );
+  }
 
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 9),
-                  color: Color.alphaBlend(
-                    color.withValues(alpha: 0.08),
-                    Colors.white,
-                  ),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () => _open(row),
-                    onLongPress: () => _showDocumentActions(row),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    if (displayNumber.isNotEmpty) ...[
-                                      Text(
-                                        displayNumber,
-                                        style: const TextStyle(
-                                          fontSize: 17.5,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                    ],
-                                    Expanded(
-                                      child: Text(
-                                        customer,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontSize: 17.5,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                    if (row['customer_problem_flag'] ==
-                                        true) ...[
-                                      const SizedBox(width: 5),
-                                      const Icon(
-                                        Icons.flag,
-                                        color: Colors.red,
-                                        size: 18,
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                                if (documentTitle.isNotEmpty) ...[
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    documentTitle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                                if (estimateDescription.isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    estimateDescription,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 14.5,
-                                      fontWeight: FontWeight.w400,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(height: 3),
-                                if (vehicle.isNotEmpty)
-                                  Text(
-                                    vehicle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                if (_hasFutureDateTag(row)) ...[
-                                  const SizedBox(height: 4),
-                                  const Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.flag_outlined,
-                                        size: 14,
-                                        color: Color(0xFFB26A00),
-                                      ),
-                                      SizedBox(width: 4),
-                                      Text(
-                                        'Future-dated',
-                                        style: TextStyle(
-                                          color: Color(0xFFB26A00),
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                                if (jobNumber.isNotEmpty ||
-                                    documentDate.isNotEmpty) ...[
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    <String>[
-                                      if (jobNumber.isNotEmpty)
-                                        '${tr('jobLabel')} $jobNumber',
-                                      if (documentDate.isNotEmpty) documentDate,
-                                    ].join(' • '),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                      fontSize: 13.5,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ],
+  Widget _documentCard(Map<String, dynamic> row) {
+    final status = _invoiceStage(row);
+    final statusLabel = _localizedStatusLabel(status);
+    final color = _statusColor(status);
+    final number = row['document_number']?.toString() ?? '';
+    final customer = row['customer_name']?.toString() ?? '';
+    final documentTitle =
+        (row['title'] ?? row['job_title'])?.toString().trim() ?? '';
+    final estimateDescription = _estimate
+        ? (row['_estimate_list_description']?.toString().trim() ??
+            estimateListDescription(row))
+        : '';
+    final vehicle = row['vehicle']?.toString() ?? '';
+    final jobNumber = row['job_number']?.toString() ?? '';
+    final documentDate = _shortDate(row['document_date']);
+    final displayNumber = number.isEmpty
+        ? ''
+        : (_estimate
+              ? (number.toUpperCase().startsWith('E-')
+                    ? number
+                    : 'E-$number')
+              : (number.toUpperCase().startsWith('I-')
+                    ? number
+                    : 'I-$number'));
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 9),
+      color: Color.alphaBlend(
+        color.withValues(alpha: 0.08),
+        Colors.white,
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _open(row),
+        onLongPress: () => _showDocumentActions(row),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        if (displayNumber.isNotEmpty) ...[
+                          Text(
+                            displayNumber,
+                            style: const TextStyle(
+                              fontSize: 17.5,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            width: 98,
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  alignment: Alignment.centerRight,
-                                  child: Text(
-                                    _money(row['total_amount']),
-                                    style: const TextStyle(
-                                      fontSize: 16.5,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 5),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: color.withValues(alpha: 0.11),
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text(
-                                      statusLabel,
-                                      style: TextStyle(
-                                        color: color,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                          const SizedBox(width: 10),
+                        ],
+                        Expanded(
+                          child: Text(
+                            customer,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 17.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (row['customer_problem_flag'] ==
+                            true) ...[
+                          const SizedBox(width: 5),
+                          const Icon(
+                            Icons.flag,
+                            color: Colors.red,
+                            size: 18,
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (documentTitle.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        documentTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (estimateDescription.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        estimateDescription,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w400,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 3),
+                    if (vehicle.isNotEmpty)
+                      Text(
+                        vehicle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    if (_hasFutureDateTag(row)) ...[
+                      const SizedBox(height: 4),
+                      const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.flag_outlined,
+                            size: 14,
+                            color: Color(0xFFB26A00),
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            'Future-dated',
+                            style: TextStyle(
+                              color: Color(0xFFB26A00),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ],
                       ),
+                    ],
+                    if (jobNumber.isNotEmpty ||
+                        documentDate.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        <String>[
+                          if (jobNumber.isNotEmpty)
+                            '${tr('jobLabel')} $jobNumber',
+                          if (documentDate.isNotEmpty) documentDate,
+                        ].join(' • '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 98,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        _money(row['total_amount']),
+                        style: const TextStyle(
+                          fontSize: 16.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
-                  ),
-                );
-              }),
-          ],
+                    const SizedBox(height: 5),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.11),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          statusLabel,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }

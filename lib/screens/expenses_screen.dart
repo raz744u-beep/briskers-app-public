@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../core/navigation_content_timing.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
@@ -923,6 +924,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   Future<void> _openTransaction(Map<String, dynamic> transaction) async {
     final id = transaction['id']?.toString() ?? '';
     if (id.isEmpty) return;
+    NavigationContentTiming.start('expense_detail');
     await Navigator.push<void>(
       context,
       MaterialPageRoute(

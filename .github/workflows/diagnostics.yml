@@ -7,6 +7,9 @@ on:
       - 'lib/**'
       - 'test/**'
       - '.github/workflows/diagnostics.yml'
+      - '.github/workflows/android-debug.yml'
+      - 'tools/require_candidate_checks.py'
+      - 'tools/tests/test_candidate_checks.py'
       - 'tools/tests/test_apk_certificate_verification.py'
       - 'tools/audit_ui_actions.py'
 
@@ -61,6 +64,9 @@ jobs:
 
       - name: Verify release certificate output parser
         run: python3 tools/tests/test_apk_certificate_verification.py
+
+      - name: Verify fail-closed candidate CI gate
+        run: python3 tools/tests/test_candidate_checks.py
 
       - name: Analyze Dart
         working-directory: generated
