@@ -12,3 +12,6 @@ Scope:
 9. Keep existing payments, invoice numbering (#6335-6340, next #6341 plus subsequent new #6341), customer records, jobs, expense transactions and synced local data unchanged.
 
 **Release gates**: precise code review, analyzer/tests and regression fixtures, Android signed higher versionCode than b2322, certificate and package validation, iOS parity check, Samsung on-device startup and navigation verification *before* functional feature testing. Do not merge into stale main or claim APK validated from CI alone.
+
+## Android release-candidate build request
+2026-10-19 owner approved building a signed APK for **regular shop phone** after automated Flutter and iOS checks passed on 29ca338. Candidate only; do not confuse with isolated Owner Delete Job test-phone APK. Install over existing b2322 after checking certificate and higher version code; Samsung startup/navigation and functionality still need device testing. Appointment mock cleanup remains deferred.
