@@ -83,7 +83,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       if (mounted) {
         setState(() {
           loading = false;
-          error = 'Local test setup failed: ' + e.toString();
+          error = 'Local test setup failed: $e';
         });
       }
     }
@@ -212,8 +212,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_employeeName(task['employee_id']?.toString()) +
-              ' · ' + (task['payroll_hours']?.toString() ?? '—') + ' hrs'),
+            Text("${_employeeName(task['employee_id']?.toString())} · ${task['payroll_hours']?.toString() ?? '—'} hrs"),
             if (history)
               Text(finished.isEmpty ? 'Completion not recorded' : finished)
             else _statusChip(task['status']?.toString() ?? 'planned'),
@@ -413,9 +412,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       for (var i = 0; i < BriskersLabFixture.vehicles.length; i++)
         ListTile(
           leading: const Icon(Icons.directions_car_outlined),
-          title: Text(BriskersLabFixture.vehicles[i]['year']! + ' ' +
-            BriskersLabFixture.vehicles[i]['make']! + ' ' +
-            BriskersLabFixture.vehicles[i]['model']!),
+          title: Text("${BriskersLabFixture.vehicles[i]['year']} ${BriskersLabFixture.vehicles[i]['make']} ${BriskersLabFixture.vehicles[i]['model']}"),
           subtitle: Text(i == 0 ? 'Job J-24 · Invoice #6342'
             : 'No current job in test copy'),
           onTap: () => setState(() {
@@ -438,8 +435,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(vehicle['year']! + ' ' + vehicle['make']! + ' ' +
-                  vehicle['model']!,
+                Text("${vehicle['year']} ${vehicle['make']} ${vehicle['model']}",
                   style: const TextStyle(
                     fontSize: 19, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 8),
@@ -510,7 +506,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             child: ListTile(
               title: Text(_employeeName(employee['id'])),
               trailing: Text(
-                (byEmployee[employee['id']] ?? 0).toStringAsFixed(1) + ' hrs'),
+                "${(byEmployee[employee['id']] ?? 0).toStringAsFixed(1)} hrs"),
             ),
           ),
         const Padding(
@@ -550,7 +546,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       ),
       ListTile(
         leading: const Icon(Icons.list_alt_outlined),
-        title: Text(tasks.length.toString() + ' labor tasks'),
+        title: Text('${tasks.length} labor tasks'),
         onTap: () => _navigate(3),
       ),
       ListTile(
