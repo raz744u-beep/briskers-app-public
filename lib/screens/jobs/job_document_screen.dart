@@ -7973,6 +7973,26 @@ class _DocumentTabsHeaderDelegate
   @override
   double get maxExtent => 52;
 
+  // Each tab owns exactly one equal-width slot. Edge labels stay visible
+  // on narrow phones; middle labels divide the remaining space evenly.
+  // Avoid TabBar's default horizontal labelPadding, which clipped Expenses.
+  Widget _alignedTab(String label, Alignment alignment) => Tab(
+    child: Padding(
+      padding: EdgeInsets.only(
+        left: alignment == Alignment.centerLeft ? 12 : 2,
+        right: alignment == Alignment.centerRight ? 12 : 2,
+      ),
+      child: Align(
+        alignment: alignment,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: alignment,
+          child: Text(label, maxLines: 1, softWrap: false),
+        ),
+      ),
+    ),
+  );
+
   @override
   Widget build(
     BuildContext context,
@@ -7992,6 +8012,7 @@ class _DocumentTabsHeaderDelegate
         child: TabBar(
           onTap: onTap,
           isScrollable: false,
+          labelPadding: EdgeInsets.zero,
           indicatorColor: accent,
           indicatorWeight: 3,
           labelColor: accent,
@@ -8001,10 +8022,15 @@ class _DocumentTabsHeaderDelegate
             fontWeight: FontWeight.w800,
           ),
           tabs: [
-            Tab(text: tr('itemsTab')),
-            if (!isEstimate) Tab(text: tr('paymentTab')),
-            Tab(text: tr('notesTab')),
-            if (!isEstimate) const Tab(text: 'Expenses'),
+            _alignedTab(tr('itemsTab'), Alignment.centerLeft),
+            if (!isEstimate)
+              _alignedTab(tr('paymentTab'), Alignment.center),
+            _alignedTab(
+              tr('notesTab'),
+              isEstimate ? Alignment.centerRight : Alignment.center,
+            ),
+            if (!isEstimate)
+              _alignedTab('Expenses', Alignment.centerRight),
           ],
         ),
       ),
