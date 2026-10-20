@@ -191,14 +191,18 @@ class _JobTasksLabScreenState extends State<JobTasksLabScreen> {
                       Navigator.pop(context,true);
                     }
                   } catch(error) {
-                    if(context.mounted) ScaffoldMessenger.of(context)
-                      .showSnackBar(SnackBar(content:Text(error.toString())));
+                    if(context.mounted) {
+                      ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content:Text(error.toString())));
+                    }
                   }
                 }),
             ]))),
         ));
     description.dispose(); hours.dispose();
-    if(saved==true && mounted) await _load(refreshInvoices:false);
+    if(saved==true && mounted) {
+      await _load(refreshInvoices:false);
+    }
   }
 
   Future<void> _editNicknames() async {
@@ -238,8 +242,10 @@ class _JobTasksLabScreenState extends State<JobTasksLabScreen> {
                 Navigator.pop(dialog);
               }
             } catch(error) {
-              if(dialog.mounted) ScaffoldMessenger.of(dialog)
-                .showSnackBar(SnackBar(content:Text(error.toString())));
+              if(dialog.mounted) {
+                ScaffoldMessenger.of(dialog)
+                  .showSnackBar(SnackBar(content:Text(error.toString())));
+              }
             }
           },child:const Text('Save')),
         ]));
