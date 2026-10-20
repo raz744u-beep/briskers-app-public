@@ -46,7 +46,10 @@ void main() {
     expect(main, isNot(contains('BriskersApi')));
     expect(main, isNot(contains('Supabase.initialize')));
     expect(main, contains('LocalJobTasksLabStore'));
-    expect(main, contains('_navRail()'));
+    expect(main, contains('bottomNavigationBar: _bottomNav()'));
+    expect(main, contains('onLongPress: (i == 2 || i == 3)'));
+    expect(main, contains('_verticalMenu(int index)'));
+    expect(main, isNot(contains('_navRail()')));
   });
 
   test('Task assignments and nicknames persist in a local SQLite test DB',
