@@ -931,9 +931,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           transactionId: id,
           allowRecurring: _allowRecurring,
           canDeleteTransaction: widget.roleCode == 'owner',
-          cachedDetail: _showingLocal
-              ? Map<String, dynamic>.from(transaction)
-              : null,
+          // The tapped list row is safe to show as a non-editable preview.
+          // Waiting for the server here caused an empty full-screen spinner.
+          cachedDetail: Map<String, dynamic>.from(transaction),
         ),
       ),
     );
