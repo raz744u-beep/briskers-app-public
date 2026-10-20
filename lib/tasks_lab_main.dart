@@ -40,17 +40,15 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   List<Map<String, dynamic>> tasks = const [];
   Map<String, String> nicknames = const {};
   int page = 2;
+  int? expandedMenu;
   int selectedVehicle = 0;
   bool loading = true;
   String? error;
 
-  static const labels = [
-    'Home', 'Customers', 'Jobs', 'Tasks', 'Work Log', 'Payroll', 'Settings',
-  ];
-  static const icons = [
+  static const navLabels = ['Home', 'Customers', 'Jobs', 'More'];
+  static const navIcons = [
     Icons.home_outlined, Icons.people_outline, Icons.build_outlined,
-    Icons.rule_outlined, Icons.history, Icons.account_balance_wallet_outlined,
-    Icons.settings_outlined,
+    Icons.more_horiz,
   ];
 
   @override
@@ -134,50 +132,123 @@ class _TasksLabHomeState extends State<TasksLabHome> {
 
   void _navigate(int next) {
     FocusManager.instance.primaryFocus?.unfocus();
-    setState(() => page = next);
+    setState(() {
+      page = next;
+      expandedMenu = null;
+    });
   }
 
-  Widget _navRail() => Container(
-    width: 70,
-    color: const Color(0xFFECF2F8),
-    child: Column(
-      children: [
-        const SizedBox(height: 8),
-        for (var i = 0; i < labels.length; i++)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 3, 4, 3),
-            child: Material(
-              color: page == i
-                ? const Color(0xFFCFDFEF)
-                : Colors.transparent,
-              borderRadius: BorderRadius.circular(12),
+  void _toggleMenu(int navIndex) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      expandedMenu = expandedMenu == navIndex ? null : navIndex;
+    });
+  }
+
+  bool _isNavSelected(int index) {
+    if (index == 2) return page == 2 || page == 3 || page == 4;
+    if (index == 3) return page == 5 || page == 6;
+    return page == index;
+  }
+
+  // Keep the familiar phone-width bottom bar. Long-press Jobs or More
+  // to unfold the related destination icons vertically above that icon.
+  Widget _bottomNav() => SafeArea(
+    top: false,
+    child: Container(
+      height: 68,
+      decoration: const BoxDecoration(
+        color: Color(0xFFEAF2FA),
+        border: Border(top: BorderSide(color: Color(0xFFD0DEEB))),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < navLabels.length; i++)
+            Expanded(
               child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () => _navigate(i),
-                child: SizedBox(
-                  height: 65, width: 63,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(icons[i], size: 25,
-                        color: page == i
+                onTap: () {
+                  if (i == 3) {
+                    _toggleMenu(i);
+                  } else {
+                    _navigate(i);
+                  }
+                },
+                onLongPress: (i == 2 || i == 3)
+                  ? () => _toggleMenu(i)
+                  : null,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      navIcons[i],
+                      size: 26,
+                      color: _isNavSelected(i)
+                        ? const Color(0xFF1263B3)
+                        : const Color(0xFF64748B),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      navLabels[i],
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: _isNavSelected(i)
+                          ? FontWeight.w800 : FontWeight.w500,
+                        color: _isNavSelected(i)
                           ? const Color(0xFF1263B3)
-                          : const Color(0xFF64748B)),
-                      const SizedBox(height: 3),
-                      Text(labels[i], textAlign: TextAlign.center,
-                        maxLines: 1,
-                        style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: page == i
-                            ? FontWeight.w800 : FontWeight.w500,
-                        )),
-                    ],
-                  ),
+                          : const Color(0xFF334155),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
+    ),
+  );
+
+  Widget _menuEntry(IconData icon, String label, int destination) =>
+    InkWell(
+      onTap: () => _navigate(destination),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+        child: Row(
+          children: [
+            Icon(icon, size: 23, color: const Color(0xFF1767B3)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(label, style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w700,
+              )),
+            ),
+          ],
+        ),
+      ),
+    );
+
+  Widget _verticalMenu(int index) => Material(
+    elevation: 10,
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(16),
+    clipBehavior: Clip.antiAlias,
+    child: SizedBox(
+      width: 180,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (index == 2) ...[
+            _menuEntry(Icons.rule_outlined, 'Tasks', 3),
+            const Divider(height: 1),
+            _menuEntry(Icons.history, 'Work Log', 4),
+          ],
+          if (index == 3) ...[
+            _menuEntry(Icons.account_balance_wallet_outlined, 'Payroll', 5),
+            const Divider(height: 1),
+            _menuEntry(Icons.settings_outlined, 'Settings', 6),
+          ],
+        ],
+      ),
     ),
   );
 
@@ -577,7 +648,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => PopScope(
+    canPop: expandedMenu == null,
+    onPopInvokedWithResult: (didPop, result) {
+      if (!didPop && expandedMenu != null) {
+        setState(() => expandedMenu = null);
+      }
+    },
+    child: Scaffold(
     appBar: AppBar(
       backgroundColor: const Color(0xFFE1F0F2),
       title: const Column(
@@ -600,12 +678,31 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           icon: const Icon(Icons.refresh)),
       ],
     ),
-    body: Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    body: Stack(
       children: [
-        _navRail(),
-        Expanded(child: _body()),
+        Positioned.fill(child: _body()),
+        if (expandedMenu != null) ...[
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => expandedMenu = null),
+              child: const ColoredBox(color: Color(0x0A000000)),
+            ),
+          ),
+          Positioned(
+            bottom: 10,
+            left: expandedMenu == 2
+              ? (MediaQuery.sizeOf(context).width * 0.625 - 90)
+                  .clamp(8.0, MediaQuery.sizeOf(context).width - 188)
+                  .toDouble()
+              : null,
+            right: expandedMenu == 3 ? 8 : null,
+            child: _verticalMenu(expandedMenu!),
+          ),
+        ],
       ],
     ),
+    bottomNavigationBar: _bottomNav(),
+  ),
   );
 }
