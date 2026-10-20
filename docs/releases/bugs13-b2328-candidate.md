@@ -8,7 +8,7 @@
 - [x] PR #259 — Invoice Detail → Expenses monetary amount styling matches main Expenses (17.5sp/w900, correct red/green).
 - [x] PR #260 — 30/90/365 day or other selected period totals read all posted, permission-checked transaction pages, exclude projected receipts from sums and don't display misleading first-page totals; show Calculating/Unavailable when incomplete.
 - [x] PR #260 — saved invoice odometer displayed in Invoice Notes once without copying into editable memo; PDF already prints header mileage.
-- [x] PR #262 — Edit Customer/Save Vehicle use approved dark blue token, customer create and other module Save colors preserved.
+- [x] PR #262 — Edit Customer/Save Vehicle use approved dark blue token; additionally Customer Notes Add/Edit, Expense Detail Edit Save and Vehicle Finding Edit Save use explicit module colors; destructive confirmation actions stay red.
 - [x] PR #256 forward-port — Today/Upcoming/Past/All one row; Today includes all current-day appointment statuses; filter changes only local query, no unneeded network pull. Historic `confirmed_today` remains internally supported.
 - [x] Jobs — initial cached job cards paint before slower secondary count/status searches; quarantine/retirement visibility guard preserved. Cached-first Auto mode no longer displays a false offline banner; real Force Offline or sync failure shows truthful notice.
 - [x] Expenses — rows returned by server transaction pages explicitly establish cloud confirmation; cached/unknown stays unknown, pending/failed still takes precedence. Does not fabricate `sync_state` or write financial records.
