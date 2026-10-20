@@ -9,6 +9,8 @@ void main() {
   test('Sanitized Richard fixture contains two cars and labor only', () {
     expect(BriskersLabFixture.customerName, 'Richard Goff');
     expect(BriskersLabFixture.vehicles.length, 2);
+    expect(BriskersLabFixture.employees.any(
+      (employee) => employee['role'] == 'secretary'), isTrue);
     expect(BriskersLabFixture.vehicles[0]['model'], 'Equus');
     expect(BriskersLabFixture.vehicles[1]['model'], 'Sonata');
     expect(BriskersLabFixture.invoiceNumber, '6342');
@@ -49,6 +51,8 @@ void main() {
     expect(main, contains('bottomNavigationBar: _bottomNav()'));
     expect(main, contains('onLongPress: (i == 2 || i == 3)'));
     expect(main, contains('_verticalMenu(int index)'));
+    expect(main, contains('Edit employee names'));
+    expect(main, contains("if (employee['role'] != 'secretary')"));
     expect(main, isNot(contains('_navRail()')));
   });
 
@@ -85,6 +89,12 @@ void main() {
       );
       await store.saveNickname(
         BriskersLabFixture.businessId, 'lab-kam', 'Kam');
+      await store.saveEmployeeProfile(
+        businessId: BriskersLabFixture.businessId,
+        employeeId: 'lab-secretary',
+        fullName: 'Front Desk Assistant',
+        displayName: 'Front Desk',
+      );
       final rows = await store.list(
           BriskersLabFixture.businessId, BriskersLabFixture.jobId);
       final valve = rows.singleWhere((r) =>
@@ -98,6 +108,11 @@ void main() {
       expect(trans['employee_id'], 'lab-chris');
       expect((await store.nicknames(
           BriskersLabFixture.businessId))['lab-kam'], 'Kam');
+      expect((await store.nicknames(
+          BriskersLabFixture.businessId))['lab-secretary'], 'Front Desk');
+      expect((await store.fullNames(
+          BriskersLabFixture.businessId))['lab-secretary'],
+          'Front Desk Assistant');
       expect(await store.list('production-company',
           BriskersLabFixture.jobId), isEmpty);
     } finally {
