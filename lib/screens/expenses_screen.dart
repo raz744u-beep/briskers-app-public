@@ -2078,7 +2078,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                               : pending
                                                   ? 'Transaction awaiting sync'
                                                   : synced
-                                                      ? 'Transaction loaded from cloud'
+                                                      ? 'Transaction confirmed in shop database'
                                                       : 'Transaction sync not verified',
                                           child: Icon(
                                             failed
