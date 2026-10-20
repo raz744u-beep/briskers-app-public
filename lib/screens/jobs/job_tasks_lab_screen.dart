@@ -21,7 +21,7 @@ class JobTasksLabScreen extends StatefulWidget {
 
 class _JobTasksLabScreenState extends State<JobTasksLabScreen> {
   final _store = LocalJobTasksLabStore(localDatabase);
-  final _api = BriskersApi();
+  final _api = const BriskersApi();
   final _cache = const LocalDocumentDetailCache();
   List<Map<String,dynamic>> _tasks = const [];
   List<Map<String,dynamic>> _employees = const [];
@@ -57,9 +57,11 @@ class _JobTasksLabScreenState extends State<JobTasksLabScreen> {
   Future<void> _readLocal() async {
     final rows = await _store.list(widget.businessId,widget.jobId);
     final names = await _store.nicknames(widget.businessId);
-    if (mounted) setState(() {
-      _tasks=rows; _nicknames=names; _initial=false;
-    });
+    if (mounted) {
+      setState(() {
+        _tasks=rows; _nicknames=names; _initial=false;
+      });
+    }
   }
 
   Future<void> _load({bool refreshInvoices=true}) async {
@@ -185,14 +187,16 @@ class _JobTasksLabScreenState extends State<JobTasksLabScreen> {
                       employeeId:mechanic,editEmployee:true,
                       description:description.text,editDescription:true,
                       hours:amount,editHours:true,status:status);
-                    if(context.mounted) Navigator.pop(context,true);
+                    if(context.mounted) {
+                      Navigator.pop(context,true);
+                    }
                   } catch(error) {
                     if(context.mounted) ScaffoldMessenger.of(context)
                       .showSnackBar(SnackBar(content:Text(error.toString())));
                   }
                 }),
             ]))),
-        )));
+        ));
     description.dispose(); hours.dispose();
     if(saved==true && mounted) await _load(refreshInvoices:false);
   }
@@ -230,7 +234,9 @@ class _JobTasksLabScreenState extends State<JobTasksLabScreen> {
                     entry.key,entry.value.text);
                 }
               }
-              if(dialog.mounted) Navigator.pop(dialog);
+              if(dialog.mounted) {
+                Navigator.pop(dialog);
+              }
             } catch(error) {
               if(dialog.mounted) ScaffoldMessenger.of(dialog)
                 .showSnackBar(SnackBar(content:Text(error.toString())));
@@ -238,7 +244,9 @@ class _JobTasksLabScreenState extends State<JobTasksLabScreen> {
           },child:const Text('Save')),
         ]));
     for(final input in inputs.values) { input.dispose(); }
-    if(mounted) await _load(refreshInvoices:false);
+    if(mounted) {
+      await _load(refreshInvoices:false);
+    }
   }
 
   Widget _taskCard(Map<String,dynamic> task,{bool history=false}) {
@@ -256,7 +264,7 @@ class _JobTasksLabScreenState extends State<JobTasksLabScreen> {
       title:Text(_description(task),
         style:const TextStyle(fontWeight:FontWeight.w700)),
       subtitle:Text([
-        _assigned(task),hrs+' hrs',
+        _assigned(task),'$hrs hrs',
         if(history) when else state,
         if(task['source_missing']==1) 'Source removed'
       ].join(' · ')),
@@ -270,7 +278,7 @@ class _JobTasksLabScreenState extends State<JobTasksLabScreen> {
     final ready=active.isNotEmpty && active.every((x)=>x['status']=='done');
     return DefaultTabController(length:2,child:Scaffold(
       appBar:AppBar(
-        title:Text('Tasks · '+widget.jobLabel),
+        title:Text('Tasks · ${widget.jobLabel}'),
         actions:[
           IconButton(tooltip:'Nicknames',onPressed:_editNicknames,
             icon:const Icon(Icons.badge_outlined)),
