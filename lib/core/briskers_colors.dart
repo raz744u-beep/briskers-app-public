@@ -7,6 +7,9 @@ class BriskersColors {
   static const today = Color(0xFF3949AB);
   static const actionBlue = Color(0xFF3B82F6);
   static const customers = actionBlue;
+  // Approved darker blue for Customer and Vehicle save actions; do not use
+  // Material's generic primary color for these forms.
+  static const customerSave = Color(0xFF18529A);
   static const schedule = appointments;
   static const jobs = Color(0xFF00897B);
   static const more = Color(0xFF607D8B);
