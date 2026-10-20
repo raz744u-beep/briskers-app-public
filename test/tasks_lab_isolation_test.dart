@@ -30,8 +30,12 @@ void main() {
   });
 
   test('Test Android build has distinct package and offline entrypoint', () {
-    final workflow = File('.github/workflows/android-tasks-test.yml')
-        .readAsStringSync();
+    // CI creates a generated Flutter shell one level below the checkout.
+    // Local tests may also run directly from the repository root.
+    final direct = File('.github/workflows/android-tasks-test.yml');
+    final file = direct.existsSync()
+        ? direct : File('../.github/workflows/android-tasks-test.yml');
+    final workflow = file.readAsStringSync();
     expect(workflow, contains('applicationId = "com.briskers.tasks_lab"'));
     expect(workflow, contains('cp ../lib/tasks_lab_main.dart ./lib/main.dart'));
     expect(workflow, contains('Briskers Tasks TEST'));
