@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/services/local_job_tasks_lab_store.dart';
+import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:drift/native.dart';
 
 void main() {
   test('Only actual labor invoice lines are mapped to tasks', () {
@@ -47,4 +49,61 @@ void main() {
     expect(screen, contains('Work Log'));
     expect(screen, contains('Not synced to shop or payroll.'));
   });
+  test('Local assignments survive invoice refresh and stay scoped to job', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    try {
+      final invoice = <String,dynamic>{
+        'kind':'invoice', 'lines': [
+          {'id':'cover-labor','name':'Labor',
+           'line_kind':'labor','description':'Valve cover work','quantity':4},
+          {'id':'trans-labor','name':'Labor',
+           'line_kind':'labor','description':'Transmission repair','quantity':5},
+        ]};
+      await store.reconcileDocument(businessId:'shop',jobId:'richard-job',
+        documentId:'invoice',laborLines:LocalJobTasksLabStore.laborLines(invoice));
+      var tasks = await store.list('shop','richard-job');
+      expect(tasks.length,2);
+      expect(tasks.every((t)=>t['status']=='planned'),isTrue);
+      await store.editTask(
+        businessId:'shop',jobId:'richard-job',documentId:'invoice',
+        lineId:'cover-labor',employeeId:'kam-id',editEmployee:true,
+        status:'done',description:'Replaced valve covers',editDescription:true,
+        hours:4,editHours:true,
+      );
+      await store.editTask(
+        businessId:'shop',jobId:'richard-job',documentId:'invoice',
+        lineId:'trans-labor',employeeId:'chris-id',editEmployee:true,
+        status:'in_progress',hours:5,editHours:true,
+      );
+      await store.saveNickname('shop','kam-id','Kam');
+      await store.saveNickname('shop','chris-id','Chris');
+      expect(await store.nicknames('shop'),
+        {'kam-id':'Kam','chris-id':'Chris'});
+      // A changed invoice description is not allowed to overwrite manual
+      // completed-work wording, mechanic identity or timestamp.
+      invoice['lines'] = [
+        {'id':'cover-labor','name':'Labor','line_kind':'labor',
+         'description':'Updated invoice billing text','quantity':6}
+      ];
+      await store.reconcileDocument(businessId:'shop',jobId:'richard-job',
+        documentId:'invoice',laborLines:LocalJobTasksLabStore.laborLines(invoice));
+      tasks=await store.list('shop','richard-job');
+      final cover=tasks.singleWhere((t)=>t['line_id']=='cover-labor');
+      final trans=tasks.singleWhere((t)=>t['line_id']=='trans-labor');
+      expect(cover['employee_id'],'kam-id');
+      expect(cover['source_description'],'Updated invoice billing text');
+      expect(cover['custom_description'],'Replaced valve covers');
+      expect(cover['payroll_hours'],4.0);
+      expect(cover['status'],'done');
+      expect(cover['completed_at'],isA<int>());
+      expect(trans['employee_id'],'chris-id');
+      expect(trans['source_missing'],1);
+      expect(await store.list('other-shop','richard-job'),isEmpty);
+      expect(await store.list('shop','unrelated-job'),isEmpty);
+    } finally {
+      await db.close();
+    }
+  });
+
 }
