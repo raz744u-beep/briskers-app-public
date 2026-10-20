@@ -355,6 +355,10 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
                 child: const Text('Cancel'),
               ),
               FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: BriskersColors.customerSave,
+                  foregroundColor: Colors.white,
+                ),
                 onPressed: () => Navigator.pop(dialogContext, true),
                 child: const Text('Save'),
               ),
@@ -570,6 +574,10 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: BriskersColors.customers,
+                foregroundColor: Colors.white,
+              ),
               onPressed: _saving ? null : _addNote,
               icon: _saving
                   ? const SizedBox(
@@ -905,6 +913,10 @@ class _EditCustomerNoteDialogState
           child: const Text('Cancel'),
         ),
         FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: BriskersColors.customerSave,
+            foregroundColor: Colors.white,
+          ),
           onPressed: _save,
           child: const Text('Save'),
         ),
