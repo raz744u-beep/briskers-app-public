@@ -62,6 +62,7 @@ import '../customers/customer_detail_screen.dart';
 import 'customer_invoice_signature_screen.dart';
 import 'invoice_warranty_panel.dart';
 import 'invoice_note_draft_rules.dart';
+import '../../widgets/document_tab_label.dart';
 import 'standard_note_editor_sheet.dart';
 import 'standard_note_picker_sheet.dart';
 import 'job_detail_screen.dart';
@@ -7973,26 +7974,6 @@ class _DocumentTabsHeaderDelegate
   @override
   double get maxExtent => 52;
 
-  // Each tab owns exactly one equal-width slot. Edge labels stay visible
-  // on narrow phones; middle labels divide the remaining space evenly.
-  // Avoid TabBar's default horizontal labelPadding, which clipped Expenses.
-  Widget _alignedTab(String label, Alignment alignment) => Tab(
-    child: Padding(
-      padding: EdgeInsets.only(
-        left: alignment == Alignment.centerLeft ? 12 : 2,
-        right: alignment == Alignment.centerRight ? 12 : 2,
-      ),
-      child: Align(
-        alignment: alignment,
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: alignment,
-          child: Text(label, maxLines: 1, softWrap: false),
-        ),
-      ),
-    ),
-  );
-
   @override
   Widget build(
     BuildContext context,
@@ -8022,15 +8003,17 @@ class _DocumentTabsHeaderDelegate
             fontWeight: FontWeight.w800,
           ),
           tabs: [
-            _alignedTab(tr('itemsTab'), Alignment.centerLeft),
+            DocumentTabLabel(
+              label: tr('itemsTab'), alignment: Alignment.centerLeft),
             if (!isEstimate)
-              _alignedTab(tr('paymentTab'), Alignment.center),
-            _alignedTab(
-              tr('notesTab'),
-              isEstimate ? Alignment.centerRight : Alignment.center,
-            ),
+              DocumentTabLabel(label: tr('paymentTab')),
+            DocumentTabLabel(
+              label: tr('notesTab'),
+              alignment: isEstimate
+                  ? Alignment.centerRight : Alignment.center),
             if (!isEstimate)
-              _alignedTab('Expenses', Alignment.centerRight),
+              const DocumentTabLabel(
+                label: 'Expenses', alignment: Alignment.centerRight),
           ],
         ),
       ),
