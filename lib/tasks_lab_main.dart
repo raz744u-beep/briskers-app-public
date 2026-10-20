@@ -39,6 +39,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   final LocalJobTasksLabStore store = LocalJobTasksLabStore(localDatabase);
   List<Map<String, dynamic>> tasks = const [];
   Map<String, String> nicknames = const {};
+  Map<String, String> fullNames = const {};
   int page = 2;
   int? expandedMenu;
   int selectedVehicle = 0;
@@ -92,10 +93,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       BriskersLabFixture.businessId, BriskersLabFixture.jobId,
     );
     final aliases = await store.nicknames(BriskersLabFixture.businessId);
+    final names = await store.fullNames(BriskersLabFixture.businessId);
     if (!mounted) return;
     setState(() {
       tasks = rows;
       nicknames = aliases;
+      fullNames = names;
       loading = false;
     });
   }
@@ -105,7 +108,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     for (final employee in BriskersLabFixture.employees) {
       if (employee['id'] == id) {
         return LocalJobTasksLabStore.displayName(
-          employee['name']!, nicknames[id],
+          fullNames[id] ?? employee['name']!, nicknames[id],
         );
       }
     }
@@ -334,7 +337,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     const DropdownMenuItem(
                       value: '', child: Text('Unassigned')),
                     for (final employee in BriskersLabFixture.employees)
-                      DropdownMenuItem(
+                      if (employee['role'] != 'secretary') DropdownMenuItem(
                         value: employee['id']!,
                         child: Text(_employeeName(employee['id'])),
                       ),
@@ -416,8 +419,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     }
   }
 
-  Future<void> _editNicknames() async {
-    final controllers = {
+  Future<void> _editEmployeeNames() async {
+    final fullControllers = {
+      for (final e in BriskersLabFixture.employees)
+        e['id']!: TextEditingController(
+          text: fullNames[e['id']] ?? e['name']!),
+    };
+    final displayControllers = {
       for (final e in BriskersLabFixture.employees)
         e['id']!: TextEditingController(
           text: nicknames[e['id']] ?? e['nickname']!),
@@ -425,17 +433,35 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     await showDialog<void>(
       context: context,
       builder: (dialog) => AlertDialog(
-        title: const Text('Mechanic nicknames'),
+        title: const Text('Employee names'),
         content: SizedBox(
           width: 380,
+          height: 430,
           child: ListView(
-            shrinkWrap: true,
             children: [
-              for (final employee in BriskersLabFixture.employees)
+              const Text('Test-only: edit full and preferred display names. '
+                'Employee IDs and job records do not change.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+              const SizedBox(height: 12),
+              for (final employee in BriskersLabFixture.employees) ...[
+                Text(employee['role'] == 'secretary'
+                  ? 'Secretary' : employee['name']!,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
                 TextField(
-                  controller: controllers[employee['id']],
-                  decoration: InputDecoration(
-                    labelText: employee['name'])),
+                  controller: fullControllers[employee['id']],
+                  decoration: const InputDecoration(
+                    labelText: 'Full name', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: displayControllers[employee['id']],
+                  decoration: const InputDecoration(
+                    labelText: 'Preferred display name',
+                    border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 16),
+              ],
             ],
           ),
         ),
@@ -445,22 +471,42 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             child: const Text('Cancel')),
           FilledButton(
             onPressed: () async {
-              for (final input in controllers.entries) {
-                if (input.value.text.trim().isNotEmpty) {
-                  await store.saveNickname(
-                    BriskersLabFixture.businessId,
-                    input.key, input.value.text,
-                  );
+              for (final employee in BriskersLabFixture.employees) {
+                final id = employee['id']!;
+                if (fullControllers[id]!.text.trim().isEmpty ||
+                    displayControllers[id]!.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(dialog).showSnackBar(
+                    const SnackBar(content:
+                      Text('Full name and display name are required')));
+                  return;
                 }
               }
-              if (dialog.mounted) Navigator.pop(dialog);
+              try {
+                for (final employee in BriskersLabFixture.employees) {
+                  final id = employee['id']!;
+                  await store.saveEmployeeProfile(
+                    businessId: BriskersLabFixture.businessId,
+                    employeeId: id,
+                    fullName: fullControllers[id]!.text,
+                    displayName: displayControllers[id]!.text,
+                  );
+                }
+                if (dialog.mounted) Navigator.pop(dialog);
+              } catch (e) {
+                if (dialog.mounted) {
+                  ScaffoldMessenger.of(dialog).showSnackBar(
+                    SnackBar(content: Text('Could not save names: $e')));
+                }
+              }
             },
             child: const Text('Save'),
           ),
         ],
       ),
     );
-    for (final controller in controllers.values) {
+    for (final controller in [
+      ...fullControllers.values, ...displayControllers.values,
+    ]) {
       controller.dispose();
     }
     await _refresh();
@@ -572,7 +618,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         _sectionHeader('Payroll preview',
           subtitle: 'Completed assigned hours · No real payments'),
         for (final employee in BriskersLabFixture.employees)
-          Card(
+          if (employee['role'] != 'secretary') Card(
             margin: const EdgeInsets.fromLTRB(10, 3, 10, 5),
             child: ListTile(
               title: Text(_employeeName(employee['id'])),
@@ -594,8 +640,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       _sectionHeader('Test Settings'),
       ListTile(
         leading: const Icon(Icons.badge_outlined),
-        title: const Text('Edit mechanic nicknames'),
-        onTap: _editNicknames,
+        title: const Text('Edit employee names'),
+        subtitle: const Text('Full names and preferred display names'),
+        onTap: _editEmployeeNames,
       ),
       const ListTile(
         leading: Icon(Icons.shield_outlined),
@@ -669,8 +716,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       ),
       actions: [
         IconButton(
-          tooltip: 'Mechanic nicknames',
-          onPressed: _editNicknames,
+          tooltip: 'Employee names',
+          onPressed: _editEmployeeNames,
           icon: const Icon(Icons.badge_outlined)),
         IconButton(
           tooltip: 'Refresh local test data',
