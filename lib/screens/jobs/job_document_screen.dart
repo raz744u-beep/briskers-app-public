@@ -1345,10 +1345,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               return Card(child: ListTile(
                 leading: Icon(income ? Icons.south_west : Icons.north_east, color: color),
                 title: Text(vendor, maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
+                  style: const TextStyle(fontSize: 16.5,
+                    fontWeight: FontWeight.w800)),
                 subtitle: Text(item['transaction_date']?.toString() ?? ''),
+                // Match the main Expenses & Income card amount style.
                 trailing: Text('${income ? '+' : '-'}${_money(item['amount'])}',
-                  style: TextStyle(fontWeight: FontWeight.w800, color: color)),
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: TextStyle(fontSize: 17.5,
+                    fontWeight: FontWeight.w900, color: color)),
                 onTap: id.isEmpty ? null : () async {
                   await Navigator.push<void>(context, MaterialPageRoute(
                     builder: (_) => ExpenseDetailScreen(
