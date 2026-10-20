@@ -17,6 +17,7 @@ import '../services/warranty_receipt_reporting.dart';
 import '../services/local_attachment_cache.dart';
 import '../services/local_financial_cache.dart';
 import '../services/invoice_payment_feed.dart';
+import '../services/expenses_period_totals.dart';
 import '../services/expenseiq_local_photo_sync.dart';
 import '../services/expenseiq_background_scheduler.dart';
 import '../widgets/briskers_page_header.dart';
@@ -91,6 +92,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   // A newer search, filter or module entry invalidates older network results.
   int _loadEpoch = 0;
   int _receiptEpoch = 0;
+  int _periodEpoch = 0;
+  ExpensesPeriodTotals? _periodTotals;
+  bool _periodCalculating = false;
+  String? _periodError;
 
   bool _isCurrentReceipt(int epoch, String businessId) =>
       mounted && epoch == _receiptEpoch && widget.businessId == businessId;
@@ -303,6 +308,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }) async {
     final epoch = ++_loadEpoch;
     final businessId = widget.businessId;
+    // Totals are independent of the visible page; never display stale 50-row
+    // sums as though they represented the selected accounting period.
+    unawaited(_refreshPeriodTotals());
     if (showLoading) {
       setState(() {
         // Never blank a previously displayed financial list while refreshing.
@@ -443,6 +451,66 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         } else {
           _error = error.toString();
         }
+      });
+    }
+  }
+
+  Future<void> _refreshPeriodTotals() async {
+    final epoch = ++_periodEpoch;
+    final businessId = widget.businessId;
+    final mode = BriskersConnectionModeController.instance;
+    final offline = mode.forceOffline;
+    final startDate = _rangeStartDate;
+    final endDate = _rangeEndDate;
+    final search = _searchController.text.trim();
+    final direction = _filter == 'all' ? null : _filter;
+    final accountId = _accountFilterId;
+    final categoryId = _categoryFilterId;
+    final counterpartyId = _counterpartyFilterId;
+    if (!mounted) return;
+    setState(() {
+      _periodTotals = null;
+      _periodCalculating = !offline;
+      _periodError = offline
+          ? 'Complete totals require an online refresh.' : null;
+    });
+    if (offline) return;
+    bool current() =>
+        mounted && epoch == _periodEpoch &&
+        widget.businessId == businessId &&
+        !BriskersConnectionModeController.instance.forceOffline;
+    try {
+      final totals = await ExpensesPeriodTotals.calculate(
+        isCurrent: current,
+        readPage: (offset, limit) => _api.transactionsPaged(
+          businessId,
+          offset: offset, limit: limit,
+          startDate: startDate, endDate: endDate,
+          search: search.isEmpty ? null : search,
+          direction: direction,
+          accountId: accountId,
+          categoryId: categoryId,
+          counterpartyId: counterpartyId,
+        ),
+        // Use only existing, identity-scoped reporting evidence for processor
+        // fees. Never invent a fee or modify canonical transaction amounts.
+        enrichPage: (rows) => const WarrantyReceiptReporting().enrich(
+          businessId, rows, refresh: false,
+        ),
+      );
+      if (!current()) return;
+      setState(() {
+        _periodTotals = totals;
+        _periodCalculating = false;
+        _periodError = null;
+      });
+    } catch (_) {
+      if (!current()) return;
+      setState(() {
+        _periodTotals = null;
+        _periodCalculating = false;
+        _periodError =
+            'Complete totals are unavailable. Refresh to retry.';
       });
     }
   }
@@ -1365,20 +1433,6 @@ class _ExpensesScreenState extends State<ExpensesScreen>
 
   @override
   Widget build(BuildContext context) {
-    final income = _transactions
-        .where((x) => x['direction']?.toString() == 'income')
-        .fold<num>(
-          0,
-          (sum, item) => sum + WarrantyReceiptReporting.amount(item),
-        );
-    final expenses = _transactions
-        .where((x) => x['direction']?.toString() != 'income')
-        .fold<num>(
-          0,
-          (sum, item) =>
-              sum + (num.tryParse(item['amount']?.toString() ?? '') ?? 0),
-        );
-
     final allVisible = InvoicePaymentFeed.combine(
       financial: _transactions,
       receipts: _invoiceReceipts,
@@ -1391,10 +1445,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     );
     final visible = allVisible.take(_visibleCount).toList();
     final moreReceiptPages = allVisible.length > _visibleCount;
-    final feesUnverified = _transactions.any(
-      (row) =>
-          row['direction'] == 'income' && row['reporting_status'] != 'verified',
-    );
+    final feesUnverified = _periodTotals?.feesUnverified == true;
 
     return Scaffold(
       appBar: widget.showAppBar
@@ -1464,7 +1515,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                     ),
                                   ),
                                   Text(
-                                    _money(income),
+                                    _periodCalculating
+                                        ? 'Calculating…'
+                                        : _periodTotals == null
+                                            ? 'Unavailable'
+                                            : _money(_periodTotals!.income),
                                     style: const TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w900,
@@ -1485,7 +1540,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                     ),
                                   ),
                                   Text(
-                                    _money(expenses),
+                                    _periodCalculating
+                                        ? 'Calculating…'
+                                        : _periodTotals == null
+                                            ? 'Unavailable'
+                                            : _money(_periodTotals!.expenses),
                                     style: const TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w900,
@@ -1496,6 +1555,23 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                               ),
                             ),
                           ],
+                        ),
+                      ),
+                    ),
+                  if (_showFinancialSummary)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 2),
+                      child: Text(
+                        _periodError ??
+                            (_periodCalculating
+                                ? 'Calculating complete posted totals for the selected filters…'
+                                : _searchController.text.trim().isNotEmpty
+                                    ? 'Search totals include all dates.'
+                                    : 'Complete posted totals for ' + _rangeLabel +
+                                      ' · pending offline entries excluded'),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF667085),
                         ),
                       ),
                     ),
