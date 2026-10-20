@@ -138,8 +138,8 @@ class LocalJobTasksLabStore {
         changes.add('completed_at=?'); args.add(finished);
       }
       await db.customStatement(
-        'UPDATE local_job_tasks_lab SET ' + changes.join(', ') +
-        ' WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        "UPDATE local_job_tasks_lab SET ${changes.join(', ')} "
+        "WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?",
         [...args, businessId, jobId, documentId, lineId],
       );
     });
