@@ -244,4 +244,50 @@ void main() {
     expect(tickers[3], isTrue);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+  testWidgets('Expenses preserves verified cloud state across Invoice navigation',
+      (tester) async {
+    final mounts = <int, int>{};
+    void markMount(int index) {
+      mounts[index] = (mounts[index] ?? 0) + 1;
+    }
+    Future<void> show(int index, {String scope = 'shop-a'}) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: RetainedModuleStack(
+            key: ValueKey(scope),
+            index: index,
+            itemCount: 8,
+            itemBuilder: (_, moduleIndex) => _TestModule(
+              index: moduleIndex,
+              onLoad: markMount,
+            ),
+          ),
+        ),
+      ));
+      await tester.pump();
+    }
+
+    await show(6);
+    // Simulates the Expenses screen recording an authoritative server
+    // confirmation in its State rather than in individual cached rows.
+    final expensesState = tester.state<_TestModuleState>(
+      find.byType(_TestModule),
+    );
+    await tester.tap(find.text('6:Open'));
+    await tester.pump();
+    expect(find.text('6:Closed'), findsOneWidget);
+    await show(4); // Invoices
+    await show(6); // Back to Expenses
+    expect(find.text('6:Closed'), findsOneWidget);
+    expect(tester.state<_TestModuleState>(find.byType(_TestModule)),
+      same(expensesState));
+    expect(mounts[6], 1, reason:
+      'Switching Invoices must not discard Expenses server-confirmed state.');
+
+    await show(6, scope: 'shop-b');
+    expect(mounts[6], 2,
+      reason: 'Verified transaction identities must not cross shops.');
+    expect(find.text('6:Open'), findsOneWidget);
+  });
+
 }
