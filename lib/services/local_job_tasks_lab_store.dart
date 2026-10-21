@@ -81,6 +81,27 @@ class LocalJobTasksLabStore {
       )
     ''');
     await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_lab_payroll_rates (
+        business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+        cents_per_hour INTEGER NOT NULL,
+        PRIMARY KEY(business_id, employee_id)
+      )
+    ''');
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_lab_payroll_disbursements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+        cents INTEGER NOT NULL, kind TEXT NOT NULL,
+        method TEXT NOT NULL, note TEXT NOT NULL,
+        paid_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+      )
+    ''');
+    await db.customStatement('''
+      CREATE INDEX IF NOT EXISTS idx_lab_payroll_payments_by_employee
+      ON local_lab_payroll_disbursements (
+        business_id, employee_id, paid_at)
+    ''');
+    await db.customStatement('''
       CREATE TABLE IF NOT EXISTS local_job_lead_lab (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL,
         employee_id TEXT, updated_at INTEGER NOT NULL,
@@ -481,6 +502,106 @@ class LocalJobTasksLabStore {
       ''', [newLead, DateTime.now().millisecondsSinceEpoch,
         businessId, jobId, previous]);
     });
+  }
+
+  static const recheckDocumentId = 'lab-manual-recheck';
+
+  /// Add an extra recheck task without changing the source invoice or billing.
+  /// Assigned hours are a separate approved payroll cap for this task.
+  Future<String> addRecheckTask({
+    required String businessId, required String jobId,
+    required String description, required double hours,
+    String? employeeId,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, jobId, description].any((v) => v.trim().isEmpty) ||
+        !hours.isFinite || hours <= 0) {
+      throw ArgumentError('Description and positive hours required');
+    }
+    if (await jobStatus(businessId, jobId) == 'completed') {
+      throw StateError('Reopen the job before adding recheck labor');
+    }
+    final now = DateTime.now().microsecondsSinceEpoch;
+    final lineId = 'recheck-$now';
+    final assignee = employeeId == null || employeeId.isEmpty
+        ? await leadMechanic(businessId, jobId) : employeeId;
+    await db.customStatement(
+      'INSERT INTO local_job_tasks_lab '
+      '(business_id, job_id, document_id, line_id, '
+      'source_description, source_invoice_hours, payroll_hours, '
+      'employee_id, status, updated_at, source_missing) '
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, 0)",
+      [businessId, jobId, recheckDocumentId, lineId,
+        description.trim(), hours, hours, assignee,
+        DateTime.now().millisecondsSinceEpoch],
+    );
+    return lineId;
+  }
+
+  /// Only the isolated test app uses these local hourly rates and payments.
+  /// Currency is stored as cents; all transaction rows are append-only.
+  Future<Map<String, int>> payrollRates(String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT employee_id, cents_per_hour FROM local_lab_payroll_rates '
+      'WHERE business_id=?',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return {for (final row in rows)
+      row.read<String>('employee_id'): row.read<int>('cents_per_hour')};
+  }
+
+  Future<void> setPayrollRate({
+    required String businessId, required String employeeId,
+    required int centsPerHour,
+  }) async {
+    await ensureTables(db);
+    if (businessId.trim().isEmpty || employeeId.trim().isEmpty ||
+        centsPerHour < 0 || centsPerHour > 1000000) {
+      throw ArgumentError('Invalid hourly rate');
+    }
+    await db.customStatement(
+      'INSERT INTO local_lab_payroll_rates '
+      '(business_id, employee_id, cents_per_hour) VALUES (?, ?, ?) '
+      'ON CONFLICT(business_id, employee_id) '
+      'DO UPDATE SET cents_per_hour=excluded.cents_per_hour',
+      [businessId, employeeId, centsPerHour],
+    );
+  }
+
+  Future<void> recordLabPayrollPayment({
+    required String businessId, required String employeeId,
+    required int cents, required String kind,
+    required String method, required String note,
+    required DateTime paidAt,
+  }) async {
+    await ensureTables(db);
+    if (businessId.trim().isEmpty || employeeId.trim().isEmpty ||
+        cents < 1 || cents > 100000000 ||
+        !const {'pay', 'advance'}.contains(kind) ||
+        !const {'cash', 'check', 'zelle', 'card', 'other'}.contains(method)) {
+      throw ArgumentError('Invalid test payment');
+    }
+    await db.customStatement(
+      'INSERT INTO local_lab_payroll_disbursements '
+      '(business_id, employee_id, cents, kind, method, note, paid_at, created_at) '
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [businessId, employeeId, cents, kind, method, note.trim(),
+        paidAt.millisecondsSinceEpoch,
+        DateTime.now().millisecondsSinceEpoch],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> payrollTestPayments(
+      String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT id, employee_id, cents, kind, method, note, paid_at '
+      'FROM local_lab_payroll_disbursements WHERE business_id=? '
+      'ORDER BY paid_at DESC, id DESC',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
   }
 
   Future<List<Map<String, dynamic>>> list(String businessId, String jobId) async {
