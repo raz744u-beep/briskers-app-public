@@ -403,7 +403,9 @@ void main() {
       );
       sync.delayedPull = Completer<void>();
       await show(tester, settle: false);
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.byKey(const ValueKey('appointment-awaiting-server')),
+          findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(find.text('Saved today '), findsNothing);
 
       await BriskersConnectionModeController.instance.setMode(
