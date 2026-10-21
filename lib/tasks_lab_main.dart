@@ -702,6 +702,100 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ],
   );
 
+  Future<void> _confirmCompleteAllTasks() async {
+    final active = tasks.where((task) =>
+        task['source_missing'] != 1).toList();
+    final unfinished = active.where((task) =>
+        task['status'] != 'done').length;
+    if (active.isEmpty || unfinished == 0) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Mark all job tasks Done?'),
+        content: SizedBox(
+          width: 380,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 360),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('Job J-24 · $unfinished unfinished of '
+                    '${active.length} tasks. Confirm the work is complete.'),
+                  const SizedBox(height: 10),
+                  for (final task in active)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        task['status'] == 'done'
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                        size: 22,
+                        color: BriskersColors.jobs,
+                      ),
+                      title: Text(_description(task),
+                        maxLines: 2, overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: Text(
+                        '${_laborAssignment(task)} · '
+                        '${task['status'] == 'done'
+                            ? 'Already Done' : 'Will mark Done'}',
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  const Text('Each unfinished task will be completed '
+                    'individually in the Work Log. Payroll Preview updates '
+                    'automatically. The job and invoice remain open.',
+                    style: TextStyle(fontSize: 12,
+                      color: Color(0xFF64748B))),
+                ],
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialog, true),
+            icon: const Icon(Icons.done_all),
+            label: Text('Mark $unfinished Done'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      final count = await store.completeConfirmedJobTasks(
+        businessId: BriskersLabFixture.businessId,
+        jobId: BriskersLabFixture.jobId,
+        confirmedTasks: [
+          for (final task in active)
+            {
+              'document_id': task['document_id'].toString(),
+              'line_id': task['line_id'].toString(),
+            },
+        ],
+      );
+      await _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$count tasks marked Done')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not complete tasks: $error')),
+        );
+      }
+    }
+  }
+
   Widget _jobsListPage() => ListView(
     children: [
       _sectionHeader('Jobs', subtitle: '1 example job · Offline TEST'),
@@ -816,7 +910,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final vehicle = BriskersLabFixture.vehicles[selectedVehicle];
     final firstVehicle = selectedVehicle == 0;
     final activeTasks = tasks.where((t) => t['source_missing'] != 1).length;
-    final completed = tasks.where((t) => t['status'] == 'done').length;
+    final completed = tasks.where((t) =>
+        t['source_missing'] != 1 && t['status'] == 'done').length;
     Widget tile(
       String label, IconData icon, Color color, VoidCallback onTap,
       {int count = 0}
@@ -948,6 +1043,18 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _navigate(4),
                 ),
+                if (completed < activeTasks) ...[
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.done_all,
+                      color: BriskersColors.jobs),
+                    title: const Text('Mark all tasks Done',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                    subtitle: Text('${activeTasks - completed} unfinished'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: _confirmCompleteAllTasks,
+                  ),
+                ],
               ],
             ),
           ),
@@ -969,6 +1076,15 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           subtitle: history
             ? 'Completed tasks automatically appear here'
             : 'Invoice #6342 · Assign Kam and Chris by task'),
+        if (!history && visible.any((task) => task['status'] != 'done'))
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: OutlinedButton.icon(
+              onPressed: _confirmCompleteAllTasks,
+              icon: const Icon(Icons.done_all),
+              label: const Text('Mark all tasks Done'),
+            ),
+          ),
         if (visible.isEmpty)
           const ListTile(title: Text('No entries yet')),
         ...visible.map((t) => _taskCard(t, history: history)),
