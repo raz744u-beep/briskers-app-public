@@ -63,4 +63,39 @@ void main() {
     expect(DocumentPdfService.fileName({'kind':'invoice','document_number':'6345'}),
         'Briskers-Invoice-6345.pdf');
   });
+
+  test('Customer Complaint shares arrival odometer with pre-inspection', () async {
+    final job=await File('lib/screens/jobs/job_detail_screen.dart').readAsString();
+    expect(job,contains("tooltip: 'Edit Mileage In'"));
+    expect(job,contains('Future<void> _editMileageIn() async'));
+    expect(job,contains('await _offlineInspection.saveLocalInspection('));
+    expect(job,contains('notes: existingNotes,'));
+    final vehicle=await File('lib/screens/customers/new_vehicle_screen.dart')
+        .readAsString();
+    expect(vehicle,contains('Current Mileage (optional)'));
+    expect(vehicle,contains('Known reading at registration.'));
+  });
+
+  test('v2 invoice uses separate departure RPC and offline queue, not legacy job arrival', () async {
+    final ui=await File('lib/screens/jobs/job_document_screen.dart').readAsString();
+    final api=await File('lib/services/briskers_api.dart').readAsString();
+    expect(ui,contains("explicitMileageOut ? 'Mileage Out' : 'Mileage'"));
+    expect(ui,contains('await _invoiceMileage.queue('));
+    expect(ui,contains('await _invoiceMileage.project('));
+    expect(api,contains('briskers_save_invoice_mileage_out_v1'));
+    expect(api,contains('briskers_document_detail_v5'));
+    expect(api,contains("if (error.code != 'PGRST202') rethrow;"));
+  });
+
+  test('migration is review-only and leaves historical document rows intact', () async {
+    final sql=await File('tools/migrations/'
+        '20261021_mileage_in_out_v2_REVIEW_ONLY.sql').readAsString();
+    expect(sql,contains('REVIEW ONLY. DO NOT APPLY'));
+    expect(sql,contains('DEFAULT 1;'));
+    expect(sql,contains('SET DEFAULT 2;'));
+    expect(sql,contains('briskers_document_detail_v5'));
+    expect(sql,contains('briskers.apply_completed_invoice_mileage_v2'));
+    expect(sql,contains('briskers.require_permission'));
+    expect(sql,isNot(contains('SET mileage_schema_version = 1')));
+  });
 }
