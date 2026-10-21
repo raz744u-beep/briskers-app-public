@@ -44,6 +44,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Map<String, String> nicknames = const {};
   Map<String, String> fullNames = const {};
   String? leadMechanicId;
+  String jobStatusCode = 'open';
+  List<Map<String, dynamic>> earlierWorkLog = const [];
   Map<String, List<Map<String, dynamic>>> allocationsByLine = {};
   int page = 0;
   int? expandedMenu;
@@ -102,6 +104,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       jobId: BriskersLabFixture.jobId,
       documentId: BriskersLabFixture.invoiceId,
       lineId: task['line_id'].toString())));
+    final currentJobStatus = await store.jobStatus(
+      BriskersLabFixture.businessId, BriskersLabFixture.jobId);
+    final archived = await store.priorCompletions(
+      BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final lead = await store.leadMechanic(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     if (!mounted) return;
@@ -110,6 +116,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       nicknames = aliases;
       fullNames = names;
       leadMechanicId = lead;
+      jobStatusCode = currentJobStatus;
+      earlierWorkLog = archived;
       allocationsByLine = {for (var i = 0; i < rows.length; i++)
         rows[i]['line_id'].toString(): allocations[i]};
       loading = false;
@@ -508,6 +516,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     description.dispose();
     if (updated == true) {
       await _refresh();
+      if (status == 'done') await _offerCompleteJobIfReady();
     }
   }
 
@@ -702,6 +711,178 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ],
   );
 
+  static const _jobStatusChoices = <(String, String, IconData, Color)>[
+    ('open', 'Open', Icons.work_outline, Color(0xFF546E7A)),
+    ('in_progress', 'In Progress', Icons.build_circle_outlined,
+      BriskersColors.jobs),
+    ('pending_approval', 'Pending Approval', Icons.approval_outlined,
+      Color(0xFFE59A00)),
+    ('waiting_parts', 'Waiting Parts', Icons.local_shipping_outlined,
+      Color(0xFFEF6C00)),
+    ('needs_recheck', 'Needs Recheck', Icons.troubleshoot_outlined,
+      Color(0xFFC62828)),
+    ('completed', 'Completed', Icons.task_alt, Color(0xFF2E7D32)),
+  ];
+
+  (String, String, IconData, Color) get _currentJobStatusInfo =>
+    _jobStatusChoices.firstWhere(
+      (item) => item.$1 == jobStatusCode,
+      orElse: () => _jobStatusChoices.first,
+    );
+
+  Widget _jobStatusControl() {
+    final current = _currentJobStatusInfo;
+    return PopupMenuButton<String>(
+      tooltip: 'Change job status',
+      onSelected: _changeJobStatus,
+      itemBuilder: (context) => [
+        for (final option in _jobStatusChoices)
+          PopupMenuItem<String>(
+            value: option.$1,
+            child: Row(children: [
+              Icon(option.$3, color: option.$4, size: 20),
+              const SizedBox(width: 8),
+              Text(option.$2),
+            ]),
+          ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+        decoration: BoxDecoration(
+          color: current.$4.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: current.$4.withValues(alpha: 0.55)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(current.$3, color: current.$4, size: 17),
+          const SizedBox(width: 4),
+          Text(current.$2, style: TextStyle(
+            color: current.$4, fontSize: 11,
+            fontWeight: FontWeight.w800)),
+          Icon(Icons.arrow_drop_down, color: current.$4, size: 18),
+        ]),
+      ),
+    );
+  }
+
+  List<Map<String, String>> _activeTaskIdentities(
+      List<Map<String, dynamic>> active) => [
+    for (final task in active)
+      {
+        'document_id': task['document_id'].toString(),
+        'line_id': task['line_id'].toString(),
+      },
+  ];
+
+  Future<void> _changeJobStatus(String next) async {
+    if (next == jobStatusCode) return;
+    final active = tasks.where((t) => t['source_missing'] != 1).toList();
+    if (next == 'completed') {
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('Complete job J-24?'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 390),
+            child: SingleChildScrollView(child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Confirm all required tasks are complete. '
+                  'Unfinished tasks will be marked Done individually.'),
+                const SizedBox(height: 10),
+                for (final task in active)
+                  ListTile(
+                    dense: true, contentPadding: EdgeInsets.zero,
+                    leading: Icon(task['status'] == 'done'
+                        ? Icons.check_circle : Icons.radio_button_unchecked,
+                      size: 20, color: BriskersColors.jobs),
+                    title: Text(_description(task)),
+                    subtitle: Text('${_laborAssignment(task)} · '
+                      '${task['status'] == 'done'
+                        ? 'Already Done' : 'Will mark Done'}'),
+                  ),
+                const SizedBox(height: 8),
+                const Text('The job status and task statuses update '
+                  'together. Invoice payment and payroll remain unchanged.',
+                  style: TextStyle(fontSize: 12,
+                    color: Color(0xFF64748B))),
+              ],
+            )),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Complete Job')),
+          ],
+        ),
+      );
+      if (result != true) return;
+    }
+    try {
+      await store.changeJobStatus(
+        businessId: BriskersLabFixture.businessId,
+        jobId: BriskersLabFixture.jobId,
+        statusCode: next,
+        if (next == 'completed')
+          confirmedTasks: _activeTaskIdentities(active),
+      );
+      await _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(next == 'completed'
+            ? 'Job and all tasks marked Completed'
+            : 'Job status updated to ${_currentJobStatusInfo.$2}'),
+        ));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not update job status: $error')));
+      }
+    }
+  }
+
+  Future<void> _offerCompleteJobIfReady() async {
+    final active = tasks.where((task) => task['source_missing'] != 1).toList();
+    if (!mounted || jobStatusCode == 'completed' || active.isEmpty ||
+        !active.every((task) => task['status'] == 'done')) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('All tasks are Done'),
+        content: const Text('Would you like to mark the entire job Completed '
+          'or keep the job open for now?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog, false),
+            child: const Text('Keep Open')),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Complete Job')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await store.changeJobStatus(
+        businessId: BriskersLabFixture.businessId,
+        jobId: BriskersLabFixture.jobId,
+        statusCode: 'completed',
+        confirmedTasks: _activeTaskIdentities(active),
+      );
+      await _refresh();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not complete job: $error')));
+      }
+    }
+  }
+
   Future<void> _confirmCompleteAllTasks() async {
     final active = tasks.where((task) =>
         task['source_missing'] != 1).toList();
@@ -794,6 +975,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         );
       }
     }
+    await _offerCompleteJobIfReady();
   }
 
   Widget _jobsListPage() => ListView(
@@ -811,7 +993,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           subtitle: const Text(
             'Oil leaks, maintenance\n2012 Hyundai Equus · 4 labor tasks'),
           isThreeLine: true,
-          trailing: const Icon(Icons.chevron_right),
+          trailing: _jobStatusControl(),
           onTap: () => _openVehicleJob(0),
         ),
       ),
@@ -928,11 +1110,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             style: const TextStyle(
               fontSize: 21, fontWeight: FontWeight.w800)),
           const Spacer(),
-          if (firstVehicle) const Chip(
-            label: Text('In progress'),
-            avatar: Icon(Icons.build, size: 16,
-              color: BriskersColors.jobs),
-          ),
+          if (firstVehicle) _jobStatusControl(),
         ]),
         Container(
           padding: const EdgeInsets.fromLTRB(13, 5, 13, 8),
@@ -1076,6 +1254,16 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           subtitle: history
             ? 'Completed tasks automatically appear here'
             : 'Invoice #6342 · Assign Kam and Chris by task'),
+        if (!history)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: Row(children: [
+              const Text('Job status', style: TextStyle(
+                fontWeight: FontWeight.w700)),
+              const Spacer(),
+              _jobStatusControl(),
+            ]),
+          ),
         if (!history && visible.any((task) => task['status'] != 'done'))
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -1088,6 +1276,29 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         if (visible.isEmpty)
           const ListTile(title: Text('No entries yet')),
         ...visible.map((t) => _taskCard(t, history: history)),
+        if (history && earlierWorkLog.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
+            child: Text('Earlier completed work', style: TextStyle(
+              fontSize: 16, fontWeight: FontWeight.w800))),
+          for (final entry in earlierWorkLog)
+            Card(
+              margin: const EdgeInsets.fromLTRB(10, 3, 10, 5),
+              child: ListTile(
+                leading: const Icon(Icons.history,
+                  color: BriskersColors.today),
+                title: Text(entry['description'].toString(),
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(
+                  '${_employeeName(entry['employee_id']?.toString())} · '
+                  '${entry['payroll_hours'] ?? '—'} hrs · '
+                  'Completed ${DateFormat('MMM d, h:mm a').format(
+                    DateTime.fromMillisecondsSinceEpoch(
+                      entry['completed_at'] as int))}',
+                ),
+              ),
+            ),
+        ],
       ],
     );
   }
