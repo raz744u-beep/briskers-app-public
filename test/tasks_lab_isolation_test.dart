@@ -118,6 +118,106 @@ void main() {
     }
   });
 
+  test('Invoice labor hours cap allows partial and rejects excess allocations',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    const shop = BriskersLabFixture.businessId;
+    const job = BriskersLabFixture.jobId;
+    const invoice = BriskersLabFixture.invoiceId;
+    const line = 'lab-differential'; // Source labor quantity is 0.8 hr.
+    try {
+      await store.reconcileDocument(
+        businessId: shop, jobId: job, documentId: invoice,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice),
+      );
+      await store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: line,
+        hoursByEmployee: {'lab-kam': 0.5, 'lab-raz': 0.2},
+      );
+      final partial = await store.allocations(
+        businessId: shop, jobId: job, documentId: invoice, lineId: line);
+      expect(partial.fold<double>(0,
+          (sum, item) => sum + (item['hours'] as num).toDouble()), 0.7);
+      final before = (await store.list(shop, job))
+          .singleWhere((row) => row['line_id'] == line);
+      expect(before['source_invoice_hours'], 0.8);
+      expect(before['payroll_hours'], 0.7);
+
+      await expectLater(
+        store.saveAllocations(
+          businessId: shop, jobId: job, documentId: invoice,
+          lineId: line,
+          hoursByEmployee: {'lab-kam': 0.5, 'lab-raz': 0.4},
+        ),
+        throwsArgumentError,
+      );
+      final stillPartial = await store.allocations(
+        businessId: shop, jobId: job, documentId: invoice, lineId: line);
+      expect(stillPartial.length, 2);
+      expect(stillPartial.fold<double>(0,
+          (sum, item) => sum + (item['hours'] as num).toDouble()), 0.7);
+
+      await store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: line,
+        hoursByEmployee: {'lab-kam': 0.5, 'lab-raz': 0.3},
+      );
+      final exact = await store.allocations(
+        businessId: shop, jobId: job, documentId: invoice, lineId: line);
+      expect(exact.fold<double>(0,
+          (sum, item) => sum + (item['hours'] as num).toDouble()),
+          closeTo(0.8, 0.000001));
+      await store.reconcileDocument(
+        businessId: shop, jobId: job, documentId: invoice,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice),
+      );
+      final afterReconcile = (await store.list(shop, job))
+          .singleWhere((row) => row['line_id'] == line);
+      expect(afterReconcile['source_invoice_hours'], 0.8);
+      expect(afterReconcile['payroll_hours'], closeTo(0.8, 0.000001));
+    } finally {
+      await db.close();
+    }
+  });
+
+  test('Existing test-phone task table gains billed-hours column safely',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    try {
+      // Emulate the prior installed table schema without the new column.
+      await db.customStatement('''
+        CREATE TABLE local_job_tasks_lab (
+          business_id TEXT NOT NULL, job_id TEXT NOT NULL,
+          document_id TEXT NOT NULL, line_id TEXT NOT NULL,
+          source_description TEXT NOT NULL, custom_description TEXT,
+          employee_id TEXT, payroll_hours REAL,
+          status TEXT NOT NULL DEFAULT 'planned',
+          completed_at INTEGER, source_missing INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY(business_id, job_id, document_id, line_id)
+        )
+      ''');
+      await store.reconcileDocument(
+        businessId: BriskersLabFixture.businessId,
+        jobId: BriskersLabFixture.jobId,
+        documentId: BriskersLabFixture.invoiceId,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice),
+      );
+      final rows = await store.list(
+        BriskersLabFixture.businessId, BriskersLabFixture.jobId);
+      expect(rows.length, 4);
+      expect(rows.first['source_invoice_hours'], isNotNull);
+    } finally {
+      await db.close();
+    }
+  });
+
   test('Task assignments and nicknames persist in a local SQLite test DB',
       () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
