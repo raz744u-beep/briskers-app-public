@@ -517,7 +517,9 @@ class AppointmentSyncService {
     String businessId, {
     required bool isOwner,
   }) async {
-    if (!isOwner) return false;
+    if (!isOwner) {
+      return false;
+    }
     final local = await _database.customSelect(
       """SELECT id FROM local_appointments
          WHERE business_id=? AND id=? AND sync_state='pending_delete'
@@ -527,7 +529,9 @@ class AppointmentSyncService {
         const Variable<String>(orphanMockAppointmentId),
       ],
     ).get();
-    if (local.length != 1) return false;
+    if (local.length != 1) {
+      return false;
+    }
 
     final outbox = await _database.customSelect(
       'SELECT * FROM sync_outbox WHERE business_id=? AND entity_id=?',
@@ -547,12 +551,16 @@ class AppointmentSyncService {
     final queueId = candidate.read<int>('id');
     final payload = candidate.read<String>('payload_json');
     final version = candidate.readNullable<int>('base_row_version');
-    if (version == null || version < 1) return false;
+    if (version == null || version < 1) {
+      return false;
+    }
 
     final confirmed = await _api.confirmOrphanMockAppointmentAbsent(
       businessId, orphanMockAppointmentId,
     );
-    if (!confirmed) return false;
+    if (!confirmed) {
+      return false;
+    }
 
     var retired = false;
     await _database.transaction(() async {
@@ -599,7 +607,9 @@ class AppointmentSyncService {
       );
       retired = true;
     });
-    if (retired) _syncEvents.add(businessId);
+    if (retired) {
+      _syncEvents.add(businessId);
+    }
     return retired;
   }
 
