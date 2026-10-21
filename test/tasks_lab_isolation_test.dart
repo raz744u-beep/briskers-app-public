@@ -69,6 +69,16 @@ void main() {
     expect(main, contains('onSelected: _changeJobStatus'));
     expect(main, contains('All tasks are Done'));
     expect(main, contains("subtitle: 'Completion history · Read-only'"));
+    // Font hierarchy: payroll hours are prominent; Work Log allocations
+    // remain legible in the compact, read-only ledger.
+    final payrollSection = main.split('Widget _payrollPage() {').last
+      .split('Widget _settingsPage()').first;
+    expect(payrollSection, contains('fontSize: 20'));
+    expect(payrollSection, contains('fontWeight: FontWeight.w800'));
+    final fullLogSection = main.split('Widget _workLogPage() {').last
+      .split('Widget _taskList({bool history = false})').first;
+    expect(fullLogSection, contains('fontSize: 14.5'));
+    expect(fullLogSection, contains('fontWeight: FontWeight.w600'));
     expect(main, contains('Widget _workLogPage()'));
     // Work Log is a passive chronological ledger: no edit pencil, no onTap.
     final logSection = main.split('Widget _workLogPage() {').last
