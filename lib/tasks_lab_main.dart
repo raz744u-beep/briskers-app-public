@@ -827,8 +827,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         businessId: BriskersLabFixture.businessId,
         jobId: BriskersLabFixture.jobId,
         statusCode: next,
-        if (next == 'completed')
-          confirmedTasks: _activeTaskIdentities(active),
+        confirmedTasks: next == 'completed'
+          ? _activeTaskIdentities(active) : null,
       );
       await _refresh();
       if (mounted) {
