@@ -423,6 +423,19 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     });
   }
 
+  void _selectCustomersFromDock() {
+    // The Customers badge represents unread customer arrivals, not the
+    // total customer count. A normal-sized tab tap must show those people,
+    // not require a precision tap on the tiny badge label.
+    // Do not consume events here; only explicit review marks them read.
+    if (_homeCustomersNewCount > 0 && _customerNotifications != null) {
+      final request = ++_customerNavigationRequest;
+      unawaited(_openCustomers(request));
+      return;
+    }
+    _goTo(1);
+  }
+
   void _goTo(int index) {
     FocusManager.instance.primaryFocus?.unfocus();
     final timedModule = switch (index) {
@@ -436,8 +449,8 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     } else {
       NavigationContentTiming.cancel();
     }
-    // A normal Customers dock tap must not await the separate unread/new
-    // customer notification lookup. It also must not filter to new only.
+    // General navigation (Home shortcuts and View all) stays unfiltered;
+    // the dock Customers destination routes through _selectCustomersFromDock.
     ++_customerNavigationRequest;
     setState(() {
       _index = index;
@@ -484,7 +497,11 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
         // Explicit module navigation dismisses the nested routes first.
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
-      _goTo(index);
+      if (index == 1) {
+        _selectCustomersFromDock();
+      } else {
+        _goTo(index);
+      }
     },
   );
 
