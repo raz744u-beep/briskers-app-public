@@ -45,6 +45,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Map<String, String> fullNames = const {};
   int page = 0;
   int? expandedMenu;
+  double menuAnchorX = 180;
   int selectedVehicle = 0;
   bool jobDetailsOpen = false;
   bool loading = true;
@@ -152,10 +153,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     });
   }
 
-  void _toggleMenu(int navIndex) {
+  void _toggleMenu(int navIndex, Offset globalPosition) {
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       expandedMenu = expandedMenu == navIndex ? null : navIndex;
+      menuAnchorX = globalPosition.dx;
     });
   }
 
@@ -197,8 +199,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         color: BriskersColors.more),
     ],
     onSelected: (index) => _navigate(_dockPages[index]),
-    onLongPressed: (index) {
-      if (index == 2 || index == 7) _toggleMenu(index);
+    onLongPressed: (index, globalPosition) {
+      if (index == 2 || index == 7) {
+        _toggleMenu(index, globalPosition);
+      }
     },
   );
 
@@ -1120,12 +1124,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           ),
           Positioned(
             bottom: 10,
-            left: expandedMenu == 2
-              ? (MediaQuery.sizeOf(context).width * 0.625 - 90)
-                  .clamp(8.0, MediaQuery.sizeOf(context).width - 188)
-                  .toDouble()
-              : null,
-            right: expandedMenu == 7 ? 8 : null,
+            left: (menuAnchorX - 90)
+              .clamp(8.0, MediaQuery.sizeOf(context).width - 188)
+              .toDouble(),
             child: _verticalMenu(expandedMenu!),
           ),
         ],
