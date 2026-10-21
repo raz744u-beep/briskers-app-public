@@ -29,13 +29,13 @@ class CustomerFindingCounts {
     for (final row in rows) {
       final id = row['id']?.toString() ?? '';
       if (id.isEmpty || !ids.add(id)) continue;
-      switch (row['status']?.toString()) {
-        case 'resolved':
-          resolved++;
-        case 'in_job':
-          inJob++;
-        default:
-          open++;
+      final status = row['status']?.toString();
+      if (status == 'resolved') {
+        resolved++;
+      } else if (status == 'in_job') {
+        inJob++;
+      } else {
+        open++;
       }
     }
     return CustomerFindingCounts(open: open, inJob: inJob, resolved: resolved);
