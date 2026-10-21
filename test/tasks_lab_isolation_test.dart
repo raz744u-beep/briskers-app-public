@@ -54,6 +54,9 @@ void main() {
     expect(main, contains("if (index == 2 || index == 7) {"));
     expect(main, contains('jobDetailsOpen'));
     expect(main, contains('Assign main job mechanic'));
+    expect(main, contains('Mark all tasks Done'));
+    expect(main, contains('_confirmCompleteAllTasks'));
+    expect(main, contains('completeConfirmedJobTasks('));
     expect(main, contains('Assign invoice labor'));
     expect(main, contains('onTap: () => _editInvoiceLabor(task)'));
     expect(main, contains('allocationsByLine'));
@@ -213,6 +216,78 @@ void main() {
         BriskersLabFixture.businessId, BriskersLabFixture.jobId);
       expect(rows.length, 4);
       expect(rows.first['source_invoice_hours'], isNotNull);
+    } finally {
+      await db.close();
+    }
+  });
+
+  test('Confirming all tasks Done preserves earlier Done and split payroll',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    const shop = BriskersLabFixture.businessId;
+    const job = BriskersLabFixture.jobId;
+    const invoice = BriskersLabFixture.invoiceId;
+    try {
+      await store.reconcileDocument(
+        businessId: shop, jobId: job, documentId: invoice,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice),
+      );
+      await store.saveLeadMechanic(shop, job, 'lab-kam');
+      await store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-valve-covers', status: 'done',
+      );
+      final firstDone = (await store.list(shop, job)).singleWhere(
+        (task) => task['line_id'] == 'lab-valve-covers');
+      final initialStamp = firstDone['completed_at'];
+      expect(initialStamp, isA<int>());
+      await store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-transmission',
+        hoursByEmployee: {'lab-chris': 1.0, 'lab-kam': 0.5},
+      );
+      final original = await store.list(shop, job);
+      final ids = [
+        for (final task in original)
+          {
+            'document_id': task['document_id'].toString(),
+            'line_id': task['line_id'].toString(),
+          },
+      ];
+      // A stale/incomplete confirmation must not change any row.
+      await expectLater(
+        store.completeConfirmedJobTasks(
+          businessId: shop, jobId: job,
+          confirmedTasks: ids.take(2).toList(),
+        ),
+        throwsStateError,
+      );
+      expect((await store.list(shop, job)).where(
+        (task) => task['status'] == 'done').length, 1);
+
+      final count = await store.completeConfirmedJobTasks(
+        businessId: shop, jobId: job, confirmedTasks: ids);
+      expect(count, 3);
+      final finished = await store.list(shop, job);
+      expect(finished.length, 4);
+      expect(finished.every((task) => task['status'] == 'done'), isTrue);
+      expect(finished.every((task) => task['completed_at'] is int), isTrue);
+      expect(finished.singleWhere(
+        (task) => task['line_id'] == 'lab-valve-covers')['completed_at'],
+        initialStamp);
+      expect((await store.allocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-transmission')).length, 2);
+      expect(await store.leadMechanic(shop, job), 'lab-kam');
+      expect(await store.completeConfirmedJobTasks(
+        businessId: shop, jobId: job, confirmedTasks: ids), 0);
+      final persisted = await store.list(shop, job);
+      expect(persisted.singleWhere(
+        (task) => task['line_id'] == 'lab-valve-covers')['completed_at'],
+        initialStamp);
+      expect(await store.list('production-company', job), isEmpty);
     } finally {
       await db.close();
     }
