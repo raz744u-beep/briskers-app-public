@@ -80,7 +80,7 @@ void main() {
     // remain legible in the compact, read-only ledger.
     final payrollSection = main.split('Widget _payrollPage() {').last
       .split('Widget _settingsPage()').first;
-    expect(payrollSection, contains('fontSize: 20'));
+    expect(payrollSection, contains('fontSize: 22'));
     expect(payrollSection, contains('fontWeight: FontWeight.w800'));
     final fullLogSection = main.split('Widget _workLogPage() {').last
       .split('Widget _taskList({bool history = false})').first;
