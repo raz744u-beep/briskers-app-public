@@ -3610,7 +3610,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     // Schema-v2 invoices have an independent departure reading. Legacy
     // documents must keep the old neutral mileage field unchanged.
     final explicitMileageOut = !_estimate &&
-        (_detail!['mileage_schema_version'] == 2 ||
+        (_offlineDocumentDraft.isLocalDraftId(widget.documentId) ||
+            _detail!['mileage_schema_version'] == 2 ||
             _detail!.containsKey('mileage_out'));
     var mileageText = (explicitMileageOut
         ? _detail!['mileage_out']
@@ -3880,7 +3881,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         widget.businessId,
         widget.documentId,
         documentDate: date,
-        mileage: newMileage,
+        mileage: explicitMileageOut ? null : newMileage,
+        mileageOut: explicitMileageOut ? newMileage : null,
         claimNumber: newClaimNumber.isEmpty ? null : newClaimNumber,
         authorizationNumber: newAuthorizationNumber.isEmpty
             ? null : newAuthorizationNumber,
