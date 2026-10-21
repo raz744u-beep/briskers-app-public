@@ -128,13 +128,14 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
               itemBuilder: (context, index) {
                 final item = widget.destinations[index];
                 final selected = index == widget.selectedIndex;
-                return SizedBox(width: 83, child: InkWell(
-                  key: ValueKey('dock-${item.label}'),
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => widget.onSelected(index),
+                return SizedBox(width: 83, child: GestureDetector(
                   onLongPressStart: widget.onLongPressed == null
                     ? null : (details) => widget.onLongPressed!(
                         index, details.globalPosition),
+                  child: InkWell(
+                  key: ValueKey('dock-${item.label}'),
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => widget.onSelected(index),
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
                     decoration: BoxDecoration(
@@ -154,6 +155,7 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
                           fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                           color: item.color)),
                     ]),
+                  ),
                   ),
                 ));
               },
