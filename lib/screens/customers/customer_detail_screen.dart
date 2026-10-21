@@ -214,7 +214,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   Future<void> _refreshEditedCustomerDocument(String documentId) async {
     _invalidateCustomerActivity(); // Show any locally saved draft immediately.
     if (BriskersConnectionModeController.instance.forceOffline ||
-        documentId.isEmpty) {
+        documentId.isEmpty ||
+        documentId.startsWith('local-estimate-') ||
+        documentId.startsWith('local-invoice-')) {
       return;
     }
     try {
