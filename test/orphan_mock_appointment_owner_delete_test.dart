@@ -157,6 +157,8 @@ void main() {
     expect(src,contains("title: 'Delete orphan test appointment?'"));
     expect(src,contains('AppointmentSyncService.orphanMockAppointmentId'));
     expect(src,contains("case 'delete_orphan_mock':"));
+    expect(src,contains("ValueKey('owner-orphan-appointment-cleanup')"));
+    expect(src,contains("if (widget.roleCode == 'owner' && _hasOrphanMock)"));
     expect(src,contains('isOwner: true'));
   });
 }
