@@ -89,6 +89,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   Timer? _searchDebounce;
   String? _error;
   bool _showingLocal = false;
+  // Cache-first is normal in Auto mode; only an actual transaction-page
+  // refresh failure should produce the saved-data notice.
+  bool _transactionRefreshFailed = false;
   // Only a server-returned transaction ID is an affirmative cloud receipt.
   // The API currently omits sync_state: unknown must remain unknown.
   final Set<String> _serverConfirmedTransactionIds = {};
@@ -158,6 +161,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _periodError = null;
       _serverConfirmedTransactionIds.clear();
       _previousServerTransactionProofs = {};
+      _transactionRefreshFailed = false;
       _serverConfirmedBusinessId = null;
     }
     if (oldWidget.dockResetToken != widget.dockResetToken) {
@@ -359,10 +363,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         // Never blank a previously displayed financial list while refreshing.
         _loading = _transactions.isEmpty && _invoiceReceipts.isEmpty;
         _visibleCount = _pageSize;
+        _transactionRefreshFailed = false;
         _error = null;
       });
     } else {
-      setState(() => _error = null);
+      setState(() {
+        _error = null;
+        _transactionRefreshFailed = false;
+      });
     }
 
     // Cached financial rows paint quickly. Restore separately persisted,
@@ -469,6 +477,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           _hasMore = false;
           _loading = false;
           _error = null;
+          _transactionRefreshFailed = false;
           _showingLocal = true;
         });
         // Existing installations have cached server invoice payments before
@@ -495,6 +504,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         _hasMore = rows.length == _pageSize;
         _loading = false;
         _showingLocal = false;
+        _transactionRefreshFailed = false;
         _error = null;
       });
       // Only the successful authenticated server response can add durable
@@ -512,6 +522,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           BriskersConnectionModeController.instance.forceOffline;
       setState(() {
         _loading = false;
+        _transactionRefreshFailed = !forceOffline;
         if (_showingLocal || forceOffline ||
             _transactions.isNotEmpty || _invoiceReceipts.isNotEmpty) {
           _error = null;
@@ -1587,7 +1598,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                             ?.copyWith(fontWeight: FontWeight.w800)),
                     ),
                   ],
-                  if (_showingLocal)
+                  if (_showingLocal &&
+                      (BriskersConnectionModeController.instance.forceOffline ||
+                          _transactionRefreshFailed))
                     Container(
                       margin: const EdgeInsets.only(bottom: 10),
                       padding: const EdgeInsets.symmetric(
@@ -1598,14 +1611,16 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                         color: BriskersColors.expenses.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(9),
                       ),
-                      child: const Row(
+                      child: Row(
                         children: [
-                          Icon(Icons.cloud_off_outlined, size: 18),
-                          SizedBox(width: 7),
+                          const Icon(Icons.cloud_off_outlined, size: 18),
+                          const SizedBox(width: 7),
                           Expanded(
                             child: Text(
-                              'Showing saved transactions • reconnect to refresh, add or edit',
-                              style: TextStyle(fontWeight: FontWeight.w700),
+                              BriskersConnectionModeController.instance.forceOffline
+                                  ? 'Offline mode • showing saved transactions'
+                                  : 'Unable to refresh transactions • showing saved data',
+                              style: const TextStyle(fontWeight: FontWeight.w700),
                             ),
                           ),
                         ],
