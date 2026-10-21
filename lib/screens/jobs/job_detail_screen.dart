@@ -1606,6 +1606,74 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     return translated.first.trim();
   }
 
+  /// Mileage In is shown beside Customer Complaint but stored in the same
+  /// existing pre-inspection odometer, so staff do not enter it twice.
+  Future<void> _editMileageIn() async {
+    if (_job == null || _busy || !_canEditInspection) return;
+    final initial = _preInspection?['odometer'] ??
+        _job?['odometer_in'];
+    final controller = TextEditingController(
+      text: initial?.toString() ?? '',
+    );
+    final save = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Mileage In'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Odometer when vehicle arrived',
+            suffixText: 'mi',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    final raw = controller.text.replaceAll(',', '').trim();
+    controller.dispose();
+    if (save != true || !mounted) return;
+    final parsed = num.tryParse(raw);
+    if (parsed == null || parsed < 0 || !parsed.isFinite ||
+        parsed > 9999999 || parsed != parsed.roundToDouble()) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Enter a valid whole-number Mileage In.'),
+      ));
+      return;
+    }
+    final existingNotes = _preInspection?['notes']?.toString();
+    final epoch = _loadEpoch;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final local = await _offlineInspection.saveLocalInspection(
+        widget.businessId,
+        widget.jobId,
+        vehicleId: _job?['vehicle_id']?.toString(),
+        notes: existingNotes,
+        odometer: parsed,
+      );
+      _applyLocalPreInspection(local, expectedEpoch: epoch);
+      unawaited(_flushPreInspectionQueue());
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _editComplaint() async {
     if (!_canQuickAdmin || _job == null || _busy) return;
     final value = await _editTextSheet(
@@ -3998,6 +4066,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }
 
   Widget _complaintDrawer(String complaint) {
+    final mileageIn = _preInspection?['odometer'] ?? _job?['odometer_in'];
     return _JobDrawerSurface(
       color: BriskersColors.customers,
       child: Padding(
@@ -4009,6 +4078,26 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               complaint.isEmpty
                   ? 'No customer complaint entered.'
                   : complaint,
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(Icons.speed_outlined, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    mileageIn == null
+                        ? 'Mileage In: Not entered'
+                        : 'Mileage In: ${mileageIn.toString()} mi',
+                  ),
+                ),
+                if (_canEditInspection)
+                  IconButton(
+                    tooltip: 'Edit Mileage In',
+                    onPressed: _busy ? null : _editMileageIn,
+                    icon: const Icon(Icons.edit_outlined, size: 19),
+                  ),
+              ],
             ),
             if (_canQuickAdmin) ...[
               const SizedBox(height: 8),

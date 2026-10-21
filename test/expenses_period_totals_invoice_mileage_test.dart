@@ -144,7 +144,9 @@ void main() {
     expect(tab, isNot(contains("_notesController.text = savedMileage")));
     final pdf = File('lib/services/document_pdf_service.dart')
         .readAsStringSync();
-    expect(pdf, contains("'Mileage: "));
-    expect(pdf, contains('if (odometer.isNotEmpty)'));
+    // The PDF now prints the historical neutral "Mileage" or independent
+    // arrival/departure labels via the source-backed shared projection.
+    expect(pdf, contains('MileageWorkflow.printableReadings(detail)'));
+    expect(pdf, contains('for (final entry in odometerRows)'));
   });
 }

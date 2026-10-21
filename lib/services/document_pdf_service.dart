@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../core/formatters.dart';
+import '../core/mileage_workflow.dart';
 import '../core/warranty_payment_amounts.dart';
 
 class DocumentPdfService {
@@ -305,7 +306,7 @@ class DocumentPdfService {
 
     final vehicle = detail['vehicle']?.toString().trim() ?? '';
     final vin = detail['vehicle_vin']?.toString().trim() ?? '';
-    final odometer = detail['odometer_in']?.toString().trim() ?? '';
+    final odometerRows = MileageWorkflow.printableReadings(detail);
     final color = detail['vehicle_color']?.toString().trim() ?? '';
     final plate = detail['vehicle_license_plate']?.toString().trim() ?? '';
     final plateState = detail['vehicle_license_state']?.toString().trim() ?? '';
@@ -504,9 +505,9 @@ class DocumentPdfService {
                       ),
                     if (vin.isNotEmpty)
                       pw.Text('VIN: $vin', style: const pw.TextStyle(fontSize: 9)),
-                    if (odometer.isNotEmpty)
+                    for (final entry in odometerRows)
                       pw.Text(
-                        'Mileage: ${_quantity(odometer)}',
+                        '${entry.$1}: ${_quantity(entry.$2)}',
                         style: const pw.TextStyle(fontSize: 9),
                       ),
                     if (color.isNotEmpty)

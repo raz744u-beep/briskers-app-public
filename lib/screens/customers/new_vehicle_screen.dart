@@ -110,7 +110,9 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
     final mileage = _mileage.text.trim().isEmpty
         ? null
         : num.tryParse(_mileage.text.replaceAll(',', '').trim());
-    if (_mileage.text.trim().isNotEmpty && mileage == null) {
+    if (_mileage.text.trim().isNotEmpty &&
+        (mileage == null || !mileage.isFinite || mileage < 0 ||
+            mileage > 9999999 || mileage != mileage.roundToDouble())) {
       setState(() => _error = 'Enter valid mileage.');
       return;
     }
@@ -268,7 +270,8 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
             decoration: const InputDecoration(
-              labelText: 'Mileage',
+              labelText: 'Current Mileage (optional)',
+              helperText: 'Known reading at registration. Updated after a verified repair.',
               suffixText: 'mi',
             ),
           ),
