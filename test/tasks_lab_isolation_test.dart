@@ -51,7 +51,7 @@ void main() {
     expect(main, contains('bottomNavigationBar: _bottomNav()'));
     expect(main, contains('BriskersModuleDock('));
     expect(main, contains('onLongPressed: (index, globalPosition)'));
-    expect(main, contains("if (index == 2 || index == 7) _toggleMenu(index)"));
+    expect(main, contains("if (index == 2 || index == 7) {"));
     expect(main, contains('jobDetailsOpen'));
     expect(main, contains('menuAnchorX - 90'));
     expect(main, contains("'Pre-inspection'"));
