@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:briskers_app/widgets/retained_module_stack.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -244,4 +246,73 @@ void main() {
     expect(tickers[3], isTrue);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+  testWidgets('Expenses preserves verified cloud state across Invoice navigation',
+      (tester) async {
+    final mounts = <int, int>{};
+    void markMount(int index) {
+      mounts[index] = (mounts[index] ?? 0) + 1;
+    }
+    Future<void> show(int index, {String scope = 'shop-a'}) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: RetainedModuleStack(
+            key: ValueKey(scope),
+            index: index,
+            itemCount: 8,
+            itemBuilder: (_, moduleIndex) => _TestModule(
+              index: moduleIndex,
+              onLoad: markMount,
+            ),
+          ),
+        ),
+      ));
+      await tester.pump();
+    }
+
+    await show(6);
+    // Simulates the Expenses screen recording an authoritative server
+    // confirmation in its State rather than in individual cached rows.
+    final expensesState = tester.state<_TestModuleState>(
+      find.byType(_TestModule),
+    );
+    await tester.tap(find.text('6:Open'));
+    await tester.pump();
+    expect(find.text('6:Closed'), findsOneWidget);
+    await show(4); // Invoices
+    await show(6); // Back to Expenses
+    expect(find.text('6:Closed'), findsOneWidget);
+    expect(tester.state<_TestModuleState>(find.byType(_TestModule)),
+      same(expensesState));
+    expect(mounts[6], 1, reason:
+      'Switching Invoices must not discard Expenses server-confirmed state.');
+
+    await show(6, scope: 'shop-b');
+    expect(mounts[6], 2,
+      reason: 'Verified transaction identities must not cross shops.');
+    expect(find.text('6:Open'), findsOneWidget);
+  });
+
+  test('Expenses retains its server-confirmed provenance without busy polling',
+      () {
+    final stack = File('lib/widgets/retained_module_stack.dart')
+        .readAsStringSync();
+    final expenses = File('lib/screens/expenses_screen.dart')
+        .readAsStringSync();
+    expect(stack, contains('retainedIndices = const {3, 4, 5, 6}'));
+    expect(expenses, contains('_serverConfirmedTransactionIds'));
+    expect(expenses, contains('if (mounted && TickerMode.valuesOf(context).enabled)'));
+    expect(expenses, contains('unawaited(_refreshPhotoCounts())'));
+    expect(expenses, contains('_serverConfirmedTransactionIds.clear()'));
+    // A business identity change resets confirmation, but dock re-entry does
+    // not silently declare previously seen server receipts unverified.
+    final switchStart = expenses.indexOf(
+      'void didUpdateWidget(covariant ExpensesScreen oldWidget)',
+    );
+    final switchEnd = expenses.indexOf('void dispose()', switchStart);
+    expect(switchStart, greaterThan(0));
+    expect(switchEnd, greaterThan(switchStart));
+    expect(expenses.substring(switchStart, switchEnd),
+        isNot(contains('_serverConfirmedTransactionIds.clear()')));
+  });
+
 }

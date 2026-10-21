@@ -124,7 +124,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       // every four seconds while the owner is reading transactions.
       _photoCountTimer = Timer.periodic(
         const Duration(seconds: 30),
-        (_) => _refreshPhotoCounts(),
+        (_) {
+          // Expenses remains mounted between dock visits. Skip cosmetic
+          // photo-count polling while it is hidden; sync runs elsewhere.
+          if (mounted && TickerMode.valuesOf(context).enabled) {
+            unawaited(_refreshPhotoCounts());
+          }
+        },
       );
     }
   }
@@ -144,6 +150,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _searchController.clear();
       _visibleCount = _pageSize;
       unawaited(_load());
+      if (_owner && Platform.isAndroid) {
+        unawaited(_refreshPhotoCounts());
+      }
     }
   }
 
