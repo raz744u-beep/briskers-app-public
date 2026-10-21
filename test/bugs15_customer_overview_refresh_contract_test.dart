@@ -45,6 +45,8 @@ void main() {
     final refresh = source.substring(start, end);
     expect(refresh, contains('_invalidateCustomerActivity();'));
     expect(refresh, contains('forceOffline'));
+    expect(refresh, contains("documentId.startsWith('local-estimate-')"));
+    expect(refresh, contains("documentId.startsWith('local-invoice-')"));
     expect(refresh, contains("detail['customer_id']?.toString() != widget.customerId"));
     expect(refresh, contains("detail['id']?.toString() != documentId"));
     expect(refresh, contains('LocalDocumentRepository().upsertFromServer('));
