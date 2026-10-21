@@ -29,7 +29,8 @@ void main() {
         return rows.skip(offset).take(count).toList();
       },
     );
-    expect(offsets, [0, 200]);
+    expect(offsets, [0, 200, 400, 600]);
+    // A full first page starts the bounded 3-page look-ahead.
     expect(summary.transactions, 236);
     expect(summary.expenses, 289.05);
     expect(summary.income, 97.0);
