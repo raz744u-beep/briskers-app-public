@@ -133,6 +133,14 @@ class VehicleFindings extends StatelessWidget {
               if (status == 'In Job' &&
                   (finding['repair_job_number']?.toString() ?? '').isNotEmpty)
                 Text(' • ${finding['repair_job_number']}'),
+              if (status == 'Resolved' &&
+                  (finding['resolved_job_number']?.toString() ?? '').isNotEmpty)
+                Text(' • Job ${finding['resolved_job_number']}'),
+              if (status == 'Resolved' &&
+                  (finding['resolved_job_number']?.toString() ?? '').isEmpty &&
+                  (finding['resolved_job_id']?.toString() ?? '').isNotEmpty &&
+                  finding['sync_state'] == 'pending')
+                const Text(' • Job link pending sync'),
             ],
           ),
           const SizedBox(height: 7),
