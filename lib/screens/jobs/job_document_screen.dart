@@ -25,6 +25,7 @@ import '../../core/connection_mode.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
+import '../../core/mileage_workflow.dart';
 import '../../core/document_presentation.dart';
 import '../../core/document_navigation_role.dart';
 import '../../core/standard_note_rules.dart';
@@ -3753,7 +3754,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                             final raw = controller.text
                                 .replaceAll(',', '')
                                 .trim();
-                            if (raw.isEmpty || num.tryParse(raw) != null) {
+                            final valid = explicitMileageOut
+                                ? (raw.isEmpty ||
+                                    MileageWorkflow.parse(raw) != null)
+                                : (raw.isEmpty || num.tryParse(raw) != null);
+                            if (valid) {
                               setSheetState(() => mileageText = raw);
                             } else if (sheetContext.mounted) {
                               ScaffoldMessenger.of(sheetContext).showSnackBar(
