@@ -1290,8 +1290,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 title: Text(entry['description'].toString(),
                   style: const TextStyle(fontWeight: FontWeight.w700)),
                 subtitle: Text(
-                  '${_employeeName(entry['employee_id']?.toString())} · '
-                  '${entry['payroll_hours'] ?? '—'} hrs · '
+                  '${entry['assignment_summary'] ?? 'Unassigned'} · '
                   'Completed ${DateFormat('MMM d, h:mm a').format(
                     DateTime.fromMillisecondsSinceEpoch(
                       entry['completed_at'] as int))}',
