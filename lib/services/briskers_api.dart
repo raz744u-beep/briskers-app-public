@@ -3363,6 +3363,17 @@ class BriskersApi {
     String businessId,
     String documentId,
   ) async {
+    // v5 adds explicit mileage readings. Older installations do not expose
+    // this RPC; only a missing-function response permits v4 fallback.
+    try {
+      final response = await networkSupabase.rpc(
+        'briskers_document_detail_v5',
+        params: {'p_business_id': businessId, 'p_document_id': documentId},
+      );
+      return Map<String, dynamic>.from(response as Map);
+    } on PostgrestException catch (error) {
+      if (error.code != 'PGRST202') rethrow;
+    }
     try {
       return await documentDetailV4(businessId, documentId);
     } on PostgrestException catch (error) {
