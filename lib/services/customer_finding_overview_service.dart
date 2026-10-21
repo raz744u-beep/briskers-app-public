@@ -75,7 +75,10 @@ class CustomerFindingOverviewService {
       return const CustomerFindingCounts(open: 0, inJob: 0, resolved: 0);
     }
 
-    final visibility = JobSummaryVisibility(businessId: businessId);
+    final visibility = JobSummaryVisibility(
+      businessId: businessId,
+      onQuarantine: (_) {},
+    );
     try {
       final raw = await _cache.load(businessId, customerId, 'findings');
       final cached = raw is List
