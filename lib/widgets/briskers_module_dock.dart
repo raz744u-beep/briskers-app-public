@@ -140,20 +140,19 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: item.count > 0 && widget.onBadgeSelected != null
-                            ? () => widget.onBadgeSelected!(index)
-                            : null,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: Badge(
-                            isLabelVisible: item.count > 0,
-                            backgroundColor: const Color(0xFF465468),
-                            label: Text(item.count > 99 ? '99+' : '${item.count}'),
-                            child: Icon(item.icon, color: item.color, size: 25),
-                          ),
-                        ),
+                      Badge(
+                        isLabelVisible: item.count > 0,
+                        backgroundColor: const Color(0xFF465468),
+                        // Only the small NUMBER opens its review queue.
+                        // Tapping the icon must open the full module instantly.
+                        label: item.count > 0 && widget.onBadgeSelected != null
+                            ? GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => widget.onBadgeSelected!(index),
+                                child: Text(item.count > 99 ? '99+' : '${item.count}'),
+                              )
+                            : Text(item.count > 99 ? '99+' : '${item.count}'),
+                        child: Icon(item.icon, color: item.color, size: 25),
                       ),
                       const SizedBox(height: 2),
                       Text(item.label, maxLines: 1, overflow: TextOverflow.ellipsis,
