@@ -17,7 +17,9 @@ class _AbsenceApi extends BriskersApi {
     String businessId,String appointmentId,
   ) async {
     queries++;
-    if (fail) throw StateError('Server offline / no receipt');
+    if (fail) {
+      throw StateError('Server offline / no receipt');
+    }
     expect(businessId,'shop-a');
     expect(appointmentId,AppointmentSyncService.orphanMockAppointmentId);
     return absent;
