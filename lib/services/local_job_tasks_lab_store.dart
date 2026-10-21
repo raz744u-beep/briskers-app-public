@@ -24,6 +24,14 @@ class LocalJobTasksLabStore {
       ON local_job_tasks_lab (business_id, job_id, status)
     ''');
     await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_task_allocations_lab (
+        business_id TEXT NOT NULL, job_id TEXT NOT NULL,
+        document_id TEXT NOT NULL, line_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL, hours REAL NOT NULL,
+        PRIMARY KEY(business_id, job_id, document_id, line_id, employee_id)
+      )
+    ''');
+    await db.customStatement('''
       CREATE TABLE IF NOT EXISTS local_job_lead_lab (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL,
         employee_id TEXT, updated_at INTEGER NOT NULL,
@@ -184,6 +192,73 @@ class LocalJobTasksLabStore {
         "UPDATE local_job_tasks_lab SET ${changes.join(', ')} "
         "WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?",
         [...args, businessId, jobId, documentId, lineId],
+      );
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> allocations({
+    required String businessId, required String jobId,
+    required String documentId, required String lineId,
+  }) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT employee_id, hours FROM local_task_allocations_lab '
+      'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=? '
+      'ORDER BY employee_id',
+      variables: [Variable<String>(businessId), Variable<String>(jobId),
+        Variable<String>(documentId), Variable<String>(lineId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
+
+  /// One authoritative allocation per invoice labor line, shared by invoice,
+  /// task editor and payroll preview. Never modifies invoice price or quantity.
+  Future<void> saveAllocations({
+    required String businessId, required String jobId,
+    required String documentId, required String lineId,
+    required Map<String, double> hoursByEmployee,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, jobId, documentId, lineId]
+        .any((value) => value.trim().isEmpty)) {
+      throw ArgumentError('Missing task identity');
+    }
+    if (hoursByEmployee.length > 2 ||
+        hoursByEmployee.keys.any((id) => id.trim().isEmpty) ||
+        hoursByEmployee.values.any((hours) => !hours.isFinite || hours <= 0)) {
+      throw ArgumentError('Choose one or two mechanics with positive hours');
+    }
+    await db.transaction(() async {
+      final task = await db.customSelect(
+        'SELECT line_id FROM local_job_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(documentId), Variable<String>(lineId)],
+      ).getSingleOrNull();
+      if (task == null) throw StateError('Labor task not found');
+      await db.customStatement(
+        'DELETE FROM local_task_allocations_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        [businessId, jobId, documentId, lineId],
+      );
+      for (final item in hoursByEmployee.entries) {
+        await db.customStatement(
+          'INSERT INTO local_task_allocations_lab '
+          '(business_id, job_id, document_id, line_id, employee_id, hours) '
+          'VALUES (?, ?, ?, ?, ?, ?)',
+          [businessId, jobId, documentId, lineId, item.key, item.value],
+        );
+      }
+      // Avoid double counting: the existing single-mechanic columns become
+      // an aggregate/compatibility view, NOT additional payroll credit.
+      await db.customStatement(
+        'UPDATE local_job_tasks_lab SET employee_id=?, payroll_hours=?, '
+        'updated_at=? WHERE business_id=? AND job_id=? '
+        'AND document_id=? AND line_id=?',
+        [hoursByEmployee.length == 1 ? hoursByEmployee.keys.first : null,
+          hoursByEmployee.values.fold<double>(0, (total, h) => total + h),
+          DateTime.now().millisecondsSinceEpoch,
+          businessId, jobId, documentId, lineId],
       );
     });
   }
