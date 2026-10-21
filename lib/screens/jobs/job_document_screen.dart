@@ -49,6 +49,7 @@ import '../../services/offline_document_draft_service.dart';
 import '../../services/offline_job_admin_service.dart';
 import '../../services/local_standard_notes_service.dart';
 import '../../services/offline_document_edit_service.dart';
+import '../../services/offline_invoice_mileage_service.dart';
 import '../../services/offline_invoice_tax_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/offline_invoice_payment_ledger.dart';
@@ -213,6 +214,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       LocalInvoiceStatusStylesCache();
   final OfflineEstimateInvoiceService _offlineEstimateInvoice =
       OfflineEstimateInvoiceService();
+  final OfflineInvoiceMileageService _invoiceMileage =
+      OfflineInvoiceMileageService();
   final LocalStandardNotesService _standardNotes = LocalStandardNotesService();
   final OfflineJobAdminService _offlineJobAdmin = OfflineJobAdminService();
   final OfflineDocumentDraftService _offlineDocumentDraft =
@@ -307,6 +310,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   void _onModeChanged() {
     if (mounted && !_busy) {
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        unawaited(_invoiceMileage.flush(widget.businessId));
+      }
       _load();
     }
   }
@@ -454,7 +460,26 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         projected['job_number'] = cachedNumber;
       }
     }
-    return projected;
+    // Apply a queued offline departure reading over a cached server detail.
+    final withMileage = await _invoiceMileage.project(
+      widget.businessId,widget.documentId,projected,
+    );
+    // Schema-v2 invoices can display Mileage In from this exact linked Job.
+    // Never project a vehicle's generic Current Mileage onto an old invoice.
+    if (withMileage['mileage_schema_version'] == 2 &&
+        withMileage['mileage_in'] == null &&
+        jobId.isNotEmpty) {
+      try {
+        final snapshot = await LocalJobRepository()
+            .jobDetail(widget.businessId, jobId);
+        final mileageIn = snapshot?.preInspection?['odometer'] ??
+            snapshot?.job['odometer_in'];
+        if (mileageIn != null) withMileage['mileage_in'] = mileageIn;
+      } catch (_) {
+        // Unavailable offline history stays blank; never invent mileage.
+      }
+    }
+    return withMileage;
   }
 
   Set<String> get _queuedPaymentOperationIds =>
@@ -3582,7 +3607,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     var customerName = _detail!['customer_name']?.toString() ?? '';
     String? vehicleId = _detail!['vehicle_id']?.toString();
     var vehicleName = _detail!['vehicle']?.toString() ?? '';
-    var mileageText = _detail!['odometer_in']?.toString().trim() ?? '';
+    // Schema-v2 invoices have an independent departure reading. Legacy
+    // documents must keep the old neutral mileage field unchanged.
+    final explicitMileageOut = !_estimate &&
+        (_detail!['mileage_schema_version'] == 2 ||
+            _detail!.containsKey('mileage_out'));
+    var mileageText = (explicitMileageOut
+        ? _detail!['mileage_out']
+        : _detail!['odometer_in'])?.toString().trim() ?? '';
     final claimController = TextEditingController(
       text: _detail!['claim_number']?.toString() ?? '',
     );
@@ -3640,7 +3672,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           customer['display_name']?.toString() ?? '';
                       vehicleId = vehicle?['id']?.toString();
                       vehicleName = _vehicleLabel(vehicle);
-                      mileageText = vehicle?['mileage']?.toString().trim() ?? '';
+                      mileageText = explicitMileageOut ? '' :
+                          (vehicle?['mileage']?.toString().trim() ?? '');
                     });
                   },
                 ),
@@ -3660,13 +3693,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           setSheetState(() {
                             vehicleId = vehicle['id']?.toString();
                             vehicleName = _vehicleLabel(vehicle);
-                            mileageText = vehicle['mileage']?.toString().trim() ?? '';
+                            mileageText = explicitMileageOut ? '' :
+                                (vehicle['mileage']?.toString().trim() ?? '');
                           });
                         },
                 ),
                 ListTile(
                   leading: const Icon(Icons.speed_outlined),
-                  title: const Text('Mileage'),
+                  title: Text(explicitMileageOut ? 'Mileage Out' : 'Mileage'),
                   subtitle: Text(
                     mileageText.isEmpty
                         ? 'Not entered'
@@ -3682,15 +3716,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           final saveMileage = await showDialog<bool>(
                             context: sheetContext,
                             builder: (dialogContext) => AlertDialog(
-                              title: const Text('Mileage'),
+                              title: Text(explicitMileageOut ? 'Mileage Out' : 'Mileage'),
                               content: TextField(
                                 controller: controller,
                                 autofocus: true,
                                 keyboardType: const TextInputType.numberWithOptions(
                                   decimal: true,
                                 ),
-                                decoration: const InputDecoration(
-                                  labelText: 'Current mileage',
+                                decoration: InputDecoration(
+                                  labelText: explicitMileageOut
+                                      ? 'Mileage Out at repair completion'
+                                      : 'Current mileage',
                                   suffixText: 'mi',
                                 ),
                               ),
@@ -3812,8 +3848,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     final originalDate = DateTime.tryParse(
       _detail!['document_date']?.toString() ?? '',
     );
-    final originalMileage =
-        _detail!['odometer_in']?.toString().replaceAll(',', '').trim() ?? '';
+    final originalMileage = (explicitMileageOut
+        ? _detail!['mileage_out']
+        : _detail!['odometer_in'])?.toString().replaceAll(',', '').trim() ?? '';
     final newMileage = mileageText.replaceAll(',', '').trim();
     final originalClaimNumber =
         _detail!['claim_number']?.toString().trim() ?? '';
@@ -3883,11 +3920,27 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
     if (newMileage != originalMileage) {
       await _run(() async {
-        await _api.updateDocumentMileage(
-          widget.businessId,
-          widget.documentId,
-          odometer: newMileage.isEmpty ? null : num.tryParse(newMileage),
-        );
+        if (explicitMileageOut) {
+          // Fail closed if the server has not deployed schema-v2. Never
+          // mis-store Mileage Out into legacy odometer_in.
+          // Commit the v2 departure reading to a dedicated offline queue.
+          // The legacy Job arrival odometer must never be modified.
+          await _invoiceMileage.queue(
+            widget.businessId,
+            widget.documentId,
+            expectedVersion: _version,
+            mileageOut: newMileage.isEmpty ? null : num.tryParse(newMileage),
+          );
+          if (!BriskersConnectionModeController.instance.forceOffline) {
+            await _invoiceMileage.flush(widget.businessId);
+          }
+        } else {
+          await _api.updateDocumentMileage(
+            widget.businessId,
+            widget.documentId,
+            odometer: newMileage.isEmpty ? null : num.tryParse(newMileage),
+          );
+        }
       });
     }
 
