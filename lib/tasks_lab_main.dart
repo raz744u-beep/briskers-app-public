@@ -850,7 +850,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Future<void> _offerCompleteJobIfReady() async {
     final active = tasks.where((task) => task['source_missing'] != 1).toList();
     if (!mounted || jobStatusCode == 'completed' || active.isEmpty ||
-        !active.every((task) => task['status'] == 'done')) return;
+        !active.every((task) => task['status'] == 'done')) {
+      return;
+    }
     final confirm = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
