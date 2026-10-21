@@ -384,6 +384,128 @@ class AppointmentSyncService {
     }).toList();
   }
 
+  // The one October test appointment has an orphaned local snapshot and
+  // a repeatedly failing appointment_edit. This action is intentionally
+  // restricted to the exact UUID and fails closed on all other records.
+  static const orphanMockAppointmentId =
+      '93356a11-f16a-4939-aaec-db5593273de3';
+
+  /// Replace only this disposable mock's unsuccessful edit with an
+  /// authenticated server-delete request, atomically. The local tombstone
+  /// prevents sync pull from resurrecting the orphan before server ack.
+  /// No customer, vehicle, job, document, payment or other queue is deleted.
+  Future<void> queueDeleteVerifiedOrphanMock(
+    String businessId, String appointmentId, {
+    required bool isOwner,
+  }) async {
+    if (!isOwner || appointmentId != orphanMockAppointmentId) {
+      throw StateError('Owner-only verified mock cleanup.');
+    }
+    await _database.transaction(() async {
+      final cached = await _database.customSelect(
+        'SELECT * FROM local_appointments WHERE business_id=? AND id=?',
+        variables: [Variable<String>(businessId),
+          Variable<String>(appointmentId)],
+      ).get();
+      if (cached.length != 1) {
+        throw StateError('Mock appointment was not found. Nothing changed.');
+      }
+      final appointment = cached.single;
+      if (appointment.read<String>('sync_state') != 'pending' ||
+          appointment.read<String>('status') != 'arrived' ||
+          appointment.readNullable<String>('request_id') != null) {
+        throw StateError('Appointment state changed. Nothing deleted.');
+      }
+      final customerId = appointment.read<String>('customer_id');
+      final vehicleId = appointment.readNullable<String>('vehicle_id');
+      final jobId = appointment.readNullable<String>('job_id');
+      if (customerId.isEmpty) {
+        throw StateError('Cannot verify the mock customer identity.');
+      }
+      final customer = await _database.customSelect(
+        'SELECT id FROM local_customers WHERE business_id=? AND id=? LIMIT 1',
+        variables: [Variable<String>(businessId),
+          Variable<String>(customerId)],
+      ).get();
+      if (customer.isNotEmpty) {
+        throw StateError('Customer exists; orphan cleanup blocked.');
+      }
+      if (vehicleId != null && vehicleId.isNotEmpty) {
+        final vehicle = await _database.customSelect(
+          'SELECT id FROM local_vehicles WHERE business_id=? AND id=? LIMIT 1',
+          variables: [Variable<String>(businessId),
+            Variable<String>(vehicleId)],
+        ).get();
+        if (vehicle.isNotEmpty) {
+          throw StateError('Vehicle exists; orphan cleanup blocked.');
+        }
+      }
+      if (jobId != null && jobId.isNotEmpty) {
+        final jobs = await _database.customSelect(
+          'SELECT id FROM local_jobs WHERE business_id=? AND id=? LIMIT 1',
+          variables: [Variable<String>(businessId), Variable<String>(jobId)],
+        ).get();
+        final docs = await _database.customSelect(
+          'SELECT id FROM local_documents WHERE business_id=? AND job_id=? LIMIT 1',
+          variables: [Variable<String>(businessId), Variable<String>(jobId)],
+        ).get();
+        if (jobs.isNotEmpty || docs.isNotEmpty) {
+          throw StateError('Linked job or document exists. Cleanup blocked.');
+        }
+      }
+      final queued = await _database.customSelect(
+        'SELECT * FROM sync_outbox WHERE business_id=? AND entity_id=?',
+        variables: [Variable<String>(businessId),
+          Variable<String>(appointmentId)],
+      ).get();
+      if (queued.length != 1 ||
+          queued.single.read<String>('entity_type') != 'appointment_edit' ||
+          queued.single.read<String>('operation') != 'update' ||
+          queued.single.read<String>('state') != 'pending' ||
+          queued.single.read<int>('attempt_count') < 1) {
+        throw StateError('Unexpected appointment operations; nothing removed.');
+      }
+      final version = appointment.readNullable<int>('row_version');
+      if (version == null || version < 1) {
+        throw StateError('Server revision missing. Cleanup needs review.');
+      }
+      // Always use a UUID: the server deletion RPC declares
+      // p_operation_id uuid, unlike older prefixed operation keys.
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE business_id=? AND entity_id=? '
+        "AND entity_type='appointment_edit' AND operation='update' "
+        "AND state='pending' AND id=?",
+        [businessId, appointmentId, queued.single.read<int>('id')],
+      );
+      await _database.customStatement(
+        """INSERT INTO sync_outbox
+          (business_id,entity_type,entity_id,operation,payload_json,
+           base_row_version,state,attempt_count,created_at)
+          VALUES (?,'appointment_delete',?,'delete',?,?,'pending',0,?)""",
+        [businessId,appointmentId,jsonEncode({
+          'operation_id': _uuidV4(),
+          'appointment_id': appointmentId,
+        }),version,_unix(DateTime.now().toUtc())],
+      );
+      await _database.customStatement(
+        "UPDATE local_appointments SET sync_state='pending_delete',"
+        ' can_check_in=0 WHERE business_id=? AND id=?',
+        [businessId,appointmentId],
+      );
+    });
+    _syncEvents.add(businessId);
+  }
+
+  String _uuidV4() {
+    final bytes = List<int>.generate(16, (_) => _random.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+        '${hex.substring(20)}';
+  }
+
   /// Stage owner-only deletion of a synchronized, unlinked appointment.
   /// A local tombstone prevents sync pulls from resurrecting it.
   Future<void> queueDeleteSynced(
@@ -409,7 +531,7 @@ class AppointmentSyncService {
            base_row_version,state,attempt_count,created_at)
           VALUES (?,'appointment_delete',?,'delete',?,?,'pending',0,?)""",
         [businessId,appointmentId,jsonEncode({
-          'operation_id':_operationId('appointment-delete'),
+          'operation_id':_uuidV4(),
           'appointment_id':appointmentId,
         }),row.readNullable<int>('row_version'),
          _unix(DateTime.now().toUtc())],
@@ -1080,6 +1202,20 @@ class AppointmentSyncService {
         await LocalJobQuarantine.assertReplayAllowed(
           _database, businessId, outboxId: outboxId,
         );
+        // A freshly staged owner deletion may have replaced this queued edit
+        // after the batch snapshot was read. Never replay stale edit rows.
+        final stillPending = await _database.customSelect(
+          """SELECT o.id FROM sync_outbox o
+             JOIN local_appointments a
+               ON a.business_id=o.business_id AND a.id=o.entity_id
+             WHERE o.id=? AND o.business_id=? AND o.entity_id=?
+               AND o.entity_type='appointment_edit'
+               AND o.state='pending' AND a.sync_state='pending' LIMIT 1""",
+          variables: [Variable<int>(outboxId),
+            Variable<String>(businessId),
+            Variable<String>(appointmentId)],
+        ).get();
+        if (stillPending.isEmpty) continue;
         final changedCustomer = payload['customer_id']?.toString();
         final changedVehicle = payload['vehicle_id']?.toString();
         final version = changedCustomer != null
