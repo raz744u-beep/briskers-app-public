@@ -47,8 +47,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   String jobStatusCode = 'open';
   List<Map<String, dynamic>> earlierWorkLog = const [];
   Map<String, List<Map<String, dynamic>>> allocationsByLine = {};
-  Map<String, double> preservedPayrollHours = {};
-  Set<String> preservedPayrollTaskKeys = {};
+  Map<String, double> earnedPayrollPreviewHours = {};
   int page = 0;
   int? expandedMenu;
   double menuAnchorX = 180;
@@ -106,7 +105,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       jobId: BriskersLabFixture.jobId,
       documentId: BriskersLabFixture.invoiceId,
       lineId: task['line_id'].toString())));
-    final preservedPayroll = await store.preservedPayrollPreview(
+    final earnedHours = await store.earnedHoursPreview(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final currentJobStatus = await store.jobStatus(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
@@ -122,8 +121,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       leadMechanicId = lead;
       jobStatusCode = currentJobStatus;
       earlierWorkLog = archived;
-      preservedPayrollHours = preservedPayroll.hoursByMechanic;
-      preservedPayrollTaskKeys = preservedPayroll.taskKeys;
+      earnedPayrollPreviewHours = earnedHours;
       allocationsByLine = {for (var i = 0; i < rows.length; i++)
         rows[i]['line_id'].toString(): allocations[i]};
       loading = false;
@@ -1398,28 +1396,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   Widget _payrollPage() {
-    // Previously earned hours remain credited when the job reopens;
-    // re-completing those same original tasks is not a second paycheck.
-    final byEmployee = <String, double>{...preservedPayrollHours};
-    for (final task in tasks) {
-      if (task['status'] != 'done') continue;
-      final doc = task['document_id'].toString();
-      final line = task['line_id'].toString();
-      final key = '${doc.length}:$doc$line';
-      if (preservedPayrollTaskKeys.contains(key)) continue;
-      final splits = allocationsByLine[task['line_id'].toString()] ?? [];
-      if (splits.isNotEmpty) {
-        for (final split in splits) {
-          final id = split['employee_id'].toString();
-          byEmployee[id] = (byEmployee[id] ?? 0) + (split['hours'] as num).toDouble();
-        }
-        continue;
-      }
-      final employee = task['employee_id']?.toString() ?? '';
-      if (employee.isEmpty) continue;
-      final hours = (task['payroll_hours'] as num?)?.toDouble() ?? 0;
-      byEmployee[employee] = (byEmployee[employee] ?? 0) + hours;
-    }
+    // Earned hours are retained across recheck without duplicating the
+    // same invoice labor task's original credit. No payments are posted.
+    final byEmployee = earnedPayrollPreviewHours;
     return ListView(
       children: [
         _sectionHeader('Payroll preview',
