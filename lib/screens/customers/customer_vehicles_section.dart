@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
 
@@ -85,6 +86,11 @@ class CustomerVehiclesSection extends StatelessWidget {
             final keyPassword =
                 '${vehicle['key_password'] ?? ''}'.trim();
             final mileage = vehicle['mileage'];
+            final recorded = DateTime.tryParse(
+              vehicle['mileage_recorded_date']?.toString() ?? '',
+            );
+            final sourceInvoice =
+                vehicle['mileage_source_invoice_id']?.toString() ?? '';
 
             return Card(
               child: ExpansionTile(
@@ -115,6 +121,13 @@ class CustomerVehiclesSection extends StatelessWidget {
                           ),
                         if (mileage != null)
                           _detailRow(context, 'Current Mileage', '$mileage mi'),
+                        if (mileage != null && recorded != null)
+                          _detailRow(
+                            context,
+                            'Last recorded',
+                            '${DateFormat('MMM d, yyyy').format(recorded)}'
+                                '${sourceInvoice.isNotEmpty ? ' · after repair' : ''}',
+                          ),
                         if (vin.isNotEmpty)
                           _detailRow(context, 'VIN', vin),
                         if (color.isNotEmpty)
