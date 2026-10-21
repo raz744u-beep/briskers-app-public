@@ -52,7 +52,7 @@ void main() {
   test('provisional upload transfers departure after receiving permanent invoice UUID', () {
     final draft = File('lib/services/offline_document_draft_service.dart')
       .readAsStringSync();
-    expect(draft, contains('await _api.saveInvoiceMileageOut('));
+    expect(draft, contains('() => _api.saveInvoiceMileageOut('));
     expect(draft, contains("localDetail['mileage_out'] != null"));
     expect(draft, contains('Mileage Out server schema is not available yet.'));
     expect(draft, contains("proof['mileage_out']"));
