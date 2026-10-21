@@ -3080,6 +3080,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             content: Text('Payment finalized. Invoice closing needs review: $error'),
           ));
         }
+      } finally {
+        // The payment mutation's earlier _run refresh happens BEFORE the
+        // separate Owner-only close RPC. Re-read the authoritative invoice
+        // after that RPC so the user sees Closed in this same screen, rather
+        // than stale Paid/Pending Close until the next navigation.
+        // This is read-only and never attempts to finalize payment again.
+        if (mounted) await _load(fastAfterMutation: true);
       }
     }
   }
@@ -5089,6 +5096,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }) {
     final rawStatus = _detail?['status']?.toString() ?? 'draft';
     if (rawStatus == 'void') return 'void';
+    // Legacy server rows retain status=issued after close; closed_at is the
+    // authoritative marker and must override the derived Paid status pill.
+    if (DocumentPresentation(_detail ?? const <String, dynamic>{})
+        .isClosed) {
+      return 'closed';
+    }
     final shownPaid = finalizedPaid + pendingPaid;
     if (pendingPaid > 0 &&
         total > 0 &&
