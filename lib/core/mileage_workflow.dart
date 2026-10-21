@@ -39,7 +39,8 @@ class MileageWorkflow {
       final legacy = parse(document['odometer_in']);
       return legacy == null ? const [] : [('Mileage', legacy)];
     }
-    final incoming = arrival(document) ?? linkedJobMileageIn;
+    // Never reinterpret an ambiguous legacy invoice value as Mileage In.
+    final incoming = parse(document['mileage_in']) ?? linkedJobMileageIn;
     final outgoing = departure(document);
     return [
       if (incoming != null) ('Mileage In', incoming),
