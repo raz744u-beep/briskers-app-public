@@ -221,6 +221,10 @@ class LocalCustomerRepository {
               'license_state':
                   vehicle.readNullable<String>('license_state'),
               'mileage': vehicle.data['mileage'],
+              'mileage_recorded_date':
+                  vehicle.readNullable<String>('mileage_recorded_date'),
+              'mileage_source_invoice_id':
+                  vehicle.readNullable<String>('mileage_source_invoice_id'),
               'color': vehicle.readNullable<String>('color'),
               'key_password':
                   vehicle.readNullable<String>('key_password'),

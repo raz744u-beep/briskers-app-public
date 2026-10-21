@@ -93,11 +93,12 @@ void main() {
     );
     await drafts.updatePendingInvoiceDetails(
       'shop', id, documentDate: DateTime(2026, 10, 16),
-      mileage: '123456', claimNumber: 'ABC-12',
+      mileageOut: '123456', claimNumber: 'ABC-12',
     );
     final saved = (await cache.load('shop', id))!;
     expect(saved['document_date'], '2026-10-16');
-    expect(saved['odometer_in'], 123456);
+    expect(saved['mileage_out'], 123456);
+    expect(saved['odometer_in'], isNull);
     expect(saved['claim_number'], 'ABC-12');
     expect(saved['customer_id'], 'customer-a');
     expect(saved['total_amount'], 174.8);
