@@ -9,10 +9,13 @@ class BriskersModuleDock extends StatefulWidget {
     super.key,
     required this.selectedIndex,
     required this.onSelected,
+    this.onLongPressed,
     required this.destinations,
   });
   final int selectedIndex;
   final ValueChanged<int> onSelected;
+  /// Optional test-lab shortcut. Existing Briskers uses ordinary taps only.
+  final ValueChanged<int>? onLongPressed;
   final List<BriskersDockDestination> destinations;
 
   @override
@@ -129,6 +132,8 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
                   key: ValueKey('dock-${item.label}'),
                   borderRadius: BorderRadius.circular(12),
                   onTap: () => widget.onSelected(index),
+                  onLongPress: widget.onLongPressed == null
+                    ? null : () => widget.onLongPressed!(index),
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
                     decoration: BoxDecoration(
