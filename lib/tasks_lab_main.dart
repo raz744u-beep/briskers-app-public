@@ -1509,34 +1509,292 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     );
   }
 
-  Widget _payrollPage() {
-    // Earned hours are retained across recheck without duplicating the
-    // same invoice labor task's original credit. No payments are posted.
-    final byEmployee = earnedPayrollPreviewHours;
-    return ListView(
-      children: [
-        _sectionHeader('Payroll preview',
-          subtitle: 'Earned hours retained after recheck · No real payments'),
-        for (final employee in BriskersLabFixture.employees)
-          if (employee['role'] != 'secretary') Card(
-            margin: const EdgeInsets.fromLTRB(10, 3, 10, 5),
-            child: ListTile(
-              title: Text(_employeeName(employee['id'])),
-              trailing: Text(
-                "${(byEmployee[employee['id']] ?? 0).toStringAsFixed(1)} hrs",
-                style: const TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.w800,
-                  color: BriskersColors.jobs),
-              ),
+  String _labMoney(int cents) => NumberFormat.simpleCurrency(
+    locale: 'en_US').format(cents / 100);
+
+  Future<void> _setTestPayrollRate(String employeeId) async {
+    final current = testHourlyRates[employeeId];
+    final controller = TextEditingController(
+      text: current == null ? '' : (current / 100).toStringAsFixed(2));
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text('Test hourly rate · ${_employeeName(employeeId)}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Local test calculation only. '
+              'This will not change the real employee pay rate.'),
+            const SizedBox(height: 10),
+            TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true),
+              decoration: const InputDecoration(
+                prefixText: r'$ ',
+                labelText: 'Hourly rate',
+                border: OutlineInputBorder()),
             ),
-          ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog, false),
+            child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () async {
+              final dollars = double.tryParse(controller.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars < 0 || dollars > 10000) {
+                ScaffoldMessenger.of(dialog).showSnackBar(
+                  const SnackBar(content: Text('Enter a valid hourly rate')));
+                return;
+              }
+              try {
+                await store.setPayrollRate(
+                  businessId: BriskersLabFixture.businessId,
+                  employeeId: employeeId,
+                  centsPerHour: (dollars * 100).round(),
+                );
+                if (dialog.mounted) Navigator.pop(dialog, true);
+              } catch (error) {
+                if (dialog.mounted) {
+                  ScaffoldMessenger.of(dialog).showSnackBar(
+                    SnackBar(content: Text('$error')));
+                }
+              }
+            },
+            child: const Text('Save test rate')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (saved == true) await _refresh();
+  }
+
+  Future<void> _recordTestPayrollPayment(String employeeId) async {
+    final amount = TextEditingController();
+    final notes = TextEditingController();
+    String kind = 'pay';
+    String method = 'cash';
+    DateTime paidAt = DateTime.now();
+    final saved = await showModalBottomSheet<bool>(
+      context: context, showDragHandle: true, isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheet) => StatefulBuilder(
+        builder: (sheet, update) => Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16,
+            MediaQuery.viewInsetsOf(sheet).bottom + 20),
+          child: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Record TEST payment · ${_employeeName(employeeId)}',
+                style: const TextStyle(fontSize: 19,
+                  fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              const Text('SIMULATION ONLY · No real payroll or cash posted.',
+                style: TextStyle(
+                  fontSize: 12, color: BriskersColors.expenses)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: amount,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true),
+                decoration: const InputDecoration(
+                  prefixText: r'$ ',
+                  labelText: 'Amount paid',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: kind,
+                decoration: const InputDecoration(
+                  labelText: 'Payment type',
+                  border: OutlineInputBorder()),
+                items: const [
+                  DropdownMenuItem(value: 'pay',
+                    child: Text('Partial / full payment')),
+                  DropdownMenuItem(value: 'advance',
+                    child: Text('Advance / unfinished work')),
+                ],
+                onChanged: (v) => update(() => kind = v ?? 'pay')),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: method,
+                decoration: const InputDecoration(
+                  labelText: 'Payment method',
+                  border: OutlineInputBorder()),
+                items: const [
+                  DropdownMenuItem(value: 'cash', child: Text('Cash')),
+                  DropdownMenuItem(value: 'check', child: Text('Check')),
+                  DropdownMenuItem(value: 'zelle', child: Text('Zelle')),
+                  DropdownMenuItem(value: 'card', child: Text('Card')),
+                  DropdownMenuItem(value: 'other', child: Text('Other')),
+                ],
+                onChanged: (v) => update(() => method = v ?? 'cash')),
+              const SizedBox(height: 9),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final chosen = await showDatePicker(
+                    context: sheet, initialDate: paidAt,
+                    firstDate: DateTime(2020), lastDate: DateTime(2100));
+                  if (chosen != null) {
+                    update(() => paidAt = chosen);
+                  }
+                },
+                icon: const Icon(Icons.calendar_month_outlined),
+                label: Text('Payment date: '
+                  "${DateFormat('MMM d, yyyy').format(paidAt)}"),
+              ),
+              const SizedBox(height: 9),
+              TextField(
+                controller: notes,
+                decoration: const InputDecoration(
+                  labelText: 'Notes (optional)',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: () async {
+                  final dollars = double.tryParse(amount.text.trim());
+                  if (dollars == null || !dollars.isFinite ||
+                      dollars <= 0 || dollars > 1000000) {
+                    ScaffoldMessenger.of(sheet).showSnackBar(
+                      const SnackBar(content: Text('Enter a positive amount')));
+                    return;
+                  }
+                  try {
+                    await store.recordLabPayrollPayment(
+                      businessId: BriskersLabFixture.businessId,
+                      employeeId: employeeId,
+                      cents: (dollars * 100).round(),
+                      kind: kind, method: method, note: notes.text,
+                      paidAt: paidAt,
+                    );
+                    if (sheet.mounted) Navigator.pop(sheet, true);
+                  } catch (error) {
+                    if (sheet.mounted) {
+                      ScaffoldMessenger.of(sheet).showSnackBar(
+                        SnackBar(content: Text('$error')));
+                    }
+                  }
+                },
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('Save TEST payment'),
+              ),
+            ],
+          )),
+        ),
+      ),
+    );
+    amount.dispose();
+    notes.dispose();
+    if (saved == true) await _refresh();
+  }
+
+  Widget _payrollPage() {
+    // Rates and disbursements are LOCAL TEST values, never live payroll.
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 25),
+      children: [
+        _sectionHeader('Payroll TEST ledger',
+          subtitle: 'Original + recheck hours · Simulation only'),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text('Earned hours stay after reopening. Test payments '
+            'and advances reduce the balance but never create real '
+            'payments. A negative balance is credit toward future work.',
+            style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ),
+        for (final employee in BriskersLabFixture.employees)
+          if (employee['role'] != 'secretary')
+            Builder(builder: (_) {
+              final id = employee['id']!;
+              final hours = earnedPayrollPreviewHours[id] ?? 0;
+              final rate = testHourlyRates[id];
+              final earnedCents = rate == null
+                ? null : (hours * rate).round();
+              final payments = testPayrollPayments.where(
+                (payment) => payment['employee_id'] == id).toList();
+              final paidCents = payments.fold<int>(0,
+                (sum, payment) => sum + (payment['cents'] as int));
+              final owing = (earnedCents ?? 0) - paidCents;
+              return Card(
+                margin: const EdgeInsets.fromLTRB(10, 4, 10, 5),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(children: [
+                        Expanded(child: Text(_employeeName(id),
+                          style: const TextStyle(
+                            fontSize: 17, fontWeight: FontWeight.w700))),
+                        Text('${hours.toStringAsFixed(1)} hrs',
+                          style: const TextStyle(fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: BriskersColors.jobs)),
+                      ]),
+                      const SizedBox(height: 4),
+                      Row(children: [
+                        Expanded(child: Text(rate == null
+                          ? 'Test rate not set'
+                          : 'Rate ${_labMoney(rate)}/hr · '
+                            'Earned ${_labMoney(earnedCents!)}',
+                          style: const TextStyle(fontSize: 12.5))),
+                        TextButton.icon(
+                          onPressed: () => _setTestPayrollRate(id),
+                          icon: const Icon(Icons.edit_outlined, size: 15),
+                          label: const Text('Rate'),
+                        ),
+                      ]),
+                      Text('Recorded test payments: ${_labMoney(paidCents)}',
+                        style: const TextStyle(fontSize: 12.5)),
+                      if (rate != null)
+                        Text(owing >= 0
+                          ? 'Remaining to pay: ${_labMoney(owing)}'
+                          : 'Advance / credit: ${_labMoney(-owing)}',
+                          style: TextStyle(fontWeight: FontWeight.w800,
+                            color: owing > 0
+                              ? BriskersColors.jobs
+                              : const Color(0xFF546E7A))),
+                      const SizedBox(height: 6),
+                      OutlinedButton.icon(
+                        onPressed: () => _recordTestPayrollPayment(id),
+                        icon: const Icon(Icons.payments_outlined),
+                        label: const Text('Record TEST payment / advance'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+        if (testPayrollPayments.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
+            child: Text('TEST payment history · Read-only',
+              style: TextStyle(
+                fontSize: 16, fontWeight: FontWeight.w800))),
+          for (final payment in testPayrollPayments)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.receipt_long_outlined,
+                color: BriskersColors.jobs),
+              title: Text('${_employeeName(payment['employee_id'].toString())} '
+                '· ${_labMoney(payment['cents'] as int)}'),
+              subtitle: Text(
+                "${payment['kind'] == 'advance' ? 'Advance' : 'Payment'} "
+                '· ${payment['method']} · '
+                "${DateFormat('MMM d, yyyy').format(DateTime.fromMillisecondsSinceEpoch(payment['paid_at'] as int))}"
+                "${(payment['note']?.toString() ?? '').isEmpty ? '' : ' · ${payment['note']}'}"),
+            ),
+        ],
         const Padding(
           padding: EdgeInsets.all(16),
-          child: Text('This is an earned-hours preview, not a payment. '
-            'Original completed hours remain after reopening; '
-            'completing the same task again does not earn a second allocation. '
-            'New recheck labor requires a separate task. '
-            'No compensation rates or transactions are connected.'),
+          child: Text('This test ledger cannot pay mechanics, issue checks, '
+            'or update actual shop expenses. Weekly paid-task selection '
+            'and production payroll approval are not connected.',
+            style: TextStyle(fontSize: 12,
+              color: Color(0xFF64748B))),
         ),
       ],
     );
