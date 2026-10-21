@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:briskers_app/widgets/retained_module_stack.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -288,6 +290,29 @@ void main() {
     expect(mounts[6], 2,
       reason: 'Verified transaction identities must not cross shops.');
     expect(find.text('6:Open'), findsOneWidget);
+  });
+
+  test('Expenses retains its server-confirmed provenance without busy polling',
+      () {
+    final stack = File('lib/widgets/retained_module_stack.dart')
+        .readAsStringSync();
+    final expenses = File('lib/screens/expenses_screen.dart')
+        .readAsStringSync();
+    expect(stack, contains('retainedIndices = const {3, 4, 5, 6}'));
+    expect(expenses, contains('_serverConfirmedTransactionIds'));
+    expect(expenses, contains('if (mounted && TickerMode.of(context))'));
+    expect(expenses, contains('unawaited(_refreshPhotoCounts())'));
+    expect(expenses, contains('_serverConfirmedTransactionIds.clear()'));
+    // A business identity change resets confirmation, but dock re-entry does
+    // not silently declare previously seen server receipts unverified.
+    final switchStart = expenses.indexOf(
+      'void didUpdateWidget(covariant ExpensesScreen oldWidget)',
+    );
+    final switchEnd = expenses.indexOf('void dispose()', switchStart);
+    expect(switchStart, greaterThan(0));
+    expect(switchEnd, greaterThan(switchStart));
+    expect(expenses.substring(switchStart, switchEnd),
+        isNot(contains('_serverConfirmedTransactionIds.clear()')));
   });
 
 }
