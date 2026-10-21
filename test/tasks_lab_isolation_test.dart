@@ -179,7 +179,7 @@ void main() {
         documentId: LocalJobTasksLabStore.recheckDocumentId,
         lineId: line,
         hoursByEmployee: {'lab-chris': 1.3, 'lab-kam': 0.5});
-      var extraAlloc = (await store.list(shop, job)).singleWhere(
+      final extraAlloc = (await store.list(shop, job)).singleWhere(
         (t) => t['line_id'] == line);
       expect(extraAlloc['source_invoice_hours'], 1.5);
       expect(extraAlloc['payroll_hours'], 1.8);
