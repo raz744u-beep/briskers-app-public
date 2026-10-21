@@ -349,8 +349,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   );
                   if (sheet.mounted) Navigator.pop(sheet, true);
                 } catch (e) {
-                  if (sheet.mounted) ScaffoldMessenger.of(sheet).showSnackBar(
-                    SnackBar(content: Text('Save failed: $e')));
+                  if (sheet.mounted) {
+                    ScaffoldMessenger.of(sheet).showSnackBar(
+                      SnackBar(content: Text('Save failed: $e')));
+                  }
                 }
               }, child: const Text('Save labor assignments')),
             ],
