@@ -73,7 +73,10 @@ class VehicleFindingActionsService {
     'resolve',
     {
       'status': 'resolved',
-      'repair_job_id': jobId,
+      // The server stores the resolving Job separately from an In Job link.
+      // Do not turn a completed Job into an active repair assignment.
+      'resolved_job_id': jobId,
+      'include_on_invoice': false,
       'resolved_at': DateTime.now().toUtc().toIso8601String(),
     },
     jobId: jobId,
@@ -671,6 +674,8 @@ class VehicleFindingActionsService {
             for (final key in [
               'status',
               'repair_job_id',
+              'resolved_job_id',
+              'resolved_job_number',
               'include_on_invoice',
               'resolved_at',
               'row_version',
