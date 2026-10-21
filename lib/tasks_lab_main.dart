@@ -843,27 +843,200 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ],
   );
 
-  Widget _overviewPage() => ListView(
+  Widget _homeTile(
+    String title, String summary, IconData icon, Color color, VoidCallback go,
+  ) => InkWell(
+    borderRadius: BorderRadius.circular(16),
+    onTap: go,
+    child: Container(
+      height: 75,
+      padding: const EdgeInsets.fromLTRB(12, 7, 9, 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 15, fontWeight: FontWeight.w800)),
+          const Spacer(),
+          Row(children: [
+            Icon(icon, color: color, size: 27),
+            const SizedBox(width: 7),
+            Expanded(child: Text(summary,
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12,
+                color: Color(0xFF667085), fontWeight: FontWeight.w700))),
+            Icon(Icons.chevron_right, color: color, size: 21),
+          ]),
+        ],
+      ),
+    ),
+  );
+
+  Widget _overviewPage() {
+    Widget tileRow(Widget first, Widget second) => Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(children: [
+        Expanded(child: first), const SizedBox(width: 10),
+        Expanded(child: second),
+      ]),
+    );
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 35),
+      children: [
+        Row(children: [
+          Image.asset('assets/briskers_header_logo.png',
+            width: 162, height: 50, fit: BoxFit.contain,
+            errorBuilder: (_, error, trace) => const Text('Briskers',
+              style: TextStyle(fontSize: 27,
+                color: Color(0xFF1767B3), fontWeight: FontWeight.w900))),
+          const Spacer(),
+          const Icon(Icons.shield_outlined, color: BriskersColors.jobs),
+        ]),
+        const SizedBox(height: 6),
+        const Text('Briskers Tasks TEST',
+          style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800)),
+        Text(DateFormat('EEEE, MMM d, yyyy').format(DateTime.now()),
+          style: const TextStyle(color: Color(0xFF667085))),
+        const SizedBox(height: 8),
+        const Text('Standalone offline copy · Real shop data is not connected',
+          style: TextStyle(fontSize: 12,
+            color: BriskersColors.jobs, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 20),
+        tileRow(
+          _homeTile('Customers', '1 Test customer',
+            Icons.people_outline, BriskersColors.customers,
+            () => _navigate(1)),
+          _homeTile('Appointments', 'No test appointments',
+            Icons.calendar_month_outlined, BriskersColors.appointments,
+            () => _navigate(9)),
+        ),
+        tileRow(
+          _homeTile('Estimates', 'No test estimates',
+            Icons.request_quote_outlined, BriskersColors.estimates,
+            () => _navigate(7)),
+          _homeTile('Invoices', '1 Example invoice',
+            Icons.receipt_long_outlined, BriskersColors.invoices,
+            () => _navigate(8)),
+        ),
+        tileRow(
+          _homeTile('Jobs', '1 Example job',
+            Icons.build_outlined, BriskersColors.jobs,
+            () => _navigate(2)),
+          _homeTile('Expenses', 'No financial data',
+            Icons.payments_outlined, BriskersColors.expenses,
+            () => _navigate(10)),
+        ),
+        const SizedBox(height: 17),
+        const Text('New functions being tested',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        tileRow(
+          _homeTile('Tasks', '${tasks.length} Labor tasks',
+            Icons.rule_outlined, BriskersColors.jobs,
+            () => _navigate(3)),
+          _homeTile('Work Log', 'Completed task history',
+            Icons.history_outlined, BriskersColors.today,
+            () => _navigate(4)),
+        ),
+        tileRow(
+          _homeTile('Payroll', 'Hours preview only',
+            Icons.account_balance_wallet_outlined, BriskersColors.invoices,
+            () => _navigate(5)),
+          _homeTile('Employees', 'Edit all names',
+            Icons.badge_outlined, BriskersColors.settings,
+            _editEmployeeNames),
+        ),
+      ],
+    );
+  }
+
+  Widget _readOnlyModule(
+    String title, String description, IconData icon, Color color,
+  ) => ListView(
     children: [
-      _sectionHeader('Briskers Tasks TEST',
-        subtitle: 'Standalone offline workshop prototype'),
-      const ListTile(
-        leading: Icon(Icons.person_outline),
-        title: Text('Richard Goff'),
-        subtitle: Text('2 cars · 1 copied example invoice'),
-      ),
-      ListTile(
-        leading: const Icon(Icons.list_alt_outlined),
-        title: Text('${tasks.length} labor tasks'),
-        onTap: () => _navigate(3),
-      ),
-      ListTile(
-        leading: const Icon(Icons.history),
-        title: const Text('Work Log'),
-        onTap: () => _navigate(4),
+      _sectionHeader(title, subtitle: 'Isolated offline test'),
+      Card(
+        margin: const EdgeInsets.symmetric(horizontal: 12),
+        color: color.withValues(alpha: 0.04),
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(children: [
+            Icon(icon, size: 38, color: color),
+            const SizedBox(height: 12),
+            Text(description, textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            const Text('No live records, financial values, or '
+              'production synchronization are available.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Color(0xFF667085))),
+          ]),
+        ),
       ),
     ],
   );
+
+  Widget _testInvoicePage() => ListView(
+    children: [
+      _sectionHeader('Invoices',
+        subtitle: 'Read-only sanitized source for Tasks'),
+      Card(
+        margin: const EdgeInsets.symmetric(horizontal: 10),
+        child: Column(children: [
+          const ListTile(
+            leading: Icon(Icons.receipt_long_outlined,
+              color: BriskersColors.invoices),
+            title: Text('Invoice #6342',
+              style: TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: Text('Richard Goff · 2012 Hyundai Equus'),
+          ),
+          const Divider(height: 1),
+          for (final task in tasks.where((t) => t['source_missing'] != 1))
+            ListTile(
+              dense: true,
+              title: Text(task['source_description']?.toString() ?? 'Labor'),
+              subtitle: Text(
+                '${task['payroll_hours'] ?? '—'} hours · labor only'),
+            ),
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text('Financial totals are intentionally not copied. '
+              'Edit test tasks from Jobs → Tasks.',
+              style: TextStyle(fontSize: 12,
+                color: Color(0xFF667085))),
+          ),
+        ]),
+      ),
+    ],
+  );
+
+  Widget _morePage() => ListView(children: [
+    _sectionHeader('More', subtitle: 'Tasks TEST features'),
+    ListTile(
+      leading: const Icon(Icons.account_balance_wallet_outlined,
+        color: BriskersColors.invoices),
+      title: const Text('Payroll preview'),
+      onTap: () => _navigate(5),
+      trailing: const Icon(Icons.chevron_right),
+    ),
+    ListTile(
+      leading: const Icon(Icons.badge_outlined,
+        color: BriskersColors.customers),
+      title: const Text('Employees and display names'),
+      onTap: _editEmployeeNames,
+      trailing: const Icon(Icons.chevron_right),
+    ),
+    ListTile(
+      leading: const Icon(Icons.settings_outlined,
+        color: BriskersColors.settings),
+      title: const Text('Settings'),
+      onTap: () => _navigate(6),
+      trailing: const Icon(Icons.chevron_right),
+    ),
+  ]);
 
   Widget _body() {
     if (loading) {
@@ -880,7 +1053,18 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       case 3: return _taskList();
       case 4: return _taskList(history: true);
       case 5: return _payrollPage();
-      default: return _settingsPage();
+      case 6: return _settingsPage();
+      case 7: return _readOnlyModule('Estimates',
+        'There are no estimates in this sanitized test copy.',
+        Icons.request_quote_outlined, BriskersColors.estimates);
+      case 8: return _testInvoicePage();
+      case 9: return _readOnlyModule('Schedule',
+        'Appointments were not included in this test copy.',
+        Icons.calendar_month_outlined, BriskersColors.appointments);
+      case 10: return _readOnlyModule('Expenses',
+        'No expenses or payments have been copied.',
+        Icons.payments_outlined, BriskersColors.expenses);
+      default: return _morePage();
     }
   }
 
