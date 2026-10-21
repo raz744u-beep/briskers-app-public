@@ -43,6 +43,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   List<Map<String, dynamic>> tasks = const [];
   Map<String, String> nicknames = const {};
   Map<String, String> fullNames = const {};
+  String? leadMechanicId;
   int page = 0;
   int? expandedMenu;
   double menuAnchorX = 180;
@@ -95,11 +96,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     );
     final aliases = await store.nicknames(BriskersLabFixture.businessId);
     final names = await store.fullNames(BriskersLabFixture.businessId);
+    final lead = await store.leadMechanic(
+      BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     if (!mounted) return;
     setState(() {
       tasks = rows;
       nicknames = aliases;
       fullNames = names;
+      leadMechanicId = lead;
       loading = false;
     });
   }
@@ -507,6 +511,69 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     await _refresh();
   }
 
+  Future<void> _assignLeadMechanic() async {
+    String selected = leadMechanicId ?? '';
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (sheet) => StatefulBuilder(
+        builder: (sheet, setSheetState) => Padding(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Assign main job mechanic', style: TextStyle(
+                fontSize: 20, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+              const Text('Lead responsibility only. Task assignments, '
+                'hours and payroll are not changed.'),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                initialValue: selected,
+                decoration: const InputDecoration(
+                  labelText: 'Lead mechanic',
+                  border: OutlineInputBorder()),
+                items: [
+                  const DropdownMenuItem(
+                    value: '', child: Text('Unassigned')),
+                  for (final employee in BriskersLabFixture.employees)
+                    if (employee['role'] == 'mechanic' ||
+                        employee['role'] == 'owner')
+                      DropdownMenuItem(
+                        value: employee['id']!,
+                        child: Text(_employeeName(employee['id'])),
+                      ),
+                ],
+                onChanged: (id) => setSheetState(
+                  () => selected = id ?? ''),
+              ),
+              const SizedBox(height: 14),
+              FilledButton(
+                onPressed: () async {
+                  try {
+                    await store.saveLeadMechanic(
+                      BriskersLabFixture.businessId,
+                      BriskersLabFixture.jobId, selected);
+                    if (sheet.mounted) Navigator.pop(sheet, true);
+                  } catch (e) {
+                    if (sheet.mounted) {
+                      ScaffoldMessenger.of(sheet).showSnackBar(
+                        SnackBar(content: Text('Could not assign job: $e')));
+                    }
+                  }
+                },
+                child: const Text('Save main job assignment'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (saved == true) await _refresh();
+  }
+
   Widget _customerPage() => ListView(
     padding: const EdgeInsets.only(bottom: 28),
     children: [
@@ -710,6 +777,24 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   style: TextStyle(fontSize: 12,
                     color: Color(0xFF667085))),
               ),
+              if (firstVehicle) ...[
+                const Divider(height: 1),
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 3),
+                  leading: const CircleAvatar(
+                    backgroundColor: Color(0x2000897B),
+                    child: Icon(Icons.engineering_outlined,
+                      color: BriskersColors.jobs)),
+                  title: const Text('Main job mechanic',
+                    style: TextStyle(fontSize: 12.8)),
+                  subtitle: Text(_employeeName(leadMechanicId),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 16)),
+                  trailing: const Icon(Icons.edit_outlined),
+                  onTap: _assignLeadMechanic,
+                ),
+              ],
+
             ],
           ),
         ),
