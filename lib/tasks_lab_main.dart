@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'core/briskers_colors.dart';
+import 'widgets/briskers_module_dock.dart';
+
 import 'local/local_database_provider.dart';
 import 'services/local_job_tasks_lab_store.dart';
 import 'tasks_lab/fixture.dart';
@@ -40,17 +43,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   List<Map<String, dynamic>> tasks = const [];
   Map<String, String> nicknames = const {};
   Map<String, String> fullNames = const {};
-  int page = 2;
+  int page = 0;
   int? expandedMenu;
   int selectedVehicle = 0;
+  bool jobDetailsOpen = false;
   bool loading = true;
   String? error;
 
-  static const navLabels = ['Home', 'Customers', 'Jobs', 'More'];
-  static const navIcons = [
-    Icons.home_outlined, Icons.people_outline, Icons.build_outlined,
-    Icons.more_horiz,
-  ];
+  static const _dockPages = [0, 1, 2, 7, 8, 9, 10, 11];
 
   @override
   void initState() {
@@ -138,6 +138,17 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     setState(() {
       page = next;
       expandedMenu = null;
+      if (next == 2) jobDetailsOpen = false;
+    });
+  }
+
+  void _openVehicleJob(int vehicleIndex) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      selectedVehicle = vehicleIndex;
+      jobDetailsOpen = true;
+      page = 2;
+      expandedMenu = null;
     });
   }
 
@@ -148,67 +159,47 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     });
   }
 
-  bool _isNavSelected(int index) {
-    if (index == 2) return page == 2 || page == 3 || page == 4;
-    if (index == 3) return page == 5 || page == 6;
-    return page == index;
+  int get _selectedDock {
+    if (page == 3 || page == 4) return 2;
+    if (page == 5 || page == 6) return 7;
+    final idx = _dockPages.indexOf(page);
+    return idx < 0 ? 0 : idx;
   }
 
-  // Keep the familiar phone-width bottom bar. Long-press Jobs or More
-  // to unfold the related destination icons vertically above that icon.
-  Widget _bottomNav() => SafeArea(
-    top: false,
-    child: Container(
-      height: 68,
-      decoration: const BoxDecoration(
-        color: Color(0xFFEAF2FA),
-        border: Border(top: BorderSide(color: Color(0xFFD0DEEB))),
-      ),
-      child: Row(
-        children: [
-          for (var i = 0; i < navLabels.length; i++)
-            Expanded(
-              child: InkWell(
-                onTap: () {
-                  if (i == 3) {
-                    _toggleMenu(i);
-                  } else {
-                    _navigate(i);
-                  }
-                },
-                onLongPress: (i == 2 || i == 3)
-                  ? () => _toggleMenu(i)
-                  : null,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      navIcons[i],
-                      size: 26,
-                      color: _isNavSelected(i)
-                        ? const Color(0xFF1263B3)
-                        : const Color(0xFF64748B),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      navLabels[i],
-                      maxLines: 1,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: _isNavSelected(i)
-                          ? FontWeight.w800 : FontWeight.w500,
-                        color: _isNavSelected(i)
-                          ? const Color(0xFF1263B3)
-                          : const Color(0xFF334155),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    ),
+  // Reuse the actual dock from the Briskers shop application.
+  // Lab-only long presses reveal Tasks/Work Log and Payroll/Settings upward.
+  Widget _bottomNav() => BriskersModuleDock(
+    selectedIndex: _selectedDock,
+    destinations: const [
+      BriskersDockDestination(
+        label: 'Home', icon: Icons.home_outlined,
+        color: BriskersColors.today),
+      BriskersDockDestination(
+        label: 'Customers', icon: Icons.people_outline,
+        color: BriskersColors.customers),
+      BriskersDockDestination(
+        label: 'Jobs', icon: Icons.build_outlined,
+        color: BriskersColors.jobs),
+      BriskersDockDestination(
+        label: 'Estimates', icon: Icons.description_outlined,
+        color: BriskersColors.estimates),
+      BriskersDockDestination(
+        label: 'Invoices', icon: Icons.receipt_long_outlined,
+        color: BriskersColors.invoices),
+      BriskersDockDestination(
+        label: 'Schedule', icon: Icons.calendar_month_outlined,
+        color: BriskersColors.schedule),
+      BriskersDockDestination(
+        label: 'Expenses', icon: Icons.account_balance_wallet_outlined,
+        color: BriskersColors.expenses),
+      BriskersDockDestination(
+        label: 'More', icon: Icons.more_horiz,
+        color: BriskersColors.more),
+    ],
+    onSelected: (index) => _navigate(_dockPages[index]),
+    onLongPressed: (index) {
+      if (index == 2 || index == 7) _toggleMenu(index);
+    },
   );
 
   Widget _menuEntry(IconData icon, String label, int destination) =>
@@ -245,7 +236,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             const Divider(height: 1),
             _menuEntry(Icons.history, 'Work Log', 4),
           ],
-          if (index == 3) ...[
+          if (index == 7) ...[
             _menuEntry(Icons.account_balance_wallet_outlined, 'Payroll', 5),
             const Divider(height: 1),
             _menuEntry(Icons.settings_outlined, 'Settings', 6),
@@ -743,7 +734,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   .clamp(8.0, MediaQuery.sizeOf(context).width - 188)
                   .toDouble()
               : null,
-            right: expandedMenu == 3 ? 8 : null,
+            right: expandedMenu == 7 ? 8 : null,
             child: _verticalMenu(expandedMenu!),
           ),
         ],
