@@ -47,6 +47,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   String jobStatusCode = 'open';
   List<Map<String, dynamic>> earlierWorkLog = const [];
   Map<String, List<Map<String, dynamic>>> allocationsByLine = {};
+  Map<String, double> preservedPayrollHours = {};
+  Set<String> preservedPayrollTaskKeys = {};
   int page = 0;
   int? expandedMenu;
   double menuAnchorX = 180;
@@ -104,6 +106,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       jobId: BriskersLabFixture.jobId,
       documentId: BriskersLabFixture.invoiceId,
       lineId: task['line_id'].toString())));
+    final preservedPayroll = await store.preservedPayrollPreview(
+      BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final currentJobStatus = await store.jobStatus(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final archived = await store.priorCompletions(
@@ -118,6 +122,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       leadMechanicId = lead;
       jobStatusCode = currentJobStatus;
       earlierWorkLog = archived;
+      preservedPayrollHours = preservedPayroll.hoursByMechanic;
+      preservedPayrollTaskKeys = preservedPayroll.taskKeys;
       allocationsByLine = {for (var i = 0; i < rows.length; i++)
         rows[i]['line_id'].toString(): allocations[i]};
       loading = false;
@@ -1392,9 +1398,15 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   Widget _payrollPage() {
-    final byEmployee = <String, double>{};
+    // Previously earned hours remain credited when the job reopens;
+    // re-completing those same original tasks is not a second paycheck.
+    final byEmployee = <String, double>{...preservedPayrollHours};
     for (final task in tasks) {
       if (task['status'] != 'done') continue;
+      final doc = task['document_id'].toString();
+      final line = task['line_id'].toString();
+      final key = '${doc.length}:$doc$line';
+      if (preservedPayrollTaskKeys.contains(key)) continue;
       final splits = allocationsByLine[task['line_id'].toString()] ?? [];
       if (splits.isNotEmpty) {
         for (final split in splits) {
@@ -1411,7 +1423,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     return ListView(
       children: [
         _sectionHeader('Payroll preview',
-          subtitle: 'Completed assigned hours · No real payments'),
+          subtitle: 'Earned hours retained after recheck · No real payments'),
         for (final employee in BriskersLabFixture.employees)
           if (employee['role'] != 'secretary') Card(
             margin: const EdgeInsets.fromLTRB(10, 3, 10, 5),
@@ -1427,8 +1439,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           ),
         const Padding(
           padding: EdgeInsets.all(16),
-          child: Text('This is only a demonstration of task hours. '
-            'No compensation rates or payroll transactions are connected.'),
+          child: Text('This is an earned-hours preview, not a payment. '
+            'Original completed hours remain after reopening; '
+            'completing the same task again does not earn a second allocation. '
+            'New recheck labor requires a separate task. '
+            'No compensation rates or transactions are connected.'),
         ),
       ],
     );
