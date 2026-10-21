@@ -55,6 +55,9 @@ void main() {
     expect(main, contains('jobDetailsOpen'));
     expect(main, contains('Assign main job mechanic'));
     expect(main, contains('Add Task · Not on Invoice'));
+    expect(main, contains('Payroll hours can be adjusted independently.'));
+    expect(main, isNot(contains('Assigned hours cannot exceed')));
+
     expect(main, contains('_addRecheckWork'));
     expect(main, contains('Record TEST payment / advance'));
     expect(main, contains('store.payrollTestPayments('));
@@ -170,14 +173,22 @@ void main() {
         documentId: LocalJobTasksLabStore.recheckDocumentId,
         lineId: line,
         hoursByEmployee: {'lab-chris': 1.0, 'lab-kam': 0.5});
-      await expectLater(
-        store.saveAllocations(
-          businessId: shop, jobId: job,
-          documentId: LocalJobTasksLabStore.recheckDocumentId,
-          lineId: line,
-          hoursByEmployee: {'lab-chris': 1.1, 'lab-kam': 0.5}),
-        throwsArgumentError,
-      );
+      // A recheck can also receive extra paid time beyond its initial 1.5.
+      await store.saveAllocations(
+        businessId: shop, jobId: job,
+        documentId: LocalJobTasksLabStore.recheckDocumentId,
+        lineId: line,
+        hoursByEmployee: {'lab-chris': 1.3, 'lab-kam': 0.5});
+      var extraAlloc = (await store.list(shop, job)).singleWhere(
+        (t) => t['line_id'] == line);
+      expect(extraAlloc['source_invoice_hours'], 1.5);
+      expect(extraAlloc['payroll_hours'], 1.8);
+      // Restore the initial allocation for later assertions.
+      await store.saveAllocations(
+        businessId: shop, jobId: job,
+        documentId: LocalJobTasksLabStore.recheckDocumentId,
+        lineId: line,
+        hoursByEmployee: {'lab-chris': 1.0, 'lab-kam': 0.5});
       expect(await store.earnedHoursPreview(shop, job), originalEarned);
       await store.editTask(
         businessId: shop, jobId: job,
@@ -536,20 +547,25 @@ void main() {
     }
   });
 
-  test('Invoice labor hours cap allows partial and rejects excess allocations',
+  test('Book time defaults payroll but permits owner-paid extra hours',
       () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     final store = LocalJobTasksLabStore(db);
     const shop = BriskersLabFixture.businessId;
     const job = BriskersLabFixture.jobId;
     const invoice = BriskersLabFixture.invoiceId;
-    const line = 'lab-differential'; // Source labor quantity is 0.8 hr.
+    const line = 'lab-differential'; // Source billed quantity is 0.8 hr.
     try {
       await store.reconcileDocument(
         businessId: shop, jobId: job, documentId: invoice,
         laborLines: LocalJobTasksLabStore.laborLines(
           BriskersLabFixture.invoice),
       );
+      final initially = (await store.list(shop, job))
+          .singleWhere((row) => row['line_id'] == line);
+      expect(initially['source_invoice_hours'], 0.8);
+      expect(initially['payroll_hours'], 0.8); // Default equality.
+
       await store.saveAllocations(
         businessId: shop, jobId: job, documentId: invoice,
         lineId: line,
@@ -559,35 +575,50 @@ void main() {
         businessId: shop, jobId: job, documentId: invoice, lineId: line);
       expect(partial.fold<double>(0,
           (sum, item) => sum + (item['hours'] as num).toDouble()), 0.7);
-      final before = (await store.list(shop, job))
-          .singleWhere((row) => row['line_id'] == line);
-      expect(before['source_invoice_hours'], 0.8);
-      expect(before['payroll_hours'], 0.7);
 
+      // Owner can voluntarily pay more than the billed 0.8 hours.
+      await store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: line,
+        hoursByEmployee: {'lab-kam': 0.9, 'lab-raz': 0.5},
+      );
+      final extra = await store.allocations(
+        businessId: shop, jobId: job, documentId: invoice, lineId: line);
+      expect(extra.length, 2);
+      expect(extra.fold<double>(0,
+          (sum, item) => sum + (item['hours'] as num).toDouble()), 1.4);
+      final withExtra = (await store.list(shop, job))
+          .singleWhere((row) => row['line_id'] == line);
+      expect(withExtra['source_invoice_hours'], 0.8);
+      expect(withExtra['payroll_hours'], 1.4);
+
+      // Validate input safety, not a fabricated book-time cap.
       await expectLater(
         store.saveAllocations(
           businessId: shop, jobId: job, documentId: invoice,
           lineId: line,
-          hoursByEmployee: {'lab-kam': 0.5, 'lab-raz': 0.4},
+          hoursByEmployee: {'lab-kam': -0.1},
         ),
         throwsArgumentError,
       );
-      final stillPartial = await store.allocations(
-        businessId: shop, jobId: job, documentId: invoice, lineId: line);
-      expect(stillPartial.length, 2);
-      expect(stillPartial.fold<double>(0,
-          (sum, item) => sum + (item['hours'] as num).toDouble()), 0.7);
-
-      await store.saveAllocations(
-        businessId: shop, jobId: job, documentId: invoice,
-        lineId: line,
-        hoursByEmployee: {'lab-kam': 0.5, 'lab-raz': 0.3},
+      await expectLater(
+        store.saveAllocations(
+          businessId: shop, jobId: job, documentId: invoice,
+          lineId: line,
+          hoursByEmployee: {'lab-kam': double.infinity},
+        ),
+        throwsArgumentError,
       );
-      final exact = await store.allocations(
-        businessId: shop, jobId: job, documentId: invoice, lineId: line);
-      expect(exact.fold<double>(0,
-          (sum, item) => sum + (item['hours'] as num).toDouble()),
-          closeTo(0.8, 0.000001));
+
+      await store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: line, status: 'done',
+      );
+      final earned = await store.earnedHoursPreview(shop, job);
+      expect(earned['lab-kam'], 0.9);
+      expect(earned['lab-raz'], 0.5);
+
+      // Invoice reconciliation must not recalculate or erase payroll bonus.
       await store.reconcileDocument(
         businessId: shop, jobId: job, documentId: invoice,
         laborLines: LocalJobTasksLabStore.laborLines(
@@ -596,7 +627,8 @@ void main() {
       final afterReconcile = (await store.list(shop, job))
           .singleWhere((row) => row['line_id'] == line);
       expect(afterReconcile['source_invoice_hours'], 0.8);
-      expect(afterReconcile['payroll_hours'], closeTo(0.8, 0.000001));
+      expect(afterReconcile['payroll_hours'], 1.4);
+      expect(await store.earnedHoursPreview(shop, job), earned);
     } finally {
       await db.close();
     }
