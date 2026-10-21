@@ -3378,6 +3378,17 @@ class BriskersApi {
     String businessId,
     String documentId,
   ) async {
+    // v5 adds explicit mileage readings. Older installations do not expose
+    // this RPC; only a missing-function response permits v4 fallback.
+    try {
+      final response = await networkSupabase.rpc(
+        'briskers_document_detail_v5',
+        params: {'p_business_id': businessId, 'p_document_id': documentId},
+      );
+      return Map<String, dynamic>.from(response as Map);
+    } on PostgrestException catch (error) {
+      if (error.code != 'PGRST202') rethrow;
+    }
     try {
       return await documentDetailV4(businessId, documentId);
     } on PostgrestException catch (error) {
@@ -3639,6 +3650,27 @@ class BriskersApi {
         'p_document_date': documentDate.toIso8601String().split('T').first,
       },
     );
+  }
+
+  /// Explicit departure odometer (schema v2 only). The backend RPC must
+  /// atomically validate invoice/job/vehicle scope and preserve the historical
+  /// document odometer_in field. Never fall back to the legacy setter.
+  Future<Map<String, dynamic>> saveInvoiceMileageOut(
+    String businessId,
+    String documentId, {
+    required int expectedVersion,
+    required num? mileageOut,
+  }) async {
+    final result = await networkSupabase.rpc(
+      'briskers_save_invoice_mileage_out_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_document_id': documentId,
+        'p_expected_version': expectedVersion,
+        'p_mileage_out': mileageOut,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
   }
 
   Future<void> updateDocumentMileage(
