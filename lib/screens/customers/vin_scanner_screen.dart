@@ -45,7 +45,16 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
     if (path == null) return;
     // Only camera images created by this capture flow are deleted. A photo
     // chosen from the gallery is never removed or modified.
-    unawaited(File(path).delete().catchError((Object _) => File(path)));
+    unawaited(_deleteCameraPhoto(path));
+  }
+
+  Future<void> _deleteCameraPhoto(String path) async {
+    try {
+      await File(path).delete();
+    } catch (_) {
+      // Camera temporary files are best-effort cleanup. No gallery file
+      // or server-stored customer artifact is ever deleted here.
+    }
   }
 
   Future<void> _choose() async {
