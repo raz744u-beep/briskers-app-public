@@ -136,11 +136,71 @@ class LocalJobTasksLabStore {
     return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
   }
 
+  // Older Tasks TEST builds archived completed work before earned-hours
+  // snapshots existed. Backfill the FIRST archived completion for each task,
+  // never replacing it with a later recheck completion.
+  Future<void> _backfillPreservedHoursFromHistory(
+      String businessId, String jobId) async {
+    final older = await db.customSelect(
+      'SELECT document_id, line_id, employee_id, payroll_hours, '
+      'assignment_summary FROM local_task_completion_history_lab '
+      'WHERE business_id=? AND job_id=? '
+      'ORDER BY completed_at ASC, id ASC',
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    for (final entry in older) {
+      final doc = entry.read<String>('document_id');
+      final line = entry.read<String>('line_id');
+      final known = await db.customSelect(
+        'SELECT 1 FROM local_payroll_preserved_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [
+          Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(doc), Variable<String>(line),
+        ],
+      ).getSingleOrNull();
+      if (known != null) continue;
+      final summary = entry.readNullable<String>('assignment_summary') ?? '';
+      final hoursByMechanic = <String, double>{};
+      final pattern = RegExp(r'([^,\\s]+):\\s*(\\d+(?:\\.\\d+)?)\\s*hrs');
+      for (final match in pattern.allMatches(summary)) {
+        final id = match.group(1);
+        final hours = double.tryParse(match.group(2) ?? '');
+        if (id != null && hours != null && hours.isFinite && hours > 0) {
+          hoursByMechanic[id] = (hoursByMechanic[id] ?? 0) + hours;
+        }
+      }
+      if (hoursByMechanic.isEmpty) {
+        final id = entry.readNullable<String>('employee_id');
+        final hours = entry.readNullable<double>('payroll_hours') ?? 0;
+        if (id != null && id.isNotEmpty && hours.isFinite && hours > 0) {
+          hoursByMechanic[id] = hours;
+        }
+      }
+      await db.customStatement(
+        'INSERT INTO local_payroll_preserved_tasks_lab '
+        '(business_id, job_id, document_id, line_id, captured_at) '
+        'VALUES (?, ?, ?, ?, ?)',
+        [businessId, jobId, doc, line, DateTime.now().millisecondsSinceEpoch],
+      );
+      for (final allocation in hoursByMechanic.entries) {
+        await db.customStatement(
+          'INSERT INTO local_payroll_preserved_hours_lab '
+          '(business_id, job_id, document_id, line_id, employee_id, hours) '
+          'VALUES (?, ?, ?, ?, ?, ?)',
+          [businessId, jobId, doc, line, allocation.key, allocation.value],
+        );
+      }
+    }
+  }
+
   /// Immutable snapshots from the first completed work cycle. The marker
   /// exists even when a task had no mechanic, preventing later double credit.
   Future<({Map<String, double> hoursByMechanic, Set<String> taskKeys})>
       preservedPayrollPreview(String businessId, String jobId) async {
     await ensureTables(db);
+    await db.transaction(() async =>
+      _backfillPreservedHoursFromHistory(businessId, jobId));
     String key(String doc, String line) => '${doc.length}:$doc$line';
     final tasks = await db.customSelect(
       'SELECT document_id, line_id FROM local_payroll_preserved_tasks_lab '
@@ -173,6 +233,7 @@ class LocalJobTasksLabStore {
   /// original labor again. Additional recheck work needs a distinct task.
   Future<void> _preservePayrollOnReopen(
       String businessId, String jobId, int capturedAt) async {
+    await _backfillPreservedHoursFromHistory(businessId, jobId);
     final completed = await db.customSelect(
       'SELECT document_id, line_id, employee_id, payroll_hours '
       'FROM local_job_tasks_lab WHERE business_id=? AND job_id=? '
@@ -225,6 +286,46 @@ class LocalJobTasksLabStore {
         }
       }
     }
+  }
+
+  /// Payroll PREVIEW, not real payment: frozen original earned hours plus
+  /// currently Done tasks that have never been credited. Reopening the same
+  /// labor line does not credit it again. Distinct recheck tasks can earn hours.
+  Future<Map<String, double>> earnedHoursPreview(
+      String businessId, String jobId) async {
+    final frozen = await preservedPayrollPreview(businessId, jobId);
+    final result = <String, double>{...frozen.hoursByMechanic};
+    final done = await db.customSelect(
+      'SELECT document_id, line_id, employee_id, payroll_hours '
+      'FROM local_job_tasks_lab WHERE business_id=? AND job_id=? '
+      "AND source_missing=0 AND status='done'",
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    for (final row in done) {
+      final doc = row.read<String>('document_id');
+      final line = row.read<String>('line_id');
+      if (frozen.taskKeys.contains('${doc.length}:$doc$line')) continue;
+      final allocations = await db.customSelect(
+        'SELECT employee_id, hours FROM local_task_allocations_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(doc), Variable<String>(line)],
+      ).get();
+      if (allocations.isNotEmpty) {
+        for (final allocation in allocations) {
+          final id = allocation.read<String>('employee_id');
+          final hours = allocation.read<double>('hours');
+          result[id] = (result[id] ?? 0) + hours;
+        }
+      } else {
+        final id = row.readNullable<String>('employee_id');
+        final hours = row.readNullable<double>('payroll_hours') ?? 0;
+        if (id != null && id.isNotEmpty && hours > 0) {
+          result[id] = (result[id] ?? 0) + hours;
+        }
+      }
+    }
+    return result;
   }
 
   /// An explicit Job status change has the same effect from the Jobs list,
