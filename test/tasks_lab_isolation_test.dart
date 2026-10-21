@@ -68,7 +68,23 @@ void main() {
     expect(main, contains('_jobStatusControl()'));
     expect(main, contains('onSelected: _changeJobStatus'));
     expect(main, contains('All tasks are Done'));
-    expect(main, contains('Earlier completed work'));
+    expect(main, contains("subtitle: 'Completion history · Read-only'"));
+    expect(main, contains('Widget _workLogPage()'));
+    // Work Log is a passive chronological ledger: no edit pencil, no onTap.
+    final logSection = main.split('Widget _workLogPage() {').last
+      .split('Widget _taskList({bool history = false})').first;
+    expect(logSection, contains("DateFormat('yyyy-MM-dd')"));
+    expect(logSection, contains("DateFormat('h:mm a')"));
+    expect(logSection, contains('records.sort('));
+    expect(logSection, contains('Previous completion'));
+    expect(logSection, isNot(contains('Icons.edit_outlined')));
+    expect(logSection, isNot(contains('onTap:')));
+    expect(logSection, isNot(contains('_editTask(')));
+    final taskCardSection = main.split('Widget _taskCard(').last
+      .split('Future<void> _editTask(').first;
+    expect(taskCardSection, contains('Icons.edit_outlined'));
+    expect(taskCardSection, contains('onTap: () => _editTask(task)'));
+    expect(main, contains('if (history) return _workLogPage();'));
 
     expect(main, contains('_confirmCompleteAllTasks'));
     expect(main, contains('completeConfirmedJobTasks('));
