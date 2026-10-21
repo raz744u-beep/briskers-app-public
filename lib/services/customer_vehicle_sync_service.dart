@@ -67,7 +67,25 @@ class CustomerVehicleSyncService {
     _syncEvents.add(businessId);
   }
 
+  // Multiple screens can request a customer pull during module navigation.
+  // Share one in-flight transfer per database/business instead of restarting a
+  // destructive bootstrap from each caller.
+  static final Expando<Map<String, Future<void>>> _activePulls = Expando();
+
   Future<void> pull(String businessId) async {
+    final active = _activePulls[_database] ??= {};
+    final existing = active[businessId];
+    if (existing != null) return existing;
+    final current = _pullUnshared(businessId);
+    active[businessId] = current;
+    try {
+      await current;
+    } finally {
+      if (identical(active[businessId], current)) active.remove(businessId);
+    }
+  }
+
+  Future<void> _pullUnshared(String businessId) async {
     int? cursor;
     var bootstrapped = false;
 
@@ -201,93 +219,94 @@ class CustomerVehicleSyncService {
   Future<void> _bootstrap(String businessId) async {
     String? afterCustomerId;
     int? bootstrapCursor;
-    var firstPage = true;
     var hasMore = true;
+    final authoritative = <String, Map<String, dynamic>>{};
 
     try {
+      // Download every page before touching the active local customer cache.
+      // A 401, timeout, malformed cursor, or failed page must not erase the
+      // previously available customers or expose a half-built directory.
       while (hasMore) {
-        final response = await _bootstrapPage(
-          businessId, afterCustomerId,
-        );
+        final response = await _bootstrapPage(businessId, afterCustomerId);
 
         if (response['revoke_all'] == true) {
+          // Explicit verified server revocation is the sole exception: access
+          // must be revoked immediately, regardless of cached/offline state.
           await _database.transaction(() async {
             await _clearCache(businessId);
             await _writeSyncState(
-              businessId,
-              cursor: null,
-              bootstrapped: false,
-              error: null,
-            );
+              businessId, cursor: null, bootstrapped: false, error: null);
           });
           return;
         }
 
         bootstrapCursor ??= int.tryParse(
-          response['bootstrap_cursor']?.toString() ?? '',
-        );
-
-        final bundles = List<dynamic>.from(
-          response['bundles'] ?? const <dynamic>[],
-        );
-        hasMore = response['has_more'] == true;
-        final nextId =
-            response['next_customer_id']?.toString();
-
-        await _database.transaction(() async {
-          if (firstPage) {
-            await _clearCache(businessId);
-          }
-
-          for (final raw in bundles) {
-            if (raw is! Map) continue;
-            await _applyBundle(
-              businessId,
-              Map<String, dynamic>.from(raw),
-            );
-          }
-        });
-
-        firstPage = false;
-        afterCustomerId =
-            (nextId == null || nextId.isEmpty) ? null : nextId;
-
-        if (hasMore && afterCustomerId == null) {
-          throw StateError(
-            'Customer bootstrap did not return a continuation ID.',
-          );
+          response['bootstrap_cursor']?.toString() ?? '');
+        if (bootstrapCursor == null) {
+          throw StateError('Customer bootstrap has no valid server cursor.');
         }
+        final bundles = List<dynamic>.from(
+          response['bundles'] ?? const <dynamic>[]);
+        hasMore = response['has_more'] == true;
+        final nextId = response['next_customer_id']?.toString();
+        for (final raw in bundles) {
+          if (raw is! Map) continue;
+          final bundle = Map<String, dynamic>.from(raw);
+          final customer = bundle['customer'];
+          if (customer is! Map) continue;
+          final id = customer['id']?.toString() ?? '';
+          if (id.isNotEmpty) authoritative[id] = bundle;
+        }
+        if (hasMore && (nextId == null || nextId.isEmpty ||
+            nextId == afterCustomerId)) {
+          throw StateError(
+            'Customer bootstrap did not return a valid continuation ID.');
+        }
+        afterCustomerId = hasMore ? nextId : null;
       }
 
+      // One atomic commit: all customers/vehicles appear together, or the
+      // old verified directory survives unchanged after rollback.
       await _database.transaction(() async {
+        final local = await _database.customSelect(
+          "SELECT id FROM local_customers "
+          "WHERE business_id=? AND sync_state='synced'",
+          variables: [Variable<String>(businessId)],
+        ).get();
+        for (final row in local) {
+          final id = row.read<String>('id');
+          if (!authoritative.containsKey(id)) {
+            await _removeCustomer(businessId, id);
+          }
+        }
+        for (final bundle in authoritative.values) {
+          await _applyBundle(businessId, bundle);
+        }
         await _writeSyncState(
           businessId,
-          cursor: bootstrapCursor ?? 0,
+          cursor: bootstrapCursor,
           bootstrapped: true,
           error: null,
         );
-        // A complete bootstrap is a historical baseline, including repair or
-        // re-import after a cache reset. Persist a revision in the existing
-        // sync-state table so notification readers cannot mistake it for a
-        // burst of new creation events. This is device metadata, not a server
-        // mutation, and commits atomically with bootstrap completion.
+        // The baseline is updated only when the whole page sequence commits.
         await _database.customStatement(
-          "INSERT INTO local_sync_states (business_id,scope,last_server_cursor,bootstrapped) "
+          "INSERT INTO local_sync_states "
+          "(business_id,scope,last_server_cursor,bootstrapped) "
           "VALUES (?,'customer_notification_baseline',?,1) "
-          "ON CONFLICT(business_id,scope) DO UPDATE SET last_server_cursor=excluded.last_server_cursor",
+          "ON CONFLICT(business_id,scope) DO UPDATE "
+          "SET last_server_cursor=excluded.last_server_cursor",
           [businessId, DateTime.now().toUtc().microsecondsSinceEpoch],
         );
       });
     } catch (error) {
-      await _database.transaction(() async {
-        await _clearCache(businessId);
-        await _writeSyncState(
-          businessId,
-          cursor: null,
-          bootstrapped: false,
-          error: error.toString(),
-        );
-      });
+      // Preserve the previous local snapshot and all queued customer work.
+      // No customer/vehicle table cleanup on an incomplete download.
+      await _writeSyncState(
+        businessId,
+        cursor: null,
+        bootstrapped: false,
+        error: error.toString(),
+      );
       rethrow;
     }
   }
@@ -340,6 +359,7 @@ class CustomerVehicleSyncService {
         server_updated_at=excluded.server_updated_at,
         row_version=excluded.row_version,
         sync_state='synced'
+      WHERE local_customers.sync_state='synced'
       ''',
       [
         customerId,
@@ -403,6 +423,7 @@ class CustomerVehicleSyncService {
           server_updated_at=excluded.server_updated_at,
           row_version=excluded.row_version,
           sync_state='synced'
+        WHERE local_vehicles.sync_state='synced'
         ''',
         [
           vehicleId,
@@ -469,6 +490,7 @@ class CustomerVehicleSyncService {
       '''
       DELETE FROM local_vehicles
       WHERE business_id = ?
+        AND local_vehicles.sync_state='synced'
         AND NOT EXISTS (
           SELECT 1
           FROM local_customer_vehicles cv
@@ -509,7 +531,7 @@ class CustomerVehicleSyncService {
       ) VALUES (?, ?, ?, ?, NULL, ?, ?)
       ON CONFLICT(business_id, scope) DO UPDATE SET
         last_server_cursor=excluded.last_server_cursor,
-        last_pull_at=excluded.last_pull_at,
+        last_pull_at=COALESCE(excluded.last_pull_at, local_sync_states.last_pull_at),
         last_error=excluded.last_error,
         bootstrapped=excluded.bootstrapped
       ''',
@@ -517,7 +539,7 @@ class CustomerVehicleSyncService {
         businessId,
         _scope,
         cursor,
-        _unix(DateTime.now().toUtc()),
+        bootstrapped && error == null ? _unix(DateTime.now().toUtc()) : null,
         error,
         bootstrapped ? 1 : 0,
       ],
