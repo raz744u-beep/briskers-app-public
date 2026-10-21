@@ -311,7 +311,17 @@ void main() {
     final switchEnd = expenses.indexOf('void dispose()', switchStart);
     expect(switchStart, greaterThan(0));
     expect(switchEnd, greaterThan(switchStart));
-    expect(expenses.substring(switchStart, switchEnd),
+    final didUpdate = expenses.substring(switchStart, switchEnd);
+    // Different business/role must forget the old shop's confirmations.
+    expect(didUpdate, contains('oldWidget.businessId != widget.businessId'));
+    expect(didUpdate, contains('oldWidget.roleCode != widget.roleCode'));
+    expect(didUpdate, contains('_serverConfirmedTransactionIds.clear()'));
+    // Ordinary dock navigation must not invalidate them.
+    final dockStart = didUpdate.indexOf(
+      'if (oldWidget.dockResetToken != widget.dockResetToken)',
+    );
+    expect(dockStart, greaterThan(0));
+    expect(didUpdate.substring(dockStart),
         isNot(contains('_serverConfirmedTransactionIds.clear()')));
   });
 
