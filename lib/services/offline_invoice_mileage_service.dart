@@ -83,7 +83,9 @@ class OfflineInvoiceMileageService {
     String businessId, String invoiceId, Map<String,dynamic> detail,
   ) async {
     if (detail['kind'] != 'invoice' ||
-        detail['mileage_schema_version'] != 2) return detail;
+        detail['mileage_schema_version'] != 2) {
+      return detail;
+    }
     final queued = await _database.customSelect(
       """SELECT payload_json,state FROM sync_outbox
          WHERE business_id=? AND entity_type=? AND entity_id=?
