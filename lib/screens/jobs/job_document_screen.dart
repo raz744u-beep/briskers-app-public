@@ -3702,7 +3702,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                 keyboardType: const TextInputType.numberWithOptions(
                                   decimal: true,
                                 ),
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
                                   labelText: explicitMileageOut
                                       ? 'Mileage Out at repair completion'
                                       : 'Current mileage',
