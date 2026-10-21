@@ -622,7 +622,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   Future<void> _deleteVerifiedOrphanMock(Map<String, dynamic> item) async {
     final id = item['id']?.toString() ?? '';
     if (widget.roleCode != 'owner' ||
-        id != AppointmentSyncService.orphanMockAppointmentId) return;
+        id != AppointmentSyncService.orphanMockAppointmentId) {
+      return;
+    }
     final ok = await _confirm(
       title: 'Delete orphan test appointment?',
       message: 'This is the disposable mock with missing customer, vehicle '
