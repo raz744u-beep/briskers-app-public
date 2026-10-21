@@ -100,6 +100,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   ExpensesPeriodTotals? _periodTotals;
   bool _periodCalculating = false;
   String? _periodError;
+  String? _lastPeriodScope;
+  DateTime? _lastPeriodAt;
+  String? _pendingPeriodScope;
 
   bool _isCurrentReceipt(int epoch, String businessId) =>
       mounted && epoch == _receiptEpoch && widget.businessId == businessId;
@@ -108,8 +111,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       mounted && epoch == _loadEpoch && widget.businessId == businessId;
 
   bool get _owner => widget.roleCode == 'owner';
-  bool get _showFinancialSummary =>
-      widget.roleCode == 'owner' || widget.roleCode == 'manager';
+  // Financial rollups belong to Owner only. Secretary/office and
+  // mechanic/foreman roles do not fetch or render confidential totals.
+  bool get _showFinancialSummary => _owner;
   bool get _allowRecurring =>
       widget.roleCode == 'owner' || widget.roleCode == 'manager';
 
@@ -318,6 +322,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   Future<void> _load({
     bool showLoading = true,
     bool refreshReceipts = false,
+    bool forceTotals = false,
   }) async {
     final epoch = ++_loadEpoch;
     final businessId = widget.businessId;
@@ -327,7 +332,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
     // Totals are independent of the visible page; never display stale 50-row
     // sums as though they represented the selected accounting period.
-    unawaited(_refreshPeriodTotals());
+    if (_showFinancialSummary) {
+      unawaited(_refreshPeriodTotals(force: forceTotals || refreshReceipts));
+    }
     if (showLoading) {
       setState(() {
         // Never blank a previously displayed financial list while refreshing.
@@ -476,11 +483,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     }
   }
 
-  Future<void> _refreshPeriodTotals() async {
-    final epoch = ++_periodEpoch;
+  Future<void> _refreshPeriodTotals({bool force = false}) async {
+    // Do not even query/report financial totals for secretary or other roles.
+    if (!_showFinancialSummary || !mounted) return;
     final businessId = widget.businessId;
-    final mode = BriskersConnectionModeController.instance;
-    final offline = mode.forceOffline;
+    final offline =
+        BriskersConnectionModeController.instance.forceOffline;
     final startDate = _rangeStartDate;
     final endDate = _rangeEndDate;
     final search = _searchController.text.trim();
@@ -488,16 +496,44 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final accountId = _accountFilterId;
     final categoryId = _categoryFilterId;
     final counterpartyId = _counterpartyFilterId;
-    if (!mounted) return;
+    final scope = [
+      businessId,
+      startDate?.toIso8601String() ?? '',
+      endDate?.toIso8601String() ?? '',
+      search,
+      direction ?? '',
+      accountId ?? '',
+      categoryId ?? '',
+      counterpartyId ?? '',
+    ].join('|');
+    if (offline) {
+      ++_periodEpoch;
+      _pendingPeriodScope = null;
+      setState(() {
+        _periodTotals = null;
+        _periodCalculating = false;
+        _periodError = 'Complete totals require an online refresh.';
+      });
+      return;
+    }
+    if (_pendingPeriodScope == scope) return;
+    final sameScope = _lastPeriodScope == scope && _periodTotals != null;
+    final fresh = sameScope && _lastPeriodAt != null &&
+        DateTime.now().difference(_lastPeriodAt!) <
+            const Duration(seconds: 45);
+    if (fresh && !force) return;
+    final epoch = ++_periodEpoch;
+    _pendingPeriodScope = scope;
     setState(() {
-      _periodTotals = null;
-      _periodCalculating = !offline;
-      _periodError = offline
-          ? 'Complete totals require an online refresh.' : null;
+      // Preserve a recently verified amount while rechecking the same scope.
+      // Switching periods never shows a total from an earlier date range.
+      if (!sameScope) _periodTotals = null;
+      _periodCalculating = true;
+      _periodError = null;
     });
-    if (offline) return;
     bool current() =>
         mounted && epoch == _periodEpoch &&
+        _pendingPeriodScope == scope &&
         widget.businessId == businessId &&
         !BriskersConnectionModeController.instance.forceOffline;
     try {
@@ -522,16 +558,23 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       if (!current()) return;
       setState(() {
         _periodTotals = totals;
+        _lastPeriodScope = scope;
+        _lastPeriodAt = DateTime.now();
+        _pendingPeriodScope = null;
         _periodCalculating = false;
         _periodError = null;
       });
     } catch (_) {
       if (!current()) return;
       setState(() {
-        _periodTotals = null;
+        _pendingPeriodScope = null;
+        // A previously verified same-scope total is retained only if we
+        // explicitly label it as historical, never silently as current.
+        if (!sameScope) _periodTotals = null;
         _periodCalculating = false;
-        _periodError =
-            'Complete totals are unavailable. Refresh to retry.';
+        _periodError = sameScope
+            ? 'Showing last verified totals; refresh failed.'
+            : 'Complete totals are unavailable. Refresh to retry.';
       });
     }
   }
@@ -989,7 +1032,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       // Keep the existing list visible while the locally saved transaction
       // is picked up and the authoritative server snapshot reconciles.
       // A full-screen spinner here made successful saves appear delayed.
-      unawaited(_load(showLoading: false));
+      unawaited(_load(showLoading: false, forceTotals: true));
     }
   }
 
@@ -1489,7 +1532,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: () => _load(),
+              onRefresh: () => _load(forceTotals: true),
               child: ListView(
                 controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
@@ -1544,11 +1587,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                     ),
                                   ),
                                   Text(
-                                    _periodCalculating
-                                        ? 'Calculating…'
-                                        : _periodTotals == null
-                                            ? 'Unavailable'
-                                            : _money(_periodTotals!.income),
+                                    _periodTotals == null
+                                        ? (_periodCalculating
+                                            ? 'Calculating…' : 'Unavailable')
+                                        : _money(_periodTotals!.income),
                                     style: const TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w900,
@@ -1569,11 +1611,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                     ),
                                   ),
                                   Text(
-                                    _periodCalculating
-                                        ? 'Calculating…'
-                                        : _periodTotals == null
-                                            ? 'Unavailable'
-                                            : _money(_periodTotals!.expenses),
+                                    _periodTotals == null
+                                        ? (_periodCalculating
+                                            ? 'Calculating…' : 'Unavailable')
+                                        : _money(_periodTotals!.expenses),
                                     style: const TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w900,
@@ -1593,7 +1634,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       child: Text(
                         _periodError ??
                             (_periodCalculating
-                                ? 'Calculating complete posted totals for the selected filters…'
+                                ? _periodTotals == null
+                                    ? 'Calculating complete posted totals…'
+                                    : 'Refreshing previously verified totals…'
                                 : _searchController.text.trim().isNotEmpty
                                     ? 'Search totals include all dates.'
                                     : 'Complete posted totals for $_rangeLabel · pending offline entries excluded'),
