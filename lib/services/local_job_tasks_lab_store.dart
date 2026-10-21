@@ -24,6 +24,13 @@ class LocalJobTasksLabStore {
       ON local_job_tasks_lab (business_id, job_id, status)
     ''');
     await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_job_lead_lab (
+        business_id TEXT NOT NULL, job_id TEXT NOT NULL,
+        employee_id TEXT, updated_at INTEGER NOT NULL,
+        PRIMARY KEY (business_id, job_id)
+      )
+    ''');
+    await db.customStatement('''
       CREATE TABLE IF NOT EXISTS local_employee_nicknames_lab (
         business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
         nickname TEXT NOT NULL, PRIMARY KEY (business_id, employee_id)
@@ -35,6 +42,36 @@ class LocalJobTasksLabStore {
         full_name TEXT NOT NULL, PRIMARY KEY (business_id, employee_id)
       )
     ''');
+  }
+
+  Future<String?> leadMechanic(String businessId, String jobId) async {
+    await ensureTables(db);
+    final row = await db.customSelect(
+      'SELECT employee_id FROM local_job_lead_lab '
+      'WHERE business_id=? AND job_id=?',
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).getSingleOrNull();
+    return row?.readNullable<String>('employee_id');
+  }
+
+  /// Lead mechanic is independent of per-labor assignments and payroll.
+  Future<void> saveLeadMechanic(
+    String businessId, String jobId, String? employeeId,
+  ) async {
+    await ensureTables(db);
+    if (businessId.trim().isEmpty || jobId.trim().isEmpty) {
+      throw ArgumentError('Business and job required');
+    }
+    await db.customStatement(
+      'INSERT INTO local_job_lead_lab '
+      '(business_id, job_id, employee_id, updated_at) VALUES (?, ?, ?, ?) '
+      'ON CONFLICT(business_id, job_id) '
+      'DO UPDATE SET employee_id=excluded.employee_id, '
+      'updated_at=excluded.updated_at',
+      [businessId, jobId,
+       employeeId == null || employeeId.isEmpty ? null : employeeId,
+       DateTime.now().millisecondsSinceEpoch],
+    );
   }
 
   Future<List<Map<String, dynamic>>> list(String businessId, String jobId) async {
