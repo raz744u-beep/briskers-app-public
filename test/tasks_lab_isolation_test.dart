@@ -55,6 +55,15 @@ void main() {
     expect(main, contains('jobDetailsOpen'));
     expect(main, contains('Assign main job mechanic'));
     expect(main, contains('Mark all tasks Done'));
+    // The bulk Done action belongs on Tasks, not as a duplicate Job Detail row.
+    final jobDetailSection = main.split('Widget _jobPage() {').last
+      .split('Widget _taskList({bool history = false})').first;
+    final taskListSection = main.split('Widget _taskList({bool history = false})').last
+      .split('Widget _payrollPage()').first;
+    expect(jobDetailSection, isNot(contains("'Mark all tasks Done'")));
+    expect(jobDetailSection, contains("'Tasks (TEST)'"));
+    expect(jobDetailSection, contains("'Work Log'"));
+    expect(taskListSection, contains("'Mark all tasks Done'"));
     expect(main, contains('Complete job J-24?'));
     expect(main, contains('_jobStatusControl()'));
     expect(main, contains('onSelected: _changeJobStatus'));
