@@ -48,6 +48,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   List<Map<String, dynamic>> earlierWorkLog = const [];
   Map<String, List<Map<String, dynamic>>> allocationsByLine = {};
   Map<String, double> earnedPayrollPreviewHours = {};
+  Map<String, int> testHourlyRates = {};
+  List<Map<String, dynamic>> testPayrollPayments = const [];
   int page = 0;
   int? expandedMenu;
   double menuAnchorX = 180;
@@ -103,8 +105,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final allocations = await Future.wait(rows.map((task) => store.allocations(
       businessId: BriskersLabFixture.businessId,
       jobId: BriskersLabFixture.jobId,
-      documentId: BriskersLabFixture.invoiceId,
+      documentId: task['document_id'].toString(),
       lineId: task['line_id'].toString())));
+    final rates = await store.payrollRates(BriskersLabFixture.businessId);
+    final payments = await store.payrollTestPayments(BriskersLabFixture.businessId);
     final earnedHours = await store.earnedHoursPreview(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final currentJobStatus = await store.jobStatus(
@@ -122,6 +126,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       jobStatusCode = currentJobStatus;
       earlierWorkLog = archived;
       earnedPayrollPreviewHours = earnedHours;
+      testHourlyRates = rates;
+      testPayrollPayments = payments;
       allocationsByLine = {for (var i = 0; i < rows.length; i++)
         rows[i]['line_id'].toString(): allocations[i]};
       loading = false;
@@ -284,6 +290,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
 
   Future<void> _editInvoiceLabor(Map<String, dynamic> task) async {
     final existing = allocationsByLine[task['line_id'].toString()] ?? [];
+    final notOnInvoice = task['document_id'] ==
+      LocalJobTasksLabStore.recheckDocumentId;
     String first = existing.isNotEmpty ? existing.first['employee_id'].toString()
       : task['employee_id']?.toString() ?? '';
     String second = existing.length > 1 ? existing[1]['employee_id'].toString() : '';
@@ -316,16 +324,18 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Assign invoice labor',
+              Text(notOnInvoice ? 'Assign recheck labor' : 'Assign invoice labor',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
               Text(_description(task)),
               const SizedBox(height: 8),
-              Text('Invoice labor: ${task['source_invoice_hours'] ?? '—'} hrs. '
+              Text('${notOnInvoice ? 'Recheck work' : 'Invoice labor'}: '
+                '${task['source_invoice_hours'] ?? '—'} hrs. '
                 'Combined mechanic hours may be less, but not more.',
                 style: const TextStyle(
                   fontSize: 12.5, color: Color(0xFF64748B))),
-              const Text('Invoice totals do not change.',
+              Text(notOnInvoice ? 'Not on Invoice · No customer charge.'
+                : 'Invoice totals do not change.',
                 style: TextStyle(fontSize: 12.5)),
               const SizedBox(height: 12),
               choose('Mechanic 1', first, (v) => first = v),
@@ -369,7 +379,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   await store.saveAllocations(
                     businessId: BriskersLabFixture.businessId,
                     jobId: BriskersLabFixture.jobId,
-                    documentId: BriskersLabFixture.invoiceId,
+                    documentId: task['document_id'].toString(),
                     lineId: task['line_id'].toString(),
                     hoursByEmployee: {
                       if (first.isNotEmpty) first: a!,
@@ -421,6 +431,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (task['document_id'] ==
+                LocalJobTasksLabStore.recheckDocumentId)
+              const Text('Recheck · Not on Invoice',
+                style: TextStyle(fontSize: 11,
+                  color: BriskersColors.jobs)),
             Text(_laborAssignment(task)),
             _statusChip(task['status']?.toString() ?? 'planned'),
           ],
@@ -489,7 +504,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                       await store.editTask(
                         businessId: BriskersLabFixture.businessId,
                         jobId: BriskersLabFixture.jobId,
-                        documentId: BriskersLabFixture.invoiceId,
+                        documentId: task['document_id'].toString(),
                         lineId: task['line_id'].toString(),
                         description: description.text,
                         editDescription: true,
@@ -1362,6 +1377,96 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     return description;
   }
 
+  Future<void> _addRecheckWork() async {
+    final description = TextEditingController();
+    final hours = TextEditingController();
+    String assignee = leadMechanicId ?? '';
+    final added = await showModalBottomSheet<bool>(
+      context: context, isScrollControlled: true,
+      showDragHandle: true, useSafeArea: true,
+      builder: (sheet) => StatefulBuilder(
+        builder: (sheet, update) => Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16,
+            MediaQuery.viewInsetsOf(sheet).bottom + 20),
+          child: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Add recheck work',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 5),
+              const Text('Not on Invoice · Extra labor for a recheck. '
+                'Does not change customer charges.',
+                style: TextStyle(color: Color(0xFF64748B))),
+              const SizedBox(height: 12),
+              TextField(controller: description, minLines: 2, maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Additional work description',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              TextField(controller: hours,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Additional payroll hours',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: assignee,
+                decoration: const InputDecoration(
+                  labelText: 'Assigned mechanic',
+                  border: OutlineInputBorder()),
+                items: [
+                  const DropdownMenuItem(
+                    value: '', child: Text('Unassigned')),
+                  for (final employee in BriskersLabFixture.employees)
+                    if (employee['role'] == 'mechanic' ||
+                        employee['role'] == 'owner')
+                      DropdownMenuItem(
+                        value: employee['id']!,
+                        child: Text(_employeeName(employee['id'])),
+                      ),
+                ],
+                onChanged: (v) => update(() => assignee = v ?? ''),
+              ),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: () async {
+                  final qty = double.tryParse(hours.text.trim());
+                  if (description.text.trim().isEmpty ||
+                      qty == null || !qty.isFinite || qty <= 0) {
+                    ScaffoldMessenger.of(sheet).showSnackBar(
+                      const SnackBar(content: Text(
+                        'Enter a description and positive hours')));
+                    return;
+                  }
+                  try {
+                    await store.addRecheckTask(
+                      businessId: BriskersLabFixture.businessId,
+                      jobId: BriskersLabFixture.jobId,
+                      description: description.text,
+                      hours: qty, employeeId: assignee);
+                    if (sheet.mounted) Navigator.pop(sheet, true);
+                  } catch (error) {
+                    if (sheet.mounted) {
+                      ScaffoldMessenger.of(sheet).showSnackBar(
+                        SnackBar(content: Text('$error')));
+                    }
+                  }
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Add recheck task'),
+              ),
+            ],
+          )),
+        ),
+      ),
+    );
+    description.dispose();
+    hours.dispose();
+    if (added == true) await _refresh();
+  }
+
   Widget _taskList({bool history = false}) {
     if (history) return _workLogPage();
     final visible = tasks.where(
@@ -1378,6 +1483,15 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             const Spacer(),
             _jobStatusControl(),
           ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          child: OutlinedButton.icon(
+            onPressed: jobStatusCode == 'completed'
+              ? null : _addRecheckWork,
+            icon: const Icon(Icons.add_circle_outline),
+            label: const Text('Add Task · Not on Invoice'),
+          ),
         ),
         if (visible.any((task) => task['status'] != 'done'))
           Padding(
@@ -1597,7 +1711,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             subtitle: Text('Richard Goff · 2012 Hyundai Equus'),
           ),
           const Divider(height: 1),
-          for (final task in tasks.where((t) => t['source_missing'] != 1))
+          for (final task in tasks.where((t) =>
+              t['source_missing'] != 1 &&
+              t['document_id'] == BriskersLabFixture.invoiceId))
             ListTile(
               dense: true,
               title: Text(task['source_description']?.toString() ?? 'Labor'),
