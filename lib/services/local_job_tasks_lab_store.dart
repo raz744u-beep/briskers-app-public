@@ -309,6 +309,61 @@ class LocalJobTasksLabStore {
     });
   }
 
+  /// Bulk task completion is one atomic local transaction. Every visible
+  /// active task must be acknowledged in the confirmation first. Existing
+  /// completion times are preserved; invoices and payment state are untouched.
+  Future<int> completeConfirmedJobTasks({
+    required String businessId,
+    required String jobId,
+    required List<Map<String, String>> confirmedTasks,
+  }) async {
+    await ensureTables(db);
+    if (businessId.trim().isEmpty || jobId.trim().isEmpty ||
+        confirmedTasks.isEmpty) {
+      throw ArgumentError('Confirm the active job tasks first');
+    }
+    String identity(String documentId, String lineId) =>
+        '${documentId.length}:$documentId$lineId';
+    final acknowledged = <String>{};
+    for (final task in confirmedTasks) {
+      final doc = task['document_id']?.trim() ?? '';
+      final line = task['line_id']?.trim() ?? '';
+      if (doc.isEmpty || line.isEmpty ||
+          !acknowledged.add(identity(doc, line))) {
+        throw ArgumentError('Invalid or duplicate confirmed task');
+      }
+    }
+    return db.transaction(() async {
+      final rows = await db.customSelect(
+        'SELECT document_id, line_id, status FROM local_job_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND source_missing=0',
+        variables: [
+          Variable<String>(businessId), Variable<String>(jobId),
+        ],
+      ).get();
+      final current = {
+        for (final row in rows)
+          identity(row.read<String>('document_id'), row.read<String>('line_id')),
+      };
+      if (current.length != acknowledged.length ||
+          !current.containsAll(acknowledged)) {
+        throw StateError('Tasks changed. Review the list and confirm again.');
+      }
+      final remaining = rows.where((row) =>
+          row.read<String>('status') != 'done').length;
+      if (remaining == 0) return 0;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await db.customStatement(
+        "UPDATE local_job_tasks_lab SET status='done', "
+        "completed_at=?, updated_at=? "
+        "WHERE business_id=? AND job_id=? AND source_missing=0 "
+        "AND status!='done'",
+        [now, now, businessId, jobId],
+      );
+      return remaining;
+    });
+  }
+
   Future<Map<String, String>> nicknames(String businessId) async {
     await ensureTables(db);
     final rows = await db.customSelect(
