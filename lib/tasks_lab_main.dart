@@ -329,9 +329,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               const SizedBox(height: 8),
               Text(_description(task)),
               const SizedBox(height: 8),
-              Text('${notOnInvoice ? 'Recheck work' : 'Invoice labor'}: '
+              Text('${notOnInvoice ? 'Original recheck' : 'Invoice book time'}: '
                 '${task['source_invoice_hours'] ?? '—'} hrs. '
-                'Combined mechanic hours may be less, but not more.',
+                'Payroll hours can be adjusted independently.',
                 style: const TextStyle(
                   fontSize: 12.5, color: Color(0xFF64748B))),
               Text(notOnInvoice ? 'Not on Invoice · No customer charge.'
@@ -361,18 +361,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     (first.isNotEmpty && first == second)) {
                   ScaffoldMessenger.of(sheet).showSnackBar(const SnackBar(
                     content: Text('Choose distinct mechanics and positive hours')));
-                  return;
-                }
-                final billed = (task['source_invoice_hours'] as num?)?.toDouble();
-                final allocated =
-                    (first.isNotEmpty ? a! : 0.0) +
-                    (second.isNotEmpty ? b! : 0.0);
-                if (billed == null || allocated > billed + 0.000001) {
-                  ScaffoldMessenger.of(sheet).showSnackBar(SnackBar(
-                    content: Text(billed == null
-                      ? 'Invoice labor hours unavailable; refresh invoice'
-                      : 'Assigned hours cannot exceed $billed invoice hours'),
-                  ));
                   return;
                 }
                 try {
