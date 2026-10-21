@@ -1224,18 +1224,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _navigate(4),
                 ),
-                if (completed < activeTasks) ...[
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.done_all,
-                      color: BriskersColors.jobs),
-                    title: const Text('Mark all tasks Done',
-                      style: TextStyle(fontWeight: FontWeight.w700)),
-                    subtitle: Text('${activeTasks - completed} unfinished'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: _confirmCompleteAllTasks,
-                  ),
-                ],
               ],
             ),
           ),
