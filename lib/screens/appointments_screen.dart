@@ -619,6 +619,37 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     if (shouldDelete == true && mounted) await _deleteAppointment(item);
   }
 
+  Future<void> _deleteVerifiedOrphanMock(Map<String, dynamic> item) async {
+    final id = item['id']?.toString() ?? '';
+    if (widget.roleCode != 'owner' ||
+        id != AppointmentSyncService.orphanMockAppointmentId) return;
+    final ok = await _confirm(
+      title: 'Delete orphan test appointment?',
+      message: 'This is the disposable mock with missing customer, vehicle '
+          'and job links. Remove only its failed appointment edit and queue '
+          'a server-verified deletion. No jobs, invoices, payments, '
+          'customers or other pending changes will be deleted. '
+          'The appointment stays hidden while the server confirms.',
+      action: 'Delete test appointment',
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+    try {
+      await _appointmentSync.queueDeleteVerifiedOrphanMock(
+        widget.businessId, id, isOwner: true,
+      );
+      if (!mounted) return;
+      await _loadLocal(reportError: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Test appointment hidden; deletion awaiting server confirmation.'),
+      ));
+      unawaited(_load(afterMutation: true));
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Test appointment not deleted: $error');
+    }
+  }
+
   Future<void> _deleteAppointment(Map<String, dynamic> item) async {
     if (widget.roleCode != 'owner') return;
     final isPendingCreate = item['id']?.toString().startsWith('local-appointment-') == true;
@@ -895,6 +926,18 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 title: const Text('Inspect J-8 test cleanup'),
                 onTap: () => Navigator.pop(sheetContext, 'repair_j8'),
               ),
+            if (widget.roleCode == 'owner' &&
+                item['id']?.toString() ==
+                    AppointmentSyncService.orphanMockAppointmentId &&
+                queued)
+              ListTile(
+                leading: const Icon(Icons.delete_forever_outlined,
+                    color: Colors.red),
+                title: const Text('Delete orphan test appointment',
+                    style: TextStyle(color: Colors.red)),
+                subtitle: const Text('Includes its one stuck edit; protects linked records'),
+                onTap: () => Navigator.pop(sheetContext, 'delete_orphan_mock'),
+              ),
             if (canDelete)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.red),
@@ -926,6 +969,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         break;
       case 'dependencies':
         await _showAppointmentDependencies(item);
+        break;
+      case 'delete_orphan_mock':
+        await _deleteVerifiedOrphanMock(item);
         break;
       case 'delete':
         await _deleteAppointment(item);
