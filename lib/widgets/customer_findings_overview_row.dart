@@ -80,7 +80,11 @@ class _CustomerFindingsOverviewRowState
       customerId: widget.customerId,
       vehicles: widget.vehicles,
     );
-    if (mounted) setState(() => _counts = work);
+    if (mounted) {
+      setState(() {
+        _counts = work;
+      });
+    }
   }
 
   @override
