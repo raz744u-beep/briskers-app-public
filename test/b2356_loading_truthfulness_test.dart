@@ -26,7 +26,7 @@ void main() {
   test('Appointments without bootstrap show unresolved status, never Total 0', () {
     final source = File('lib/screens/appointments_screen.dart').readAsStringSync();
     expect(source, contains('final total = _appointments?.length;'));
-    expect(source, contains("'${tr('total')} ${total ?? '—'}'"));
+    expect(source, contains(r"'${tr('total')} ${total ?? '—'}'"));
     expect(source, contains("ValueKey('appointment-awaiting-server')"));
     expect(source,
         contains('Checking appointments in the background. No saved list is available yet.'));
