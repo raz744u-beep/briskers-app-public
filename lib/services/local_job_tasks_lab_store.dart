@@ -162,7 +162,7 @@ class LocalJobTasksLabStore {
       if (known != null) continue;
       final summary = entry.readNullable<String>('assignment_summary') ?? '';
       final hoursByMechanic = <String, double>{};
-      final pattern = RegExp(r'([^,\\s]+):\\s*(\\d+(?:\\.\\d+)?)\\s*hrs');
+      final pattern = RegExp(r'([^,\s]+):\s*(\d+(?:\.\d+)?)\s*hrs');
       for (final match in pattern.allMatches(summary)) {
         final id = match.group(1);
         final hours = double.tryParse(match.group(2) ?? '');
