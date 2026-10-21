@@ -235,6 +235,25 @@ class InvoicePaymentFeed {
   }
 
   /// Stable identity is required to retire a local card without duplication.
+  /// On an online first page, stale server-pending cached receipts are NOT
+  /// proof that a payment remains pending. The same payment may already have
+  /// been finalized and appear in the financial ledger. Show the current
+  /// authorized page plus previous posted allocations and the durable local
+  /// outbox. Full pagination restores any still-pending older server items.
+  /// Never equate payments merely because amount/customer/date match.
+  static List<Map<String, dynamic>> reconcileOnlineFirstPage(
+    List<Map<String, dynamic>> authoritativePage,
+    List<Map<String, dynamic>> previouslyVisible,
+  ) {
+    final posted = previouslyVisible
+        .where((row) => row['receipt_state']?.toString() == 'posted')
+        .toList();
+    final local = previouslyVisible
+        .where((row) => row['receipt_state']?.toString() == 'local')
+        .toList();
+    return mergeReceipts([...authoritativePage, ...posted], local);
+  }
+
   /// Equal amounts or customer names NEVER establish receipt identity.
   static List<Map<String, dynamic>> mergeReceipts(
     List<Map<String, dynamic>> authoritative,
