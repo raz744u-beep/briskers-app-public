@@ -36,7 +36,7 @@ void main() {
         final items = offset == 600 ? 44 : 200;
         return [
           for (var i = 0; i < items; i++)
-            {'id': 'id-\${offset + i}', 'direction': 'expense',
+            {'id': 'id-${offset + i}', 'direction': 'expense',
               'amount': 1.00},
         ];
       },
