@@ -104,6 +104,7 @@ class CustomerFindingOverviewService {
       final permittedLocal = await visibility.filterFindings(local);
 
       List<Map<String, dynamic>> serverOrCache = cachedVisible;
+      var fetchedServer = false;
       if (!BriskersConnectionModeController.instance.forceOffline) {
         try {
           final server = <Map<String, dynamic>>[];
@@ -119,6 +120,7 @@ class CustomerFindingOverviewService {
             }));
           }
           final permittedServer = await visibility.filterFindings(server);
+          fetchedServer = true;
           // A locally created finding has no permanent server ID yet. Keep
           // only unread/sync-pending local drafts from the cached section;
           // never resurrect a previously synced or revoked cached record.
@@ -134,6 +136,12 @@ class CustomerFindingOverviewService {
           // cached and local counts without clearing notifications/data.
           serverOrCache = cachedVisible;
         }
+      }
+      // Never present a confident zero when the device has no recorded
+      // findings snapshot and the server could not be checked. The row
+      // remains tappable and offers the full screen for retry.
+      if (!fetchedServer && raw is! List && permittedLocal.isEmpty) {
+        throw StateError('No trusted findings snapshot is available.');
       }
       final merged = mergeWorkFindings(serverOrCache, permittedLocal);
       final projected = await _actions.project(businessId, merged);
