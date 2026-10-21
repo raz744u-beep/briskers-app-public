@@ -1274,7 +1274,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               label: const Text('Mark all tasks Done'),
             ),
           ),
-        if (visible.isEmpty)
+        if (visible.isEmpty && (!history || earlierWorkLog.isEmpty))
           const ListTile(title: Text('No entries yet')),
         ...visible.map((t) => _taskCard(t, history: history)),
         if (history && earlierWorkLog.isNotEmpty) ...[
