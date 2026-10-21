@@ -454,6 +454,21 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         projected['job_number'] = cachedNumber;
       }
     }
+    // Schema-v2 invoices can display Mileage In from this exact linked Job.
+    // Never project a vehicle's generic Current Mileage onto an old invoice.
+    if (projected['mileage_schema_version'] == 2 &&
+        projected['mileage_in'] == null &&
+        jobId.isNotEmpty) {
+      try {
+        final snapshot = await LocalJobRepository()
+            .jobDetail(widget.businessId, jobId);
+        final mileageIn = snapshot?.preInspection?['odometer'] ??
+            snapshot?.job['odometer_in'];
+        if (mileageIn != null) projected['mileage_in'] = mileageIn;
+      } catch (_) {
+        // Unavailable offline history stays blank; never invent mileage.
+      }
+    }
     return projected;
   }
 
