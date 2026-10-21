@@ -88,7 +88,12 @@ void main() {
   });
 
   test('release R8 suppresses only unavailable optional OCR languages', () {
-    final workflow = File('.github/workflows/android-debug.yml')
+    // CI executes tests inside a generated Flutter project whose workflow
+    // files remain in the parent checkout. Local root tests use the first path.
+    final workflowFile = File('.github/workflows/android-debug.yml');
+    final workflow = (workflowFile.existsSync()
+            ? workflowFile
+            : File('../.github/workflows/android-debug.yml'))
         .readAsStringSync();
     for (final language in ['chinese', 'devanagari', 'japanese', 'korean']) {
       expect(workflow,
