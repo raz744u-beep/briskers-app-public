@@ -55,6 +55,12 @@ void main() {
     expect(main, contains('jobDetailsOpen'));
     expect(main, contains('Assign main job mechanic'));
     expect(main, contains('Mark all tasks Done'));
+    expect(main, contains('Complete job J-24?'));
+    expect(main, contains('_jobStatusControl()'));
+    expect(main, contains('onSelected: _changeJobStatus'));
+    expect(main, contains('All tasks are Done'));
+    expect(main, contains('Earlier completed work'));
+
     expect(main, contains('_confirmCompleteAllTasks'));
     expect(main, contains('completeConfirmedJobTasks('));
     expect(main, contains('Assign invoice labor'));
@@ -80,6 +86,115 @@ void main() {
     expect(dock, contains('this.onLongPressed,'));
     expect(dock, contains('onLongPressStart: widget.onLongPressed == null'));
     expect(dock, contains('details.globalPosition'));
+  });
+
+  test('Job status and task transitions share one persisted workflow',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    const shop = BriskersLabFixture.businessId;
+    const job = BriskersLabFixture.jobId;
+    const invoice = BriskersLabFixture.invoiceId;
+    List<Map<String, String>> confirmations(List<Map<String, dynamic>> rows) =>
+        [for (final task in rows) {
+          'document_id': task['document_id'].toString(),
+          'line_id': task['line_id'].toString(),
+        }];
+    try {
+      await store.reconcileDocument(
+        businessId: shop, jobId: job, documentId: invoice,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice),
+      );
+      expect(await store.jobStatus(shop, job), 'open');
+      await store.saveLeadMechanic(shop, job, 'lab-kam');
+      await store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-valve-covers', status: 'in_progress',
+      );
+      expect(await store.jobStatus(shop, job), 'in_progress');
+
+      await store.changeJobStatus(
+        businessId: shop, jobId: job, statusCode: 'pending_approval');
+      await store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-spark-plugs', status: 'in_progress');
+      expect(await store.jobStatus(shop, job), 'pending_approval');
+      await store.changeJobStatus(
+        businessId: shop, jobId: job, statusCode: 'waiting_parts');
+      await store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-valve-covers', status: 'done');
+      expect(await store.jobStatus(shop, job), 'waiting_parts');
+      await store.changeJobStatus(
+        businessId: shop, jobId: job, statusCode: 'needs_recheck');
+      await store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-differential', status: 'in_progress');
+      expect(await store.jobStatus(shop, job), 'needs_recheck');
+
+      final active = await store.list(shop, job);
+      await expectLater(
+        store.changeJobStatus(
+          businessId: shop, jobId: job, statusCode: 'completed',
+          confirmedTasks: confirmations(active).take(2).toList(),
+        ),
+        throwsStateError,
+      );
+      expect(await store.jobStatus(shop, job), 'needs_recheck');
+      expect((await store.list(shop, job)).where(
+        (task) => task['status'] == 'done').length, 1);
+
+      final previouslyDone = active.singleWhere(
+        (task) => task['line_id'] == 'lab-valve-covers');
+      final earlierTime = previouslyDone['completed_at'];
+      await store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-transmission',
+        hoursByEmployee: {'lab-kam': 1.0, 'lab-chris': 0.5},
+      );
+      final changed = await store.changeJobStatus(
+        businessId: shop, jobId: job, statusCode: 'completed',
+        confirmedTasks: confirmations(active),
+      );
+      expect(changed, 3);
+      expect(await store.jobStatus(shop, job), 'completed');
+      final done = await store.list(shop, job);
+      expect(done.every((task) => task['status'] == 'done'), isTrue);
+      expect(done.singleWhere(
+        (task) => task['line_id'] == 'lab-valve-covers')['completed_at'],
+        earlierTime);
+      await expectLater(
+        store.editTask(
+          businessId: shop, jobId: job, documentId: invoice,
+          lineId: 'lab-spark-plugs', status: 'in_progress',
+        ),
+        throwsStateError,
+      );
+
+      final reopened = await store.changeJobStatus(
+        businessId: shop, jobId: job, statusCode: 'in_progress');
+      expect(reopened, 4);
+      expect(await store.jobStatus(shop, job), 'in_progress');
+      final pending = await store.list(shop, job);
+      expect(pending.every((task) => task['status'] == 'in_progress'), isTrue);
+      expect(pending.every((task) => task['completed_at'] == null), isTrue);
+      final archive = await store.priorCompletions(shop, job);
+      expect(archive.length, 4);
+      expect(archive.singleWhere(
+        (task) => task['line_id'] == 'lab-valve-covers')['completed_at'],
+        earlierTime);
+      expect(archive.singleWhere(
+        (task) => task['line_id'] == 'lab-transmission')
+          ['assignment_summary'].toString(), contains('lab-chris'));
+      expect((await store.allocations(businessId: shop, jobId: job,
+        documentId: invoice, lineId: 'lab-transmission')).length, 2);
+      expect(await store.leadMechanic(shop, job), 'lab-kam');
+      expect(await store.jobStatus('another-shop', job), 'open');
+      expect(await store.priorCompletions('another-shop', job), isEmpty);
+    } finally {
+      await db.close();
+    }
   });
 
   test('Job lead auto-fills unassigned tasks and preserves labor overrides',
