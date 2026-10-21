@@ -62,7 +62,8 @@ class LocalJobTasksLabStore {
     return row?.readNullable<String>('employee_id');
   }
 
-  /// Lead mechanic is independent of per-labor assignments and payroll.
+  /// Assign uncustomized task labor to the job lead automatically.
+  /// Explicit invoice allocations are never rewritten by lead changes.
   Future<void> saveLeadMechanic(
     String businessId, String jobId, String? employeeId,
   ) async {
@@ -70,16 +71,35 @@ class LocalJobTasksLabStore {
     if (businessId.trim().isEmpty || jobId.trim().isEmpty) {
       throw ArgumentError('Business and job required');
     }
-    await db.customStatement(
-      'INSERT INTO local_job_lead_lab '
-      '(business_id, job_id, employee_id, updated_at) VALUES (?, ?, ?, ?) '
-      'ON CONFLICT(business_id, job_id) '
-      'DO UPDATE SET employee_id=excluded.employee_id, '
-      'updated_at=excluded.updated_at',
-      [businessId, jobId,
-       employeeId == null || employeeId.isEmpty ? null : employeeId,
-       DateTime.now().millisecondsSinceEpoch],
-    );
+    await db.transaction(() async {
+      final previous = await leadMechanic(businessId, jobId);
+      final newLead = employeeId == null || employeeId.isEmpty
+          ? null : employeeId;
+      await db.customStatement(
+        'INSERT INTO local_job_lead_lab '
+        '(business_id, job_id, employee_id, updated_at) VALUES (?, ?, ?, ?) '
+        'ON CONFLICT(business_id, job_id) '
+        'DO UPDATE SET employee_id=excluded.employee_id, '
+        'updated_at=excluded.updated_at',
+        [businessId, jobId, newLead,
+          DateTime.now().millisecondsSinceEpoch],
+      );
+      // Only tasks without manual splits/allocations, and either previously
+      // unassigned or inheriting the former lead, receive the new lead.
+      await db.customStatement('''
+        UPDATE local_job_tasks_lab SET employee_id=?, updated_at=?
+        WHERE business_id=? AND job_id=?
+          AND (employee_id IS NULL OR employee_id=?)
+          AND NOT EXISTS (
+            SELECT 1 FROM local_task_allocations_lab a
+            WHERE a.business_id=local_job_tasks_lab.business_id
+              AND a.job_id=local_job_tasks_lab.job_id
+              AND a.document_id=local_job_tasks_lab.document_id
+              AND a.line_id=local_job_tasks_lab.line_id
+          )
+      ''', [newLead, DateTime.now().millisecondsSinceEpoch,
+        businessId, jobId, previous]);
+    });
   }
 
   Future<List<Map<String, dynamic>>> list(String businessId, String jobId) async {
@@ -110,6 +130,7 @@ class LocalJobTasksLabStore {
         [businessId, jobId, documentId],
       );
       final now = DateTime.now().millisecondsSinceEpoch;
+      final lead = await leadMechanic(businessId, jobId);
       for (final line in laborLines) {
         final id = line['id']?.toString().trim() ?? '';
         if (id.isEmpty) continue;
@@ -120,12 +141,12 @@ class LocalJobTasksLabStore {
         await db.customStatement('''
           INSERT INTO local_job_tasks_lab
             (business_id, job_id, document_id, line_id,
-             source_description, payroll_hours, status, updated_at, source_missing)
-          VALUES (?, ?, ?, ?, ?, ?, 'planned', ?, 0)
+             source_description, payroll_hours, employee_id, status, updated_at, source_missing)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'planned', ?, 0)
           ON CONFLICT(business_id, job_id, document_id, line_id)
           DO UPDATE SET source_description=excluded.source_description,
                         source_missing=0
-        ''', [businessId, jobId, documentId, id, description, qty, now]);
+        ''', [businessId, jobId, documentId, id, description, qty, lead, now]);
       }
     });
   }
