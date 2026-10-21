@@ -1,7 +1,8 @@
 -- REVIEW ONLY. Do not deploy to active Briskers Dev without owner
 -- approval to automatically post due financial transactions.
 --
--- Last corrected amount becomes the amount on the next occurrence.
+-- The latest corrected posted amount is used for the next occurrence.
+-- No new trigger is attached to user edits or financial allocations.
 -- Cintas 2026-10-21 was due for $105.29; pg_cron run at 12:05Z failed
 -- 23514 "Expense allocations must equal the expense/refund amount".
 -- Generate the required signed expense allocation in the same transaction;
@@ -25,6 +26,7 @@ declare
   category_direction text;
   tx_kind text;
   signed_amount numeric;
+  latest_corrected_amount numeric;
   tx uuid;
 begin
   for r in
@@ -73,7 +75,25 @@ begin
       when r.direction='income' and category_direction='expense' then 'supplier_refund'
       else 'other_income'
     end;
-    signed_amount := case when r.direction='expense' then -r.amount else r.amount end;
+    -- Prefer the most recent actual posted occurrence (including its Owner
+    -- correction) over the initial saved amount. A corrected Cintas amount
+    -- therefore becomes next week's amount without touching old invoices or
+    -- adding triggers to the transaction edit path. Rule-only first occurrence
+    -- uses the configured starting amount.
+    SELECT abs(t.amount) INTO latest_corrected_amount
+    FROM briskers.financial_transactions t
+    WHERE t.business_id=r.business_id
+      AND t.recurring_rule_id=r.id
+      AND t.recurring_occurrence_date IS NOT NULL
+      AND t.status='posted'
+      AND ((r.direction='expense' AND t.amount<0)
+           OR (r.direction='income' AND t.amount>0))
+    ORDER BY t.recurring_occurrence_date DESC, t.created_at DESC, t.id DESC
+    LIMIT 1;
+    signed_amount := CASE
+      WHEN r.direction='expense' THEN -coalesce(latest_corrected_amount,r.amount)
+      ELSE coalesce(latest_corrected_amount,r.amount)
+    END;
 
     occ := r.next_date;
     while occ<=coalesce(p_through_date,current_date)
@@ -112,7 +132,8 @@ begin
 
     next_occ := occ;
     update briskers.recurring_transactions
-    set next_date=next_occ,
+    set amount=abs(signed_amount),
+        next_date=next_occ,
         paused_reason=null,
         is_repeating=case
           when end_date is not null and next_occ>end_date then false
@@ -125,52 +146,6 @@ begin
 end
 $function$
 ;
-
--- Carry an authorized correction on a generated expense to the next
--- recurring occurrence. The original transaction is still independently
--- editable/audited; the rule amount is the latest corrected value.
--- Do not rewrite earlier occurrences or allow editing an older occurrence
--- to overrule a more recent one.
-CREATE OR REPLACE FUNCTION briskers.carry_forward_recurring_amount_v1()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''
-AS $trigger$
-BEGIN
-  IF TG_OP <> 'UPDATE' OR NEW.amount IS NOT DISTINCT FROM OLD.amount OR
-     NEW.recurring_rule_id IS NULL OR
-     NEW.recurring_occurrence_date IS NULL OR
-     NEW.status <> 'posted' OR
-     NEW.kind NOT IN ('supplier_expense','other_expense',
-                       'supplier_refund','other_income') THEN
-    RETURN NEW;
-  END IF;
-
-  UPDATE briskers.recurring_transactions r
-  SET amount=abs(NEW.amount),
-      updated_at=clock_timestamp(),
-      row_version=r.row_version+1
-  WHERE r.business_id=NEW.business_id
-    AND r.id=NEW.recurring_rule_id
-    AND r.is_repeating
-    AND r.direction=CASE WHEN NEW.amount<0 THEN 'expense' ELSE 'income' END
-    AND r.amount IS DISTINCT FROM abs(NEW.amount)
-    AND NOT EXISTS (
-      SELECT 1 FROM briskers.financial_transactions later
-      WHERE later.business_id=NEW.business_id
-        AND later.recurring_rule_id=NEW.recurring_rule_id
-        AND later.recurring_occurrence_date>NEW.recurring_occurrence_date
-        AND later.status='posted'
-    );
-  RETURN NEW;
-END;
-$trigger$;
-REVOKE ALL ON FUNCTION briskers.carry_forward_recurring_amount_v1()
-  FROM PUBLIC,anon,authenticated;
-DROP TRIGGER IF EXISTS recurring_amount_carry_forward_v1
-  ON briskers.financial_transactions;
-CREATE TRIGGER recurring_amount_carry_forward_v1
-AFTER UPDATE OF amount ON briskers.financial_transactions
-FOR EACH ROW
-EXECUTE FUNCTION briskers.carry_forward_recurring_amount_v1();
 
 -- Hourly at minute 05, first due run ~00:05 America/Chicago, and hourly
 -- catch-up if a previous scheduled run fails or the database was offline.
