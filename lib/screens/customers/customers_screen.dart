@@ -190,6 +190,27 @@ class _CustomersScreenState extends State<CustomersScreen> {
         _showingLocal = !forceOnline && !_onlineReady;
         _error = null;
       });
+      // A failed multi-page bootstrap can leave only a subset available
+      // offline. A typed search may query authorized server customers while
+      // the full local directory is still rebuilding. Never treat a limited
+      // online search page as the complete customer total.
+      if (query.isNotEmpty && !forceOnline && !_onlineReady &&
+          !BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          final authorized = await _api.customers(
+            widget.businessId, search: query, limit: 100);
+          if (!mounted || request != _searchRequest ||
+              _search.text.trim() != query) return;
+          setState(() {
+            _rows = authorized;
+            _showingLocal = false;
+            _error = null;
+          });
+        } catch (_) {
+          // The local search results above stay usable if the remote read
+          // times out or access is revoked. No guessed results are added.
+        }
+      }
     } catch (error) {
       if (!mounted || request != _searchRequest) return;
       setState(() => _error = error.toString());
