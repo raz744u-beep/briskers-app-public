@@ -57,7 +57,7 @@ class LocalJobTasksLabStore {
         business_id TEXT NOT NULL, job_id TEXT NOT NULL,
         document_id TEXT NOT NULL, line_id TEXT NOT NULL,
         description TEXT NOT NULL,
-        employee_id TEXT, payroll_hours REAL,
+        employee_id TEXT, payroll_hours REAL, assignment_summary TEXT,
         completed_at INTEGER NOT NULL, reopened_at INTEGER NOT NULL
       )
     ''');
@@ -175,12 +175,23 @@ class LocalJobTasksLabStore {
         await db.customStatement('''
           INSERT INTO local_task_completion_history_lab
           (business_id, job_id, document_id, line_id, description,
-           employee_id, payroll_hours, completed_at, reopened_at)
-          SELECT business_id, job_id, document_id, line_id,
-            COALESCE(custom_description, source_description),
-            employee_id, payroll_hours, completed_at, ?
-          FROM local_job_tasks_lab WHERE business_id=? AND job_id=?
-            AND source_missing=0 AND status='done' AND completed_at IS NOT NULL
+           employee_id, payroll_hours, assignment_summary,
+           completed_at, reopened_at)
+          SELECT t.business_id, t.job_id, t.document_id, t.line_id,
+            COALESCE(t.custom_description, t.source_description),
+            t.employee_id, t.payroll_hours,
+            COALESCE(
+              (SELECT group_concat(a.employee_id || ': ' || a.hours || ' hrs', ', ')
+               FROM local_task_allocations_lab a
+               WHERE a.business_id=t.business_id AND a.job_id=t.job_id
+                 AND a.document_id=t.document_id AND a.line_id=t.line_id),
+              t.employee_id || ': ' || t.payroll_hours || ' hrs',
+              'Unassigned'
+            ),
+            t.completed_at, ?
+          FROM local_job_tasks_lab t WHERE t.business_id=? AND t.job_id=?
+            AND t.source_missing=0 AND t.status='done'
+            AND t.completed_at IS NOT NULL
         ''', [now, businessId, jobId]);
         final completed = await db.customSelect(
           "SELECT COUNT(*) AS count FROM local_job_tasks_lab "
@@ -335,6 +346,10 @@ class LocalJobTasksLabStore {
       throw ArgumentError('Description required');
     }
     await db.transaction(() async {
+      if (status != null && status != 'done' &&
+          await jobStatus(businessId, jobId) == 'completed') {
+        throw StateError('Reopen the job before changing completed tasks');
+      }
       final row = await db.customSelect(
         'SELECT status, completed_at FROM local_job_tasks_lab '
         'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
