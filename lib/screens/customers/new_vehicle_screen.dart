@@ -225,10 +225,10 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
             inputFormatters: const [VinTextInputFormatter()],
             decoration: InputDecoration(
               labelText: 'VIN',
-              helperText: 'Scan it or type/edit it manually',
+              helperText: 'Photograph, scan the barcode, or type it manually',
               suffixIcon: IconButton(
                 onPressed: _scanVin,
-                tooltip: 'Scan VIN barcode',
+                tooltip: 'Capture VIN from photo or barcode',
                 icon: const Icon(Icons.qr_code_scanner),
               ),
             ),
