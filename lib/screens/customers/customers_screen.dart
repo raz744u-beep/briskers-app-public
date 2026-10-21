@@ -41,6 +41,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
   final _search = TextEditingController();
   Timer? _searchDebounce;
   int _searchRequest = 0;
+  int _loadRequest = 0;
   List<Map<String, dynamic>>? _rows;
   int _totalCustomers = 0;
   String? _error;
@@ -71,8 +72,11 @@ class _CustomersScreenState extends State<CustomersScreen> {
   }
 
   Future<void> _load({bool refreshOnline = true}) async {
+    final request = ++_loadRequest;
     final query = _search.text.trim();
     var localAvailable = false;
+    bool current() => mounted && request == _loadRequest &&
+        query == _search.text.trim();
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
 
     if (!forceOnline) {
@@ -92,7 +96,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
       final bootstrapped = results[2] == true;
       localAvailable = bootstrapped || rows.isNotEmpty;
 
-      if (mounted && localAvailable) {
+      if (current() && localAvailable) {
         setState(() {
           _rows = rows;
           _totalCustomers = total;
@@ -108,6 +112,18 @@ class _CustomersScreenState extends State<CustomersScreen> {
 
     if (!refreshOnline) return;
 
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (!current()) return;
+      setState(() {
+        _rows ??= const <Map<String, dynamic>>[];
+        _onlineReady = false;
+        _showingLocal = true;
+        _refreshFailed = false;
+        _error = null;
+      });
+      return;
+    }
+
     try {
       await _sync.pull(widget.businessId);
       final bootstrapped =
@@ -120,7 +136,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
         _localCustomers.customerTotal(widget.businessId),
       ]);
 
-      if (!mounted) return;
+      if (!current()) return;
       setState(() {
         _rows = List<Map<String, dynamic>>.from(
           results[0] as List,
@@ -132,22 +148,41 @@ class _CustomersScreenState extends State<CustomersScreen> {
         _error = null;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!current()) return;
+      // An unrelated interrupted bootstrap may have populated another
+      // screen's cache since this request began. Keep any already displayed
+      // customers instead of replacing them with a blank/error screen.
+      final savedVisible = _rows != null && _rows!.isNotEmpty;
       setState(() {
         _onlineReady = false;
-        if (localAvailable && !forceOnline) {
-          _showingLocal = true;
-          _refreshFailed = true;
-          _error = null;
-        } else {
-          _rows ??= const [];
-          _error = error.toString();
-        }
+        _refreshFailed = true;
+        _showingLocal = !forceOnline && (localAvailable || savedVisible);
+        _rows ??= const <Map<String, dynamic>>[];
+        _error = _friendlySyncError(error);
       });
     }
   }
 
+  static String _friendlySyncError(Object error) {
+    final description = error.toString().toLowerCase();
+    if (description.contains('failed host lookup') ||
+        description.contains('socketexception') ||
+        description.contains('network is unreachable')) {
+      return 'Cannot reach the Briskers server (network/DNS issue). '
+          'Previously saved customers remain on this device. '
+          'Check Wi-Fi or mobile data and refresh when connected.';
+    }
+    if (description.contains('timeout')) {
+      return 'Customer download timed out. Saved customers are unchanged; '
+          'retry after the connection stabilizes.';
+    }
+    return 'Customer download did not finish. Any locally saved customers '
+        'remain available; try refreshing when the connection is stable.';
+  }
+
   void _onSearchChanged(String _) {
+    // A late network result must never replace a newer typed search.
+    ++_loadRequest;
     _searchDebounce?.cancel();
     _searchDebounce = Timer(
       const Duration(milliseconds: 250),
@@ -178,6 +213,29 @@ class _CustomersScreenState extends State<CustomersScreen> {
         _showingLocal = !forceOnline && !_onlineReady;
         _error = null;
       });
+      // A failed multi-page bootstrap can leave only a subset available
+      // offline. A typed search may query authorized server customers while
+      // the full local directory is still rebuilding. Never treat a limited
+      // online search page as the complete customer total.
+      if (query.isNotEmpty && !forceOnline && !_onlineReady &&
+          !BriskersConnectionModeController.instance.forceOffline) {
+        try {
+          final authorized = await _api.customers(
+            widget.businessId, search: query, limit: 100);
+          if (!mounted || request != _searchRequest ||
+              _search.text.trim() != query) {
+            return;
+          }
+          setState(() {
+            _rows = authorized;
+            _showingLocal = false;
+            _error = null;
+          });
+        } catch (_) {
+          // The local search results above stay usable if the remote read
+          // times out or access is revoked. No guessed results are added.
+        }
+      }
     } catch (error) {
       if (!mounted || request != _searchRequest) return;
       setState(() => _error = error.toString());

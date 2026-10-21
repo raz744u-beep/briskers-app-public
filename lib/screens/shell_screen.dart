@@ -429,6 +429,10 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     // not require a precision tap on the tiny badge label.
     // Do not consume events here; only explicit review marks them read.
     if (_homeCustomersNewCount > 0 && _customerNotifications != null) {
+      // Navigate immediately, even when SQLite notification reads are busy
+      // with a large customer bootstrap. Replace with the review queue when
+      // its exact IDs are available; never consume unread events on tap.
+      _goTo(1);
       final request = ++_customerNavigationRequest;
       unawaited(_openCustomers(request));
       return;
@@ -454,7 +458,10 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     ++_customerNavigationRequest;
     setState(() {
       _index = index;
-      if (index == 1) _focusedCustomerIds = null;
+      if (index == 1) {
+        _focusedCustomerIds = null;
+        _customersRefreshToken++;
+      }
       if (index == 2) _jobsRefreshToken++;
       if (index == 3) _estimatesDockReset++;
       if (index == 4) _invoicesDockReset++;
@@ -487,7 +494,8 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
       if (nested) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
-      // Only the Customers badge opens the new-customer review queue.
+      // A badge tap also changes screens immediately while IDs load.
+      _goTo(1);
       final request = ++_customerNavigationRequest;
       unawaited(_openCustomers(request));
     },
