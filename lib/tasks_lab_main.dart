@@ -1077,26 +1077,34 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       }
     },
     child: Scaffold(
-    appBar: AppBar(
-      backgroundColor: const Color(0xFFE1F0F2),
-      title: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Briskers', style: TextStyle(
-            color: Color(0xFF1767B3), fontWeight: FontWeight.w900)),
-          Text('TASKS TEST · OFFLINE', style: TextStyle(
-            fontSize: 11, color: Color(0xFF007F79))),
-        ],
-      ),
+    appBar: page == 0 ? null : AppBar(
+      backgroundColor: BriskersColors.jobs.withValues(alpha: 0.08),
+      toolbarHeight: 78,
+      titleSpacing: 10,
+      title: Row(children: [
+        Image.asset('assets/briskers_header_logo.png',
+          height: 44, width: 148, fit: BoxFit.contain,
+          errorBuilder: (_, error, trace) => const Text('Briskers',
+            style: TextStyle(
+              color: Color(0xFF1767B3), fontWeight: FontWeight.w900))),
+        const Spacer(),
+        const Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('TASKS TEST', style: TextStyle(
+              fontSize: 11, fontWeight: FontWeight.w800,
+              color: BriskersColors.jobs)),
+            Text('OFFLINE · ISOLATED', style: TextStyle(
+              fontSize: 10, color: Color(0xFF667085))),
+          ],
+        ),
+      ]),
       actions: [
         IconButton(
           tooltip: 'Employee names',
           onPressed: _editEmployeeNames,
           icon: const Icon(Icons.badge_outlined)),
-        IconButton(
-          tooltip: 'Refresh local test data',
-          onPressed: _refresh,
-          icon: const Icon(Icons.refresh)),
       ],
     ),
     body: Stack(
