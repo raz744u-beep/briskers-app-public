@@ -79,6 +79,45 @@ void main() {
     expect(dock, contains('details.globalPosition'));
   });
 
+  test('Job lead auto-fills unassigned tasks and preserves labor overrides',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    const shop = BriskersLabFixture.businessId;
+    const job = BriskersLabFixture.jobId;
+    const invoice = BriskersLabFixture.invoiceId;
+    try {
+      await store.reconcileDocument(businessId: shop, jobId: job,
+        documentId: invoice,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice));
+      await store.saveLeadMechanic(shop, job, 'lab-kam');
+      var tasks = await store.list(shop, job);
+      expect(tasks.every((row) => row['employee_id'] == 'lab-kam'), isTrue);
+      await store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-transmission',
+        hoursByEmployee: {'lab-chris': 1.5},
+      );
+      await store.saveLeadMechanic(shop, job, 'lab-chris');
+      tasks = await store.list(shop, job);
+      expect(tasks.singleWhere((row) => row['line_id'] == 'lab-valve-covers')
+        ['employee_id'], 'lab-chris');
+      expect((await store.allocations(businessId: shop, jobId: job,
+        documentId: invoice, lineId: 'lab-transmission'))
+        .single['employee_id'], 'lab-chris');
+      await store.reconcileDocument(businessId: shop, jobId: job,
+        documentId: invoice,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice));
+      expect((await store.allocations(businessId: shop, jobId: job,
+        documentId: invoice, lineId: 'lab-transmission')).length, 1);
+      expect(await store.leadMechanic('another-shop', job), isNull);
+    } finally {
+      await db.close();
+    }
+  });
+
   test('Task assignments and nicknames persist in a local SQLite test DB',
       () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
@@ -169,7 +208,7 @@ void main() {
           r['line_id'] == 'lab-valve-covers');
       final trans = rows.singleWhere((r) =>
           r['line_id'] == 'lab-transmission');
-      expect(valve['employee_id'], 'lab-kam');
+      expect(valve['employee_id'], 'lab-chris');
       expect(valve['custom_description'], 'Finished valve covers');
       expect(valve['status'], 'done');
       expect(valve['completed_at'], isA<int>());
