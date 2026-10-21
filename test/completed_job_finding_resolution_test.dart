@@ -40,9 +40,9 @@ void main() {
     final end = source.indexOf('Future<void> _changeFinding(', start);
     final picker = source.substring(start, end);
     expect(picker, contains('business_id=? AND customer_id=? AND vehicle_id=?'));
-    expect(picker, contains(
-      '_api.customerServiceHistory(\\n          widget.businessId, widget.customerId)'.replaceAll('\\n', '\n'),
-    ));
+    expect(picker,
+        contains('final remote = await _api.customerServiceHistory('));
+    expect(picker, contains('widget.businessId, widget.customerId);'));
     expect(picker, contains("row['vehicle_id']?.toString() == vehicleId"));
     expect(picker, isNot(contains('_api.jobs(widget.businessId)')));
     expect(picker, contains('_jobVisibility.filter(jobs)'));
