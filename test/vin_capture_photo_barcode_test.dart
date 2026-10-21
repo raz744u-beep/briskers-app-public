@@ -87,6 +87,21 @@ void main() {
     expect(captured, vin);
   });
 
+  test('release R8 suppresses only unavailable optional OCR languages', () {
+    final workflow = File('.github/workflows/android-debug.yml')
+        .readAsStringSync();
+    for (final language in ['chinese', 'devanagari', 'japanese', 'korean']) {
+      expect(workflow,
+          contains('-dontwarn com.google.mlkit.vision.text.$language.**'));
+    }
+    expect(workflow,
+        isNot(contains('-dontwarn com.google.mlkit.vision.text.latin.**')));
+    expect(workflow, contains('proguardFiles(getDefaultProguardFile('));
+    final scanner = File('lib/screens/customers/vin_scanner_screen.dart')
+        .readAsStringSync();
+    expect(scanner, contains('TextRecognitionScript.latin'));
+  });
+
   test('camera never cuts or auto-applies unverified barcode values', () {
     final screen=File('lib/screens/customers/vin_scanner_screen.dart')
         .readAsStringSync();
