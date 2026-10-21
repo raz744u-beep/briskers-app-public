@@ -406,12 +406,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   Future<void> _editTask(Map<String, dynamic> task) async {
-    var mechanic = task['employee_id']?.toString() ?? '';
     var status = task['status']?.toString() ?? 'planned';
     final description = TextEditingController(text: _description(task));
-    final hours = TextEditingController(
-      text: task['payroll_hours']?.toString() ?? '',
-    );
     final updated = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -434,32 +430,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     labelText: 'Work performed description',
                     border: OutlineInputBorder())),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: mechanic,
-                  decoration: const InputDecoration(
-                    labelText: 'Assigned mechanic',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: [
-                    const DropdownMenuItem(
-                      value: '', child: Text('Unassigned')),
-                    for (final employee in BriskersLabFixture.employees)
-                      if (employee['role'] != 'secretary') DropdownMenuItem(
-                        value: employee['id']!,
-                        child: Text(_employeeName(employee['id'])),
-                      ),
-                  ],
-                  onChanged: (v) {
-                    setModalState(() => mechanic = v ?? '');
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(sheetContext, false);
+                    _editInvoiceLabor(task);
                   },
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: hours,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Mechanic hours', border: OutlineInputBorder()),
+                  icon: const Icon(Icons.people_outline),
+                  label: const Text('Assign / split labor mechanics'),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
@@ -482,14 +459,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 FilledButton(
                   child: const Text('Save task'),
                   onPressed: () async {
-                    final raw = hours.text.trim();
-                    final value = raw.isEmpty
-                      ? null : double.tryParse(raw);
-                    if (raw.isNotEmpty && value == null) {
-                      ScaffoldMessenger.of(sheetContext).showSnackBar(
-                        const SnackBar(content: Text('Enter valid hours')));
-                      return;
-                    }
                     try {
                       await store.editTask(
                         businessId: BriskersLabFixture.businessId,
@@ -498,8 +467,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         lineId: task['line_id'].toString(),
                         description: description.text,
                         editDescription: true,
-                        employeeId: mechanic, editEmployee: true,
-                        hours: value, editHours: true,
                         status: status,
                       );
                       if (sheetContext.mounted) {
@@ -520,7 +487,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       ),
     );
     description.dispose();
-    hours.dispose();
     if (updated == true) {
       await _refresh();
     }
