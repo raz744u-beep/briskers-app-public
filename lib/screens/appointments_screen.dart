@@ -67,6 +67,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   bool _onlineReady = false;
   bool _showingLocal = false;
   bool _refreshFailed = false;
+  bool _hasOrphanMock = false;
   int _localLoadGeneration = 0;
   int _connectionGeneration = 0;
   Future<void>? _refreshFuture;
@@ -98,12 +99,38 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     _syncSubscription = AppointmentSyncService.syncEvents.listen((businessId) {
       if (mounted && businessId == widget.businessId) {
         unawaited(_loadLocal());
+        unawaited(_probeOwnerOrphan());
       }
     });
     BriskersConnectionModeController.instance.addListener(
       _onConnectionModeChanged,
     );
     _load(initialEntry: true);
+    unawaited(_probeOwnerOrphan());
+  }
+
+  Future<void> _probeOwnerOrphan() async {
+    if (widget.roleCode != 'owner') {
+      if (mounted) setState(() => _hasOrphanMock = false);
+      return;
+    }
+    final businessId = widget.businessId;
+    try {
+      final rows = await localDatabase.customSelect(
+        "SELECT id FROM local_appointments WHERE business_id=? AND id=? "
+        "AND sync_state='pending' LIMIT 1",
+        variables: [Variable<String>(businessId),
+          const Variable<String>(AppointmentSyncService.orphanMockAppointmentId)],
+      ).get();
+      if (mounted && widget.businessId == businessId) {
+        setState(() => _hasOrphanMock = rows.length == 1);
+      }
+    } catch (_) {
+      // A failed preview must not permit destructive action or block the list.
+      if (mounted && widget.businessId == businessId) {
+        setState(() => _hasOrphanMock = false);
+      }
+    }
   }
 
   void _listenForQuarantine() {
@@ -174,7 +201,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       _refreshFailed = false;
       _error = null;
       _checkingInId = null;
+      _hasOrphanMock = false;
       _listenForQuarantine();
+      unawaited(_probeOwnerOrphan());
       _load(initialEntry: true);
     } else if (oldWidget.dockResetToken != widget.dockResetToken) {
       // Tab re-entry keeps the current filter, search and scroll position.
@@ -642,6 +671,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       );
       if (!mounted) return;
       await _loadLocal(reportError: true);
+      await _probeOwnerOrphan();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Test appointment hidden; deletion awaiting server confirmation.'),
@@ -1230,6 +1260,18 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 84),
               children: [
+                if (widget.roleCode == 'owner' && _hasOrphanMock)
+                  Card(
+                    child: ListTile(
+                      key: const ValueKey('owner-orphan-appointment-cleanup'),
+                      leading: const Icon(Icons.delete_outline, color: Colors.red),
+                      title: const Text('Remove orphan test appointment'),
+                      subtitle: const Text('One stuck edit • owner review required'),
+                      onTap: () => _deleteVerifiedOrphanMock(const {
+                        'id': AppointmentSyncService.orphanMockAppointmentId,
+                      }),
+                    ),
+                  ),
                 if (_canManage && _onlineReady && _pending > 0) ...[
                   const SizedBox(height: 10),
                   Card(
