@@ -510,6 +510,7 @@ class _CustomerVehicleFindingsSectionState
                               maxWidth: 1920,
                               maxHeight: 1920,
                             );
+                            if (!sheetContext.mounted) return;
                             if (picked.isNotEmpty) {
                               setSheetState(() => photos.addAll(picked));
                             }
@@ -528,6 +529,7 @@ class _CustomerVehicleFindingsSectionState
                               maxWidth: 1920,
                               maxHeight: 1920,
                             );
+                            if (!sheetContext.mounted) return;
                             if (photo != null) {
                               setSheetState(() => photos.add(photo));
                             }
