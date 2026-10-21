@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../services/customer_finding_overview_service.dart';
 import '../services/vehicle_finding_actions_service.dart';
+import '../services/local_job_quarantine.dart';
+import '../services/local_job_retirement.dart';
 
 /// Tappable customer-wide findings shortcut. Counts are independent from
 /// Jobs and are not limited to the latest repair; all accessible linked
@@ -33,6 +35,10 @@ class _CustomerFindingsOverviewRowState
     extends State<CustomerFindingsOverviewRow> {
   late Future<CustomerFindingCounts> _counts;
   StreamSubscription<String>? _changes;
+  StreamSubscription<({String businessId, Set<String> jobIds})>?
+      _quarantine;
+  StreamSubscription<({String businessId, Set<String> jobIds})>?
+      _retirements;
 
   String _vehicleIds(List<dynamic> vehicles) {
     final ids = vehicles.whereType<Map>()
@@ -47,6 +53,14 @@ class _CustomerFindingsOverviewRowState
     _refresh();
     _changes = VehicleFindingActionsService.changes.listen((businessId) {
       if (businessId == widget.businessId && mounted) _refresh();
+    });
+    // A revoked Job or finding identity must be removed from the summary,
+    // even if it was visible in an earlier cached customer snapshot.
+    _quarantine = LocalJobQuarantine.events.listen((event) {
+      if (event.businessId == widget.businessId && mounted) _refresh();
+    });
+    _retirements = LocalJobRetirement.events.listen((event) {
+      if (event.businessId == widget.businessId && mounted) _refresh();
     });
   }
 
@@ -72,6 +86,8 @@ class _CustomerFindingsOverviewRowState
   @override
   void dispose() {
     _changes?.cancel();
+    _quarantine?.cancel();
+    _retirements?.cancel();
     super.dispose();
   }
 
