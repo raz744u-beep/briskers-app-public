@@ -400,12 +400,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ));
   }
 
-  Widget _taskCard(Map<String, dynamic> task, {bool history = false}) {
+  // Tasks remain editable here; Work Log uses a distinct read-only view.
+  Widget _taskCard(Map<String, dynamic> task) {
     final done = task['status'] == 'done';
-    final stamp = task['completed_at'];
-    final finished = stamp is int
-      ? DateFormat('MMM d, h:mm a').format(
-          DateTime.fromMillisecondsSinceEpoch(stamp)) : '';
     return Card(
       margin: const EdgeInsets.fromLTRB(10, 3, 10, 5),
       child: ListTile(
@@ -421,9 +418,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(_laborAssignment(task)),
-            if (history)
-              Text(finished.isEmpty ? 'Completion not recorded' : finished)
-            else _statusChip(task['status']?.toString() ?? 'planned'),
+            _statusChip(task['status']?.toString() ?? 'planned'),
           ],
         ),
         trailing: const Icon(Icons.edit_outlined, size: 19),
@@ -1236,26 +1231,150 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     );
   }
 
+  // A chronological, read-only ledger, separate from the editable Tasks
+  // page. Prior completion cycles are shown alongside current Done tasks.
+  Widget _workLogPage() {
+    final records = <({
+      int completedAt,
+      String description,
+      String assignment,
+      bool earlier,
+    })>[
+      for (final task in tasks)
+        if (task['source_missing'] != 1 && task['status'] == 'done')
+          (
+            completedAt: task['completed_at'] is int
+              ? task['completed_at'] as int : 0,
+            description: _description(task),
+            assignment: _laborAssignment(task),
+            earlier: false,
+          ),
+      for (final entry in earlierWorkLog)
+        (
+          completedAt: entry['completed_at'] is int
+            ? entry['completed_at'] as int : 0,
+          description: entry['description']?.toString() ?? 'Work completed',
+          assignment: _displayArchivedAssignment(
+            entry['assignment_summary']?.toString() ?? 'Unassigned'),
+          earlier: true,
+        ),
+    ];
+    records.sort((a, b) {
+      final difference = b.completedAt.compareTo(a.completedAt);
+      return difference != 0
+        ? difference : a.description.compareTo(b.description);
+    });
+
+    final entries = <Widget>[];
+    String? lastDay;
+    for (final item in records) {
+      final date = item.completedAt > 0
+        ? DateTime.fromMillisecondsSinceEpoch(item.completedAt)
+        : null;
+      final dayKey = date == null
+        ? 'unknown' : DateFormat('yyyy-MM-dd').format(date);
+      if (dayKey != lastDay) {
+        lastDay = dayKey;
+        entries.add(Padding(
+          padding: const EdgeInsets.fromLTRB(16, 13, 16, 5),
+          child: Text(
+            date == null
+              ? 'Date not recorded'
+              : DateFormat('EEE, MMM d, yyyy').format(date),
+            style: const TextStyle(fontSize: 13,
+              color: Color(0xFF64748B), fontWeight: FontWeight.w800),
+          ),
+        ));
+      }
+      entries.add(Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: Color(0xFFE1E7EB), width: 0.7))),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 3),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 68,
+                  child: Text(
+                    date == null ? '—' : DateFormat('h:mm a').format(date),
+                    style: const TextStyle(fontSize: 11.5,
+                      color: Color(0xFF64748B)),
+                  ),
+                ),
+                const Icon(Icons.check_circle,
+                  color: Color(0xFF169D70), size: 19),
+                const SizedBox(width: 9),
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(item.description, maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13.8,
+                        fontWeight: FontWeight.w700, height: 1.2)),
+                    const SizedBox(height: 2),
+                    Text(item.assignment, maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12.5,
+                        color: Color(0xFF526273), height: 1.2)),
+                    if (item.earlier)
+                      const Text('Previous completion',
+                        style: TextStyle(fontSize: 10.5,
+                          color: Color(0xFF64748B))),
+                  ],
+                )),
+              ],
+            ),
+          ),
+        ),
+      ));
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 18),
+      children: [
+        _sectionHeader('Work Log',
+          subtitle: 'Completion history · Read-only'),
+        if (records.isEmpty)
+          const ListTile(title: Text('No completed work yet')),
+        ...entries,
+      ],
+    );
+  }
+
+  String _displayArchivedAssignment(String raw) {
+    var description = raw;
+    for (final employee in BriskersLabFixture.employees) {
+      final id = employee['id'];
+      if (id != null) {
+        description = description.replaceAll(
+          id, _employeeName(id),
+        );
+      }
+    }
+    return description;
+  }
+
   Widget _taskList({bool history = false}) {
-    final visible = tasks.where((t) =>
-      history ? t['status'] == 'done' : t['source_missing'] != 1).toList();
+    if (history) return _workLogPage();
+    final visible = tasks.where(
+      (task) => task['source_missing'] != 1).toList();
     return ListView(
       children: [
-        _sectionHeader(history ? 'Work Log' : 'Job tasks',
-          subtitle: history
-            ? 'Completed tasks automatically appear here'
-            : 'Invoice #6342 · Assign Kam and Chris by task'),
-        if (!history)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: Row(children: [
-              const Text('Job status', style: TextStyle(
-                fontWeight: FontWeight.w700)),
-              const Spacer(),
-              _jobStatusControl(),
-            ]),
-          ),
-        if (!history && visible.any((task) => task['status'] != 'done'))
+        _sectionHeader('Job tasks',
+          subtitle: 'Invoice #6342 · Assign Kam and Chris by task'),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          child: Row(children: [
+            const Text('Job status', style: TextStyle(
+              fontWeight: FontWeight.w700)),
+            const Spacer(),
+            _jobStatusControl(),
+          ]),
+        ),
+        if (visible.any((task) => task['status'] != 'done'))
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
             child: OutlinedButton.icon(
@@ -1264,31 +1383,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               label: const Text('Mark all tasks Done'),
             ),
           ),
-        if (visible.isEmpty && (!history || earlierWorkLog.isEmpty))
-          const ListTile(title: Text('No entries yet')),
-        ...visible.map((t) => _taskCard(t, history: history)),
-        if (history && earlierWorkLog.isNotEmpty) ...[
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
-            child: Text('Earlier completed work', style: TextStyle(
-              fontSize: 16, fontWeight: FontWeight.w800))),
-          for (final entry in earlierWorkLog)
-            Card(
-              margin: const EdgeInsets.fromLTRB(10, 3, 10, 5),
-              child: ListTile(
-                leading: const Icon(Icons.history,
-                  color: BriskersColors.today),
-                title: Text(entry['description'].toString(),
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: Text(
-                  '${entry['assignment_summary'] ?? 'Unassigned'} · '
-                  'Completed ${DateFormat('MMM d, h:mm a').format(
-                    DateTime.fromMillisecondsSinceEpoch(
-                      entry['completed_at'] as int))}',
-                ),
-              ),
-            ),
-        ],
+        if (visible.isEmpty)
+          const ListTile(title: Text('No tasks yet')),
+        ...visible.map(_taskCard),
       ],
     );
   }
