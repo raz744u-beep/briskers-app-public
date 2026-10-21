@@ -49,11 +49,24 @@ void main() {
     expect(main, isNot(contains('Supabase.initialize')));
     expect(main, contains('LocalJobTasksLabStore'));
     expect(main, contains('bottomNavigationBar: _bottomNav()'));
-    expect(main, contains('onLongPress: (i == 2 || i == 3)'));
+    expect(main, contains('BriskersModuleDock('));
+    expect(main, contains('onLongPressed: (index)'));
+    expect(main, contains("if (index == 2 || index == 7) _toggleMenu(index)"));
+    expect(main, contains('jobDetailsOpen'));
+    expect(main, contains("'Pre-inspection'"));
+    expect(main, contains("'Customer Complaint'"));
+    expect(main, contains("'Work Performed'"));
+    expect(main, contains("'Tasks (TEST)'"));
+    expect(main, contains("'New functions being tested'"));
+    expect(main, contains("page == 0 ? null : AppBar("));
     expect(main, contains('_verticalMenu(int index)'));
     expect(main, contains('Edit employee names'));
     expect(main, contains("if (employee['role'] != 'secretary')"));
     expect(main, isNot(contains('_navRail()')));
+    final dock = File('lib/widgets/briskers_module_dock.dart')
+      .readAsStringSync();
+    expect(dock, contains('this.onLongPressed,'));
+    expect(dock, contains('onLongPress: widget.onLongPressed == null'));
   });
 
   test('Task assignments and nicknames persist in a local SQLite test DB',
