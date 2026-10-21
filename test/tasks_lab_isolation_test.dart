@@ -53,6 +53,10 @@ void main() {
     expect(main, contains('onLongPressed: (index, globalPosition)'));
     expect(main, contains("if (index == 2 || index == 7) {"));
     expect(main, contains('jobDetailsOpen'));
+    expect(main, contains('Assign main job mechanic'));
+    expect(main, contains('_assignLeadMechanic'));
+    expect(main, contains('Main job mechanic'));
+
     expect(main, contains('menuAnchorX - 90'));
     expect(main, contains("'Pre-inspection'"));
     expect(main, contains("'Customer Complaint'"));
@@ -102,6 +106,19 @@ void main() {
         employeeId: 'lab-chris', editEmployee: true,
         hours: 1.5, editHours: true,
       );
+      await store.saveLeadMechanic(
+        BriskersLabFixture.businessId, BriskersLabFixture.jobId, 'lab-kam');
+      expect(await store.leadMechanic(
+        BriskersLabFixture.businessId, BriskersLabFixture.jobId),
+        'lab-kam');
+      // Reassigning the job lead must never rewrite labor-line mechanics.
+      await store.saveLeadMechanic(
+        BriskersLabFixture.businessId, BriskersLabFixture.jobId, 'lab-chris');
+      expect(await store.leadMechanic(
+        BriskersLabFixture.businessId, BriskersLabFixture.jobId),
+        'lab-chris');
+      expect(await store.leadMechanic(
+        'another-test-shop', BriskersLabFixture.jobId), isNull);
       await store.saveNickname(
         BriskersLabFixture.businessId, 'lab-kam', 'Kam');
       await store.saveEmployeeProfile(
