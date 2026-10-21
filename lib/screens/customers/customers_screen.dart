@@ -200,7 +200,9 @@ class _CustomersScreenState extends State<CustomersScreen> {
           final authorized = await _api.customers(
             widget.businessId, search: query, limit: 100);
           if (!mounted || request != _searchRequest ||
-              _search.text.trim() != query) return;
+              _search.text.trim() != query) {
+            return;
+          }
           setState(() {
             _rows = authorized;
             _showingLocal = false;
