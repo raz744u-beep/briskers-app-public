@@ -24,6 +24,7 @@ import '../services/offline_estimate_invoice_service.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/offline_document_edit_service.dart';
 import '../services/offline_invoice_tax_service.dart';
+import '../services/offline_invoice_mileage_service.dart';
 import '../services/offline_invoice_payment_ledger.dart';
 import '../services/local_tax_settings_cache.dart';
 import '../services/local_invoice_status_styles_cache.dart';
@@ -67,6 +68,8 @@ class _BusinessGateState extends State<BusinessGate> {
       OfflineInvoiceTaxService();
   final OfflineInvoicePaymentLedger _offlinePayments =
       OfflineInvoicePaymentLedger();
+  final OfflineInvoiceMileageService _offlineInvoiceMileage =
+      OfflineInvoiceMileageService();
   final LocalTaxSettingsCache _taxSettingsCache =
       LocalTaxSettingsCache();
   final LocalInvoiceStatusStylesCache _invoiceStatusStyles =
@@ -338,6 +341,14 @@ class _BusinessGateState extends State<BusinessGate> {
     } catch (_) {
       // A tax edit with uncertain or stale server outcome remains fenced
       // in SQLite; never retry an ambiguous non-idempotent correction.
+    }
+
+    try {
+      await _offlineInvoiceMileage.flush(businessId);
+    } catch (_) {
+      // Arrival and departure odometer saves remain in their separate,
+      // business-scoped durable queues until the next trusted sync.
+      // Never touch an invoice's historical odometer_in on replay.
     }
 
     try {
