@@ -127,7 +127,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         (_) {
           // Expenses remains mounted between dock visits. Skip cosmetic
           // photo-count polling while it is hidden; sync runs elsewhere.
-          if (mounted && TickerMode.of(context)) {
+          if (mounted && TickerMode.valuesOf(context).enabled) {
             unawaited(_refreshPhotoCounts());
           }
         },
