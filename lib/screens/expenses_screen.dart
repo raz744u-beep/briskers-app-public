@@ -719,8 +719,15 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         if (offset == 0) {
           // Show the latest server payments after the first short page;
           // continue filling the historical offline snapshot in background.
+          // Previously cached *pending* server receipts may already have
+          // been finalized into posted financial transactions. Until a fresh
+          // authoritative page proves the pending ID still exists, displaying
+          // stale pending cards alongside the posted transaction can count
+          // the same payment twice. Keep only saved posted allocations and
+          // durable local outbox receipts; the full inventory restores any
+          // genuinely pending older server receipts once verified.
           final saved = _invoiceReceipts
-              .where((r) => r['receipt_state']?.toString() != 'local')
+              .where((r) => r['receipt_state']?.toString() == 'posted')
               .toList();
           final queued = _invoiceReceipts
               .where((r) => r['receipt_state']?.toString() == 'local')
