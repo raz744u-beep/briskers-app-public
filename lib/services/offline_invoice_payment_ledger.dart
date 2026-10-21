@@ -176,6 +176,7 @@ class OfflineInvoicePaymentLedger {
     required int remainingBeforePaymentCents,
     required String methodId,
     required String methodName,
+    String? paymentDate,
     Iterable<String>? expectedQueuedOperationIds,
   }) async {
     if (businessId.isEmpty || invoiceId.isEmpty || methodId.isEmpty) {
@@ -192,9 +193,17 @@ class OfflineInvoicePaymentLedger {
     // The UTC receipt timestamp stays immutable for provenance.
     final capturedAt = DateTime.now();
     final capturedUtc = capturedAt.toUtc();
-    final capturedDate = '${capturedAt.year.toString().padLeft(4, '0')}-'
+    final defaultDate = '${capturedAt.year.toString().padLeft(4, '0')}-'
         '${capturedAt.month.toString().padLeft(2, '0')}-'
         '${capturedAt.day.toString().padLeft(2, '0')}';
+    final capturedDate = paymentDate ?? defaultDate;
+    final parsedDate = DateTime.tryParse(capturedDate);
+    if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(capturedDate) ||
+        parsedDate == null ||
+        parsedDate.toIso8601String().substring(0, 10) != capturedDate ||
+        parsedDate.isAfter(DateTime(capturedAt.year, capturedAt.month, capturedAt.day))) {
+      throw ArgumentError('Select a valid payment date, not later than today.');
+    }
     final now = capturedUtc.millisecondsSinceEpoch ~/ 1000;
     final payload = <String, dynamic>{
       'operation_id': operationId,

@@ -2837,6 +2837,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       builder: (_) => _PaymentEntryDialog(
         methods: methods,
         initialAmount: remaining,
+        editDate: true,
         title: tr('addPayment'),
         saveLabel: tr('addPayment'),
       ),
@@ -2845,35 +2846,38 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
     final isOffline = BriskersConnectionModeController.instance.forceOffline ||
         _offlineDocumentDraft.isLocalDraftId(widget.documentId);
-    if (isOffline) {
-      final chosen = methods.firstWhere(
-        (m) => m['id']?.toString() == result['method_id'].toString(),
-      );
-      await _run(() async {
-        await _offlinePayments.recordReceivedPayment(
-          widget.businessId,
-          widget.documentId,
-          amount: result['amount'] as num,
-          remainingBeforePaymentCents: (remaining * 100).round(),
-          methodId: result['method_id'].toString(),
-          methodName: chosen['name']?.toString() ?? '',
-          expectedQueuedOperationIds: queuedOperationIds,
-        );
-      });
-      if (mounted && _error == null &&
-          (result['amount'] as num) >= remaining - 0.005) {
-        await _offerCompleteJobAfterPaymentEntry();
-      }
-      return;
-    }
-    await _run(() async {
-      await _api.addPendingInvoicePayment(
+    final chosenDate = result['payment_date']?.toString() ?? '';
+    final chosen = methods.firstWhere(
+      (m) => m['id']?.toString() == result['method_id'].toString(),
+    );
+    // Stage a dated, idempotent UUID locally before sending, online or
+    // offline. Legacy online Add Payment RPC discards the selected date.
+    final saved = await _run(() async {
+      await _offlinePayments.recordReceivedPayment(
         widget.businessId,
         widget.documentId,
         amount: result['amount'] as num,
+        remainingBeforePaymentCents: (remaining * 100).round(),
         methodId: result['method_id'].toString(),
+        methodName: chosen['name']?.toString() ?? '',
+        paymentDate: chosenDate,
+        expectedQueuedOperationIds: queuedOperationIds,
       );
     });
+    if (!saved) return;
+    if (!isOffline) {
+      try {
+        await _offlinePayments.flush(widget.businessId);
+        if (mounted) await _load(fastAfterMutation: true);
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Payment saved locally with its selected date. '
+                'Sync is pending; do not add it again.'),
+          ));
+        }
+      }
+    }
     if (mounted && _error == null &&
         (result['amount'] as num) >= remaining - 0.005) {
       await _offerCompleteJobAfterPaymentEntry();
@@ -8993,7 +8997,7 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
       context: context,
       initialDate: _paymentDate,
       firstDate: DateTime(1990),
-      lastDate: DateTime.now().add(const Duration(days: 1)),
+      lastDate: DateTime.now(),
     );
     if (date != null && mounted) setState(() => _paymentDate = date);
   }
@@ -9029,7 +9033,7 @@ class _PaymentEntryDialogState extends State<_PaymentEntryDialog> {
         children: [
           TextField(
             controller: _amount,
-            autofocus: true,
+            autofocus: false,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: InputDecoration(
               labelText: tr('paymentAmount'),
