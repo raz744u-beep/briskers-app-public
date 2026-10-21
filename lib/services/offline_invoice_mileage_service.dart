@@ -24,6 +24,7 @@ class OfflineInvoiceMileageService {
   final BriskersLocalDatabase _database;
   final BriskersApi _api;
   static const _type = 'invoice_mileage_out';
+  static final Expando<Map<String, Future<void>>> _activeFlushes = Expando();
 
   int _now() => DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
 
@@ -104,7 +105,18 @@ class OfflineInvoiceMileageService {
 
   /// Run after reconnection or a foreground save. A missing v2 RPC cannot
   /// silently convert this edit into legacy odometer_in.
-  Future<void> flush(String businessId) async {
+  Future<void> flush(String businessId) {
+    final active = _activeFlushes[_database] ??= {};
+    final already = active[businessId];
+    if (already != null) return already;
+    final work = _flushInternal(businessId);
+    active[businessId] = work;
+    return work.whenComplete(() {
+      if (identical(active[businessId], work)) active.remove(businessId);
+    });
+  }
+
+  Future<void> _flushInternal(String businessId) async {
     if (BriskersConnectionModeController.instance.forceOffline) return;
     final rows=await _database.customSelect(
       """SELECT * FROM sync_outbox WHERE business_id=?
@@ -128,6 +140,22 @@ class OfflineInvoiceMileageService {
             const Variable<String>(_type)],
         ).get();
         if (fresh.isEmpty) continue;
+        // Seal this exact outbox payload BEFORE the first network attempt.
+        // Concurrent user edits may coalesce only while attempt_count=0;
+        // once sent, an uncertain response must never erase a newer reading.
+        await _database.transaction(() async {
+          await LocalJobQuarantine.assertReplayAllowed(
+            _database, businessId, outboxId: id,
+          );
+          await _database.customStatement(
+            """UPDATE sync_outbox
+               SET attempt_count=attempt_count+1,last_attempt_at=?,
+                   last_error=NULL
+               WHERE id=? AND business_id=? AND entity_type=?
+                 AND state='pending'""",
+            [_now(), id, businessId, _type],
+          );
+        });
         final desired=MileageWorkflow.parse(payload['mileage_out']);
         try {
           await LocalJobQuarantine.guardReplay(
@@ -159,9 +187,9 @@ class OfflineInvoiceMileageService {
         });
       } catch (error) {
         await _database.customStatement(
-          """UPDATE sync_outbox SET attempt_count=attempt_count+1,
-             last_attempt_at=?,last_error=? WHERE id=? AND business_id=?""",
-          [_now(),error.toString(),id,businessId],
+          """UPDATE sync_outbox SET last_attempt_at=?,last_error=?
+             WHERE id=? AND business_id=? AND entity_type=?""",
+          [_now(),error.toString(),id,businessId,_type],
         );
         break;
       }
