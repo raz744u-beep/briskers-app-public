@@ -2685,6 +2685,21 @@ class BriskersApi {
     );
   }
 
+  /// Owner-only, read-only proof for the exact disposable mock appointment.
+  /// A false reply or missing RPC MUST NOT retire any local pending deletion.
+  Future<bool> confirmOrphanMockAppointmentAbsent(
+    String businessId, String appointmentId,
+  ) async {
+    final result = await networkSupabase.rpc(
+      'briskers_confirm_orphan_mock_absent_v1',
+      params: {
+        'p_business_id': businessId,
+        'p_appointment_id': appointmentId,
+      },
+    );
+    return result == true;
+  }
+
   Future<bool> syncOfflineAppointmentDelete(
     String businessId, String appointmentId, {
     required String operationId,

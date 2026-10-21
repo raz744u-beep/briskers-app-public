@@ -298,6 +298,25 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       return;
     }
 
+    // The old mock's deletion may already be absent on the server. Its
+    // tombstone still needs a fresh, Owner-authorized negative existence
+    // receipt; a normal check-in refresh never flushes delete operations.
+    // Attempt reconciliation before the short no-refresh interval.
+    if (widget.roleCode == 'owner') {
+      try {
+        final retired = await _appointmentSync.reconcileAbsentOrphanMock(
+          businessId, isOwner: true,
+        );
+        if (retired && mounted) {
+          unawaited(_probeOwnerOrphan());
+          unawaited(_loadLocal(reportError: true));
+        }
+      } catch (_) {
+        // Offline/unsupported server response must leave the delete queue
+        // untouched. Never report the appointment deleted on an error.
+      }
+    }
+
     final lastPull = _lastSuccessfulPull[businessId];
     if (initialEntry && !forceOnline && localAvailable && lastPull != null &&
         DateTime.now().difference(lastPull) < _entryRefreshInterval) {
