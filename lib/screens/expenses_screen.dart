@@ -92,6 +92,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   // Only a server-returned transaction ID is an affirmative cloud receipt.
   // The API currently omits sync_state: unknown must remain unknown.
   final Set<String> _serverConfirmedTransactionIds = {};
+  // Recently seen server receipts survive app restarts, but only for the
+  // same business, unchanged transaction fingerprint, and a bounded TTL.
+  Map<String, String> _previousServerTransactionProofs = {};
   String? _serverConfirmedBusinessId;
   // A newer search, filter or module entry invalidates older network results.
   int _loadEpoch = 0;
@@ -154,6 +157,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _periodCalculating = false;
       _periodError = null;
       _serverConfirmedTransactionIds.clear();
+      _previousServerTransactionProofs = {};
       _serverConfirmedBusinessId = null;
     }
     if (oldWidget.dockResetToken != widget.dockResetToken) {
@@ -342,6 +346,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final businessId = widget.businessId;
     if (_serverConfirmedBusinessId != businessId) {
       _serverConfirmedTransactionIds.clear();
+      _previousServerTransactionProofs = {};
       _serverConfirmedBusinessId = businessId;
     }
     // Totals are independent of the visible page; never display stale 50-row
@@ -358,6 +363,20 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       });
     } else {
       setState(() => _error = null);
+    }
+
+    // Cached financial rows paint quickly. Restore separately persisted,
+    // previously authenticated server evidence before those rows render.
+    // Absence of a proof remains an unknown gray cloud, never a green guess.
+    try {
+      final proofs = await _localFinancial.loadServerConfirmedTransactions(
+        businessId,
+      );
+      if (_isCurrentLoad(epoch, businessId)) {
+        setState(() => _previousServerTransactionProofs = proofs);
+      }
+    } catch (_) {
+      // A missing/corrupt verification cache must not block the list.
     }
 
     // Reload the durable offline payment queue on every entry/refresh.
@@ -478,6 +497,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         _showingLocal = false;
         _error = null;
       });
+      // Only the successful authenticated server response can add durable
+      // proof. Saving this first page makes a later app restart stable even
+      // if the optional 1,000-row history download does not finish.
+      unawaited(_localFinancial.saveServerConfirmedTransactions(
+        businessId, rows,
+      ).catchError((Object _) {}));
       // Options and the complete offline cache are not prerequisites for
       // showing a transaction or an invoice payment in Expenses & Income.
       unawaited(_hydrateFinancialHistory(epoch, businessId, rows));
@@ -631,6 +656,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       });
       // The offline cache remains durable, but does not block first paint.
       await _localFinancial.saveTransactions(businessId, snapshot);
+      await _localFinancial.saveServerConfirmedTransactions(
+        businessId, snapshot,
+      );
       if (!_isCurrentLoad(epoch, businessId)) return;
       await _localFinancial.saveOptions(businessId, options);
       if (_isCurrentLoad(epoch, businessId)) {
@@ -2135,19 +2163,31 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                         // An unreported state stays unknown.
                                         final verifiedId =
                                             transaction['id']?.toString() ?? '';
+                                        final previouslyConfirmed =
+                                            verifiedId.isNotEmpty &&
+                                            _previousServerTransactionProofs[
+                                              verifiedId] ==
+                                            LocalFinancialCache
+                                                .serverTransactionSignature(
+                                                  transaction);
+                                        final currentConfirmed =
+                                            _serverConfirmedTransactionIds
+                                                .contains(verifiedId);
                                         final synced = state == 'synced' ||
                                             (!pending && !failed &&
-                                              verifiedId.isNotEmpty &&
-                                              _serverConfirmedTransactionIds
-                                                .contains(verifiedId));
+                                                verifiedId.isNotEmpty &&
+                                                (currentConfirmed ||
+                                                    previouslyConfirmed));
                                         return Tooltip(
                                           message: failed
                                               ? 'Transaction sync needs attention'
                                               : pending
                                                   ? 'Transaction awaiting sync'
-                                                  : synced
+                                                  : currentConfirmed || state == 'synced'
                                                       ? 'Transaction confirmed in shop database'
-                                                      : 'Transaction sync not verified',
+                                                      : previouslyConfirmed
+                                                          ? 'Previously confirmed on server; refresh to recheck'
+                                                          : 'Transaction sync not verified',
                                           child: Icon(
                                             failed
                                                 ? Icons.cloud_off_outlined
