@@ -322,6 +322,54 @@ class _CustomerVehicleFindingsSectionState
     );
   }
 
+  Future<void> _previewStagedFindingPhoto(XFile photo) async {
+    if (!mounted) return;
+    // The selected file is local to this draft. Previewing it must not
+    // create, upload, or delete a finding or any photo on disk.
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        insetPadding: const EdgeInsets.all(12),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('Finding photo',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close photo preview',
+                    onPressed: () => Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              SizedBox(
+                height: MediaQuery.sizeOf(dialogContext).height * 0.65,
+                child: InteractiveViewer(
+                  minScale: 0.8,
+                  maxScale: 5,
+                  child: Image.file(
+                    File(photo.path),
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) =>
+                        const Text('Cannot preview the selected photo.'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _addFinding() async {
     if (_busy || !widget.canManage) return;
 
@@ -386,16 +434,71 @@ class _CustomerVehicleFindingsSectionState
                     onChanged: (value) =>
                         setSheetState(() => includeOnInvoice = value == true),
                   ),
-                  if (photos.isNotEmpty)
+                  if (photos.isNotEmpty) ...[
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
                         photos.length == 1
-                            ? '1 photo selected'
-                            : '${photos.length} photos selected',
+                            ? '1 photo selected — tap to preview'
+                            : '${photos.length} photos selected — tap to preview',
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 120,
+                      child: ListView.separated(
+                        key: const ValueKey('finding-selected-photo-strip'),
+                        scrollDirection: Axis.horizontal,
+                        itemCount: photos.length,
+                        separatorBuilder: (_, _) =>
+                            const SizedBox(width: 10),
+                        itemBuilder: (context, index) {
+                          final photo = photos[index];
+                          return SizedBox(
+                            width: 118,
+                            child: Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: InkWell(
+                                    key: ValueKey('finding-photo-preview-$index'),
+                                    onTap: () => _previewStagedFindingPhoto(photo),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: Image.file(
+                                        File(photo.path),
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, _, _) =>
+                                            const Center(
+                                              child: Icon(Icons.broken_image_outlined),
+                                            ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                Positioned(
+                                  right: 0,
+                                  top: 0,
+                                  child: IconButton.filledTonal(
+                                    key: ValueKey('finding-photo-remove-$index'),
+                                    tooltip: 'Remove selected photo',
+                                    onPressed: () => setSheetState(
+                                      () => photos.removeAt(index),
+                                    ),
+                                    icon: const Icon(Icons.close, size: 18),
+                                    iconSize: 18,
+                                    constraints: const BoxConstraints(
+                                      minWidth: 35, minHeight: 35,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 6),
                   Row(
                     children: [
@@ -407,6 +510,7 @@ class _CustomerVehicleFindingsSectionState
                               maxWidth: 1920,
                               maxHeight: 1920,
                             );
+                            if (!sheetContext.mounted) return;
                             if (picked.isNotEmpty) {
                               setSheetState(() => photos.addAll(picked));
                             }
@@ -425,6 +529,7 @@ class _CustomerVehicleFindingsSectionState
                               maxWidth: 1920,
                               maxHeight: 1920,
                             );
+                            if (!sheetContext.mounted) return;
                             if (photo != null) {
                               setSheetState(() => photos.add(photo));
                             }

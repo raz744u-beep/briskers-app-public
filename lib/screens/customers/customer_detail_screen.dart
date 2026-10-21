@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../widgets/job_compact_card.dart';
+import '../../widgets/customer_findings_overview_row.dart';
 import '../../widgets/stale_keyboard_inset_guard.dart';
 import '../../core/connection_mode.dart';
 import '../../core/formatters.dart';
@@ -550,6 +551,31 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     );
   }
 
+  Future<void> _openAllVehicleFindings(List<dynamic> vehicles) async {
+    // Both customer Overview and Vehicles tab use the same existing
+    // permission-aware, vehicle-scoped detail screen. Do not create a
+    // second copy of finding records or aggregate them into Jobs.
+    if (!mounted) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('All Vehicle Findings')),
+          body: ListView(children: [
+            CustomerVehicleFindingsSection(
+              businessId: widget.businessId,
+              customerId: widget.customerId,
+              vehicles: vehicles,
+              canManage: _canManageQuickActions,
+              canDelete: widget.roleCode == 'owner',
+              initiallyExpanded: true,
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Widget _customerOverviewCard() => FutureBuilder<List<Map<String, dynamic>>>(
     key: ValueKey(('customer-overview', _jobVisibility.epoch)),
     future: _activeCustomerItems(),
@@ -595,6 +621,14 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           if (snapshot.hasError)
             const ListTile(title: Text('Saved customer activity unavailable')),
           link('Jobs', Icons.build_outlined, BriskersColors.jobs, jobs),
+          CustomerFindingsOverviewRow(
+            businessId: widget.businessId,
+            customerId: widget.customerId,
+            vehicles: List<dynamic>.from(_data?['vehicles'] ?? const []),
+            onOpen: () => _openAllVehicleFindings(
+              List<dynamic>.from(_data?['vehicles'] ?? const []),
+            ),
+          ),
           link('Invoices', Icons.receipt_long_outlined, BriskersColors.invoices, invoices),
           link('Estimates', Icons.description_outlined, BriskersColors.estimates, estimates),
           link('Appointments', Icons.calendar_today_outlined, BriskersColors.schedule, appointments),
@@ -1635,20 +1669,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                         style: TextStyle(fontWeight: FontWeight.w700)),
                       subtitle: const Text('View open and resolved findings across vehicles'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.push<void>(
-                        context,
-                        MaterialPageRoute(builder: (_) => Scaffold(
-                          appBar: AppBar(title: const Text('All Vehicle Findings')),
-                          body: ListView(children: [CustomerVehicleFindingsSection(
-                            businessId: widget.businessId,
-                            customerId: widget.customerId,
-                            vehicles: vehicles,
-                            canManage: _canManageQuickActions,
-                            canDelete: widget.roleCode == 'owner',
-                            initiallyExpanded: true,
-                          )]),
-                        )),
-                      ),
+                      onTap: () => _openAllVehicleFindings(vehicles),
                     ),
                   ),
                   const SizedBox(height: 18),
