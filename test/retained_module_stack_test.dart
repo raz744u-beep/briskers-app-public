@@ -300,7 +300,7 @@ void main() {
         .readAsStringSync();
     expect(stack, contains('retainedIndices = const {3, 4, 5, 6}'));
     expect(expenses, contains('_serverConfirmedTransactionIds'));
-    expect(expenses, contains('if (mounted && TickerMode.of(context))'));
+    expect(expenses, contains('if (mounted && TickerMode.valuesOf(context).enabled)'));
     expect(expenses, contains('unawaited(_refreshPhotoCounts())'));
     expect(expenses, contains('_serverConfirmedTransactionIds.clear()'));
     // A business identity change resets confirmation, but dock re-entry does
