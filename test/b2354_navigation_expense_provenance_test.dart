@@ -24,7 +24,9 @@ void main() {
         .readAsStringSync();
     final goTo = shell.substring(shell.indexOf('void _goTo(int index)'),
         shell.indexOf('String get _roleLabel'));
-    expect(goTo, contains('if (index == 1) _focusedCustomerIds = null;'));
+    expect(goTo, contains('if (index == 1) {'));
+    expect(goTo, contains('_focusedCustomerIds = null;'));
+    expect(goTo, contains('_customersRefreshToken++;'));
     expect(goTo, isNot(contains('unawaited(_openCustomers(request))')));
     expect(shell, contains('onBadgeSelected: (index)'));
     expect(shell, contains('unawaited(_openCustomers(request))'));
