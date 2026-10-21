@@ -280,8 +280,11 @@ class CustomerVehicleSyncService {
           }
         }
         for (final bundle in authoritative.values) {
-          await _applyBundle(businessId, bundle);
+          await _applyBundle(businessId, bundle, pruneOrphans: false);
         }
+        // A single orphan scan after the complete snapshot avoids repeating
+        // a full vehicle-table pass for each of ~2,800 customer bundles.
+        await _removeOrphanVehicles(businessId);
         await _writeSyncState(
           businessId,
           cursor: bootstrapCursor,
@@ -313,8 +316,9 @@ class CustomerVehicleSyncService {
 
   Future<void> _applyBundle(
     String businessId,
-    Map<String, dynamic> bundle,
-  ) async {
+    Map<String, dynamic> bundle, {
+    bool pruneOrphans = true,
+  }) async {
     final rawCustomer = bundle['customer'];
     if (rawCustomer is! Map) return;
 
@@ -459,7 +463,7 @@ class CustomerVehicleSyncService {
       );
     }
 
-    await _removeOrphanVehicles(businessId);
+    if (pruneOrphans) await _removeOrphanVehicles(businessId);
   }
 
   Future<void> _removeCustomer(
