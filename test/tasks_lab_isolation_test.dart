@@ -123,6 +123,138 @@ void main() {
     expect(dock, contains('details.globalPosition'));
   });
 
+  test('Needs Recheck preserves initial payroll without double counting',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    const shop = BriskersLabFixture.businessId;
+    const job = BriskersLabFixture.jobId;
+    const invoice = BriskersLabFixture.invoiceId;
+    try {
+      final lines = LocalJobTasksLabStore.laborLines(BriskersLabFixture.invoice);
+      await store.reconcileDocument(businessId: shop, jobId: job,
+        documentId: invoice, laborLines: lines);
+      await store.saveLeadMechanic(shop, job, 'lab-kam');
+      await store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-transmission',
+        hoursByEmployee: {'lab-chris': 1.0, 'lab-kam': 0.5},
+      );
+      await store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-differential',
+        hoursByEmployee: {'lab-kam': 0.5, 'lab-raz': 0.3},
+      );
+      final ack = [
+        for (final task in await store.list(shop, job))
+          {
+            'document_id': task['document_id'].toString(),
+            'line_id': task['line_id'].toString(),
+          },
+      ];
+      await store.changeJobStatus(businessId: shop, jobId: job,
+        statusCode: 'completed', confirmedTasks: ack);
+      final original = await store.earnedHoursPreview(shop, job);
+      expect(original['lab-kam'], closeTo(5.5, 0.000001));
+      expect(original['lab-chris'], closeTo(1.0, 0.000001));
+      expect(original['lab-raz'], closeTo(0.3, 0.000001));
+
+      await store.changeJobStatus(
+        businessId: shop, jobId: job, statusCode: 'needs_recheck');
+      expect(await store.jobStatus(shop, job), 'needs_recheck');
+      expect((await store.list(shop, job)).every((t) =>
+        t['status'] == 'in_progress'), isTrue);
+      expect(await store.earnedHoursPreview(shop, job), original);
+      final frozen = await store.preservedPayrollPreview(shop, job);
+      expect(frozen.taskKeys.length, 4);
+      expect(frozen.hoursByMechanic, original);
+
+      // Editing and re-completing the SAME task is not new payroll.
+      await store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-transmission',
+        hoursByEmployee: {'lab-raz': 1.5},
+      );
+      await store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-transmission', status: 'done',
+      );
+      expect(await store.earnedHoursPreview(shop, job), original);
+      await store.changeJobStatus(businessId: shop, jobId: job,
+        statusCode: 'completed', confirmedTasks: ack);
+      await store.changeJobStatus(businessId: shop, jobId: job,
+        statusCode: 'in_progress');
+      expect(await store.earnedHoursPreview(shop, job), original);
+      expect((await store.priorCompletions(shop, job)).length, 8);
+
+      // Separate new recheck work can earn a distinct, additional credit.
+      await store.reconcileDocument(businessId: shop, jobId: job,
+        documentId: invoice, laborLines: [
+          ...lines,
+          {'id': 'lab-new-recheck', 'line_kind': 'item', 'name': 'Labor',
+           'description': 'Additional recheck work', 'quantity': 0.4},
+        ]);
+      await store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-new-recheck',
+        hoursByEmployee: {'lab-chris': 0.4},
+      );
+      await store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-new-recheck', status: 'done',
+      );
+      final withRecheck = await store.earnedHoursPreview(shop, job);
+      expect(withRecheck['lab-kam'], closeTo(5.5, 0.000001));
+      expect(withRecheck['lab-raz'], closeTo(0.3, 0.000001));
+      expect(withRecheck['lab-chris'], closeTo(1.4, 0.000001));
+      expect(await store.earnedHoursPreview('another-shop', job), isEmpty);
+    } finally {
+      await db.close();
+    }
+  });
+
+  test('Earlier test Work Log completions migrate to preserved payroll',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    const shop = BriskersLabFixture.businessId;
+    const job = BriskersLabFixture.jobId;
+    const invoice = BriskersLabFixture.invoiceId;
+    try {
+      await store.reconcileDocument(
+        businessId: shop, jobId: job, documentId: invoice,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice));
+      await db.customStatement('''
+        INSERT INTO local_task_completion_history_lab
+          (business_id, job_id, document_id, line_id, description,
+           employee_id, payroll_hours, assignment_summary,
+           completed_at, reopened_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ''', [shop, job, invoice, 'lab-differential',
+        'Replace rear differential fluid', null, 0.9,
+        'lab-kam: 0.5 hrs, lab-raz: 0.4 hrs',
+        1761000000000, 1761000100000]);
+      final before = await store.earnedHoursPreview(shop, job);
+      expect(before['lab-kam'], closeTo(0.5, 0.000001));
+      expect(before['lab-raz'], closeTo(0.4, 0.000001));
+      expect((await store.preservedPayrollPreview(shop, job)).taskKeys.length, 1);
+      // Later recheck snapshots cannot overwrite the first completed work.
+      await db.customStatement('''
+        INSERT INTO local_task_completion_history_lab
+          (business_id, job_id, document_id, line_id, description,
+           employee_id, payroll_hours, assignment_summary,
+           completed_at, reopened_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ''', [shop, job, invoice, 'lab-differential',
+        'Replace rear differential fluid', 'lab-chris', 0.8,
+        'lab-chris: 0.8 hrs', 1761000500000, 1761000600000]);
+      expect(await store.earnedHoursPreview(shop, job), before);
+    } finally {
+      await db.close();
+    }
+  });
+
   test('Job status and task transitions share one persisted workflow',
       () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
