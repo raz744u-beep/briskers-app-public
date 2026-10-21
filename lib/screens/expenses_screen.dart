@@ -2106,10 +2106,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                           ),
                                         ),
                                       if (invoiceReceipt) Text(
-                                        transaction['_payment_coverage'] == 'paid'
-                                            ? 'Paid' : 'Partial',
+                                        transaction['_receipt_state'] != 'posted'
+                                            ? 'Recorded • awaiting finalization'
+                                            : transaction['_payment_coverage'] == 'paid'
+                                                ? 'Paid' : 'Partial',
                                         style: TextStyle(
-                                          color: transaction['_payment_coverage'] == 'paid'
+                                          color: transaction['_receipt_state'] == 'posted' &&
+                                                  transaction['_payment_coverage'] == 'paid'
                                               ? const Color(0xFF168A4B)
                                               : const Color(0xFFD56D08),
                                           fontWeight: FontWeight.w800,
@@ -2150,20 +2153,27 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                       const SizedBox(height: 6),
                                       Stack(alignment: Alignment.center, children: [
                                         Icon(
-                                          transaction['_receipt_state'] == 'local'
-                                              ? Icons.cloud_outlined : Icons.cloud,
+                                          transaction['_receipt_state'] == 'posted'
+                                              ? Icons.cloud : Icons.cloud_outlined,
                                           size: 32,
-                                          color: transaction['_receipt_state'] == 'local'
-                                              ? const Color(0xFF667085)
-                                              : const Color(0xFF169B62),
+                                          color: transaction['_receipt_state'] == 'posted'
+                                              ? const Color(0xFF169B62)
+                                              : transaction['_receipt_state'] == 'pending'
+                                                  ? const Color(0xFFD56D08)
+                                                  : const Color(0xFF667085),
                                         ),
                                         Icon(
-                                          transaction['_receipt_state'] == 'local'
-                                              ? Icons.priority_high : Icons.check,
-                                          size: transaction['_receipt_state'] == 'local' ? 17 : 19,
-                                          color: transaction['_receipt_state'] == 'local'
-                                              ? const Color(0xFF667085)
-                                              : Colors.white,
+                                          transaction['_receipt_state'] == 'posted'
+                                              ? Icons.check
+                                              : transaction['_receipt_state'] == 'pending'
+                                                  ? Icons.schedule
+                                                  : Icons.priority_high,
+                                          size: 17,
+                                          color: transaction['_receipt_state'] == 'posted'
+                                              ? Colors.white
+                                              : transaction['_receipt_state'] == 'pending'
+                                                  ? const Color(0xFFD56D08)
+                                                  : const Color(0xFF667085),
                                         ),
                                       ]),
                                     ],
