@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 /// Mount a module on its first visit and retain expensive list modules,
-/// including Expenses. Expenses holds verified server receipt identities in its
+/// including Customers and Expenses. Reopening Customers should not
+/// remount its list and repeat a full bootstrap before the first frame.
+/// Expenses holds verified server receipt identities in its
 /// state; disposing it on a tab switch made green clouds falsely turn gray.
 /// Hidden modules keep their filters, controllers and scroll position, without
 /// running tickers or receiving focus. Unvisited modules do no work.
@@ -11,7 +13,7 @@ class RetainedModuleStack extends StatefulWidget {
     required this.index,
     required this.itemCount,
     required this.itemBuilder,
-    this.retainedIndices = const {3, 4, 5, 6},
+    this.retainedIndices = const {1, 3, 4, 5, 6},
   });
 
   final int index;
