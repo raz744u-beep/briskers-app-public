@@ -3571,7 +3571,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     var customerName = _detail!['customer_name']?.toString() ?? '';
     String? vehicleId = _detail!['vehicle_id']?.toString();
     var vehicleName = _detail!['vehicle']?.toString() ?? '';
-    var mileageText = _detail!['odometer_in']?.toString().trim() ?? '';
+    // Schema-v2 invoices have an independent departure reading. Legacy
+    // documents must keep the old neutral mileage field unchanged.
+    final explicitMileageOut = !_estimate &&
+        (_detail!['mileage_schema_version'] == 2 ||
+            _detail!.containsKey('mileage_out'));
+    var mileageText = (explicitMileageOut
+        ? _detail!['mileage_out']
+        : _detail!['odometer_in'])?.toString().trim() ?? '';
     final claimController = TextEditingController(
       text: _detail!['claim_number']?.toString() ?? '',
     );
@@ -3629,7 +3636,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           customer['display_name']?.toString() ?? '';
                       vehicleId = vehicle?['id']?.toString();
                       vehicleName = _vehicleLabel(vehicle);
-                      mileageText = vehicle?['mileage']?.toString().trim() ?? '';
+                      mileageText = explicitMileageOut ? '' :
+                          (vehicle?['mileage']?.toString().trim() ?? '');
                     });
                   },
                 ),
@@ -3649,13 +3657,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           setSheetState(() {
                             vehicleId = vehicle['id']?.toString();
                             vehicleName = _vehicleLabel(vehicle);
-                            mileageText = vehicle['mileage']?.toString().trim() ?? '';
+                            mileageText = explicitMileageOut ? '' :
+                                (vehicle['mileage']?.toString().trim() ?? '');
                           });
                         },
                 ),
                 ListTile(
                   leading: const Icon(Icons.speed_outlined),
-                  title: const Text('Mileage'),
+                  title: Text(explicitMileageOut ? 'Mileage Out' : 'Mileage'),
                   subtitle: Text(
                     mileageText.isEmpty
                         ? 'Not entered'
@@ -3671,7 +3680,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           final saveMileage = await showDialog<bool>(
                             context: sheetContext,
                             builder: (dialogContext) => AlertDialog(
-                              title: const Text('Mileage'),
+                              title: Text(explicitMileageOut ? 'Mileage Out' : 'Mileage'),
                               content: TextField(
                                 controller: controller,
                                 autofocus: true,
@@ -3679,7 +3688,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                   decimal: true,
                                 ),
                                 decoration: const InputDecoration(
-                                  labelText: 'Current mileage',
+                                  labelText: explicitMileageOut
+                                      ? 'Mileage Out at repair completion'
+                                      : 'Current mileage',
                                   suffixText: 'mi',
                                 ),
                               ),
@@ -3801,8 +3812,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     final originalDate = DateTime.tryParse(
       _detail!['document_date']?.toString() ?? '',
     );
-    final originalMileage =
-        _detail!['odometer_in']?.toString().replaceAll(',', '').trim() ?? '';
+    final originalMileage = (explicitMileageOut
+        ? _detail!['mileage_out']
+        : _detail!['odometer_in'])?.toString().replaceAll(',', '').trim() ?? '';
     final newMileage = mileageText.replaceAll(',', '').trim();
     final originalClaimNumber =
         _detail!['claim_number']?.toString().trim() ?? '';
@@ -3872,11 +3884,22 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
     if (newMileage != originalMileage) {
       await _run(() async {
-        await _api.updateDocumentMileage(
-          widget.businessId,
-          widget.documentId,
-          odometer: newMileage.isEmpty ? null : num.tryParse(newMileage),
-        );
+        if (explicitMileageOut) {
+          // Fail closed if the server has not deployed schema-v2. Never
+          // mis-store Mileage Out into legacy odometer_in.
+          await _api.saveInvoiceMileageOut(
+            widget.businessId,
+            widget.documentId,
+            expectedVersion: _version,
+            mileageOut: newMileage.isEmpty ? null : num.tryParse(newMileage),
+          );
+        } else {
+          await _api.updateDocumentMileage(
+            widget.businessId,
+            widget.documentId,
+            odometer: newMileage.isEmpty ? null : num.tryParse(newMileage),
+          );
+        }
       });
     }
 
