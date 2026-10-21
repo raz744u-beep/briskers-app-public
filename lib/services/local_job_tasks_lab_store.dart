@@ -61,6 +61,25 @@ class LocalJobTasksLabStore {
         completed_at INTEGER NOT NULL, reopened_at INTEGER NOT NULL
       )
     ''');
+    // One immutable earned-hours snapshot per original labor task.
+    // Re-completing a reopened task must not credit the same labor twice.
+    // This is a read-only payroll PREVIEW ledger, not a payment record.
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_payroll_preserved_tasks_lab (
+        business_id TEXT NOT NULL, job_id TEXT NOT NULL,
+        document_id TEXT NOT NULL, line_id TEXT NOT NULL,
+        captured_at INTEGER NOT NULL,
+        PRIMARY KEY (business_id, job_id, document_id, line_id)
+      )
+    ''');
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_payroll_preserved_hours_lab (
+        business_id TEXT NOT NULL, job_id TEXT NOT NULL,
+        document_id TEXT NOT NULL, line_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL, hours REAL NOT NULL,
+        PRIMARY KEY (business_id, job_id, document_id, line_id, employee_id)
+      )
+    ''');
     await db.customStatement('''
       CREATE TABLE IF NOT EXISTS local_job_lead_lab (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL,
@@ -117,6 +136,97 @@ class LocalJobTasksLabStore {
     return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
   }
 
+  /// Immutable snapshots from the first completed work cycle. The marker
+  /// exists even when a task had no mechanic, preventing later double credit.
+  Future<({Map<String, double> hoursByMechanic, Set<String> taskKeys})>
+      preservedPayrollPreview(String businessId, String jobId) async {
+    await ensureTables(db);
+    String key(String doc, String line) => '${doc.length}:$doc$line';
+    final tasks = await db.customSelect(
+      'SELECT document_id, line_id FROM local_payroll_preserved_tasks_lab '
+      'WHERE business_id=? AND job_id=?',
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    final allocations = await db.customSelect(
+      'SELECT employee_id, hours FROM local_payroll_preserved_hours_lab '
+      'WHERE business_id=? AND job_id=?',
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    final byMechanic = <String, double>{};
+    for (final allocation in allocations) {
+      final id = allocation.read<String>('employee_id');
+      byMechanic[id] = (byMechanic[id] ?? 0) +
+          allocation.read<double>('hours');
+    }
+    return (
+      hoursByMechanic: byMechanic,
+      taskKeys: {
+        for (final task in tasks)
+          key(task.read<String>('document_id'),
+              task.read<String>('line_id')),
+      },
+    );
+  }
+
+  /// Freeze the original per-mechanic hours when a Completed job is reopened.
+  /// A unique task marker prevents any later completion cycle crediting the
+  /// original labor again. Additional recheck work needs a distinct task.
+  Future<void> _preservePayrollOnReopen(
+      String businessId, String jobId, int capturedAt) async {
+    final completed = await db.customSelect(
+      'SELECT document_id, line_id, employee_id, payroll_hours '
+      'FROM local_job_tasks_lab WHERE business_id=? AND job_id=? '
+      "AND source_missing=0 AND status='done'",
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    for (final row in completed) {
+      final doc = row.read<String>('document_id');
+      final line = row.read<String>('line_id');
+      final previous = await db.customSelect(
+        'SELECT 1 FROM local_payroll_preserved_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(doc), Variable<String>(line)],
+      ).getSingleOrNull();
+      if (previous != null) continue;
+      final allocations = await db.customSelect(
+        'SELECT employee_id, hours FROM local_task_allocations_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(doc), Variable<String>(line)],
+      ).get();
+      await db.customStatement(
+        'INSERT INTO local_payroll_preserved_tasks_lab '
+        '(business_id, job_id, document_id, line_id, captured_at) '
+        'VALUES (?, ?, ?, ?, ?)',
+        [businessId, jobId, doc, line, capturedAt],
+      );
+      if (allocations.isNotEmpty) {
+        for (final allocation in allocations) {
+          await db.customStatement(
+            'INSERT INTO local_payroll_preserved_hours_lab '
+            '(business_id, job_id, document_id, line_id, employee_id, hours) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            [businessId, jobId, doc, line,
+              allocation.read<String>('employee_id'),
+              allocation.read<double>('hours')],
+          );
+        }
+      } else {
+        final id = row.readNullable<String>('employee_id');
+        final hours = row.readNullable<double>('payroll_hours') ?? 0;
+        if (id != null && id.isNotEmpty && hours > 0) {
+          await db.customStatement(
+            'INSERT INTO local_payroll_preserved_hours_lab '
+            '(business_id, job_id, document_id, line_id, employee_id, hours) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            [businessId, jobId, doc, line, id, hours],
+          );
+        }
+      }
+    }
+  }
+
   /// An explicit Job status change has the same effect from the Jobs list,
   /// Job Detail and Tasks. Completing is atomic with all active task statuses.
   /// Reopening creates permanent Work Log snapshots, but never touches money.
@@ -171,6 +281,9 @@ class LocalJobTasksLabStore {
           [now, now, businessId, jobId],
         );
       } else if (previous == 'completed') {
+        // Snapshot earned hours before task reactivation. This runs inside
+        // the same transaction as archived completion and status changes.
+        await _preservePayrollOnReopen(businessId, jobId, now);
         // Preserve previous completion events in history for audit/work log.
         await db.customStatement('''
           INSERT INTO local_task_completion_history_lab
