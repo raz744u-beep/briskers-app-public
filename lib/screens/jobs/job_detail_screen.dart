@@ -4066,6 +4066,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }
 
   Widget _complaintDrawer(String complaint) {
+    final mileageIn = _preInspection?['odometer'] ?? _job?['odometer_in'];
     return _JobDrawerSurface(
       color: BriskersColors.customers,
       child: Padding(
@@ -4085,7 +4086,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Mileage In: ${_preInspection?['odometer'] ?? _job?['odometer_in'] ?? 'Not entered'} mi',
+                    mileageIn == null
+                        ? 'Mileage In: Not entered'
+                        : 'Mileage In: ${mileageIn.toString()} mi',
                   ),
                 ),
                 if (_canEditInspection)
