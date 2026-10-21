@@ -156,5 +156,7 @@ void main() {
     expect(customers, contains(
       'if (BriskersConnectionModeController.instance.forceOffline) {'));
     expect(customers, contains('_rows ??= const <Map<String, dynamic>>[];'));
+    expect(customers, contains('search: query, limit: 100'));
+    expect(customers, contains('_search.text.trim() != query'));
   });
 }
