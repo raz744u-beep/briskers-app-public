@@ -199,7 +199,8 @@ void main() {
       expect(source, contains('visibility.isCurrent(generation)'), reason: path);
     }
     final customer = await File('lib/screens/customers/customer_detail_screen.dart').readAsString();
-    expect(customer, contains("ValueKey(('customer-overview', _jobVisibility.epoch))"));
+    expect(customer, contains("'customer-overview', widget.customerId,"));
+    expect(customer, contains('_jobVisibility.epoch, _activityRevision'));
     expect(customer, contains("ValueKey(('offline-customer-sections', _jobVisibility.epoch))"));
     final findings = await File('lib/screens/customers/customer_vehicle_findings_section.dart').readAsString();
     expect(findings, contains("ValueKey(('vehicle-findings', _jobVisibility.epoch))"));
