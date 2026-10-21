@@ -436,13 +436,12 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
     } else {
       NavigationContentTiming.cancel();
     }
-    final request = ++_customerNavigationRequest;
-    if (index == 1) {
-      unawaited(_openCustomers(request));
-      return;
-    }
+    // A normal Customers dock tap must not await the separate unread/new
+    // customer notification lookup. It also must not filter to new only.
+    ++_customerNavigationRequest;
     setState(() {
       _index = index;
+      if (index == 1) _focusedCustomerIds = null;
       if (index == 2) _jobsRefreshToken++;
       if (index == 3) _estimatesDockReset++;
       if (index == 4) _invoicesDockReset++;
@@ -467,6 +466,18 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
       const BriskersDockDestination(label: 'Expenses', icon: Icons.account_balance_wallet_outlined, color: BriskersColors.expenses),
       const BriskersDockDestination(label: 'More', icon: Icons.more_horiz, color: BriskersColors.more),
     ],
+    onBadgeSelected: (index) {
+      if (index != 1) {
+        _goTo(index);
+        return;
+      }
+      if (nested) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+      // Only the Customers badge opens the new-customer review queue.
+      final request = ++_customerNavigationRequest;
+      unawaited(_openCustomers(request));
+    },
     onSelected: (index) {
       if (nested) {
         // A shared dock may be inside a sheet over a detail page.

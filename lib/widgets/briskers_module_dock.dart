@@ -9,10 +9,14 @@ class BriskersModuleDock extends StatefulWidget {
     super.key,
     required this.selectedIndex,
     required this.onSelected,
+    this.onBadgeSelected,
     required this.destinations,
   });
   final int selectedIndex;
   final ValueChanged<int> onSelected;
+  /// Badge taps may open a separate review queue without delaying normal
+  /// navigation to the module. Other badges retain standard navigation.
+  final ValueChanged<int>? onBadgeSelected;
   final List<BriskersDockDestination> destinations;
 
   @override
@@ -139,7 +143,15 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
                       Badge(
                         isLabelVisible: item.count > 0,
                         backgroundColor: const Color(0xFF465468),
-                        label: Text(item.count > 99 ? '99+' : '${item.count}'),
+                        // Only the small NUMBER opens its review queue.
+                        // Tapping the icon must open the full module instantly.
+                        label: item.count > 0 && widget.onBadgeSelected != null
+                            ? GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => widget.onBadgeSelected!(index),
+                                child: Text(item.count > 99 ? '99+' : '${item.count}'),
+                              )
+                            : Text(item.count > 99 ? '99+' : '${item.count}'),
                         child: Icon(item.icon, color: item.color, size: 25),
                       ),
                       const SizedBox(height: 2),

@@ -1651,36 +1651,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
               ],
             )
           : null,
-      bottomNavigationBar: (widget.customerId != null || !widget.showAppBar)
-          ? SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (widget.isOwner || widget.canManageExpenses)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 7, 12, 9),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _estimate ? _createStandaloneEstimate
-                              : _createBlankInvoice,
-                          icon: const Icon(Icons.add),
-                          label: Text(_estimate ? 'New Estimate' : 'New Invoice'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: accent,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 13),
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (widget.customerId != null &&
-                      widget.sharedBottomNavigationBar != null)
-                    widget.sharedBottomNavigationBar!,
-                ],
-              ),
-            )
+      // The module dock belongs to Shell. Nested customer views may supply
+      // their own dock; never reserve bottom space for New Estimate/Invoice.
+      // Creation lives beside Search for every view, just like Customers.
+      bottomNavigationBar: widget.customerId != null &&
+              widget.sharedBottomNavigationBar != null
+          ? widget.sharedBottomNavigationBar!
           : widget.showAppBar && _estimate
           ? (widget.sharedBottomNavigationBar ??
                 NavigationBar(
@@ -1914,8 +1890,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (widget.showAppBar &&
-                    (widget.isOwner || widget.canManageExpenses))
+                if (widget.isOwner || widget.canManageExpenses)
                   IconButton.filled(
                     tooltip: _estimate ? 'New Estimate' : 'New Invoice',
                     style: IconButton.styleFrom(

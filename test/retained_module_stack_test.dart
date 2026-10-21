@@ -298,7 +298,7 @@ void main() {
         .readAsStringSync();
     final expenses = File('lib/screens/expenses_screen.dart')
         .readAsStringSync();
-    expect(stack, contains('retainedIndices = const {3, 4, 5, 6}'));
+    expect(stack, contains('retainedIndices = const {1, 3, 4, 5, 6}'));
     expect(expenses, contains('_serverConfirmedTransactionIds'));
     expect(expenses, contains('if (mounted && TickerMode.valuesOf(context).enabled)'));
     expect(expenses, contains('unawaited(_refreshPhotoCounts())'));
@@ -323,6 +323,38 @@ void main() {
     expect(dockStart, greaterThan(0));
     expect(didUpdate.substring(dockStart),
         isNot(contains('_serverConfirmedTransactionIds.clear()')));
+  });
+
+  testWidgets('Customers opens instantly from Invoices without remount', (
+    tester,
+  ) async {
+    final mounts = <int, int>{};
+    void record(int i) => mounts[i] = (mounts[i] ?? 0) + 1;
+    Future<void> show(int index) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: RetainedModuleStack(
+            index: index,
+            itemCount: 8,
+            itemBuilder: (_, i) => _TestModule(index: i, onLoad: record),
+          ),
+        ),
+      ));
+      await tester.pump();
+    }
+
+    await show(1);
+    await tester.tap(find.text('1:Open'));
+    await tester.pump();
+    final customerState =
+        tester.state<_TestModuleState>(find.byType(_TestModule));
+    await show(4); // Invoice list
+    await show(1); // Customer list
+    expect(mounts[1], 1);
+    expect(tester.state<_TestModuleState>(find.byType(_TestModule)),
+        same(customerState));
+    expect(find.text('1:Closed'), findsOneWidget);
+    expect(mounts[4], 1);
   });
 
 }
