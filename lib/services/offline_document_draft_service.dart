@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
+import '../core/mileage_workflow.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
@@ -110,6 +111,8 @@ class OfflineDocumentDraftService {
       'id': id,
       'kind': 'invoice',
       'document_number': null,
+      'mileage_schema_version': 2,
+      'mileage_out': null,
       'status': 'issued',
       'display_status': 'Pending sync',
       'display_status_code': 'open',
@@ -955,6 +958,7 @@ class OfflineDocumentDraftService {
     String documentId, {
     required DateTime documentDate,
     String? mileage,
+    String? mileageOut,
     String? claimNumber,
     String? authorizationNumber,
   }) async {
@@ -966,8 +970,12 @@ class OfflineDocumentDraftService {
     final updated = <String, dynamic>{
       ...detail,
       'document_date': date,
-      'odometer_in': mileage == null || mileage.isEmpty
-          ? null : num.tryParse(mileage),
+      if (detail['mileage_schema_version'] == 2)
+        'mileage_out': mileageOut == null || mileageOut.isEmpty
+            ? null : MileageWorkflow.parse(mileageOut)
+      else
+        'odometer_in': mileage == null || mileage.isEmpty
+            ? null : num.tryParse(mileage),
       'claim_number': claimNumber,
       'authorization_number': authorizationNumber,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
@@ -1387,6 +1395,51 @@ class OfflineDocumentDraftService {
             );
             serverDetail = await _api.documentDetail(businessId,serverId);
           }
+          }
+        }
+
+        if ((payload['kind'] == 'invoice' ||
+                payload['kind'] == 'convert_invoice') &&
+            localDetail['mileage_schema_version'] == 2 &&
+            localDetail['mileage_out'] != null) {
+          // A provisional local invoice cannot call UUID-only mileage RPCs.
+          // Transfer its verified departure reading AFTER the permanent
+          // invoice exists, before retiring the same durable draft outbox.
+          if (serverDetail['mileage_schema_version'] != 2) {
+            throw StateError('Mileage Out server schema is not available yet.');
+          }
+          final desired = MileageWorkflow.parse(localDetail['mileage_out']);
+          if (desired == null) {
+            throw StateError('Invalid unsynced invoice departure mileage.');
+          }
+          if (MileageWorkflow.parse(serverDetail['mileage_out']) != desired) {
+            final version = int.tryParse(
+              serverDetail['row_version']?.toString() ?? '',
+            );
+            if (version == null || version < 1) {
+              throw StateError('Invoice row revision is missing.');
+            }
+            try {
+              await LocalJobQuarantine.guardReplay(
+                _database, businessId,
+                () => _api.saveInvoiceMileageOut(
+                  businessId, serverId,
+                  expectedVersion: version,
+                  mileageOut: desired,
+                ),
+                outboxId: outboxId,
+              );
+            } catch (_) {
+              // A lost acknowledgment may follow a committed write.
+              // Never retry this mutation with a new guessed revision.
+              final proof = await _api.documentDetail(
+                businessId, serverId);
+              if (proof['mileage_schema_version'] != 2 ||
+                  MileageWorkflow.parse(proof['mileage_out']) != desired) {
+                rethrow;
+              }
+            }
+            serverDetail = await _api.documentDetail(businessId, serverId);
           }
         }
 
