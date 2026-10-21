@@ -44,6 +44,24 @@ class LocalJobTasksLabStore {
       )
     ''');
     await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_job_status_lab (
+        business_id TEXT NOT NULL, job_id TEXT NOT NULL,
+        status_code TEXT NOT NULL, updated_at INTEGER NOT NULL,
+        PRIMARY KEY (business_id, job_id)
+      )
+    ''');
+    // Keep the prior completion in the Work Log when a completed job reopens.
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_task_completion_history_lab (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_id TEXT NOT NULL, job_id TEXT NOT NULL,
+        document_id TEXT NOT NULL, line_id TEXT NOT NULL,
+        description TEXT NOT NULL,
+        employee_id TEXT, payroll_hours REAL,
+        completed_at INTEGER NOT NULL, reopened_at INTEGER NOT NULL
+      )
+    ''');
+    await db.customStatement('''
       CREATE TABLE IF NOT EXISTS local_job_lead_lab (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL,
         employee_id TEXT, updated_at INTEGER NOT NULL,
@@ -62,6 +80,132 @@ class LocalJobTasksLabStore {
         full_name TEXT NOT NULL, PRIMARY KEY (business_id, employee_id)
       )
     ''');
+  }
+
+  static const validJobStatuses = <String>{
+    'open', 'in_progress', 'pending_approval', 'waiting_parts',
+    'needs_recheck', 'completed', 'cancelled',
+  };
+
+  /// Existing installed test tasks are migrated without overwriting work.
+  /// A prior Done task does not silently close a job or invoice.
+  Future<String> jobStatus(String businessId, String jobId) async {
+    await ensureTables(db);
+    final recorded = await db.customSelect(
+      'SELECT status_code FROM local_job_status_lab '
+      'WHERE business_id=? AND job_id=?',
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).getSingleOrNull();
+    if (recorded != null) return recorded.read<String>('status_code');
+    final active = await db.customSelect(
+      "SELECT 1 FROM local_job_tasks_lab "
+      "WHERE business_id=? AND job_id=? AND source_missing=0 "
+      "AND status!='planned' LIMIT 1",
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).getSingleOrNull();
+    return active == null ? 'open' : 'in_progress';
+  }
+
+  Future<List<Map<String, dynamic>>> priorCompletions(
+      String businessId, String jobId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT * FROM local_task_completion_history_lab '
+      'WHERE business_id=? AND job_id=? ORDER BY completed_at DESC, id DESC',
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
+
+  /// An explicit Job status change has the same effect from the Jobs list,
+  /// Job Detail and Tasks. Completing is atomic with all active task statuses.
+  /// Reopening creates permanent Work Log snapshots, but never touches money.
+  Future<int> changeJobStatus({
+    required String businessId, required String jobId,
+    required String statusCode,
+    List<Map<String, String>>? confirmedTasks,
+  }) async {
+    await ensureTables(db);
+    if (businessId.trim().isEmpty || jobId.trim().isEmpty ||
+        !validJobStatuses.contains(statusCode)) {
+      throw ArgumentError('Invalid job status or identity');
+    }
+    return db.transaction(() async {
+      final previous = await jobStatus(businessId, jobId);
+      if (statusCode == previous) return 0;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      int affected = 0;
+      if (statusCode == 'completed') {
+        final requested = confirmedTasks ?? const <Map<String, String>>[];
+        final confirmed = <String>{};
+        String id(String doc, String line) => '${doc.length}:$doc$line';
+        for (final task in requested) {
+          final doc = task['document_id']?.trim() ?? '';
+          final line = task['line_id']?.trim() ?? '';
+          if (doc.isEmpty || line.isEmpty ||
+              !confirmed.add(id(doc, line))) {
+            throw ArgumentError('Invalid or duplicate confirmed task');
+          }
+        }
+        final tasks = await db.customSelect(
+          'SELECT document_id, line_id, status FROM local_job_tasks_lab '
+          'WHERE business_id=? AND job_id=? AND source_missing=0',
+          variables: [Variable<String>(businessId),
+            Variable<String>(jobId)],
+        ).get();
+        final actual = {
+          for (final task in tasks)
+            id(task.read<String>('document_id'), task.read<String>('line_id')),
+        };
+        if (actual.isEmpty || actual.length != confirmed.length ||
+            !actual.containsAll(confirmed)) {
+          throw StateError('Job tasks changed. Review before completing.');
+        }
+        affected = tasks.where((task) =>
+            task.read<String>('status') != 'done').length;
+        await db.customStatement(
+          "UPDATE local_job_tasks_lab SET status='done', "
+          "completed_at=COALESCE(completed_at, ?), updated_at=? "
+          "WHERE business_id=? AND job_id=? AND source_missing=0 "
+          "AND status!='done'",
+          [now, now, businessId, jobId],
+        );
+      } else if (previous == 'completed') {
+        // Preserve previous completion events in history for audit/work log.
+        await db.customStatement('''
+          INSERT INTO local_task_completion_history_lab
+          (business_id, job_id, document_id, line_id, description,
+           employee_id, payroll_hours, completed_at, reopened_at)
+          SELECT business_id, job_id, document_id, line_id,
+            COALESCE(custom_description, source_description),
+            employee_id, payroll_hours, completed_at, ?
+          FROM local_job_tasks_lab WHERE business_id=? AND job_id=?
+            AND source_missing=0 AND status='done' AND completed_at IS NOT NULL
+        ''', [now, businessId, jobId]);
+        final completed = await db.customSelect(
+          "SELECT COUNT(*) AS count FROM local_job_tasks_lab "
+          "WHERE business_id=? AND job_id=? AND source_missing=0 "
+          "AND status='done'",
+          variables: [Variable<String>(businessId), Variable<String>(jobId)],
+        ).getSingle();
+        affected = completed.read<int>('count');
+        await db.customStatement(
+          "UPDATE local_job_tasks_lab SET status='in_progress', "
+          "completed_at=NULL, updated_at=? "
+          "WHERE business_id=? AND job_id=? AND source_missing=0 "
+          "AND status='done'",
+          [now, businessId, jobId],
+        );
+      }
+      await db.customStatement(
+        'INSERT INTO local_job_status_lab '
+        '(business_id, job_id, status_code, updated_at) VALUES (?,?,?,?) '
+        'ON CONFLICT(business_id, job_id) DO UPDATE SET '
+        'status_code=excluded.status_code, updated_at=excluded.updated_at',
+        [businessId, jobId, statusCode, now],
+      );
+      return affected;
+    });
   }
 
   Future<String?> leadMechanic(String businessId, String jobId) async {
@@ -228,6 +372,19 @@ class LocalJobTasksLabStore {
         "WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?",
         [...args, businessId, jobId, documentId, lineId],
       );
+      // Only the Open status auto-promotes; pause/recheck statuses remain.
+      if (status == 'in_progress' || status == 'done') {
+        if (await jobStatus(businessId, jobId) == 'open') {
+          await db.customStatement(
+            'INSERT INTO local_job_status_lab '
+            '(business_id, job_id, status_code, updated_at) '
+            "VALUES (?, ?, 'in_progress', ?) "
+            'ON CONFLICT(business_id, job_id) DO UPDATE SET '
+            'status_code=excluded.status_code, updated_at=excluded.updated_at',
+            [businessId, jobId, DateTime.now().millisecondsSinceEpoch],
+          );
+        }
+      }
     });
   }
 
