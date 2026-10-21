@@ -46,6 +46,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
   String? _error;
   bool _onlineReady = false;
   bool _showingLocal = false;
+  bool _refreshFailed = false;
   bool get _canManageCustomers => const {'owner', 'manager', 'office'}.contains(widget.roleCode);
 
   @override
@@ -96,6 +97,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
           _rows = rows;
           _totalCustomers = total;
           _showingLocal = !_onlineReady;
+          // A cache-first paint is expected in Auto, not a network error.
           _error = null;
         });
       }
@@ -126,6 +128,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
         _totalCustomers = results[1] as int;
         _onlineReady = bootstrapped;
         _showingLocal = !bootstrapped;
+        _refreshFailed = !bootstrapped;
         _error = null;
       });
     } catch (error) {
@@ -134,6 +137,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
         _onlineReady = false;
         if (localAvailable && !forceOnline) {
           _showingLocal = true;
+          _refreshFailed = true;
           _error = null;
         } else {
           _rows ??= const [];
@@ -223,6 +227,19 @@ class _CustomersScreenState extends State<CustomersScreen> {
                       ),
                 ),
               ),
+              if (_showingLocal &&
+                  (BriskersConnectionModeController.instance.forceOffline ||
+                      _refreshFailed))
+                Tooltip(
+                  message: _refreshFailed
+                      ? 'Customer refresh needs attention; saved customers shown'
+                      : 'Offline: showing saved customers',
+                  child: const Padding(
+                    padding: EdgeInsets.only(right: 8),
+                    child: Icon(Icons.cloud_off_outlined,
+                      size: 18, color: Color(0xFF667085)),
+                  ),
+                ),
               Text(
                 '${tr('total')} $_totalCustomers',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -261,32 +278,6 @@ class _CustomersScreenState extends State<CustomersScreen> {
             ],
           ),
         ),
-        if (_showingLocal)
-          Container(
-            margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 10,
-              vertical: 8,
-            ),
-            decoration: BoxDecoration(
-              color: Theme.of(context)
-                  .colorScheme
-                  .surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.cloud_off_outlined, size: 18),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: Text(
-                    tr('savedCustomersOffline'),
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
-            ),
-          ),
         if (_error != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
