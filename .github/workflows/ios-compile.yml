@@ -61,7 +61,7 @@ jobs:
               "  config = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)\n"
               "  raise 'Missing Flutter Generated.xcconfig' unless File.exist?(config)\n"
               "  File.foreach(config) do |line|\n"
-              "    match = line.match(/FLUTTER_ROOT\\=(.*)/)\n"
+              "    match = line.match(/FLUTTER_ROOT=(.*)/)\n"
               "    return match[1].strip if match\n"
               "  end\n"
               "  raise 'Missing FLUTTER_ROOT'\n"
