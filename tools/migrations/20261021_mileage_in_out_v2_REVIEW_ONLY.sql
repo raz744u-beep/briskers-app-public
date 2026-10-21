@@ -4,14 +4,13 @@
 -- Existing odometer_in fields and imported PDFs remain unchanged.
 BEGIN;
 
+-- Old rows are logically 1 without a mass UPDATE (and without changing
+-- 5,900+ historical row versions, sync cursors, or timestamps). New rows
+-- created after this migration default to 2.
 ALTER TABLE briskers.sales_documents
-  ADD COLUMN IF NOT EXISTS mileage_schema_version smallint;
-UPDATE briskers.sales_documents
-SET mileage_schema_version = 1
-WHERE mileage_schema_version IS NULL;
+  ADD COLUMN IF NOT EXISTS mileage_schema_version smallint NOT NULL DEFAULT 1;
 ALTER TABLE briskers.sales_documents
-  ALTER COLUMN mileage_schema_version SET DEFAULT 2,
-  ALTER COLUMN mileage_schema_version SET NOT NULL;
+  ALTER COLUMN mileage_schema_version SET DEFAULT 2;
 ALTER TABLE briskers.sales_documents
   ADD COLUMN IF NOT EXISTS odometer_out numeric;
 ALTER TABLE briskers.vehicles
