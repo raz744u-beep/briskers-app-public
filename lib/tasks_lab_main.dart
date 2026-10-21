@@ -603,8 +603,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               const Text('Assign main job mechanic', style: TextStyle(
                 fontSize: 20, fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
-              const Text('Lead responsibility only. Task assignments, '
-                'hours and payroll are not changed.'),
+              const Text('Unassigned labor tasks automatically inherit the lead. '
+                'Manual task overrides and split allocations stay unchanged.'),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
                 initialValue: selected,
