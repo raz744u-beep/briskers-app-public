@@ -54,6 +54,10 @@ void main() {
     expect(main, contains("if (index == 2 || index == 7) {"));
     expect(main, contains('jobDetailsOpen'));
     expect(main, contains('Assign main job mechanic'));
+    expect(main, contains('Assign invoice labor'));
+    expect(main, contains('onTap: () => _editInvoiceLabor(task)'));
+    expect(main, contains('allocationsByLine'));
+
     expect(main, contains('_assignLeadMechanic'));
     expect(main, contains('Main job mechanic'));
 
@@ -106,6 +110,38 @@ void main() {
         employeeId: 'lab-chris', editEmployee: true,
         hours: 1.5, editHours: true,
       );
+      await store.saveAllocations(
+        businessId: BriskersLabFixture.businessId,
+        jobId: BriskersLabFixture.jobId,
+        documentId: BriskersLabFixture.invoiceId,
+        lineId: 'lab-transmission',
+        hoursByEmployee: {'lab-chris': 1.0, 'lab-kam': 0.5},
+      );
+      final split = await store.allocations(
+        businessId: BriskersLabFixture.businessId,
+        jobId: BriskersLabFixture.jobId,
+        documentId: BriskersLabFixture.invoiceId,
+        lineId: 'lab-transmission',
+      );
+      expect(split.length, 2);
+      expect(split.fold<double>(0, (n, a) => n + (a['hours'] as num).toDouble()), 1.5);
+      final splitTask = (await store.list(
+        BriskersLabFixture.businessId, BriskersLabFixture.jobId))
+        .singleWhere((task) => task['line_id'] == 'lab-transmission');
+      expect(splitTask['employee_id'], isNull);
+      expect(splitTask['payroll_hours'], 1.5);
+      await store.saveAllocations(
+        businessId: BriskersLabFixture.businessId,
+        jobId: BriskersLabFixture.jobId,
+        documentId: BriskersLabFixture.invoiceId,
+        lineId: 'lab-transmission',
+        hoursByEmployee: {'lab-chris': 1.5},
+      );
+      expect((await store.allocations(
+        businessId: BriskersLabFixture.businessId,
+        jobId: BriskersLabFixture.jobId,
+        documentId: BriskersLabFixture.invoiceId,
+        lineId: 'lab-transmission')).length, 1);
       await store.saveLeadMechanic(
         BriskersLabFixture.businessId, BriskersLabFixture.jobId, 'lab-kam');
       expect(await store.leadMechanic(
