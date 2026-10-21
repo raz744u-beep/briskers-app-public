@@ -772,23 +772,14 @@ class LocalJobTasksLabStore {
     }
     await db.transaction(() async {
       final task = await db.customSelect(
-        'SELECT line_id, source_invoice_hours FROM local_job_tasks_lab '
+        'SELECT line_id FROM local_job_tasks_lab '
         'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
         variables: [Variable<String>(businessId), Variable<String>(jobId),
           Variable<String>(documentId), Variable<String>(lineId)],
       ).getSingleOrNull();
       if (task == null) throw StateError('Labor task not found');
-      final invoiceHours = task.readNullable<double>('source_invoice_hours');
-      if (invoiceHours == null || !invoiceHours.isFinite ||
-          invoiceHours < 0) {
-        throw StateError('Invoice labor hours unavailable; refresh invoice');
-      }
-      final allocatedHours = hoursByEmployee.values.fold<double>(
-        0, (total, hours) => total + hours);
-      if (allocatedHours > invoiceHours + 0.000001) {
-        throw ArgumentError('Mechanic hours cannot exceed '
-          'invoice labor hours ($invoiceHours hrs)');
-      }
+      // Billed book time is a default, never a ceiling on earned payroll.
+      // The task's source_invoice_hours / invoice price remain unchanged.
       await db.customStatement(
         'DELETE FROM local_task_allocations_lab '
         'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
