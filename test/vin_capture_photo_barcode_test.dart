@@ -20,8 +20,8 @@ void main() {
   test('barcode strips harmless Code39 wrapping without truncating long codes', () {
     expect(VinCaptureParser.fromBarcodeValues([
       'PART-AB-000004940493',
-      'VIN: ${vin}',
-      '*${vin}*',
+      'VIN: $vin',
+      '*$vin*',
       '${vin}98765',
       '123456',
     ]), [vin]);
@@ -34,7 +34,7 @@ void main() {
   test('printed VIN OCR accepts labeled or spaced lines only when complete', () {
     expect(VinCaptureParser.fromTextLines([
       'Manufacturer: Honda',
-      'VIN: ${vin}',
+      'VIN: $vin',
       'Other number: 12345',
     ]), [vin]);
     expect(VinCaptureParser.fromTextLines([
