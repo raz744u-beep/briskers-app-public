@@ -1307,7 +1307,7 @@ class _CustomerVehicleFindingsSectionState
         {required bool completed}) {
       final jobId = job['id']?.toString() ?? '';
       final number = job['job_number']?.toString().trim() ?? '';
-      final label = number.isNotEmpty ? 'Job ' + number : 'Job';
+      final label = number.isNotEmpty ? 'Job $number' : 'Job';
       return ListTile(
         leading: Icon(completed ? Icons.history_outlined : Icons.work_outline),
         title: Text(label),
@@ -1322,8 +1322,8 @@ class _CustomerVehicleFindingsSectionState
               builder: (dialogContext) => AlertDialog(
                 title: const Text('Resolve using completed Job?'),
                 content: Text(
-                  'Confirm that the repair on ' + label +
-                  ' resolved this finding. Briskers will record that historical '
+                  'Confirm that the repair on $label resolved this finding. '
+                  'Briskers will record that historical '
                   'Job and mark the finding Resolved. It will NOT reopen the '
                   'Job, change its invoice, payments or payroll. The '
                   'resolution is recorded now; the repair date is not changed.',
