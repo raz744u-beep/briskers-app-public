@@ -349,7 +349,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   ScaffoldMessenger.of(sheet).showSnackBar(SnackBar(
                     content: Text(billed == null
                       ? 'Invoice labor hours unavailable; refresh invoice'
-                      : 'Assigned hours cannot exceed ${billed} invoice hours'),
+                      : 'Assigned hours cannot exceed $billed invoice hours'),
                   ));
                   return;
                 }
