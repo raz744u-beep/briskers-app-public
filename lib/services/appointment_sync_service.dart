@@ -506,6 +506,103 @@ class AppointmentSyncService {
         '${hex.substring(20)}';
   }
 
+  /// The verified mock may have been deleted server-side long ago (or never
+  /// existed). It must not leave a permanent deletion outbox entry merely
+  /// because the ordinary revision-guarded delete RPC requires a server row.
+  ///
+  /// No local tombstone/queue is retired without a new authenticated,
+  /// owner-authorized, server-side absence receipt. Fail closed if offline,
+  /// unauthorized, wrong identity, changed local queue, or missing RPC.
+  Future<bool> reconcileAbsentOrphanMock(
+    String businessId, {
+    required bool isOwner,
+  }) async {
+    if (!isOwner) return false;
+    final local = await _database.customSelect(
+      """SELECT id FROM local_appointments
+         WHERE business_id=? AND id=? AND sync_state='pending_delete'
+           AND status='arrived' AND request_id IS NULL LIMIT 1""",
+      variables: [
+        Variable<String>(businessId),
+        const Variable<String>(orphanMockAppointmentId),
+      ],
+    ).get();
+    if (local.length != 1) return false;
+
+    final outbox = await _database.customSelect(
+      'SELECT * FROM sync_outbox WHERE business_id=? AND entity_id=?',
+      variables: [
+        Variable<String>(businessId),
+        const Variable<String>(orphanMockAppointmentId),
+      ],
+    ).get();
+    if (outbox.length != 1 ||
+        outbox.single.read<String>('entity_type') != 'appointment_delete' ||
+        outbox.single.read<String>('operation') != 'delete' ||
+        !const {'pending','conflict'}
+            .contains(outbox.single.read<String>('state'))) {
+      return false;
+    }
+    final candidate = outbox.single;
+    final queueId = candidate.read<int>('id');
+    final payload = candidate.read<String>('payload_json');
+    final version = candidate.readNullable<int>('base_row_version');
+    if (version == null || version < 1) return false;
+
+    final confirmed = await _api.confirmOrphanMockAppointmentAbsent(
+      businessId, orphanMockAppointmentId,
+    );
+    if (!confirmed) return false;
+
+    var retired = false;
+    await _database.transaction(() async {
+      final now = await _database.customSelect(
+        'SELECT * FROM sync_outbox WHERE id=? AND business_id=? AND entity_id=?',
+        variables: [
+          Variable<int>(queueId), Variable<String>(businessId),
+          const Variable<String>(orphanMockAppointmentId),
+        ],
+      ).get();
+      final current = await _database.customSelect(
+        """SELECT id FROM local_appointments
+           WHERE business_id=? AND id=? AND sync_state='pending_delete'
+             AND status='arrived' AND request_id IS NULL LIMIT 1""",
+        variables: [
+          Variable<String>(businessId),
+          const Variable<String>(orphanMockAppointmentId),
+        ],
+      ).get();
+      final others = await _database.customSelect(
+        'SELECT id FROM sync_outbox WHERE business_id=? AND entity_id=?',
+        variables: [
+          Variable<String>(businessId),
+          const Variable<String>(orphanMockAppointmentId),
+        ],
+      ).get();
+      if (current.length != 1 || now.length != 1 ||
+          others.length != 1 ||
+          now.single.read<String>('entity_type') != 'appointment_delete' ||
+          now.single.read<String>('operation') != 'delete' ||
+          !const {'pending','conflict'}
+              .contains(now.single.read<String>('state')) ||
+          now.single.read<String>('payload_json') != payload ||
+          now.single.readNullable<int>('base_row_version') != version) {
+        return;
+      }
+      await _database.customStatement(
+        'DELETE FROM sync_outbox WHERE business_id=? AND id=?',
+        [businessId, queueId],
+      );
+      await _database.customStatement(
+        'DELETE FROM local_appointments WHERE business_id=? AND id=?',
+        [businessId, orphanMockAppointmentId],
+      );
+      retired = true;
+    });
+    if (retired) _syncEvents.add(businessId);
+    return retired;
+  }
+
   /// Stage owner-only deletion of a synchronized, unlinked appointment.
   /// A local tombstone prevents sync pulls from resurrecting it.
   Future<void> queueDeleteSynced(
