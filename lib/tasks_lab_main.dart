@@ -309,7 +309,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               const SizedBox(height: 8),
               Text(_description(task)),
               const SizedBox(height: 8),
-              const Text('Labor allocation only; invoice totals do not change.'),
+              Text('Invoice labor: ${task['source_invoice_hours'] ?? '—'} hrs. '
+                'Combined mechanic hours may be less, but not more.',
+                style: const TextStyle(
+                  fontSize: 12.5, color: Color(0xFF64748B))),
+              const Text('Invoice totals do not change.',
+                style: TextStyle(fontSize: 12.5)),
               const SizedBox(height: 12),
               choose('Mechanic 1', first, (v) => first = v),
               const SizedBox(height: 8),
@@ -334,6 +339,18 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     (first.isNotEmpty && first == second)) {
                   ScaffoldMessenger.of(sheet).showSnackBar(const SnackBar(
                     content: Text('Choose distinct mechanics and positive hours')));
+                  return;
+                }
+                final billed = (task['source_invoice_hours'] as num?)?.toDouble();
+                final allocated =
+                    (first.isNotEmpty ? a! : 0.0) +
+                    (second.isNotEmpty ? b! : 0.0);
+                if (billed == null || allocated > billed + 0.000001) {
+                  ScaffoldMessenger.of(sheet).showSnackBar(SnackBar(
+                    content: Text(billed == null
+                      ? 'Invoice labor hours unavailable; refresh invoice'
+                      : 'Assigned hours cannot exceed ${billed} invoice hours'),
+                  ));
                   return;
                 }
                 try {
