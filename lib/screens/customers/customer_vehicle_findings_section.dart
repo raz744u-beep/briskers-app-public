@@ -350,7 +350,8 @@ class _CustomerVehicleFindingsSectionState
                   ),
                 ],
               ),
-              Flexible(
+              SizedBox(
+                height: MediaQuery.sizeOf(dialogContext).height * 0.65,
                 child: InteractiveViewer(
                   minScale: 0.8,
                   maxScale: 5,
