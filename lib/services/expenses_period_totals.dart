@@ -40,28 +40,41 @@ class ExpensesPeriodTotals {
     }
     final byIdentity = <String, Map<String, dynamic>>{};
     var complete = false;
-    for (var pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+    // A single page is cheapest for 30-day views. When that page is full,
+    // request up to three subsequent pages concurrently. Preserve page order
+    // and require an actual short/empty terminal page before totaling.
+    var nextPage = 0;
+    while (nextPage < maxPages && !complete) {
       if (isCurrent != null && !isCurrent()) {
         throw StateError('Period changed while totals were loading.');
       }
-      final fetched = await readPage(pageIndex * pageSize, pageSize);
+      final batchSize = nextPage == 0
+          ? 1
+          : (maxPages - nextPage < 3 ? maxPages - nextPage : 3);
+      final pages = await Future.wait([
+        for (var index = 0; index < batchSize; index++)
+          readPage((nextPage + index) * pageSize, pageSize),
+      ]);
       if (isCurrent != null && !isCurrent()) {
         throw StateError('Period changed while totals were loading.');
       }
-      if (fetched.length > pageSize) {
-        throw StateError('Transaction endpoint exceeded its page size.');
-      }
-      for (final row in fetched) {
-        final id = row['id']?.toString() ?? '';
-        if (id.isEmpty) {
-          throw StateError('Cannot total a transaction without a stable ID.');
+      for (final fetched in pages) {
+        if (fetched.length > pageSize) {
+          throw StateError('Transaction endpoint exceeded its page size.');
         }
-        byIdentity[id] = row;
+        for (final row in fetched) {
+          final id = row['id']?.toString() ?? '';
+          if (id.isEmpty) {
+            throw StateError('Cannot total a transaction without a stable ID.');
+          }
+          byIdentity[id] = row;
+        }
+        if (fetched.length < pageSize) {
+          complete = true;
+          break;
+        }
       }
-      if (fetched.length < pageSize) {
-        complete = true;
-        break;
-      }
+      nextPage += batchSize;
     }
     if (!complete) {
       throw StateError('Could not verify all transactions in this period.');
@@ -71,7 +84,9 @@ class ExpensesPeriodTotals {
     var expenseCents = 0;
     var unverified = false;
     final rows = byIdentity.values.toList();
-    const enrichmentBatch = 100;
+    // Reusing one fee-evidence snapshot across up to 1,000 transactions
+    // avoids scanning the same local invoice cache for every small page.
+    const enrichmentBatch = 1000;
     for (var i = 0; i < rows.length; i += enrichmentBatch) {
       if (isCurrent != null && !isCurrent()) {
         throw StateError('Period changed while totals were loading.');
