@@ -1273,12 +1273,15 @@ class _CustomerVehicleFindingsSectionState
     var jobs = local.map((row) => Map<String, dynamic>.from(row.data)).toList();
     if (!BriskersConnectionModeController.instance.forceOffline) {
       try {
-        final remote = await _api.jobs(widget.businessId);
+        // Unlike the generic Jobs list, customer service history includes
+        // the vehicle ID and completed Jobs, and is scoped by customer on
+        // the server before anything reaches this picker.
+        final remote = await _api.customerServiceHistory(
+          widget.businessId, widget.customerId);
         jobs = {
           for (final row in jobs) row['id'].toString(): row,
           for (final row in remote)
-            if (row['customer_id']?.toString() == widget.customerId &&
-                row['vehicle_id']?.toString() == vehicleId &&
+            if (row['vehicle_id']?.toString() == vehicleId &&
                 (row['id']?.toString() ?? '').isNotEmpty)
               row['id'].toString(): row,
         }.values.toList();
