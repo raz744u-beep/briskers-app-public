@@ -280,7 +280,7 @@ class LocalJobTasksLabStore {
         0, (total, hours) => total + hours);
       if (allocatedHours > invoiceHours + 0.000001) {
         throw ArgumentError('Mechanic hours cannot exceed '
-          'invoice labor hours (${invoiceHours} hrs)');
+          'invoice labor hours ($invoiceHours hrs)');
       }
       await db.customStatement(
         'DELETE FROM local_task_allocations_lab '
