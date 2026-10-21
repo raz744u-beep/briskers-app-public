@@ -504,76 +504,275 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   Widget _customerPage() => ListView(
+    padding: const EdgeInsets.only(bottom: 28),
     children: [
-      _sectionHeader('Customers', subtitle: 'Local test data only'),
+      _sectionHeader('Customers', subtitle: '1 test customer · Local only'),
       Card(
-        margin: const EdgeInsets.all(12),
+        margin: const EdgeInsets.symmetric(horizontal: 10),
         child: ListTile(
-          leading: const CircleAvatar(child: Icon(Icons.person_outline)),
+          leading: const CircleAvatar(
+            backgroundColor: Color(0x203B82F6),
+            child: Icon(Icons.person_outline, color: BriskersColors.customers)),
           title: const Text(BriskersLabFixture.customerName,
-            style: TextStyle(fontWeight: FontWeight.bold)),
+            style: TextStyle(fontWeight: FontWeight.w800)),
           subtitle: const Text('2 vehicles'),
-          onTap: () => _navigate(2),
+          onTap: () => _openVehicleJob(0),
           trailing: const Icon(Icons.chevron_right),
         ),
       ),
       for (var i = 0; i < BriskersLabFixture.vehicles.length; i++)
-        ListTile(
-          leading: const Icon(Icons.directions_car_outlined),
-          title: Text("${BriskersLabFixture.vehicles[i]['year']} ${BriskersLabFixture.vehicles[i]['make']} ${BriskersLabFixture.vehicles[i]['model']}"),
-          subtitle: Text(i == 0 ? 'Job J-24 · Invoice #6342'
-            : 'No current job in test copy'),
-          onTap: () => setState(() {
-            selectedVehicle = i; page = 2;
-          }),
+        Card(
+          margin: const EdgeInsets.fromLTRB(10, 5, 10, 0),
+          child: ListTile(
+            leading: const Icon(Icons.directions_car_outlined,
+              color: BriskersColors.vehicles),
+            title: Text("${BriskersLabFixture.vehicles[i]['year']} ${BriskersLabFixture.vehicles[i]['make']} ${BriskersLabFixture.vehicles[i]['model']}",
+              style: const TextStyle(fontWeight: FontWeight.w700)),
+            subtitle: Text(i == 0
+              ? 'Job J-24 · Invoice #6342'
+              : 'No job in the isolated test copy'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _openVehicleJob(i),
+          ),
         ),
     ],
   );
 
-  Widget _jobPage() {
-    final vehicle = BriskersLabFixture.vehicles[selectedVehicle];
-    return ListView(
+  Widget _jobsListPage() => ListView(
+    children: [
+      _sectionHeader('Jobs', subtitle: '1 example job · Offline TEST'),
+      Card(
+        margin: const EdgeInsets.symmetric(horizontal: 10),
+        color: BriskersColors.jobs.withValues(alpha: 0.06),
+        child: ListTile(
+          leading: const CircleAvatar(
+            backgroundColor: Color(0x2000897B),
+            child: Icon(Icons.build_outlined, color: BriskersColors.jobs)),
+          title: const Text('J-24 · Richard Goff',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+          subtitle: const Text(
+            'Oil leaks, maintenance\n2012 Hyundai Equus · 4 labor tasks'),
+          isThreeLine: true,
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _openVehicleJob(0),
+        ),
+      ),
+    ],
+  );
+
+  Widget _jobInfoRow(IconData icon, String title, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 7),
+    child: Row(
       children: [
-        _sectionHeader('Job details',
-          subtitle: BriskersLabFixture.customerName),
-        Card(
-          margin: const EdgeInsets.symmetric(horizontal: 10),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("${vehicle['year']} ${vehicle['make']} ${vehicle['model']}",
+        CircleAvatar(
+          radius: 18,
+          backgroundColor: BriskersColors.jobs.withValues(alpha: 0.12),
+          child: Icon(icon, color: BriskersColors.jobs, size: 21),
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(
+              color: Color(0xFF667085), fontSize: 12.8)),
+            Text(value, maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 16, fontWeight: FontWeight.w800)),
+          ],
+        )),
+      ],
+    ),
+  );
+
+  Widget _jobCategoryTile(
+    String label, IconData icon, Color color, VoidCallback onTap,
+    {int count = 0}
+  ) => SizedBox(
+    height: 85,
+    child: Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(3, 7, 3, 5),
+          child: Column(
+            children: [
+              Badge(
+                isLabelVisible: count > 0,
+                label: Text('$count'),
+                backgroundColor: Colors.red,
+                child: CircleAvatar(
+                  radius: 17,
+                  backgroundColor: color.withValues(alpha: 0.13),
+                  child: Icon(icon, color: color, size: 19),
+                ),
+              ),
+              const SizedBox(height: 5),
+              Expanded(child: Center(
+                child: Text(label, maxLines: 3,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 19, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 8),
-                Text(selectedVehicle == 0
-                  ? 'J-24 · Oil leaks, maintenance'
-                  : 'No current job · Ready for test entry'),
-                const SizedBox(height: 8),
-                if (selectedVehicle == 0)
-                  const Text('Invoice #6342 · 4 labor tasks'),
+                    fontSize: 11.2, fontWeight: FontWeight.w800,
+                    height: 1.12)),
+              )),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+
+  void _labNotice(String title) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 10, 18, 30),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(
+                fontSize: 21, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 14),
+              const Text('This section has no data in the isolated test copy. '
+                'The regular Briskers app and its live records are unchanged.'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _jobPage() {
+    if (!jobDetailsOpen) return _jobsListPage();
+    final vehicle = BriskersLabFixture.vehicles[selectedVehicle];
+    final firstVehicle = selectedVehicle == 0;
+    final activeTasks = tasks.where((t) => t['source_missing'] != 1).length;
+    final completed = tasks.where((t) => t['status'] == 'done').length;
+    Widget tile(
+      String label, IconData icon, Color color, VoidCallback onTap,
+      {int count = 0}
+    ) => Expanded(child: _jobCategoryTile(
+      label, icon, color, onTap, count: count));
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 38),
+      children: [
+        Row(children: [
+          IconButton(
+            onPressed: () => _navigate(2),
+            icon: const Icon(Icons.arrow_back)),
+          Text(firstVehicle ? 'Job J-24' : 'Vehicle details',
+            style: const TextStyle(
+              fontSize: 21, fontWeight: FontWeight.w800)),
+          const Spacer(),
+          if (firstVehicle) const Chip(
+            label: Text('In progress'),
+            avatar: Icon(Icons.build, size: 16,
+              color: BriskersColors.jobs),
+          ),
+        ]),
+        Container(
+          padding: const EdgeInsets.fromLTRB(13, 5, 13, 8),
+          decoration: BoxDecoration(
+            color: BriskersColors.jobs.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: BriskersColors.jobs.withValues(alpha: 0.24)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _jobInfoRow(Icons.person_outline, 'Customer',
+                BriskersLabFixture.customerName),
+              const Divider(height: 1),
+              _jobInfoRow(Icons.directions_car_outlined, 'Vehicle',
+                "${vehicle['year']} ${vehicle['make']} ${vehicle['model']}"),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(5, 11, 5, 5),
+                child: Text(firstVehicle
+                  ? 'Oil leaks, maintenance'
+                  : 'No current job in test copy',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700, fontSize: 15.5)),
+              ),
+              if (firstVehicle) const Padding(
+                padding: EdgeInsets.only(left: 5, bottom: 4),
+                child: Text('Invoice #6342 · Tasks TEST · Offline only',
+                  style: TextStyle(fontSize: 12,
+                    color: Color(0xFF667085))),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        if (firstVehicle) ...[
+          Row(children: [
+            tile('Pre-inspection', Icons.search, const Color(0xFF6B4BC3),
+              () => _labNotice('Pre-inspection')),
+            const SizedBox(width: 8),
+            tile('Customer Complaint', Icons.description_outlined,
+              BriskersColors.customers,
+              () => _labNotice('Customer Complaint')),
+            const SizedBox(width: 8),
+            tile('Findings', Icons.car_repair_outlined, Colors.deepOrange,
+              () => _labNotice('Findings')),
+            const SizedBox(width: 8),
+            tile('Estimates', Icons.request_quote_outlined,
+              BriskersColors.estimates, () => _navigate(7)),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            tile('Invoices', Icons.receipt_long_outlined,
+              BriskersColors.invoices, () => _navigate(8), count: 1),
+            const SizedBox(width: 8),
+            tile('Work Performed', Icons.build_outlined,
+              const Color(0xFF15988F), () => _navigate(4),
+              count: completed),
+            const SizedBox(width: 8),
+            tile('Job Expenses', Icons.payments_outlined,
+              BriskersColors.expenses, () => _labNotice('Job Expenses')),
+            const SizedBox(width: 8),
+            tile('Profitability', Icons.analytics_outlined,
+              BriskersColors.reports, () => _labNotice('Job Profitability')),
+          ]),
+          const SizedBox(height: 14),
+          Card(
+            margin: EdgeInsets.zero,
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: Color(0x2000897B),
+                    child: Icon(Icons.rule_outlined,
+                      color: BriskersColors.jobs)),
+                  title: const Text('Tasks (TEST)',
+                    style: TextStyle(fontWeight: FontWeight.w800)),
+                  subtitle: Text('$activeTasks labor tasks · $completed done'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _navigate(3),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.history_outlined,
+                    color: BriskersColors.today),
+                  title: const Text('Work Log',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+                  subtitle: const Text('Completed work by mechanic'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _navigate(4),
+                ),
               ],
             ),
           ),
-        ),
-        if (selectedVehicle == 0) ...[
-          _sectionHeader('Tasks',
-            subtitle: 'Automatically copied from invoice labor'),
-          ...tasks.where((t) => t['source_missing'] != 1)
-            .map(_taskCard),
-          Padding(
-            padding: const EdgeInsets.all(10),
-            child: FilledButton.icon(
-              onPressed: () => _navigate(4),
-              icon: const Icon(Icons.history),
-              label: const Text('View Work Log'),
-            ),
-          ),
         ] else const Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('This second vehicle is available for navigation '
-            'testing. No real service record was copied for it.'),
+          padding: EdgeInsets.all(14),
+          child: Text('The second car is shown for customer/navigation '
+            'testing only; no service records were copied.'),
         ),
       ],
     );
