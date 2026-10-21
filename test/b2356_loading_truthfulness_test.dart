@@ -7,11 +7,13 @@ void main() {
     final source = File('lib/screens/expenses_screen.dart').readAsStringSync();
     expect(source, contains('bool _transactionRefreshFailed = false;'));
     expect(source, contains('_transactionRefreshFailed = !forceOffline;'));
-    expect(source, contains('BriskersConnectionModeController.instance.forceOffline ||'));
+    expect(source, contains('.instance.forceOffline ||'));
     expect(source, contains('_transactionRefreshFailed))'));
     expect(source, contains('Offline mode • showing saved transactions'));
     expect(source,
         contains('Unable to refresh transactions • showing saved data'));
+    expect(source, contains('No tall banner in Auto: preserve list position.'));
+    expect(source, contains('Tooltip('));
     expect(source,
         isNot(contains('Showing saved transactions • reconnect to refresh, add or edit')));
     // A successful server page, and a fresh attempt, must clear stale warning.
