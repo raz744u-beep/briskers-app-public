@@ -54,6 +54,13 @@ void main() {
     expect(main, contains("if (index == 2 || index == 7) {"));
     expect(main, contains('jobDetailsOpen'));
     expect(main, contains('Assign main job mechanic'));
+    expect(main, contains('Add Task · Not on Invoice'));
+    expect(main, contains('_addRecheckWork'));
+    expect(main, contains('Record TEST payment / advance'));
+    expect(main, contains('store.payrollTestPayments('));
+    expect(main, contains('store.recordLabPayrollPayment('));
+    expect(main, contains('earnedPayrollPreviewHours'));
+
     expect(main, contains('Mark all tasks Done'));
     // The bulk Done action belongs on Tasks, not as a duplicate Job Detail row.
     final jobDetailSection = main.split('Widget _jobPage() {').last
@@ -121,6 +128,132 @@ void main() {
     expect(dock, contains('this.onLongPressed,'));
     expect(dock, contains('onLongPressStart: widget.onLongPressed == null'));
     expect(dock, contains('details.globalPosition'));
+  });
+
+  test('Unbilled recheck task increases only new earned hours and not invoice',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    const shop = BriskersLabFixture.businessId;
+    const job = BriskersLabFixture.jobId;
+    const invoice = BriskersLabFixture.invoiceId;
+    try {
+      await store.reconcileDocument(
+        businessId: shop, jobId: job, documentId: invoice,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice));
+      await store.saveLeadMechanic(shop, job, 'lab-kam');
+      final originals = await store.list(shop, job);
+      final identities = [for (final t in originals) {
+        'document_id': t['document_id'].toString(),
+        'line_id': t['line_id'].toString(),
+      }];
+      await store.changeJobStatus(
+        businessId: shop, jobId: job, statusCode: 'completed',
+        confirmedTasks: identities);
+      await store.changeJobStatus(
+        businessId: shop, jobId: job, statusCode: 'needs_recheck');
+      final originalEarned = await store.earnedHoursPreview(shop, job);
+      final line = await store.addRecheckTask(
+        businessId: shop, jobId: job,
+        description: 'Replace leaking connector again', hours: 1.5,
+      );
+      var extra = (await store.list(shop, job)).singleWhere(
+        (t) => t['line_id'] == line);
+      expect(extra['document_id'], LocalJobTasksLabStore.recheckDocumentId);
+      expect(extra['employee_id'], 'lab-kam');
+      expect(extra['status'], 'planned');
+      expect(extra['source_invoice_hours'], 1.5);
+      expect((await store.list(shop, job)).length, 5);
+      await store.saveAllocations(
+        businessId: shop, jobId: job,
+        documentId: LocalJobTasksLabStore.recheckDocumentId,
+        lineId: line,
+        hoursByEmployee: {'lab-chris': 1.0, 'lab-kam': 0.5});
+      await expectLater(
+        store.saveAllocations(
+          businessId: shop, jobId: job,
+          documentId: LocalJobTasksLabStore.recheckDocumentId,
+          lineId: line,
+          hoursByEmployee: {'lab-chris': 1.1, 'lab-kam': 0.5}),
+        throwsArgumentError,
+      );
+      expect(await store.earnedHoursPreview(shop, job), originalEarned);
+      await store.editTask(
+        businessId: shop, jobId: job,
+        documentId: LocalJobTasksLabStore.recheckDocumentId,
+        lineId: line, status: 'done');
+      final earned = await store.earnedHoursPreview(shop, job);
+      expect(earned['lab-chris'], (originalEarned['lab-chris'] ?? 0) + 1.0);
+      expect(earned['lab-kam'], (originalEarned['lab-kam'] ?? 0) + 0.5);
+      expect((await store.list(shop, job)).where(
+        (t) => t['document_id'] == invoice).length, 4);
+      await store.reconcileDocument(
+        businessId: shop, jobId: job, documentId: invoice,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice));
+      extra = (await store.list(shop, job)).singleWhere(
+        (t) => t['line_id'] == line);
+      expect(extra['status'], 'done');
+      expect(extra['source_missing'], 0);
+      expect((await store.priorCompletions(shop, job)).length, 4);
+      expect(await store.list('production-company', job), isEmpty);
+    } finally {
+      await db.close();
+    }
+  });
+
+  test('Test payroll rates, partial payments and advances persist separately',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    const shop = BriskersLabFixture.businessId;
+    const job = BriskersLabFixture.jobId;
+    const invoice = BriskersLabFixture.invoiceId;
+    try {
+      await store.reconcileDocument(
+        businessId: shop, jobId: job, documentId: invoice,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice));
+      await store.saveLeadMechanic(shop, job, 'lab-chris');
+      await store.setPayrollRate(
+        businessId: shop, employeeId: 'lab-chris', centsPerHour: 4000);
+      expect((await store.payrollRates(shop))['lab-chris'], 4000);
+      final when = DateTime(2026, 10, 19);
+      await store.recordLabPayrollPayment(
+        businessId: shop, employeeId: 'lab-chris',
+        cents: 5000, kind: 'advance', method: 'cash',
+        note: 'Before job is done', paidAt: when);
+      expect(await store.earnedHoursPreview(shop, job), isEmpty);
+      var payments = await store.payrollTestPayments(shop);
+      expect(payments.length, 1);
+      expect(payments.single['kind'], 'advance');
+      expect(payments.single['cents'], 5000);
+      expect(payments.single['paid_at'], when.millisecondsSinceEpoch);
+
+      await store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-spark-plugs', status: 'done');
+      final earned = await store.earnedHoursPreview(shop, job);
+      expect(earned['lab-chris'], 0.5);
+      await store.recordLabPayrollPayment(
+        businessId: shop, employeeId: 'lab-chris',
+        cents: 1500, kind: 'pay', method: 'check',
+        note: 'Partial after completion', paidAt: when);
+      payments = await store.payrollTestPayments(shop);
+      expect(payments.length, 2);
+      expect(payments.fold<int>(0,
+        (sum, item) => sum + (item['cents'] as int)), 6500);
+      expect((earned['lab-chris']! * 4000).round(), 2000);
+      expect(await store.payrollTestPayments('production-company'), isEmpty);
+      expect(await store.payrollRates('production-company'), isEmpty);
+      await expectLater(store.recordLabPayrollPayment(
+        businessId: shop, employeeId: 'lab-chris',
+        cents: -2, kind: 'pay', method: 'cash', note: '', paidAt: when),
+        throwsArgumentError);
+    } finally {
+      await db.close();
+    }
   });
 
   test('Needs Recheck preserves initial payroll without double counting',
