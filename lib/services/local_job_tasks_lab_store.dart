@@ -12,13 +12,25 @@ class LocalJobTasksLabStore {
         business_id TEXT NOT NULL, job_id TEXT NOT NULL,
         document_id TEXT NOT NULL, line_id TEXT NOT NULL,
         source_description TEXT NOT NULL, custom_description TEXT,
-        employee_id TEXT, payroll_hours REAL,
+        employee_id TEXT, payroll_hours REAL, source_invoice_hours REAL,
         status TEXT NOT NULL DEFAULT 'planned',
         completed_at INTEGER, source_missing INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (business_id, job_id, document_id, line_id)
       )
     ''');
+    // Safe upgrade for the already-installed isolated test database.
+    // Keep billed labor quantity separate from payroll allocation totals.
+    final columns = await db.customSelect(
+      'PRAGMA table_info(local_job_tasks_lab)',
+    ).get();
+    if (!columns.any((row) =>
+        row.read<String>('name') == 'source_invoice_hours')) {
+      await db.customStatement(
+        'ALTER TABLE local_job_tasks_lab '
+        'ADD COLUMN source_invoice_hours REAL',
+      );
+    }
     await db.customStatement('''
       CREATE INDEX IF NOT EXISTS idx_job_tasks_lab_job
       ON local_job_tasks_lab (business_id, job_id, status)
@@ -141,12 +153,14 @@ class LocalJobTasksLabStore {
         await db.customStatement('''
           INSERT INTO local_job_tasks_lab
             (business_id, job_id, document_id, line_id,
-             source_description, payroll_hours, employee_id, status, updated_at, source_missing)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'planned', ?, 0)
+             source_description, source_invoice_hours, payroll_hours,
+             employee_id, status, updated_at, source_missing)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, 0)
           ON CONFLICT(business_id, job_id, document_id, line_id)
           DO UPDATE SET source_description=excluded.source_description,
+                        source_invoice_hours=excluded.source_invoice_hours,
                         source_missing=0
-        ''', [businessId, jobId, documentId, id, description, qty, lead, now]);
+        ''', [businessId, jobId, documentId, id, description, qty, qty, lead, now]);
       }
     });
   }
@@ -251,12 +265,23 @@ class LocalJobTasksLabStore {
     }
     await db.transaction(() async {
       final task = await db.customSelect(
-        'SELECT line_id FROM local_job_tasks_lab '
+        'SELECT line_id, source_invoice_hours FROM local_job_tasks_lab '
         'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
         variables: [Variable<String>(businessId), Variable<String>(jobId),
           Variable<String>(documentId), Variable<String>(lineId)],
       ).getSingleOrNull();
       if (task == null) throw StateError('Labor task not found');
+      final invoiceHours = task.readNullable<double>('source_invoice_hours');
+      if (invoiceHours == null || !invoiceHours.isFinite ||
+          invoiceHours < 0) {
+        throw StateError('Invoice labor hours unavailable; refresh invoice');
+      }
+      final allocatedHours = hoursByEmployee.values.fold<double>(
+        0, (total, hours) => total + hours);
+      if (allocatedHours > invoiceHours + 0.000001) {
+        throw ArgumentError('Mechanic hours cannot exceed '
+          'invoice labor hours (${invoiceHours} hrs)');
+      }
       await db.customStatement(
         'DELETE FROM local_task_allocations_lab '
         'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
