@@ -531,7 +531,7 @@ class AppointmentSyncService {
            base_row_version,state,attempt_count,created_at)
           VALUES (?,'appointment_delete',?,'delete',?,?,'pending',0,?)""",
         [businessId,appointmentId,jsonEncode({
-          'operation_id':_operationId('appointment-delete'),
+          'operation_id':_uuidV4(),
           'appointment_id':appointmentId,
         }),row.readNullable<int>('row_version'),
          _unix(DateTime.now().toUtc())],
@@ -1202,6 +1202,20 @@ class AppointmentSyncService {
         await LocalJobQuarantine.assertReplayAllowed(
           _database, businessId, outboxId: outboxId,
         );
+        // A freshly staged owner deletion may have replaced this queued edit
+        // after the batch snapshot was read. Never replay stale edit rows.
+        final stillPending = await _database.customSelect(
+          """SELECT o.id FROM sync_outbox o
+             JOIN local_appointments a
+               ON a.business_id=o.business_id AND a.id=o.entity_id
+             WHERE o.id=? AND o.business_id=? AND o.entity_id=?
+               AND o.entity_type='appointment_edit'
+               AND o.state='pending' AND a.sync_state='pending' LIMIT 1""",
+          variables: [Variable<int>(outboxId),
+            Variable<String>(businessId),
+            Variable<String>(appointmentId)],
+        ).get();
+        if (stillPending.isEmpty) continue;
         final changedCustomer = payload['customer_id']?.toString();
         final changedVehicle = payload['vehicle_id']?.toString();
         final version = changedCustomer != null
