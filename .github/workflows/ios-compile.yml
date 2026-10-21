@@ -44,6 +44,38 @@ jobs:
           if [ -d ../assets ]; then cp -R ../assets ./assets; fi
           cp ../pubspec.yaml ./pubspec.yaml
           cp ../analysis_options.yaml ./analysis_options.yaml
+      - name: Enable iOS 15.5 camera and bundled VIN OCR
+        run: |
+          python3 - <<'PY'
+          import plistlib
+          import re
+          from pathlib import Path
+
+          ios = Path('generated/ios')
+          podfile = ios / 'Podfile'
+          source = podfile.read_text()
+          if re.search(r"^\s*#?\s*platform :ios,", source, flags=re.MULTILINE):
+              source = re.sub(r"^\s*#?\s*platform :ios,.*$",
+                              "platform :ios, '15.5'", source,
+                              count=1, flags=re.MULTILINE)
+          else:
+              source = "platform :ios, '15.5'\n" + source
+          podfile.write_text(source)
+
+          project = ios / 'Runner.xcodeproj' / 'project.pbxproj'
+          p = project.read_text()
+          p = re.sub(r"IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+;",
+                     "IPHONEOS_DEPLOYMENT_TARGET = 15.5;", p)
+          project.write_text(p)
+
+          info = ios / 'Runner' / 'Info.plist'
+          config = plistlib.loads(info.read_bytes())
+          config['NSCameraUsageDescription'] = (
+              'Capture a VIN barcode or photograph the vehicle VIN label.')
+          config['NSPhotoLibraryUsageDescription'] = (
+              'Choose an existing VIN label photo to read its characters on-device.')
+          info.write_bytes(plistlib.dumps(config))
+          PY
       - name: Resolve Flutter dependencies
         working-directory: generated
         run: flutter pub get
