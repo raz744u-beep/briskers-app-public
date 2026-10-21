@@ -44,6 +44,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Map<String, String> nicknames = const {};
   Map<String, String> fullNames = const {};
   String? leadMechanicId;
+  Map<String, List<Map<String, dynamic>>> allocationsByLine = {};
   int page = 0;
   int? expandedMenu;
   double menuAnchorX = 180;
@@ -96,6 +97,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     );
     final aliases = await store.nicknames(BriskersLabFixture.businessId);
     final names = await store.fullNames(BriskersLabFixture.businessId);
+    final allocations = await Future.wait(rows.map((task) => store.allocations(
+      businessId: BriskersLabFixture.businessId,
+      jobId: BriskersLabFixture.jobId,
+      documentId: BriskersLabFixture.invoiceId,
+      lineId: task['line_id'].toString())));
     final lead = await store.leadMechanic(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     if (!mounted) return;
@@ -104,6 +110,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       nicknames = aliases;
       fullNames = names;
       leadMechanicId = lead;
+      allocationsByLine = {for (var i = 0; i < rows.length; i++)
+        rows[i]['line_id'].toString(): allocations[i]};
       loading = false;
     });
   }
@@ -254,6 +262,106 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ),
   );
 
+  String _laborAssignment(Map<String, dynamic> task) {
+    final allocations = allocationsByLine[task['line_id'].toString()] ?? [];
+    if (allocations.isNotEmpty) {
+      return allocations.map((a) => "${_employeeName(a['employee_id'].toString())}: ${a['hours']} hrs").join(' · ');
+    }
+    return "${_employeeName(task['employee_id']?.toString())} · ${task['payroll_hours'] ?? '—'} hrs";
+  }
+
+  Future<void> _editInvoiceLabor(Map<String, dynamic> task) async {
+    final existing = allocationsByLine[task['line_id'].toString()] ?? [];
+    String first = existing.isNotEmpty ? existing.first['employee_id'].toString()
+      : task['employee_id']?.toString() ?? '';
+    String second = existing.length > 1 ? existing[1]['employee_id'].toString() : '';
+    final hoursA = TextEditingController(text: existing.isNotEmpty
+      ? existing.first['hours'].toString() : task['payroll_hours']?.toString() ?? '');
+    final hoursB = TextEditingController(text: existing.length > 1
+      ? existing[1]['hours'].toString() : '');
+    final saved = await showModalBottomSheet<bool>(
+      context: context, isScrollControlled: true, useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheet) => StatefulBuilder(builder: (sheet, update) {
+        Widget choose(String label, String value, ValueChanged<String> set) =>
+          DropdownButtonFormField<String>(
+            initialValue: value,
+            decoration: InputDecoration(labelText: label,
+              border: const OutlineInputBorder()),
+            items: [
+              const DropdownMenuItem(value: '', child: Text('Unassigned')),
+              for (final e in BriskersLabFixture.employees)
+                if (e['role'] == 'mechanic' || e['role'] == 'owner')
+                  DropdownMenuItem(value: e['id']!,
+                    child: Text(_employeeName(e['id']))),
+            ],
+            onChanged: (v) => update(() => set(v ?? '')),
+          );
+        return Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16,
+            MediaQuery.viewInsetsOf(sheet).bottom + 16),
+          child: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Assign invoice labor',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+              Text(_description(task)),
+              const SizedBox(height: 8),
+              const Text('Labor allocation only; invoice totals do not change.'),
+              const SizedBox(height: 12),
+              choose('Mechanic 1', first, (v) => first = v),
+              const SizedBox(height: 8),
+              TextField(controller: hoursA,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Hours 1',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              choose('Mechanic 2 (optional)', second, (v) => second = v),
+              const SizedBox(height: 8),
+              TextField(controller: hoursB,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Hours 2',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              FilledButton(onPressed: () async {
+                final a = double.tryParse(hoursA.text);
+                final b = double.tryParse(hoursB.text);
+                if ((first.isNotEmpty && (a == null || !a.isFinite || a <= 0)) ||
+                    (second.isNotEmpty && (b == null || !b.isFinite || b <= 0)) ||
+                    (first.isEmpty && second.isNotEmpty) ||
+                    (first.isNotEmpty && first == second)) {
+                  ScaffoldMessenger.of(sheet).showSnackBar(const SnackBar(
+                    content: Text('Choose distinct mechanics and positive hours')));
+                  return;
+                }
+                try {
+                  await store.saveAllocations(
+                    businessId: BriskersLabFixture.businessId,
+                    jobId: BriskersLabFixture.jobId,
+                    documentId: BriskersLabFixture.invoiceId,
+                    lineId: task['line_id'].toString(),
+                    hoursByEmployee: {
+                      if (first.isNotEmpty) first: a!,
+                      if (second.isNotEmpty) second: b!,
+                    },
+                  );
+                  if (sheet.mounted) Navigator.pop(sheet, true);
+                } catch (e) {
+                  if (sheet.mounted) ScaffoldMessenger.of(sheet).showSnackBar(
+                    SnackBar(content: Text('Save failed: $e')));
+                }
+              }, child: const Text('Save labor assignments')),
+            ],
+          ))); 
+      }),
+    );
+    hoursA.dispose();
+    hoursB.dispose();
+    if (saved == true) await _refresh();
+  }
+
   Widget _statusChip(String value) {
     final done = value == 'done';
     final label = done ? 'Done'
@@ -285,7 +393,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("${_employeeName(task['employee_id']?.toString())} · ${task['payroll_hours']?.toString() ?? '—'} hrs"),
+            Text(_laborAssignment(task)),
             if (history)
               Text(finished.isEmpty ? 'Completion not recorded' : finished)
             else _statusChip(task['status']?.toString() ?? 'planned'),
@@ -887,6 +995,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final byEmployee = <String, double>{};
     for (final task in tasks) {
       if (task['status'] != 'done') continue;
+      final splits = allocationsByLine[task['line_id'].toString()] ?? [];
+      if (splits.isNotEmpty) {
+        for (final split in splits) {
+          final id = split['employee_id'].toString();
+          byEmployee[id] = (byEmployee[id] ?? 0) + (split['hours'] as num).toDouble();
+        }
+        continue;
+      }
       final employee = task['employee_id']?.toString() ?? '';
       if (employee.isEmpty) continue;
       final hours = (task['payroll_hours'] as num?)?.toDouble() ?? 0;
@@ -1087,8 +1203,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             ListTile(
               dense: true,
               title: Text(task['source_description']?.toString() ?? 'Labor'),
-              subtitle: Text(
-                '${task['payroll_hours'] ?? '—'} hours · labor only'),
+              subtitle: Text(_laborAssignment(task)),
+              trailing: const Icon(Icons.edit_outlined),
+              onTap: () => _editInvoiceLabor(task),
             ),
           const Padding(
             padding: EdgeInsets.all(12),
