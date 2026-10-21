@@ -108,6 +108,18 @@ class _CustomersScreenState extends State<CustomersScreen> {
 
     if (!refreshOnline) return;
 
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (!mounted) return;
+      setState(() {
+        _rows ??= const <Map<String, dynamic>>[];
+        _onlineReady = false;
+        _showingLocal = true;
+        _refreshFailed = false;
+        _error = null;
+      });
+      return;
+    }
+
     try {
       await _sync.pull(widget.businessId);
       final bootstrapped =
