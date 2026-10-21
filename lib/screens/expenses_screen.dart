@@ -1593,39 +1593,37 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                   if (!widget.showAppBar) ...[
                     Padding(
                       padding: const EdgeInsets.fromLTRB(6, 2, 6, 14),
-                      child: Text(tr('expensesIncome'),
-                        style: Theme.of(context).textTheme.titleLarge
-                            ?.copyWith(fontWeight: FontWeight.w800)),
-                    ),
-                  ],
-                  if (_showingLocal &&
-                      (BriskersConnectionModeController.instance.forceOffline ||
-                          _transactionRefreshFailed))
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: BriskersColors.expenses.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(9),
-                      ),
                       child: Row(
                         children: [
-                          const Icon(Icons.cloud_off_outlined, size: 18),
-                          const SizedBox(width: 7),
                           Expanded(
                             child: Text(
-                              BriskersConnectionModeController.instance.forceOffline
-                                  ? 'Offline mode • showing saved transactions'
-                                  : 'Unable to refresh transactions • showing saved data',
-                              style: const TextStyle(fontWeight: FontWeight.w700),
+                              tr('expensesIncome'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w800),
                             ),
                           ),
+                          // No tall banner in Auto: preserve list position.
+                          // A compact icon still exposes a genuine failure.
+                          if (_showingLocal &&
+                              (BriskersConnectionModeController
+                                      .instance.forceOffline ||
+                                  _transactionRefreshFailed))
+                            Tooltip(
+                              message: BriskersConnectionModeController
+                                      .instance.forceOffline
+                                  ? 'Offline mode • showing saved transactions'
+                                  : 'Unable to refresh transactions • showing saved data',
+                              child: const Padding(
+                                padding: EdgeInsets.only(left: 8),
+                                child: Icon(Icons.cloud_off_outlined, size: 20),
+                              ),
+                            ),
                         ],
                       ),
                     ),
+                  ],
                   if (_showFinancialSummary)
                     Card(
                       margin: EdgeInsets.zero,
