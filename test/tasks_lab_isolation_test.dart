@@ -50,9 +50,10 @@ void main() {
     expect(main, contains('LocalJobTasksLabStore'));
     expect(main, contains('bottomNavigationBar: _bottomNav()'));
     expect(main, contains('BriskersModuleDock('));
-    expect(main, contains('onLongPressed: (index)'));
+    expect(main, contains('onLongPressed: (index, globalPosition)'));
     expect(main, contains("if (index == 2 || index == 7) _toggleMenu(index)"));
     expect(main, contains('jobDetailsOpen'));
+    expect(main, contains('menuAnchorX - 90'));
     expect(main, contains("'Pre-inspection'"));
     expect(main, contains("'Customer Complaint'"));
     expect(main, contains("'Work Performed'"));
@@ -66,7 +67,8 @@ void main() {
     final dock = File('lib/widgets/briskers_module_dock.dart')
       .readAsStringSync();
     expect(dock, contains('this.onLongPressed,'));
-    expect(dock, contains('onLongPress: widget.onLongPressed == null'));
+    expect(dock, contains('onLongPressStart: widget.onLongPressed == null'));
+    expect(dock, contains('details.globalPosition'));
   });
 
   test('Task assignments and nicknames persist in a local SQLite test DB',
