@@ -1653,7 +1653,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                     : 'Refreshing previously verified totals…'
                                 : _searchController.text.trim().isNotEmpty
                                     ? 'Search totals include all dates.'
-                                    : 'Complete posted totals for $_rangeLabel · pending offline entries excluded'),
+                                    : _lastPeriodAt == null
+                                        ? 'Complete posted totals · pending offline entries excluded'
+                                        : 'Posted totals for $_rangeLabel · verified ${DateFormat('h:mm a').format(_lastPeriodAt!)} · pending offline entries excluded'),
                         style: const TextStyle(
                           fontSize: 12,
                           color: Color(0xFF667085),
