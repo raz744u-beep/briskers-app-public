@@ -1021,7 +1021,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   @override
   Widget build(BuildContext context) {
     final visible = _visibleAppointments;
-    final total = _appointments?.length ?? 0;
+    // Until local bootstrap or a server pull completes, zero is not a
+    // verified appointment count. Do not label an unresolved load Total 0.
+    final total = _appointments?.length;
     if (_appointments != null) {
       NavigationContentTiming.contentVisible(
         'appointments',
@@ -1066,7 +1068,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       ),
                     const Spacer(),
                     Text(
-                      '${tr('total')} $total',
+                      '${tr('total')} ${total ?? '—'}',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                   color: BriskersColors.appointments,
                                   fontWeight: FontWeight.w700,
@@ -1247,10 +1249,17 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 ],
                 const SizedBox(height: 10),
                 if (_appointments == null)
-                  const Center(
+                  Card(
+                    key: const ValueKey('appointment-awaiting-server'),
                     child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: CircularProgressIndicator(),
+                      padding: const EdgeInsets.all(20),
+                      child: Text(
+                        BriskersConnectionModeController.instance.forceOffline
+                            ? 'No saved appointments are available offline.'
+                            : _refreshFailed
+                                ? 'Could not refresh appointments. Pull down to retry.'
+                                : 'Checking appointments in the background. No saved list is available yet.',
+                      ),
                     ),
                   )
                 else if (visible.isEmpty)
