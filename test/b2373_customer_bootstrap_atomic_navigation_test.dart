@@ -156,6 +156,10 @@ void main() {
     expect(customers, contains(
       'if (BriskersConnectionModeController.instance.forceOffline) {'));
     expect(customers, contains('_rows ??= const <Map<String, dynamic>>[];'));
+    expect(customers, contains("description.contains('failed host lookup')"));
+    expect(customers, contains('network/DNS issue'));
+    expect(customers, contains('query == _search.text.trim()'));
+    expect(customers, contains('++_loadRequest;'));
     expect(customers, contains('search: query, limit: 100'));
     expect(customers, contains('_search.text.trim() != query'));
   });
