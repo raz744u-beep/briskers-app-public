@@ -65,7 +65,8 @@ void main() {
     // directory. Reviewing an individual record is the only read action.
     final review = File('lib/screens/customers/new_customers_screen.dart')
         .readAsStringSync();
-    expect(review, contains('onViewAll:'));
+    expect(review, contains('onPressed: widget.onViewAll'));
+    expect(review, contains('widget.customerIds'));
     expect(review, contains('widget.notifications.markReviewed(reviewed)'));
   });
 }
