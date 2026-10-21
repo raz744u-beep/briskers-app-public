@@ -135,7 +135,8 @@ BEGIN
   SELECT * INTO d FROM briskers.sales_documents
   WHERE business_id=p_business_id AND id=p_document_id FOR UPDATE;
   IF NOT FOUND OR d.kind <> 'invoice' OR d.origin <> 'native' OR
-     d.status='void' OR d.mileage_schema_version <> 2 THEN
+     d.status='void' OR d.closed_at IS NOT NULL OR
+     d.mileage_schema_version <> 2 THEN
     RAISE EXCEPTION 'Invoice is not eligible for departure mileage edit'
       USING ERRCODE='55000';
   END IF;
