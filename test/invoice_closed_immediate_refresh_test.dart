@@ -46,9 +46,10 @@ void main() {
     expect(end, greaterThan(begin));
     final code = source.substring(begin, end);
     expect(code, contains("if (rawStatus == 'void') return 'void';"));
-    expect(code, contains(".isClosed) return 'closed';"));
+    expect(code, contains(".isClosed) {"));
+    expect(code, contains("return 'closed';"));
     expect(
-      code.indexOf(".isClosed) return 'closed';"),
+      code.indexOf(".isClosed) {"),
       lessThan(code.indexOf("if (total > 0 && finalizedPaid >= total - 0.005)")),
     );
   });
