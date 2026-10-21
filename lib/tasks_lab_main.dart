@@ -722,6 +722,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ('needs_recheck', 'Needs Recheck', Icons.troubleshoot_outlined,
       Color(0xFFC62828)),
     ('completed', 'Completed', Icons.task_alt, Color(0xFF2E7D32)),
+    ('cancelled', 'Cancelled', Icons.cancel_outlined, Color(0xFF757575)),
   ];
 
   (String, String, IconData, Color) get _currentJobStatusInfo =>
