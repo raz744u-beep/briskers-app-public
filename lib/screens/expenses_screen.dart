@@ -1178,7 +1178,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    if (changed == true && mounted) await _load();
+    if (changed == true && mounted) await _load(forceTotals: true);
   }
 
   Future<void> _copyTransactionFromList(String transactionId) async {
@@ -1192,7 +1192,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    if (changed == true && mounted) await _load();
+    if (changed == true && mounted) await _load(forceTotals: true);
   }
 
   Future<void> _deleteTransactionFromList(String transactionId) async {
@@ -1225,7 +1225,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
 
     try {
       await _api.voidManualTransaction(widget.businessId, transactionId);
-      if (mounted) await _load();
+      if (mounted) await _load(forceTotals: true);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
