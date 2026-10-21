@@ -71,6 +71,40 @@ void main() {
     expect(source, contains("'resolved_job_number',"));
   });
 
+  testWidgets('offline historical link stays marked as pending sync',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: VehicleFindings(
+            findings: const [
+              {
+                'id': 'finding-pending',
+                'status': 'resolved',
+                'resolved_job_id': 'job-old',
+                'sync_state': 'pending',
+                'body': 'Recorded after repair',
+              },
+            ],
+            canManage: false,
+            canEdit: false,
+            canIncludeOnInvoice: false,
+            onEdit: _noop,
+            onAddPhotos: _noop,
+            onAddToJob: _noop,
+            onResolve: _noop,
+            onReopen: _noop,
+            onInvoiceChanged: (_, __) async {},
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.byKey(const ValueKey('vehicle-findings-resolved')));
+    await tester.pumpAndSettle();
+    expect(find.text(' • Job link pending sync'), findsOneWidget);
+    expect(find.text('Saved locally • waiting to sync'), findsOneWidget);
+  });
+
   testWidgets('resolved history shows the Job number when server confirms it',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
