@@ -636,6 +636,34 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Configure optional-language ML Kit release shrinker rules
+        working-directory: generated
+        run: |
+          # The app exclusively uses Latin OCR. ML Kit's Flutter plugin references
+          # other optional recognizers from unreachable selection branches.
+          # Do not silence missing Latin recognizer or unrelated classes.
+          cat > android/app/proguard-rules.pro <<'PROGUARD'
+          -dontwarn com.google.mlkit.vision.text.chinese.**
+          -dontwarn com.google.mlkit.vision.text.devanagari.**
+          -dontwarn com.google.mlkit.vision.text.japanese.**
+          -dontwarn com.google.mlkit.vision.text.korean.**
+          PROGUARD
+          python3 - <<'PY'
+          from pathlib import Path
+          gradle = Path('android/app/build.gradle.kts')
+          code = gradle.read_text()
+          release_signing = '            signingConfig = signingConfigs.getByName("briskersRelease")'
+          if code.count(release_signing) != 1:
+              raise SystemExit("Expected exactly one permanent release signing config")
+          code = code.replace(
+              release_signing,
+              release_signing + '\n'
+              '            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")',
+              1,
+          )
+          gradle.write_text(code)
+          PY
+
       - name: Validate permanent signing keystore
         working-directory: generated
         env:
