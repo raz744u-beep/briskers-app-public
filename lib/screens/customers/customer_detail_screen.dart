@@ -17,6 +17,7 @@ import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/customer_detail_cache.dart';
 import '../../services/customer_document_summary_service.dart';
+import '../../services/local_document_repository.dart';
 import '../../services/customer_document_recency.dart';
 import '../../services/customer_job_recency.dart';
 import '../../local/local_database_provider.dart';
@@ -82,6 +83,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   final GlobalKey _notesSectionKey = GlobalKey();
   bool _expandQuickNotes = false;
   int _customerTab = 0; // Overview, Info, Vehicles, Notes.
+  int _activityRevision = 0;
 
   Future<Map<String, dynamic>> _loadOfflineSections() async {
     final visibility = _jobVisibility;
@@ -201,6 +203,40 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     return visibility.isCurrent(generation) ? visibleRows : [];
   }
 
+  // The customer overview reads the local document index, not the customer
+  // identity payload. Invalidate it when an editor/list returns, including
+  // Force Offline paths that do not run the full _load() refresh.
+  void _invalidateCustomerActivity() {
+    if (!mounted) return;
+    setState(() => _activityRevision++);
+  }
+
+  Future<void> _refreshEditedCustomerDocument(String documentId) async {
+    _invalidateCustomerActivity(); // Show any locally saved draft immediately.
+    if (BriskersConnectionModeController.instance.forceOffline ||
+        documentId.isEmpty) {
+      return;
+    }
+    try {
+      // A newly created online document can exist on the server before its
+      // list index is pulled. Refresh only this document rather than syncing
+      // every invoice and estimate whenever a customer editor closes.
+      final detail = await _api.documentDetail(widget.businessId, documentId);
+      if (detail['id']?.toString() != documentId ||
+          detail['customer_id']?.toString() != widget.customerId ||
+          (detail['kind'] != 'invoice' && detail['kind'] != 'estimate')) {
+        return;
+      }
+      await LocalDocumentRepository().upsertFromServer(
+        widget.businessId, [detail]);
+    } catch (_) {
+      // Failed/unauthorized remote refresh cannot hide locally queued changes.
+      // The regular sync or pull-to-refresh will retry when available.
+    } finally {
+      _invalidateCustomerActivity();
+    }
+  }
+
   Future<void> _openOverviewRecord(Map<String, dynamic> item) async {
     final id = item['id']?.toString() ?? '';
     final jobId = item['job_id']?.toString() ?? '';
@@ -228,7 +264,10 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           documentId: id,
           isOwner: widget.roleCode == 'owner',
           roleCode: widget.roleCode)));
+      await _refreshEditedCustomerDocument(id);
+      return;
     }
+    _invalidateCustomerActivity();
   }
 
   Future<void> _showCustomerDocuments(String title) async {
@@ -252,6 +291,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ),
       ),
     );
+    _invalidateCustomerActivity();
     if (mounted) await _load();
   }
 
@@ -577,7 +617,8 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   }
 
   Widget _customerOverviewCard() => FutureBuilder<List<Map<String, dynamic>>>(
-    key: ValueKey(('customer-overview', _jobVisibility.epoch)),
+    key: ValueKey(('customer-overview', widget.customerId,
+        _jobVisibility.epoch, _activityRevision)),
     future: _activeCustomerItems(),
     builder: (context, snapshot) {
       final rows = snapshot.data ?? const <Map<String, dynamic>>[];
@@ -1241,6 +1282,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ),
       ),
     );
+    await _refreshEditedCustomerDocument(invoiceId);
     if (mounted) await _load();
   }
 
@@ -1273,6 +1315,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             initialAction:'add_item',
           ),
         ));
+        _invalidateCustomerActivity();
         return;
       }
       final history = await _api.customerServiceHistory(
@@ -1363,6 +1406,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
             initialAction:'add_item',
           )),
         );
+        await _refreshEditedCustomerDocument(documentId);
         if (mounted) await _load();
         return;
       }
@@ -1384,6 +1428,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           ),
         ),
       );
+      await _refreshEditedCustomerDocument(documentId);
       if (mounted) await _load();
     } catch (error) {
       if (!mounted) return;
