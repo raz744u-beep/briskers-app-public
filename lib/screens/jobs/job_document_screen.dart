@@ -5099,7 +5099,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     // Legacy server rows retain status=issued after close; closed_at is the
     // authoritative marker and must override the derived Paid status pill.
     if (DocumentPresentation(_detail ?? const <String, dynamic>{})
-        .isClosed) return 'closed';
+        .isClosed) {
+      return 'closed';
+    }
     final shownPaid = finalizedPaid + pendingPaid;
     if (pendingPaid > 0 &&
         total > 0 &&
