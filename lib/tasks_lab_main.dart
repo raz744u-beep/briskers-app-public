@@ -1318,7 +1318,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     const SizedBox(height: 2),
                     Text(item.assignment, maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12.5,
+                      style: const TextStyle(fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
                         color: Color(0xFF526273), height: 1.2)),
                     if (item.earlier)
                       const Text('Previous completion',
@@ -1417,7 +1418,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             child: ListTile(
               title: Text(_employeeName(employee['id'])),
               trailing: Text(
-                "${(byEmployee[employee['id']] ?? 0).toStringAsFixed(1)} hrs"),
+                "${(byEmployee[employee['id']] ?? 0).toStringAsFixed(1)} hrs",
+                style: const TextStyle(
+                  fontSize: 20, fontWeight: FontWeight.w800,
+                  color: BriskersColors.jobs),
+              ),
             ),
           ),
         const Padding(
