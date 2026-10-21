@@ -325,7 +325,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(notOnInvoice ? 'Assign recheck labor' : 'Assign invoice labor',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
               Text(_description(task)),
               const SizedBox(height: 8),
@@ -336,7 +336,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   fontSize: 12.5, color: Color(0xFF64748B))),
               Text(notOnInvoice ? 'Not on Invoice · No customer charge.'
                 : 'Invoice totals do not change.',
-                style: TextStyle(fontSize: 12.5)),
+                style: const TextStyle(fontSize: 12.5)),
               const SizedBox(height: 12),
               choose('Mechanic 1', first, (v) => first = v),
               const SizedBox(height: 8),
