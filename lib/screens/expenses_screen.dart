@@ -142,6 +142,20 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   @override
   void didUpdateWidget(covariant ExpensesScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.roleCode != widget.roleCode) {
+      // Never reuse an Owner's financial totals or server ID proofs for a
+      // different business/role. Even a transient role swap must fail closed.
+      ++_periodEpoch;
+      _pendingPeriodScope = null;
+      _periodTotals = null;
+      _lastPeriodScope = null;
+      _lastPeriodAt = null;
+      _periodCalculating = false;
+      _periodError = null;
+      _serverConfirmedTransactionIds.clear();
+      _serverConfirmedBusinessId = null;
+    }
     if (oldWidget.dockResetToken != widget.dockResetToken) {
       _searchDebounce?.cancel();
       _filter = 'all';
