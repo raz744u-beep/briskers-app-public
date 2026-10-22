@@ -39,7 +39,7 @@ void main() {
 
   test('two estimate tabs are centered and compact Jobs filter matches', () {
     final tabs = File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
-    expect(tabs, contains("label: tr('itemsTab'), alignment: Alignment.center"));
+    expect(tabs, contains('alignment: isEstimate ? Alignment.center : Alignment.centerLeft'));
     expect(tabs, contains("label: tr('notesTab'),\n              alignment: Alignment.center"));
     final jobs = File('lib/screens/jobs_screen.dart').readAsStringSync();
     expect(jobs, contains('fit: FlexFit.loose'));
