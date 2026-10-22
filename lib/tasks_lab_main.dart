@@ -540,8 +540,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                       deltaHours: change, reason: reason.text);
                     if (sheet.mounted) Navigator.pop(sheet, true);
                   } catch (error) {
-                    if (sheet.mounted) ScaffoldMessenger.of(sheet)
-                      .showSnackBar(SnackBar(content: Text('$error')));
+                    if (sheet.mounted) {
+                      ScaffoldMessenger.of(sheet)
+                        .showSnackBar(SnackBar(content: Text('$error')));
+                    }
                   }
                 },
                 icon: const Icon(Icons.edit_note_outlined),
@@ -550,7 +552,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             ],
           )),
         ),
-      )),
+      ),
     );
     delta.dispose();
     reason.dispose();
