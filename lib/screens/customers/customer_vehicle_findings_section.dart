@@ -13,6 +13,7 @@ import '../../widgets/vehicle_findings.dart';
 import '../../services/offline_work_findings_service.dart';
 import '../../services/work_finding_merge.dart';
 import '../../services/vehicle_finding_actions_service.dart';
+import '../../services/finding_job_choice_policy.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
 import '../../services/job_summary_visibility.dart';
@@ -1257,9 +1258,11 @@ class _CustomerVehicleFindingsSectionState
     if (resolving && linked.isNotEmpty) return linked;
     final vehicleId =
         (finding['vehicle_id'] ?? finding['_vehicle_id'])?.toString() ?? '';
+    if (vehicleId.isEmpty) return null;
     final local = await localDatabase
         .customSelect(
-          "SELECT id,job_number,title,status FROM local_jobs WHERE business_id=? AND customer_id=? AND vehicle_id=? AND lower(status) NOT IN ('completed','closed','cancelled','canceled')",
+          'SELECT id,job_number,title,status FROM local_jobs '
+          'WHERE business_id=? AND customer_id=? AND vehicle_id=?',
           variables: [
             Variable<String>(widget.businessId),
             Variable<String>(widget.customerId),
@@ -1270,57 +1273,121 @@ class _CustomerVehicleFindingsSectionState
     var jobs = local.map((row) => Map<String, dynamic>.from(row.data)).toList();
     if (!BriskersConnectionModeController.instance.forceOffline) {
       try {
-        final remote = await _api.jobs(widget.businessId);
+        // Unlike the generic Jobs list, customer service history includes
+        // the vehicle ID and completed Jobs, and is scoped by customer on
+        // the server before anything reaches this picker.
+        final remote = await _api.customerServiceHistory(
+          widget.businessId, widget.customerId);
         jobs = {
           for (final row in jobs) row['id'].toString(): row,
           for (final row in remote)
-            if (row['customer_id']?.toString() == widget.customerId &&
-                row['vehicle_id']?.toString() == vehicleId &&
-                ![
-                  'completed',
-                  'closed',
-                  'cancelled',
-                  'canceled',
-                ].contains(row['status']?.toString().toLowerCase()))
+            if (row['vehicle_id']?.toString() == vehicleId &&
+                (row['id']?.toString() ?? '').isNotEmpty)
               row['id'].toString(): row,
         }.values.toList();
       } catch (_) {
-        /* Use the saved, accessible jobs offline. */
+        // Only already-saved jobs remain selectable while disconnected.
       }
     }
     jobs = await _jobVisibility.filter(jobs);
+    final active = jobs.where((job) =>
+        findingJobChoice(job['status'], resolving: resolving) ==
+        FindingJobChoice.active).toList();
+    final historical = jobs.where((job) =>
+        findingJobChoice(job['status'], resolving: resolving) ==
+        FindingJobChoice.completedHistory).toList();
     if (!mounted) return null;
-    if (jobs.isEmpty) {
+    if (active.isEmpty && historical.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Open a Job for this vehicle first.')),
+        SnackBar(content: Text(resolving
+            ? 'No eligible Jobs found for this vehicle.'
+            : 'Open a Job for this vehicle first.')),
       );
       return null;
     }
+
+    Widget jobChoice(BuildContext sheetContext, Map<String, dynamic> job,
+        {required bool completed}) {
+      final jobId = job['id']?.toString() ?? '';
+      final number = job['job_number']?.toString().trim() ?? '';
+      final label = number.isNotEmpty ? 'Job $number' : 'Job';
+      return ListTile(
+        leading: Icon(completed ? Icons.history_outlined : Icons.work_outline),
+        title: Text(label),
+        subtitle: Text([
+          job['title']?.toString() ?? '',
+          if (completed) 'Completed',
+        ].where((part) => part.isNotEmpty).join(' • ')),
+        onTap: jobId.isEmpty ? null : () async {
+          if (completed) {
+            final confirmed = await showDialog<bool>(
+              context: sheetContext,
+              builder: (dialogContext) => AlertDialog(
+                title: const Text('Resolve using completed Job?'),
+                content: Text(
+                  'Confirm that the repair on $label resolved this finding. '
+                  'Briskers will record that historical '
+                  'Job and mark the finding Resolved. It will NOT reopen the '
+                  'Job, change its invoice, payments or payroll. The '
+                  'resolution is recorded now; the repair date is not changed.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext, false),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(dialogContext, true),
+                    child: const Text('Confirm resolved'),
+                  ),
+                ],
+              ),
+            );
+            if (confirmed != true || !sheetContext.mounted) return;
+          }
+          if (sheetContext.mounted) Navigator.pop(sheetContext, jobId);
+        },
+      );
+    }
+
     return showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                resolving ? 'Resolve on Job' : 'Add to Job',
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
+        child: FractionallySizedBox(
+          heightFactor: 0.68,
+          child: ListView(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  resolving ? 'Resolve on Job' : 'Add to Job',
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
-            ),
-            for (final job in jobs)
-              ListTile(
-                leading: const Icon(Icons.work_outline),
-                title: Text(job['job_number']?.toString() ?? 'Job'),
-                subtitle: Text(job['title']?.toString() ?? ''),
-                onTap: () => Navigator.pop(sheetContext, job['id'].toString()),
-              ),
-          ],
+              if (active.isNotEmpty) ...[
+                const ListTile(title: Text('Active Jobs')),
+                for (final job in active)
+                  jobChoice(sheetContext, job, completed: false),
+              ],
+              if (resolving && historical.isNotEmpty) ...[
+                const Divider(),
+                const ListTile(
+                  title: Text('Completed Jobs — historical repair'),
+                  subtitle: Text(
+                    'Select only the Job on which the issue was repaired. '
+                    'Existing invoices and payroll will not be changed.',
+                  ),
+                ),
+                for (final job in historical)
+                  jobChoice(sheetContext, job, completed: true),
+              ],
+            ],
+          ),
         ),
       ),
     );

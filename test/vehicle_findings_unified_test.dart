@@ -472,7 +472,9 @@ void main() {
       ], local);
       final result = merged.firstWhere((row) => row['id'] == 'fixture-f1');
       expect(result['status'], 'resolved');
-      expect(result['include_on_invoice'], true);
+      // Resolution cannot silently add anything to a closed invoice.
+      // The server also clears include_on_invoice on resolve.
+      expect(result['include_on_invoice'], false);
       expect(result['sync_state'], 'pending');
     },
   );

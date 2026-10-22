@@ -960,19 +960,25 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          subtitle: Text(
-                            '${tr('lastPull')}: '
-                            '${_dateLabel(row['last_pull_at'])}\n'
-                            '${tr('lastPush')}: '
-                            '${_dateLabel(row['last_push_at'])}',
-                          ),
+                          subtitle: Text([
+                            "${tr('lastPull')}: ${_dateLabel(row['last_pull_at'])}",
+                            "${tr('lastPush')}: ${_dateLabel(row['last_push_at'])}",
+                            if ((row['last_error']?.toString() ?? '').isNotEmpty)
+                              "Download failed: ${row['last_error']}",
+                            if (row['bootstrapped'] != true)
+                              'Download incomplete; offline list may be partial',
+                          ].join('\n')),
                           trailing: Icon(
-                            row['bootstrapped'] == true
-                                ? Icons.check_circle_outline
-                                : Icons.hourglass_empty,
-                            color: row['bootstrapped'] == true
-                                ? Colors.green
-                                : Colors.orange,
+                            (row['last_error']?.toString() ?? '').isNotEmpty
+                                ? Icons.error_outline
+                                : row['bootstrapped'] == true
+                                    ? Icons.check_circle_outline
+                                    : Icons.hourglass_empty,
+                            color: (row['last_error']?.toString() ?? '').isNotEmpty
+                                ? Colors.red
+                                : row['bootstrapped'] == true
+                                    ? Colors.green
+                                    : Colors.orange,
                           ),
                           isThreeLine: true,
                         ),

@@ -73,7 +73,10 @@ class VehicleFindingActionsService {
     'resolve',
     {
       'status': 'resolved',
-      'repair_job_id': jobId,
+      // The server stores the resolving Job separately from an In Job link.
+      // Do not turn a completed Job into an active repair assignment.
+      'resolved_job_id': jobId,
+      'include_on_invoice': false,
       'resolved_at': DateTime.now().toUtc().toIso8601String(),
     },
     jobId: jobId,
@@ -146,6 +149,33 @@ class VehicleFindingActionsService {
           current['status'] == 'in_job' &&
           current['repair_job_id'] != jobId) {
         throw StateError('This finding is already assigned to another Job.');
+      }
+      // A historical resolution is stored on the server under resolved_job_id,
+      // not the local repair_job_id column. Repeated taps must not enqueue
+      // multiple identical actions while the first is awaiting sync.
+      if (action == 'resolve' && current['status'] == 'resolved') {
+        if (current['resolved_job_id']?.toString() == jobId) {
+          updated = current;
+          return;
+        }
+        final queued = await _database.customSelect(
+          "SELECT payload_json FROM sync_outbox "
+          "WHERE business_id=? AND entity_type='finding_action' "
+          "AND entity_id=? AND operation='resolve' AND state='pending'",
+          variables: [Variable<String>(businessId), Variable<String>(id)],
+        ).get();
+        for (final item in queued) {
+          try {
+            final prior = Map<String, dynamic>.from(
+              jsonDecode(item.read<String>('payload_json')) as Map);
+            if (prior['job_id']?.toString() == jobId) {
+              updated = current;
+              return;
+            }
+          } catch (_) {
+            // Malformed previous actions remain for explicit conflict review.
+          }
+        }
       }
       final relevant = patch.keys.where((key) => key != 'resolved_at');
       if (relevant.every((key) => current[key] == patch[key])) {
@@ -671,6 +701,8 @@ class VehicleFindingActionsService {
             for (final key in [
               'status',
               'repair_job_id',
+              'resolved_job_id',
+              'resolved_job_number',
               'include_on_invoice',
               'resolved_at',
               'row_version',

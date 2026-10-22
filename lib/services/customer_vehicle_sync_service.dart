@@ -276,7 +276,7 @@ class CustomerVehicleSyncService {
         for (final row in local) {
           final id = row.read<String>('id');
           if (!authoritative.containsKey(id)) {
-            await _removeCustomer(businessId, id);
+            await _removeCustomer(businessId, id, pruneOrphans: false);
           }
         }
         for (final bundle in authoritative.values) {
@@ -327,6 +327,15 @@ class CustomerVehicleSyncService {
     final customerId =
         customer['id']?.toString() ?? '';
     if (customerId.isEmpty) return;
+    final localState = await _database.customSelect(
+      'SELECT sync_state FROM local_customers WHERE business_id=? AND id=?',
+      variables: [Variable<String>(businessId), Variable<String>(customerId)],
+    ).getSingleOrNull();
+    if (localState != null && localState.read<String>('sync_state') != 'synced') {
+      // Pending offline edits and their vehicle associations must win over
+      // any server snapshot until the durable outbox has synchronized.
+      return;
+    }
 
     final contacts = List<dynamic>.from(
       bundle['contacts'] ?? const <dynamic>[],
@@ -393,8 +402,12 @@ class CustomerVehicleSyncService {
       '''
       DELETE FROM local_customer_vehicles
       WHERE business_id = ? AND customer_id = ?
+        AND vehicle_id NOT IN (
+          SELECT id FROM local_vehicles
+          WHERE business_id = ? AND sync_state <> 'synced'
+        )
       ''',
-      [businessId, customerId],
+      [businessId, customerId, businessId],
     );
 
     for (final raw in vehicles) {
@@ -468,8 +481,9 @@ class CustomerVehicleSyncService {
 
   Future<void> _removeCustomer(
     String businessId,
-    String customerId,
-  ) async {
+    String customerId, {
+    bool pruneOrphans = true,
+  }) async {
     await _database.customStatement(
       '''
       DELETE FROM local_customer_vehicles
@@ -484,7 +498,7 @@ class CustomerVehicleSyncService {
       ''',
       [businessId, customerId],
     );
-    await _removeOrphanVehicles(businessId);
+    if (pruneOrphans) await _removeOrphanVehicles(businessId);
   }
 
   Future<void> _removeOrphanVehicles(

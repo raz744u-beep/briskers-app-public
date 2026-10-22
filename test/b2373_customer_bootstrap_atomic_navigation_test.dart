@@ -116,6 +116,44 @@ void main() {
     }
   });
 
+  test('server bootstrap preserves local pending customer and vehicle link',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final api = _PagedApi()..failOnSecond = false;
+    try {
+      await _insertCustomer(db, 'new-1', syncState: 'pending');
+      await db.customStatement(
+        "UPDATE local_customers SET display_name='Locally edited' "
+        "WHERE id='new-1'",
+      );
+      await db.customStatement(
+        "INSERT INTO local_vehicles(id,business_id,make,model,sync_state) "
+        "VALUES ('local-car','shop','BMW','528i','pending')",
+      );
+      await db.customStatement(
+        "INSERT INTO local_customer_vehicles("
+        "business_id,customer_id,vehicle_id,is_primary) "
+        "VALUES ('shop','new-1','local-car',1)",
+      );
+      final sync = CustomerVehicleSyncService(api: api, database: db);
+      await sync.pull('shop');
+      final dirty = await db.customSelect(
+        "SELECT display_name,sync_state FROM local_customers "
+        "WHERE id='new-1'",
+      ).getSingle();
+      expect(dirty.read<String>('display_name'), 'Locally edited');
+      expect(dirty.read<String>('sync_state'), 'pending');
+      final linked = await db.customSelect(
+        "SELECT COUNT(*) AS n FROM local_customer_vehicles "
+        "WHERE customer_id='new-1' AND vehicle_id='local-car'",
+      ).getSingle();
+      expect(linked.read<int>('n'),1);
+      expect(await _ids(db), ['new-1','new-2']);
+    } finally {
+      await db.close();
+    }
+  });
+
   test('while page two downloads, old directory remains complete',
       () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
