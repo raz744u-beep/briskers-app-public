@@ -201,7 +201,13 @@ void main() {
     final customer = await File('lib/screens/customers/customer_detail_screen.dart').readAsString();
     expect(customer, contains("'customer-overview', widget.customerId,"));
     expect(customer, contains('_jobVisibility.epoch, _activityRevision'));
-    expect(customer, contains("ValueKey(('offline-customer-sections', _jobVisibility.epoch))"));
+    // Offline history now uses the same lifetime-bound section as online.
+    // The retired duplicate surface must not be recreated with stale data.
+    expect(customer, isNot(contains('_offlineCustomerSections()')));
+    expect(customer, contains('body: ListView(children: [CustomerServiceHistorySection('));
+    final history = await File('lib/screens/customers/customer_service_history_section.dart').readAsString();
+    expect(history, contains('final generation = visibility.beginLoad();'));
+    expect(history, contains('cached: true,'));
     final findings = await File('lib/screens/customers/customer_vehicle_findings_section.dart').readAsString();
     expect(findings, contains("ValueKey(('vehicle-findings', _jobVisibility.epoch))"));
     expect(findings, contains('_guardModal(quarantine,'));
