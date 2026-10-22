@@ -114,6 +114,29 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         ? Map<String, dynamic>.from(historyRaw)
         : <String, dynamic>{};
 
+    // The cached server-only history can be empty in Force Offline even
+    // though the durable local job and invoice indexes contain real records.
+    // Reconcile by stable ID so Overview counts never contradict the saved
+    // Jobs / Documents panel.
+    final localItems = await _activeCustomerItems();
+    final localJobs = localItems.where((row) => row['type'] == 'Job').toList();
+    final localDocuments = localItems.where((row) =>
+      row['type'] == 'invoice' || row['type'] == 'estimate').toList();
+    List<Map<String, dynamic>> combine(List<dynamic> cached,
+        List<Map<String, dynamic>> local) {
+      final found = <String, Map<String, dynamic>>{};
+      for (final row in [...cached.whereType<Map>().map((r) =>
+          Map<String, dynamic>.from(r)), ...local]) {
+        final id = row['id']?.toString() ?? '';
+        if (id.isNotEmpty) found[id] = row;
+      }
+      return found.values.toList();
+    }
+    history['jobs'] = combine(
+      List<dynamic>.from(history['jobs'] ?? const []), localJobs);
+    history['documents'] = combine(
+      List<dynamic>.from(history['documents'] ?? const []), localDocuments);
+
     history['jobs'] = await visibility.filter(
       List<dynamic>.from(history['jobs'] ?? const [])
           .whereType<Map>().map((row) => Map<String, dynamic>.from(row)),
@@ -165,6 +188,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           ...j.data,
           'customer_name': _data?['customer']?['name'] ?? '',
           'vehicle': j.data['vehicle_label'],
+          // The compact card expects the shared job-list projection keys,
+          // not Drift's assigned_employee_name/vehicle_label field names.
+          'assigned_employee': j.data['assigned_employee_name'],
+          'assigned_position': j.data['assigned_position'],
+          'planned_hours': j.data['planned_hours'],
+          'status_color': j.data['status_color'],
         } });
     }
     final docs = await CustomerDocumentSummaryService().forCustomer(
@@ -1561,31 +1590,15 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 padding: const EdgeInsets.all(16),
                 children: [
                   if (_showingLocal)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: BriskersColors.customers.withValues(
-                          alpha: 0.08,
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 4),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Tooltip(
+                          message: 'Using saved local records. Edits sync on reconnection.',
+                          child: Icon(Icons.cloud_off_outlined,
+                            size: 17, color: Color(0xFF667085)),
                         ),
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.cloud_off_outlined, size: 18),
-                          SizedBox(width: 7),
-                          Expanded(
-                            child: Text(
-                              'Showing saved customer and vehicle data • edits save locally and sync when reconnected',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
                       ),
                     ),
                   Row(children: [
