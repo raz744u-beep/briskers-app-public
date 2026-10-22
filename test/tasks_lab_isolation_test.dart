@@ -84,13 +84,33 @@ void main() {
     expect(main, isNot(contains('Widget _workLogPage()')));
     expect(main, isNot(contains('_displayArchivedAssignment(')));
     expect(main, contains('fontSize: 22'));
-    expect(main, contains('fontSize: done ? 14.5 : 13'));
+    // Dense task rows are at most two lines until explicitly expanded.
+    expect(main, contains('final Set<String> expandedTaskKeys'));
+    expect(main, contains('({String mechanics, String hours}) _compactTaskCredit('));
+    expect(main, contains("key: ValueKey('compact-task-"));
+    expect(main, contains('maxLines: expanded ? null : 1'));
+    expect(main, contains('expandedTaskKeys.remove(id)'));
+    expect(main, contains('expandedTaskKeys.add(id)'));
+    expect(main, contains('const EdgeInsets.fromLTRB(10, 7, 6, 7)'));
+    expect(main, contains('fontSize: 15'));
+    expect(main, contains('if (expanded)'));
+    expect(main, contains('Additional work · Not on Invoice'));
     final taskCardSection = main.split('Widget _taskCard(').last
       .split('Future<void> _editTask(').first;
     expect(taskCardSection, contains('record?['));
     expect(taskCardSection, contains('_completedAssignment(record)'));
     expect(taskCardSection, contains('Icons.lock_outline'));
-    expect(taskCardSection, contains('onTap: done ? null :'));
+    // Entire row expands without editing, for both done and active tasks.
+    expect(taskCardSection, contains('onTap: () => setState(() {'));
+    expect(taskCardSection, contains("tooltip: 'Edit task'"));
+    expect(taskCardSection, contains('onPressed: () => _editTask(task)'));
+    expect(taskCardSection, contains('PopupMenuButton<String>'));
+    expect(taskCardSection, contains('_ownerCorrectEarnedHours(task)'));
+    expect(taskCardSection, isNot(contains("onTap: () => _editTask(task)")));
+    expect(taskCardSection, contains('record != null'));
+    expect(taskCardSection, contains('credit.mechanics'));
+    expect(taskCardSection, contains('credit.hours'));
+    expect(taskCardSection, contains('corrections.isNotEmpty'));
     expect(main, contains('Pay mechanic for this task'));
     expect(main, contains('Owner correction · TEST'));
     expect(main, contains('recordOwnerEarnedHoursCorrection('));
