@@ -10,10 +10,10 @@ void main() {
     expect(methodEnd, greaterThan(methodStart));
     final load = source.substring(methodStart, methodEnd);
     expect(load, contains('unawaited(_refreshInvoiceReceipts(businessId))'));
-    expect(load, contains('final rows = await _fetchTransactions(offset: 0);'));
+    expect(load, contains('offset: 0, fastFirstPaint: true'));
     expect(load, contains('unawaited(_hydrateFinancialHistory(epoch, businessId, rows));'));
     expect(load.indexOf('unawaited(_refreshInvoiceReceipts(businessId))'),
-        lessThan(load.indexOf('final rows = await _fetchTransactions(offset: 0);')));
+        lessThan(load.indexOf('offset: 0, fastFirstPaint: true')));
     expect(load.indexOf('setState(() {\n        _transactions = rows;'),
         lessThan(load.indexOf('unawaited(_hydrateFinancialHistory(')));
     expect(load, isNot(contains('await _api.transactions(businessId, limit: 1000)')));
@@ -34,7 +34,7 @@ void main() {
     expect(refresh, isNot(contains('_isCurrentLoad(epoch, businessId)')));
     expect(refresh, contains('if (_invoiceReceipts.isNotEmpty) _loading = false'));
     // No synthetic paid receipt or income transaction may be invented.
-    expect(refresh, contains('InvoicePaymentFeed.mergeReceipts('));
+    expect(refresh, contains('InvoicePaymentFeed.reconcileOnlineFirstPage('));
     expect(refresh, contains('await _invoiceFeed.saveServerReceipts(businessId, rows)'));
   });
 
