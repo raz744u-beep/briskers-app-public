@@ -121,6 +121,44 @@ void main() {
     }
   });
 
+  test('online first page drops stale server-pending caches after finalization '
+      'but retains unrelated posted and true queued receipts', () {
+    final stale = receipt('old-pending','pending',497.80);
+    final posted = receipt('alloc-497','posted',497.80,
+        transactionId:'txn-497');
+    final historical = receipt('alloc-historical','posted',1100,
+        transactionId:'txn-1100');
+    final localQueued = receipt('operation-offline','local',75.00);
+    final rebuilt = InvoicePaymentFeed.reconcileOnlineFirstPage(
+      [posted],
+      [stale, historical, localQueued],
+    );
+    expect(rebuilt.map((r) => r['receipt_id']).toSet(),
+      {'alloc-497','alloc-historical','operation-offline'});
+    final financial = [
+      {
+        'id':'txn-497', 'direction':'income', 'amount':497.80,
+        'transaction_date':'2026-10-21',
+      },
+      {
+        'id':'txn-1100', 'direction':'income', 'amount':1100.00,
+        'transaction_date':'2026-10-20',
+      }
+    ];
+    final cards=InvoicePaymentFeed.combine(financial:financial,receipts:rebuilt);
+    expect(cards.where((r) =>
+      (r['id']=='txn-497' || r['id']=='alloc-497')).length,1);
+    expect(cards.where((r) =>
+      (r['id']=='txn-1100' || r['id']=='alloc-historical')).length,1);
+    expect(cards.where((r) => r['id']=='operation-offline').length,1);
+    // Two real distinct payments with equal amounts stay separate.
+    final separate=receipt('new-independent','posted',497.80,
+        transactionId:'different-real-transaction');
+    final both=InvoicePaymentFeed.reconcileOnlineFirstPage(
+      [posted,separate],[]);
+    expect(both,hasLength(2));
+  });
+
   test('server pending + partial/full remain separate, but only one per ID',
       () {
     final input = [
