@@ -942,8 +942,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Future<void> _confirmCompleteAllTasks() async {
     final active = tasks.where((task) =>
         task['source_missing'] != 1).toList();
-    final unfinished = active.where((task) =>
-        task['status'] != 'done').length;
+    final pending = active.where((task) =>
+      _firstCompletion(task) == null && task['status'] != 'done').toList();
+    final unfinished = pending.length;
     if (active.isEmpty || unfinished == 0) return;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -958,10 +959,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('Job J-24 · $unfinished unfinished of '
-                    '${active.length} tasks. Confirm the work is complete.'),
+                  Text('Job J-24 · $unfinished active tasks to finish. '
+                    'Previously completed work will not be changed.'),
                   const SizedBox(height: 10),
-                  for (final task in active)
+                  for (final task in pending)
                     ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
