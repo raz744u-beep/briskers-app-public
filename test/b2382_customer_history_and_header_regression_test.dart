@@ -3,17 +3,11 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('customer overview reuses durable local jobs and documents offline', () {
-    final source = File('lib/screens/customers/customer_detail_screen.dart')
-        .readAsStringSync();
-    final start = source.indexOf('Future<Map<String, dynamic>> _loadOfflineSections()');
-    final end = source.indexOf('Future<List<Map<String, dynamic>>> _activeCustomerItems()', start);
-    final text = source.substring(start, end);
-    expect(text, contains('final localItems = await _activeCustomerItems();'));
-    expect(text, contains("history['jobs'] = combine("));
-    expect(text, contains("history['documents'] = combine("));
-    expect(text, contains('found[id] = row'));
-    expect(text, contains('visibility.filter('));
+  test('Jobs opens a single local-first Service History with visits under jobs', () {
+    final source = File('lib/screens/customers/customer_detail_screen.dart').readAsStringSync();
+    expect(source, contains('_showCustomerServiceHistory()'));
+    expect(source, isNot(contains("link('Visits'")));
+    expect(source, isNot(contains('No saved service history yet.')));
   });
 
   test('customer Job cards reuse the canonical local repository projection', () {

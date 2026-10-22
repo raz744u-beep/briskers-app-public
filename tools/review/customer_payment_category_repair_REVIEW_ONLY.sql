@@ -31,6 +31,9 @@ WHERE t.business_id=nullif(current_setting('briskers.repair_business_id',true),'
 -- Lock candidate rows and category before checking the reviewed manifest.
 SELECT t.id FROM briskers.financial_transactions t
 JOIN customer_category_repair_manifest m ON m.id=t.id AND m.business_id=t.business_id FOR UPDATE OF t;
+SELECT c.id FROM briskers.financial_categories c
+WHERE c.id IN (SELECT target_category_id FROM customer_category_repair_manifest)
+FOR SHARE OF c;
 DO $review$
 DECLARE actual_count integer; actual_md5 text; changed integer;
 BEGIN
@@ -39,6 +42,12 @@ BEGIN
   IF actual_count<>current_setting('briskers.repair_expected_count')::integer OR
      actual_md5<>current_setting('briskers.repair_manifest_md5') THEN
     RAISE EXCEPTION 'Repair manifest changed; preview and review again';
+  END IF;
+  IF EXISTS (SELECT 1 FROM customer_category_repair_manifest m
+    JOIN briskers.financial_categories c ON c.id=m.target_category_id AND c.business_id=m.business_id
+    WHERE NOT c.active OR lower(btrim(c.name))<>'customers' OR
+      c.normal_direction<>'income' OR c.report_treatment<>'revenue') THEN
+    RAISE EXCEPTION 'Target category changed; review again';
   END IF;
   UPDATE briskers.financial_transactions t SET category_id=m.target_category_id
   FROM customer_category_repair_manifest m

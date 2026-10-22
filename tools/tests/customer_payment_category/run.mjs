@@ -57,5 +57,20 @@ await assert.rejects(()=>post('00000000-0000-0000-0000-000000000099',methods[0])
 await db.exec(`SELECT set_config('test.denied','no',false); UPDATE briskers.financial_categories SET active=false WHERE business_id='${shop}'`);
 await assert.rejects(()=>post('00000000-0000-0000-0000-000000000098',methods[0]),error=>error.code==='23514');assertions++;
 check((await db.query('SELECT count(*)::int AS n FROM briskers.financial_transactions')).rows[0].n,4);
+await db.exec(`UPDATE briskers.financial_categories SET active=true WHERE business_id='${shop}';
+INSERT INTO briskers.financial_transactions(business_id,kind,amount,category_id,customer_id) VALUES
+('${shop}','customer_payment',10,'00000000-0000-0000-0000-000000000080','${customer}'),
+('${shop}','other_income',20,NULL,NULL);`);
+const preserved=(await db.query('SELECT * FROM briskers.financial_transactions ORDER BY id')).rows;
+const emptyPreview=(await db.query(sql('../../review/customer_payment_category_preview.sql'))).rows[0];
+check(emptyPreview.candidate_count,0);
+await db.query(`SELECT set_config('briskers.repair_expected_count','0',false),set_config('briskers.repair_manifest_md5',$1,false)`,[emptyPreview.manifest_md5]);
+await db.exec(sql('../../review/customer_payment_category_repair_REVIEW_ONLY.sql').replace(/ROLLBACK;\s*$/, 'COMMIT;'));
+check((await db.query('SELECT * FROM briskers.financial_transactions ORDER BY id')).rows,preserved);
+await db.exec(`INSERT INTO briskers.financial_categories VALUES(gen_random_uuid(),'${shop}',' Customers ',true,'income','revenue');`);
+await assert.rejects(()=>post('00000000-0000-0000-0000-000000000097',methods[0]),error=>error.code==='23514');assertions++;
+check((await db.query('SELECT count(*)::int AS n FROM briskers.financial_transactions')).rows[0].n,6);
+await db.exec(`ALTER FUNCTION public.briskers_record_payment(uuid,uuid,uuid,numeric,uuid,date,uuid) SET statement_timeout='1s'`);
+await assert.rejects(()=>db.exec(sql('../../review/customer_payment_category_default_REVIEW_ONLY.sql')),/source drift/);assertions++;
 console.log(`PASS: ${assertions} isolated payment-category assertions; no hosted writes.`);
 } finally {await db.close();}

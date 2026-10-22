@@ -31,12 +31,14 @@ class CustomerServiceHistorySection extends StatefulWidget {
     required this.customerId,
     required this.vehicles,
     this.roleCode = 'viewer',
+    this.initiallyExpanded = false,
   });
 
   final String businessId;
   final String customerId;
   final List<dynamic> vehicles;
   final String roleCode;
+  final bool initiallyExpanded;
 
   @override
   State<CustomerServiceHistorySection> createState() =>
@@ -207,18 +209,7 @@ class _CustomerServiceHistorySectionState
       // Publish durable records first on every connection mode. A failed
       // remote refresh must never clear the already usable history.
       await _showCachedHistory(visibility, generation, businessId, customerId);
-      if (offline) {
-        if (await _showCachedHistory(visibility, generation, businessId, customerId,
-        )) {
-          return;
-        }
-        if (!mounted || !visibility.isCurrent(generation)) return;
-        setState(() {
-          _loading = false;
-          _error = null;
-        });
-        return;
-      }
+      if (offline) return;
 
       final snapshotGeneration = await visibility.captureSnapshotGeneration();
       if (!mounted || !visibility.isCurrent(generation)) return;
@@ -962,7 +953,7 @@ class _CustomerServiceHistorySectionState
 
     return Card(
       child: ExpansionTile(
-        initiallyExpanded: false,
+        initiallyExpanded: widget.initiallyExpanded,
         maintainState: true,
         leading: const Icon(Icons.history_outlined),
         title: const Text(
