@@ -596,7 +596,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _pendingPeriodScope = null;
       final saved = await const VerifiedExpenseTotalsCache().load(scope);
       if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
-          businessId != widget.businessId) return;
+          businessId != widget.businessId) {
+        return;
+      }
       setState(() {
         final sameScope = _lastPeriodScope == scope && _periodTotals != null;
         if (saved != null) {
@@ -1234,12 +1236,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final id = transaction['id']?.toString() ?? '';
     if (id.isEmpty) return;
     NavigationContentTiming.start('expense_detail');
+    var changed = false;
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => ExpenseDetailScreen(
           businessId: widget.businessId,
           transactionId: id,
+          onChanged: () => changed = true,
           allowRecurring: _allowRecurring,
           canDeleteTransaction: widget.roleCode == 'owner',
           // The tapped list row is safe to show as a non-editable preview.
@@ -1248,8 +1252,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    // Keep the cached list on screen while refreshing in the background.
-    unawaited(_load(showLoading: false));
+    // Reading a detail does not invalidate the entire list. Actual mutations
+    // refresh in the background while preserving the existing first frame.
+    if (changed && mounted) {
+      unawaited(_load(showLoading: false, forceTotals: true));
+    }
   }
 
   Future<void> _editTransactionFromList(String transactionId) async {

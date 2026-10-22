@@ -68,6 +68,12 @@ jobs:
       - name: Verify fail-closed candidate CI gate
         run: python3 tools/tests/test_candidate_checks.py
 
+      - name: Verify payment category patch against isolated PostgreSQL
+        working-directory: tools/tests/customer_payment_category
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node run.mjs
+
       - name: Analyze Dart
         working-directory: generated
         run: flutter analyze

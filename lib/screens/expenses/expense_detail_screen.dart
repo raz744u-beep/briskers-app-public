@@ -33,8 +33,10 @@ class ExpenseDetailScreen extends StatefulWidget {
     this.financialCache,
     this.localPhotoSync,
     this.receiptReporting,
+    this.onChanged,
   });
 
+  final VoidCallback? onChanged;
   final String businessId;
   final String transactionId;
   final bool allowRecurring;
@@ -570,6 +572,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
           bytes: await file.readAsBytes(),
         );
       }
+      widget.onChanged?.call();
       if (_isCurrent(actionGeneration)) await _load();
     } catch (error) {
       if (_isCurrent(actionGeneration)) {
@@ -657,6 +660,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         );
       }
 
+      widget.onChanged?.call();
       if (_isCurrent(actionGeneration)) await _load();
     } catch (error) {
       if (_isCurrent(actionGeneration)) {
@@ -797,6 +801,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         bucket: attachment['bucket']?.toString() ?? 'briskers-private',
         key: attachment['key']?.toString() ?? '',
       );
+      widget.onChanged?.call();
       if (_isCurrent(actionGeneration)) await _load();
     } catch (error) {
       if (_isCurrent(actionGeneration)) {
@@ -826,6 +831,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         ),
       );
       if (changed == true && _isCurrent(generation)) {
+        widget.onChanged?.call();
         generation = ++_loadGeneration;
         final saved = await _localFinancial.loadTransactionDetail(
           widget.businessId,
@@ -1121,12 +1127,15 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
 
     amount.dispose();
     remarks.dispose();
-    if (saved == true && _isCurrent(generation)) await _load();
+    if (saved == true && _isCurrent(generation)) {
+      widget.onChanged?.call();
+      await _load();
+    }
   }
 
   Future<void> _copy() async {
     if (_detail?['editable'] != true || _busy) return;
-    await Navigator.push<bool>(
+    final changed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => ExpenseEntryScreen(
@@ -1136,6 +1145,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
         ),
       ),
     );
+    if (changed == true) {
+      widget.onChanged?.call();
+    }
   }
 
   Future<void> _delete() async {
@@ -1185,6 +1197,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
     });
     try {
       await _api.voidManualTransaction(widget.businessId, widget.transactionId);
+      widget.onChanged?.call();
       if (mounted && _isCurrent(actionGeneration)) Navigator.pop(context);
     } catch (error) {
       if (_isCurrent(actionGeneration)) {
@@ -1243,6 +1256,7 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       ),
     );
     if (changed == true && _isCurrent(generation)) {
+      widget.onChanged?.call();
       await _load();
     }
   }

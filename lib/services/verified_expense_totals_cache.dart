@@ -31,7 +31,9 @@ class VerifiedExpenseTotalsCache {
       final transactions = data['transactions'] as int;
       final at = DateTime.parse(data['verifiedAt'] as String).toLocal();
       if (!income.isFinite || !expenses.isFinite || income < 0 || expenses < 0 ||
-          transactions < 0 || at.isAfter(DateTime.now())) return null;
+          transactions < 0 || at.isAfter(DateTime.now())) {
+        return null;
+      }
       return (totals: ExpensesPeriodTotals(income: income, expenses: expenses,
         transactions: transactions, feesUnverified: data['feesUnverified'] as bool), at: at);
     } catch (_) {

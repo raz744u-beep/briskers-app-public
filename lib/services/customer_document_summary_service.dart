@@ -103,8 +103,11 @@ class CustomerDocumentSummaryService {
   }) async {
     final rows = await _database
         .customSelect(
-          'SELECT * FROM local_documents WHERE business_id=? AND customer_id=? '
-          "AND lower(COALESCE(status,''))<>'void'",
+          'SELECT d.*, j.vehicle_id, j.vehicle_label, j.job_number '
+          'FROM local_documents d LEFT JOIN local_jobs j '
+          'ON j.business_id=d.business_id AND j.id=d.job_id '
+          'WHERE d.business_id=? AND d.customer_id=? '
+          "AND lower(COALESCE(d.status,''))<>'void'",
           variables: [
             Variable<String>(businessId),
             Variable<String>(customerId),
@@ -117,6 +120,10 @@ class CustomerDocumentSummaryService {
         'id': row.read<String>('id'),
         'kind': row.read<String>('kind'),
         'job_id': row.readNullable<String>('job_id'),
+        'document_date': row.readNullable<String>('document_date'),
+        'vehicle_id': row.readNullable<String>('vehicle_id'),
+        'vehicle': row.readNullable<String>('vehicle_label'),
+        'job_number': row.readNullable<String>('job_number'),
         'status': row.readNullable<String>('status'),
         'display_status_code': row.readNullable<String>('display_status_code'),
         'document_number': row.readNullable<String>('document_number'),

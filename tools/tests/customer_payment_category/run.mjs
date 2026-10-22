@@ -1,0 +1,61 @@
+const { PGlite } = await import(process.env.PGLITE_MODULE ?? '@electric-sql/pglite');
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+const db = new PGlite();
+const sql = name => readFileSync(new URL(name, import.meta.url), 'utf8');
+const shop='00000000-0000-0000-0000-000000000001';
+const other='00000000-0000-0000-0000-000000000002';
+const customer='00000000-0000-0000-0000-000000000003';
+const category='00000000-0000-0000-0000-000000000004';
+const invoice='00000000-0000-0000-0000-000000000005';
+const account='00000000-0000-0000-0000-000000000006';
+let assertions=0;
+const check=(value,expected)=>{assert.deepEqual(value,expected);assertions++;};
+try {
+await db.exec(`CREATE SCHEMA briskers;
+CREATE TABLE briskers.customers(id uuid,business_id uuid);
+CREATE TABLE briskers.financial_categories(id uuid,business_id uuid,name text,active boolean,normal_direction text,report_treatment text);
+CREATE TABLE briskers.financial_transactions(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),business_id uuid,account_id uuid,kind text,amount numeric,currency_code text,transaction_date date,customer_id uuid,payment_method_id uuid,idempotency_key uuid,category_id uuid,status text DEFAULT 'posted',row_version bigint DEFAULT 1,UNIQUE(business_id,idempotency_key));
+CREATE TABLE briskers.sales_documents(id uuid,business_id uuid,kind text,status text,total_amount numeric,tax_amount numeric,currency_code text,customer_id uuid,credited_invoice_id uuid);
+CREATE TABLE briskers.payment_allocations(id uuid DEFAULT gen_random_uuid(),business_id uuid,transaction_id uuid,document_id uuid,gross_amount numeric,tax_amount numeric);
+CREATE FUNCTION briskers.require_permission(uuid,text) RETURNS void LANGUAGE plpgsql AS $$BEGIN IF current_setting('test.denied',true)='yes' THEN RAISE EXCEPTION 'denied' USING ERRCODE='42501'; END IF; END$$;
+CREATE FUNCTION briskers.lock_operation(uuid,uuid) RETURNS void LANGUAGE sql AS $$SELECT$$;
+INSERT INTO briskers.customers VALUES('${customer}','${shop}');
+INSERT INTO briskers.financial_categories VALUES('${category}','${shop}','Customers',true,'income','revenue'),(gen_random_uuid(),'${other}','Customers',true,'income','revenue');
+INSERT INTO briskers.sales_documents VALUES('${invoice}','${shop}','invoice','issued',1000,0,'USD','${customer}',NULL);`);
+await db.exec(sql('original_record_payment.sql'));
+const aclBefore=(await db.query(`SELECT proacl FROM pg_proc WHERE oid='public.briskers_record_payment(uuid,uuid,uuid,numeric,uuid,date,uuid)'::regprocedure`)).rows[0];
+await db.exec(sql('../../review/customer_payment_category_default_REVIEW_ONLY.sql'));
+await db.exec(sql('../../review/customer_payment_category_default_REVIEW_ONLY.sql'));
+check((await db.query(`SELECT proacl FROM pg_proc WHERE oid='public.briskers_record_payment(uuid,uuid,uuid,numeric,uuid,date,uuid)'::regprocedure`)).rows[0],aclBefore);
+const post=async(key,method,amount=100)=> (await db.query(`SELECT public.briskers_record_payment($1,$2,$3,$4,$5,'2026-10-21',$6) AS id`,[shop,invoice,account,amount,key,method])).rows[0].id;
+const methods=['00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000011','00000000-0000-0000-0000-000000000012','00000000-0000-0000-0000-000000000013'];
+for (const method of methods) {
+ const key=(await db.query('SELECT gen_random_uuid() AS id')).rows[0].id;
+ const id=await post(key,method);check(await post(key,method),id);
+ const row=(await db.query('SELECT category_id,amount,transaction_date::text,payment_method_id,customer_id FROM briskers.financial_transactions WHERE id=$1',[id])).rows[0];
+ check(row,{category_id:category,amount:'100',transaction_date:'2026-10-21',payment_method_id:method,customer_id:customer});
+}
+check((await db.query('SELECT count(*)::int AS n,sum(amount)::text AS total FROM briskers.financial_transactions')).rows[0],{n:4,total:'400'});
+check((await db.query('SELECT count(*)::int AS n,sum(gross_amount)::text AS total FROM briskers.payment_allocations')).rows[0],{n:4,total:'400'});
+await db.exec(`UPDATE briskers.financial_transactions SET category_id=NULL WHERE id=(SELECT id FROM briskers.financial_transactions ORDER BY id LIMIT 1);`);
+await db.query(`SELECT set_config('briskers.repair_business_id',$1,false)`,[shop]);
+const preview=(await db.query(sql('../../review/customer_payment_category_preview.sql'))).rows[0];
+check(preview.candidate_count,1);
+await db.query(`SELECT set_config('briskers.repair_expected_count',$1,false),set_config('briskers.repair_manifest_md5',$2,false)`,['1',preview.manifest_md5]);
+const before=(await db.query('SELECT * FROM briskers.financial_transactions ORDER BY id')).rows;
+await db.exec(sql('../../review/customer_payment_category_repair_REVIEW_ONLY.sql'));
+check((await db.query('SELECT * FROM briskers.financial_transactions ORDER BY id')).rows,before);
+// Synthetic only: verify reviewed commit path changes only the category.
+await db.exec(sql('../../review/customer_payment_category_repair_REVIEW_ONLY.sql').replace(/ROLLBACK;\s*$/, 'COMMIT;'));
+const after=(await db.query('SELECT * FROM briskers.financial_transactions ORDER BY id')).rows;
+check(after.map(({category_id,...rest})=>rest),before.map(({category_id,...rest})=>rest));
+check(after.every(row=>row.category_id===category),true);
+check((await db.query(sql('../../review/customer_payment_category_preview.sql'))).rows[0].candidate_count,0);
+await db.exec(`SELECT set_config('test.denied','yes',false)`);
+await assert.rejects(()=>post('00000000-0000-0000-0000-000000000099',methods[0]),error=>error.code==='42501');assertions++;
+await db.exec(`SELECT set_config('test.denied','no',false); UPDATE briskers.financial_categories SET active=false WHERE business_id='${shop}'`);
+await assert.rejects(()=>post('00000000-0000-0000-0000-000000000098',methods[0]),error=>error.code==='23514');assertions++;
+check((await db.query('SELECT count(*)::int AS n FROM briskers.financial_transactions')).rows[0].n,4);
+console.log(`PASS: ${assertions} isolated payment-category assertions; no hosted writes.`);
+} finally {await db.close();}
