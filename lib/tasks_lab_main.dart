@@ -200,7 +200,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   // Reuse the actual dock from the Briskers shop application.
-  // Lab-only long presses reveal Tasks/Work Log and Payroll/Settings upward.
+  // Lab-only long presses reveal combined Tasks/history and Payroll/Settings upward.
   Widget _bottomNav() => BriskersModuleDock(
     selectedIndex: _selectedDock,
     destinations: const [
@@ -983,7 +983,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     ),
                   const SizedBox(height: 8),
                   const Text('Each unfinished task will be completed '
-                    'individually in the Work Log. Payroll Preview updates '
+                    'in the completed work list. Payroll Preview updates '
                     'automatically. The job and invoice remain open.',
                     style: TextStyle(fontSize: 12,
                       color: Color(0xFF64748B))),
@@ -1893,6 +1893,17 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   /// Item | Qty | Amount, with a mechanic/hour edit control by each labor
   /// heading. Price data and source invoice editing are never introduced.
   String _invoiceMechanicSummary(Map<String, dynamic> task) {
+    final saved = _firstCompletion(task);
+    if (saved != null) {
+      final frozen = (saved['payroll_allocations'] as List?)
+        ?.whereType<Map<String, dynamic>>().toList() ?? [];
+      if (frozen.isEmpty) return _completedAssignment(saved);
+      return frozen.map((row) {
+        final hours = (row['hours'] as num?)?.toDouble() ?? 0;
+        return '${_employeeName(row['employee_id']?.toString())} '
+          '${hours.toStringAsFixed(1)}h';
+      }).join(' · ');
+    }
     final rows = allocationsByLine[task['line_id'].toString()] ?? const [];
     if (rows.isNotEmpty) {
       return rows.map((a) {
@@ -1907,6 +1918,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   Widget _testInvoiceLaborRow(Map<String, dynamic> task) {
+    final locked = _firstCompletion(task) != null;
     final book = (task['source_invoice_hours'] as num?)?.toDouble();
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 11),
@@ -1926,7 +1938,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 alignment: Alignment.centerRight,
                 child: InkWell(
                   key: ValueKey('labor-hours-edit-${task['line_id']}'),
-                  onTap: () => _editInvoiceLabor(task),
+                  onTap: locked ? null : () => _editInvoiceLabor(task),
                   borderRadius: BorderRadius.circular(6),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(4, 5, 0, 5),
@@ -1942,8 +1954,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                           fontSize: 12.5, fontWeight: FontWeight.w700,
                           color: BriskersColors.jobs))),
                       const SizedBox(width: 5),
-                      const Icon(Icons.edit_outlined, size: 18,
-                        color: BriskersColors.jobs),
+                      Icon(locked ? Icons.lock_outline : Icons.edit_outlined,
+                        size: 18, color: locked
+                          ? const Color(0xFF64748B) : BriskersColors.jobs),
                     ]),
                   ),
                 ),
