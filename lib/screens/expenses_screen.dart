@@ -275,6 +275,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
 
   Future<List<Map<String, dynamic>>> _fetchTransactions({
     required int offset,
+    bool fastFirstPaint = false,
   }) async {
     final rows = await _api.transactionsPaged(
       widget.businessId,
@@ -290,6 +291,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       categoryId: _categoryFilterId,
       counterpartyId: _counterpartyFilterId,
     );
+    if (fastFirstPaint) {
+      // Price/fee verification is supplemental. The transaction list cannot
+      // wait for sequential invoice-detail reads to show existing payments.
+      return rows.map(WarrantyReceiptReporting.unverified).toList();
+    }
     try {
       return await const WarrantyReceiptReporting().enrich(
         widget.businessId,
@@ -297,6 +303,32 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       );
     } catch (_) {
       return rows.map(WarrantyReceiptReporting.unverified).toList();
+    }
+  }
+
+  Future<void> _enrichVisiblePage(
+    int epoch, String businessId, List<Map<String, dynamic>> rows,
+  ) async {
+    try {
+      final checked = await const WarrantyReceiptReporting()
+          .enrich(businessId, rows);
+      if (!_isCurrentLoad(epoch, businessId)) return;
+      final updates = {
+        for (final row in checked)
+          if ((row['id']?.toString() ?? '').isNotEmpty)
+            row['id'].toString(): row,
+      };
+      setState(() {
+        _transactions = [
+          for (final existing in _transactions)
+            if (updates.containsKey(existing['id']?.toString()))
+              updates[existing['id']?.toString()]!
+            else
+              existing,
+        ];
+      });
+    } catch (_) {
+      // Unverified gross amounts remain explicitly labeled, not inferred.
     }
   }
 
@@ -432,11 +464,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         // Enrich only those rows. Enriching the entire ~1,000-row snapshot
         // first can delay the page and unnecessarily process many receipts.
         final hasMoreLocal = localRows.length > _pageSize;
-        localRows = await const WarrantyReceiptReporting().enrich(
-          widget.businessId,
-          localRows.take(_pageSize).toList(),
-          refresh: false,
-        );
+        // Display cached transactions immediately; full processor-fee
+        // verification is asynchronous and scoped to this navigation epoch.
+        localRows = localRows.take(_pageSize).map(
+          WarrantyReceiptReporting.unverified).toList();
         final localOptions = await _localFinancial.loadOptions(
           widget.businessId,
         );
@@ -493,7 +524,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     try {
       // Fetch just the visible page first. Waiting for historical 1,000-row
       // snapshots made newly posted invoice payments appear very late.
-      final rows = await _fetchTransactions(offset: 0);
+      final rows = await _fetchTransactions(
+        offset: 0, fastFirstPaint: true);
       if (!_isCurrentLoad(epoch, businessId)) return;
       setState(() {
         _serverConfirmedTransactionIds.addAll(
@@ -507,6 +539,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         _transactionRefreshFailed = false;
         _error = null;
       });
+      unawaited(_enrichVisiblePage(epoch, businessId, rows));
       // Only the successful authenticated server response can add durable
       // proof. Saving this first page makes a later app restart stable even
       // if the optional 1,000-row history download does not finish.
