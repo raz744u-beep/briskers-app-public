@@ -60,17 +60,19 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Estimate uses left and right edges without extra gaps',
+  testWidgets('Estimate two tabs are centered in equal-width targets',
       (tester) async {
     await show(tester, width: 320, tabs: const [
-      DocumentTabLabel(label: 'Items', alignment: Alignment.centerLeft),
-      DocumentTabLabel(label: 'Notes', alignment: Alignment.centerRight),
+      DocumentTabLabel(label: 'Items', alignment: Alignment.center),
+      DocumentTabLabel(label: 'Notes', alignment: Alignment.center),
     ]);
     final left = tester.getRect(find.text('Items'));
     final right = tester.getRect(find.text('Notes'));
-    expect(left.left, lessThan(25));
-    expect(right.right, greaterThan(295));
-    expect(right.right, lessThanOrEqualTo(320));
+    expect(left.center.dx, closeTo(80, 12));
+    expect(right.center.dx, closeTo(240, 12));
+    await tester.tap(find.text('Notes'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
   });
 
   test('Invoice tab header keeps four equal-width labels in correct order', () {
@@ -80,7 +82,7 @@ void main() {
     final header = src.substring(start);
     expect(header, contains('isScrollable: false'));
     expect(header, contains('labelPadding: EdgeInsets.zero'));
-    expect(header, contains("label: tr('itemsTab'), alignment: Alignment.centerLeft"));
+    expect(header, contains('alignment: isEstimate ? Alignment.center : Alignment.centerLeft'));
     expect(header, contains("label: tr('paymentTab')"));
     expect(header, contains("label: tr('notesTab')"));
     expect(header, contains("label: 'Expenses', alignment: Alignment.centerRight"));
