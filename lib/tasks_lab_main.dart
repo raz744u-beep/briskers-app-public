@@ -434,9 +434,15 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ));
   }
 
-  // Tasks remain editable here; Work Log uses a distinct read-only view.
+  // Each task appears ONCE. Completed records use immutable initial data,
+  // never the live editable row or repeated historical reopen events.
   Widget _taskCard(Map<String, dynamic> task) {
-    final done = task['status'] == 'done';
+    final record = _firstCompletion(task);
+    final done = record != null || task['status'] == 'done';
+    final completedAt = record?['completed_at'];
+    final stamp = completedAt is int
+      ? DateFormat('MMM d, h:mm a').format(
+          DateTime.fromMillisecondsSinceEpoch(completedAt)) : '';
     return Card(
       margin: const EdgeInsets.fromLTRB(10, 3, 10, 5),
       child: ListTile(
@@ -444,24 +450,36 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         leading: Icon(
           done ? Icons.check_circle : Icons.build_circle_outlined,
           color: done ? const Color(0xFF169D70)
-            : const Color(0xFF417CC5),
-        ),
-        title: Text(_description(task),
+            : const Color(0xFF417CC5)),
+        title: Text(record?['description']?.toString() ?? _description(task),
           style: const TextStyle(fontWeight: FontWeight.w700)),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (task['document_id'] ==
                 LocalJobTasksLabStore.recheckDocumentId)
-              const Text('Recheck · Not on Invoice',
+              const Text('Additional work · Not on Invoice',
                 style: TextStyle(fontSize: 11,
                   color: BriskersColors.jobs)),
-            Text(_laborAssignment(task)),
-            _statusChip(task['status']?.toString() ?? 'planned'),
+            Text(record == null
+              ? _laborAssignment(task)
+              : _completedAssignment(record),
+              style: TextStyle(
+                fontSize: done ? 14.5 : 13,
+                fontWeight: done ? FontWeight.w600 : FontWeight.w400)),
+            if (done)
+              Text(stamp.isEmpty ? 'Completed · read-only'
+                : 'Completed $stamp · read-only',
+                style: const TextStyle(fontSize: 11,
+                  color: Color(0xFF64748B)))
+            else
+              _statusChip(task['status']?.toString() ?? 'planned'),
           ],
         ),
-        trailing: const Icon(Icons.edit_outlined, size: 19),
-        onTap: () => _editTask(task),
+        trailing: Icon(done ? Icons.lock_outline : Icons.edit_outlined,
+          size: 19, color: done
+            ? const Color(0xFF64748B) : BriskersColors.jobs),
+        onTap: done ? null : () => _editTask(task),
       ),
     );
   }
@@ -1224,7 +1242,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               BriskersColors.invoices, () => _navigate(8), count: 1),
             const SizedBox(width: 8),
             tile('Work Performed', Icons.build_outlined,
-              const Color(0xFF15988F), () => _navigate(4),
+              const Color(0xFF15988F), () => _labNotice('Work Performed'),
               count: completed),
             const SizedBox(width: 8),
             tile('Job Expenses', Icons.payments_outlined,
@@ -1249,16 +1267,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _navigate(3),
                 ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.history_outlined,
-                    color: BriskersColors.today),
-                  title: const Text('Work Log',
-                    style: TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: const Text('Completed work by mechanic'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _navigate(4),
-                ),
+
               ],
             ),
           ),
@@ -1271,137 +1280,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     );
   }
 
-  // A chronological, read-only ledger, separate from the editable Tasks
-  // page. Prior completion cycles are shown alongside current Done tasks.
-  Widget _workLogPage() {
-    final records = <({
-      int completedAt,
-      String description,
-      String assignment,
-      bool earlier,
-    })>[
-      for (final task in tasks)
-        if (task['source_missing'] != 1 && task['status'] == 'done')
-          (
-            completedAt: task['completed_at'] is int
-              ? task['completed_at'] as int : 0,
-            description: _description(task),
-            assignment: _laborAssignment(task),
-            earlier: false,
-          ),
-      for (final entry in earlierWorkLog)
-        (
-          completedAt: entry['completed_at'] is int
-            ? entry['completed_at'] as int : 0,
-          description: entry['description']?.toString() ?? 'Work completed',
-          assignment: _displayArchivedAssignment(
-            entry['assignment_summary']?.toString() ?? 'Unassigned'),
-          earlier: true,
-        ),
-    ];
-    records.sort((a, b) {
-      final difference = b.completedAt.compareTo(a.completedAt);
-      return difference != 0
-        ? difference : a.description.compareTo(b.description);
-    });
-
-    final entries = <Widget>[];
-    String? lastDay;
-    for (final item in records) {
-      final date = item.completedAt > 0
-        ? DateTime.fromMillisecondsSinceEpoch(item.completedAt)
-        : null;
-      final dayKey = date == null
-        ? 'unknown' : DateFormat('yyyy-MM-dd').format(date);
-      if (dayKey != lastDay) {
-        lastDay = dayKey;
-        entries.add(Padding(
-          padding: const EdgeInsets.fromLTRB(16, 13, 16, 5),
-          child: Text(
-            date == null
-              ? 'Date not recorded'
-              : DateFormat('EEE, MMM d, yyyy').format(date),
-            style: const TextStyle(fontSize: 13,
-              color: Color(0xFF64748B), fontWeight: FontWeight.w800),
-          ),
-        ));
-      }
-      entries.add(Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-        child: DecoratedBox(
-          decoration: const BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: Color(0xFFE1E7EB), width: 0.7))),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 3),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 68,
-                  child: Text(
-                    date == null ? '—' : DateFormat('h:mm a').format(date),
-                    style: const TextStyle(fontSize: 11.5,
-                      color: Color(0xFF64748B)),
-                  ),
-                ),
-                const Icon(Icons.check_circle,
-                  color: Color(0xFF169D70), size: 19),
-                const SizedBox(width: 9),
-                Expanded(child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(item.description, maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13.8,
-                        fontWeight: FontWeight.w700, height: 1.2)),
-                    const SizedBox(height: 2),
-                    Text(item.assignment, maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 14.5,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF526273), height: 1.2)),
-                    if (item.earlier)
-                      const Text('Previous completion',
-                        style: TextStyle(fontSize: 10.5,
-                          color: Color(0xFF64748B))),
-                  ],
-                )),
-              ],
-            ),
-          ),
-        ),
-      ));
-    }
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(4, 0, 4, 18),
-      children: [
-        _sectionHeader('Work Log',
-          subtitle: 'Completion history · Read-only'),
-        if (records.isEmpty)
-          const ListTile(title: Text('No completed work yet')),
-        ...entries,
-      ],
-    );
-  }
-
-  String _displayArchivedAssignment(String raw) {
-    var description = raw;
-    for (final employee in BriskersLabFixture.employees) {
-      final id = employee['id'];
-      if (id != null) {
-        description = description.replaceAll(
-          id, _employeeName(id),
-        );
-      }
-    }
-    return description;
-  }
-
   Future<void> _addRecheckWork() async {
     final description = TextEditingController();
     final hours = TextEditingController();
     String assignee = leadMechanicId ?? '';
+    bool paid = true;
     final added = await showModalBottomSheet<bool>(
       context: context, isScrollControlled: true,
       showDragHandle: true, useSafeArea: true,
@@ -1425,12 +1308,20 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   labelText: 'Additional work description',
                   border: OutlineInputBorder())),
               const SizedBox(height: 12),
-              TextField(controller: hours,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Additional payroll hours',
-                  border: OutlineInputBorder())),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Pay mechanic for this task'),
+                subtitle: const Text('Turn off to record unpaid recheck work'),
+                value: paid,
+                onChanged: (value) => update(() => paid = value),
+              ),
+              if (paid)
+                TextField(controller: hours,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Additional payroll hours',
+                    border: OutlineInputBorder())),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: assignee,
@@ -1453,12 +1344,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               const SizedBox(height: 14),
               FilledButton.icon(
                 onPressed: () async {
-                  final qty = double.tryParse(hours.text.trim());
+                  final qty = paid ? double.tryParse(hours.text.trim()) : 0.0;
                   if (description.text.trim().isEmpty ||
-                      qty == null || !qty.isFinite || qty <= 0) {
+                      qty == null || !qty.isFinite ||
+                      (paid && qty <= 0)) {
                     ScaffoldMessenger.of(sheet).showSnackBar(
                       const SnackBar(content: Text(
-                        'Enter a description and positive hours')));
+                        'Enter description and positive hours if paid')));
                     return;
                   }
                   try {
@@ -1488,14 +1380,21 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (added == true) await _refresh();
   }
 
-  Widget _taskList({bool history = false}) {
-    if (history) return _workLogPage();
-    final visible = tasks.where(
-      (task) => task['source_missing'] != 1).toList();
+  Widget _taskList() {
+    final original = tasks.where((task) =>
+      task['source_missing'] != 1 &&
+      task['document_id'] == BriskersLabFixture.invoiceId).toList();
+    final additional = tasks.where((task) =>
+      task['source_missing'] != 1 &&
+      task['document_id'] ==
+        LocalJobTasksLabStore.recheckDocumentId).toList();
+    final active = [...original, ...additional].where((task) =>
+      _firstCompletion(task) == null && task['status'] != 'done').toList();
     return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
       children: [
-        _sectionHeader('Job tasks',
-          subtitle: 'Invoice #6342 · Assign Kam and Chris by task'),
+        _sectionHeader('Job tasks & completed work',
+          subtitle: 'One entry per task · Original work stays preserved'),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
           child: Row(children: [
@@ -1505,27 +1404,42 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             _jobStatusControl(),
           ]),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-          child: OutlinedButton.icon(
-            onPressed: jobStatusCode == 'completed'
-              ? null : _addRecheckWork,
-            icon: const Icon(Icons.add_circle_outline),
-            label: const Text('Add Task · Not on Invoice'),
+        if (jobStatusCode != 'completed')
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: OutlinedButton.icon(
+              onPressed: _addRecheckWork,
+              icon: const Icon(Icons.add_circle_outline),
+              label: const Text('Add Task · Not on Invoice'),
+            ),
           ),
-        ),
-        if (visible.any((task) => task['status'] != 'done'))
+        if (active.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
             child: OutlinedButton.icon(
               onPressed: _confirmCompleteAllTasks,
               icon: const Icon(Icons.done_all),
-              label: const Text('Mark all tasks Done'),
+              label: const Text('Mark all active tasks Done'),
             ),
           ),
-        if (visible.isEmpty)
-          const ListTile(title: Text('No tasks yet')),
-        ...visible.map(_taskCard),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 5),
+          child: Text('Original work · Invoice #6342',
+            style: TextStyle(fontSize: 16,
+              fontWeight: FontWeight.w800))),
+        if (original.isEmpty)
+          const ListTile(title: Text('No invoice labor tasks')),
+        ...original.map(_taskCard),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 5),
+          child: Text('Additional / recheck work',
+            style: TextStyle(fontSize: 16,
+              fontWeight: FontWeight.w800))),
+        if (additional.isEmpty)
+          const ListTile(
+            title: Text('No additional work recorded'),
+            subtitle: Text('Reopen the job and add a new task if needed.')),
+        ...additional.map(_taskCard),
       ],
     );
   }
@@ -1931,17 +1845,17 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
         tileRow(
-          _homeTile('Tasks', '${tasks.length} Labor tasks',
+          _homeTile('Tasks & work history', '${tasks.length} Labor tasks',
             Icons.rule_outlined, BriskersColors.jobs,
             () => _navigate(3)),
-          _homeTile('Work Log', 'Completed task history',
-            Icons.history_outlined, BriskersColors.today,
-            () => _navigate(4)),
-        ),
-        tileRow(
-          _homeTile('Payroll', 'Hours preview only',
+          _homeTile('Payroll', 'Test-only earnings and payments',
             Icons.account_balance_wallet_outlined, BriskersColors.invoices,
             () => _navigate(5)),
+        ),
+        tileRow(
+          _homeTile('Settings', 'Test app preferences',
+            Icons.settings_outlined, BriskersColors.settings,
+            () => _navigate(6)),
           _homeTile('Employees', 'Edit all names',
             Icons.badge_outlined, BriskersColors.settings,
             _editEmployeeNames),
@@ -2206,7 +2120,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       case 1: return _customerPage();
       case 2: return _jobPage();
       case 3: return _taskList();
-      case 4: return _taskList(history: true);
+      case 4: return _taskList();
       case 5: return _payrollPage();
       case 6: return _settingsPage();
       case 7: return _readOnlyModule('Estimates',
