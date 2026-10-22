@@ -318,6 +318,21 @@ class LocalJobRepository {
     return rows.map(_jobListMap).toList();
   }
 
+  /// Customer navigation uses the same card projection as the main Jobs list.
+  Future<List<Map<String, dynamic>>> forCustomer(
+    String businessId, String customerId,
+  ) async {
+    await LocalJobRetirement.ensureSchema(_database);
+    final rows = await _database.customSelect(
+      "SELECT j.*, 0 AS open_findings, j.server_updated_at AS activity_at, "
+      "j.created_at AS job_date_at, NULL AS last_accessed_at "
+      "FROM local_jobs j WHERE j.business_id=? AND j.customer_id=? "
+      "AND ${_visibleJobSql('j')}",
+      variables: [Variable<String>(businessId), Variable<String>(customerId)],
+    ).get();
+    return rows.map(_jobListMap).toList();
+  }
+
   Future<String?> jobNumberForJob(String businessId, String jobId) async {
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;

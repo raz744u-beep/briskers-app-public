@@ -387,7 +387,7 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn("actions: read", workflow.split("  build:")[0])
         self.assertIn("actions: read", workflow.split("  build:")[1])
         self.assertNotIn("--head-only", workflow)
-        self.assertIn("if: github.ref == 'refs/heads/" + gate.CANDIDATE_BRANCH + "'",
+        self.assertIn("if: (github.ref == 'refs/heads/" + gate.CANDIDATE_BRANCH + "'",
                       workflow.split("Revalidate exact-head checks before Android work")[1].split("Install Flutter stable")[0])
 
     def test_prerequisite_path_filters_cover_gate_changes(self):

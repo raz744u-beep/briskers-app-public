@@ -16,14 +16,11 @@ void main() {
     expect(text, contains('visibility.filter('));
   });
 
-  test('customer Job cards use same mechanic fields as canonical job cards', () {
-    final source = File('lib/screens/customers/customer_detail_screen.dart')
-        .readAsStringSync();
-    final card = File('lib/widgets/job_compact_card.dart').readAsStringSync();
-    expect(source, contains("'assigned_employee': j.data['assigned_employee_name']"));
-    expect(source, contains("'assigned_position': j.data['assigned_position']"));
-    expect(source, contains("'planned_hours': j.data['planned_hours']"));
-    expect(card, contains("job['assigned_employee'] ?? job['mechanic']"));
+  test('customer Job cards reuse the canonical local repository projection', () {
+    final source = File('lib/screens/customers/customer_detail_screen.dart').readAsStringSync();
+    expect(source, contains('LocalJobRepository().forCustomer('));
+    final history = File('lib/screens/customers/customer_service_history_section.dart').readAsStringSync();
+    expect(history, contains('LocalJobRepository().forCustomer('));
   });
 
   test('offline notices do not consume full customer or job header', () {

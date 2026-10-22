@@ -18,6 +18,7 @@ import '../../services/customer_vehicle_sync_service.dart';
 import '../../services/customer_detail_cache.dart';
 import '../../services/customer_document_summary_service.dart';
 import '../../services/local_document_repository.dart';
+import '../../services/local_job_repository.dart';
 import '../../services/customer_document_recency.dart';
 import '../../services/customer_job_recency.dart';
 import '../../local/local_database_provider.dart';
@@ -169,32 +170,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         'title':a.read<String>('title'),
         'status':a.read<String>('status')});
     }
-    final jobs = await localDatabase.customSelect(
-      "SELECT * FROM local_jobs WHERE business_id=? AND customer_id=? "
-      "",
-      variables: vars).get();
-    for (final j in jobs) {
-      final rawStatus = j.read<String>('status');
-      final formattedStatus = rawStatus.replaceAll('_', ' ');
-      final jobStatus = formattedStatus.isEmpty ? 'Open' :
-          formattedStatus[0].toUpperCase() + formattedStatus.substring(1);
-      rows.add({'type':'Job','id':j.read<String>('id'),
-        'job_id':j.read<String>('id'),
-        'title':j.read<String>('title'),
-        'number':j.readNullable<String>('job_number') ?? 'Pending sync',
-        'created_at': j.readNullable<DateTime>('created_at')?.toIso8601String(),
-        'status':jobStatus,
-        'job_snapshot': <String, dynamic>{
-          ...j.data,
-          'customer_name': _data?['customer']?['name'] ?? '',
-          'vehicle': j.data['vehicle_label'],
-          // The compact card expects the shared job-list projection keys,
-          // not Drift's assigned_employee_name/vehicle_label field names.
-          'assigned_employee': j.data['assigned_employee_name'],
-          'assigned_position': j.data['assigned_position'],
-          'planned_hours': j.data['planned_hours'],
-          'status_color': j.data['status_color'],
-        } });
+    final jobs = await LocalJobRepository().forCustomer(
+      widget.businessId, widget.customerId);
+    for (final job in jobs) {
+      rows.add({...job, 'type': 'Job', 'job_id': job['id'],
+        'number': job['job_number'] ?? 'Pending sync',
+        'job_snapshot': job});
     }
     final docs = await CustomerDocumentSummaryService().forCustomer(
       widget.businessId, widget.customerId, includeClosed: true);
@@ -658,7 +639,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       final invoices = rows.where((item) => item['type'] == 'invoice').toList();
       final estimates = rows.where((item) => item['type'] == 'estimate').toList();
       final appointments = rows.where((item) => item['type'] == 'Appointment').toList();
-      final visits = rows.where((item) => item['type'] == 'Visit').toList();
       final docs = [...invoices, ...estimates];
       docs.sort(compareCustomerDocumentRecency);
       final balance = invoices.fold<int>(0, (sum, item) =>
@@ -704,7 +684,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           link('Invoices', Icons.receipt_long_outlined, BriskersColors.invoices, invoices),
           link('Estimates', Icons.description_outlined, BriskersColors.estimates, estimates),
           link('Appointments', Icons.calendar_today_outlined, BriskersColors.schedule, appointments),
-          link('Visits', Icons.history_outlined, BriskersColors.jobs, visits),
           link('Payments', Icons.payments_outlined, BriskersColors.invoices, paymentInvoices),
           if (balance > 0 || pending > 0) ...[
             const Divider(height: 12),
@@ -824,22 +803,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         final appointments = List<Map<String, dynamic>>.from(
           data['appointments'] ?? const <Map<String, dynamic>>[],
         );
-        final history = Map<String, dynamic>.from(
-          data['history'] ?? const <String, dynamic>{},
-        );
-        final jobs = List<dynamic>.from(history['jobs'] ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList();
-        final documents = List<dynamic>.from(history['documents'] ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList();
-        final expenses = List<dynamic>.from(history['expenses'] ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList();
-
         return Column(
           children: [
 
@@ -855,50 +818,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               },
             ),
             const SizedBox(height: 18),
-            Card(
-              child: ExpansionTile(
-                leading: const Icon(Icons.history_outlined),
-                title: const Text(
-                  'Service History',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-                subtitle: Text(
-                  '${jobs.length} jobs • ${documents.length} documents • ${expenses.length} expenses',
-                ),
-                children: [
-                  if (jobs.isEmpty && documents.isEmpty && expenses.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text('No saved service history yet.'),
-                      ),
-                    )
-                  else ...[
-                    for (final job in jobs.take(12))
-                      ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.build_outlined),
-                        title: Text(
-                          [
-                            job['job_number']?.toString() ?? '',
-                            job['title']?.toString() ?? '',
-                          ].where((x) => x.isNotEmpty).join(' — '),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    if (jobs.length > 12)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text('+ ${jobs.length - 12} more jobs saved'),
-                        ),
-                      ),
-                  ],
-                ],
-              ),
+            CustomerServiceHistorySection(
+              key: ValueKey(('offline-history', _activityRevision)),
+              roleCode: widget.roleCode,
+              businessId: widget.businessId,
+              customerId: widget.customerId,
+              vehicles: List<dynamic>.from(_data?['vehicles'] ?? const []),
             ),
           ],
         );
@@ -1754,6 +1679,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                     const SizedBox(height: 18),
                     CustomerServiceHistorySection(
+                      key: ValueKey(('history', _activityRevision)),
                   roleCode: widget.roleCode,
                       businessId: widget.businessId,
                       customerId: widget.customerId,
