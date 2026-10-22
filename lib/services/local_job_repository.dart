@@ -846,7 +846,6 @@ class LocalJobRepository {
         'customer_problem_flag_note',
       ),
       'vehicle_id': vehicleId,
-      'vehicle_id': row.readNullable<String>('vehicle_id'),
       'vehicle': row.readNullable<String>('vehicle_label'),
       'vehicle_vin': row.readNullable<String>('vehicle_vin'),
       'vehicle_plate': row.readNullable<String>('vehicle_plate'),
