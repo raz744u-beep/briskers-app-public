@@ -133,6 +133,39 @@ void main() {
     expect(dock, contains('details.globalPosition'));
   });
 
+  test('Invoice test layout mirrors production Items columns and keeps editing scoped',
+      () {
+    final source = File('lib/screens/jobs/job_document_screen.dart')
+      .readAsStringSync();
+    final lab = File('lib/tasks_lab_main.dart').readAsStringSync();
+    // Same visual column sizing as the existing real invoice Items tab.
+    final realItems = source.split('Widget _itemsTab(').last
+      .split('Widget _paymentTab(').first;
+    expect(realItems, contains("tr('itemColumn')"));
+    expect(realItems, contains("tr('qtyColumn')"));
+    expect(realItems, contains("tr('amountColumn')"));
+    expect(realItems, contains('width: 58'));
+    expect(realItems, contains('width: 92'));
+    final copy = lab.split('Widget _testInvoiceLaborRow(').last
+      .split('Widget _morePage()').first;
+    expect(copy, contains("Text('Item'"));
+    expect(copy, contains("Text('Qty'"));
+    expect(copy, contains("Text('Amount'"));
+    expect(copy, contains('width: 58'));
+    expect(copy, contains('width: 92'));
+    expect(copy, contains("Text('Labor'"));
+    expect(copy, contains("Key('labor-hours-edit-"));
+    expect(copy, contains('onTap: () => _editInvoiceLabor(task)'));
+    expect(copy, contains('_invoiceMechanicSummary(task)'));
+    expect(copy, contains("task['source_invoice_hours']"));
+    expect(copy, contains("'document_id'] == BriskersLabFixture.invoiceId"));
+    expect(copy, contains('Financial amounts are intentionally redacted'));
+    // Invoice amounts are redacted; test edit actions only allocate hours.
+    expect(copy, isNot(contains('store.saveAllocations(')));
+    expect(copy, isNot(contains('store.editTask(')));
+    expect(copy, isNot(contains('unit_price')));
+  });
+
   test('Unbilled recheck task increases only new earned hours and not invoice',
       () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
