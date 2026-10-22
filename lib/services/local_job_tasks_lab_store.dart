@@ -548,6 +548,14 @@ class LocalJobTasksLabStore {
       await db.customStatement('''
         UPDATE local_job_tasks_lab SET employee_id=?, updated_at=?
         WHERE business_id=? AND job_id=?
+          AND status!='done'
+          AND NOT EXISTS (
+            SELECT 1 FROM local_payroll_preserved_tasks_lab p
+            WHERE p.business_id=local_job_tasks_lab.business_id
+              AND p.job_id=local_job_tasks_lab.job_id
+              AND p.document_id=local_job_tasks_lab.document_id
+              AND p.line_id=local_job_tasks_lab.line_id
+          )
           AND (employee_id IS NULL OR employee_id=?)
           AND NOT EXISTS (
             SELECT 1 FROM local_task_allocations_lab a
@@ -564,7 +572,7 @@ class LocalJobTasksLabStore {
   static const recheckDocumentId = 'lab-manual-recheck';
 
   /// Add an extra recheck task without changing the source invoice or billing.
-  /// Assigned hours are a separate approved payroll cap for this task.
+  /// Assigned payroll hours are separate from customer billing.
   Future<String> addRecheckTask({
     required String businessId, required String jobId,
     required String description, required double hours,
