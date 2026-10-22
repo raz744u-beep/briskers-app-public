@@ -84,7 +84,7 @@ void main() {
     expect(main, isNot(contains('Widget _workLogPage()')));
     expect(main, isNot(contains('_displayArchivedAssignment(')));
     expect(main, contains('fontSize: 22'));
-    expect(main, contains('fontSize: 14.5'));
+    expect(main, contains('fontSize: done ? 14.5 : 13'));
     final taskCardSection = main.split('Widget _taskCard(').last
       .split('Future<void> _editTask(').first;
     expect(taskCardSection, contains('record?['));
@@ -973,7 +973,8 @@ void main() {
           r['line_id'] == 'lab-valve-covers');
       final trans = rows.singleWhere((r) =>
           r['line_id'] == 'lab-transmission');
-      expect(valve['employee_id'], 'lab-chris');
+      // Completed task keeps its original mechanic when the lead changes.
+      expect(valve['employee_id'], 'lab-kam');
       expect(valve['custom_description'], 'Finished valve covers');
       expect(valve['status'], 'done');
       expect(valve['completed_at'], isA<int>());
