@@ -64,52 +64,39 @@ void main() {
     expect(main, contains('store.recordLabPayrollPayment('));
     expect(main, contains('earnedPayrollPreviewHours'));
 
-    expect(main, contains('Mark all tasks Done'));
-    // The bulk Done action belongs on Tasks, not as a duplicate Job Detail row.
+    expect(main, contains('Mark all active tasks Done'));
     final jobDetailSection = main.split('Widget _jobPage() {').last
-      .split('Widget _taskList({bool history = false})').first;
-    final taskListSection = main.split('Widget _taskList({bool history = false})').last
-      .split('Widget _payrollPage()').first;
+      .split('Future<void> _addRecheckWork()').first;
+    final taskListSection = main.split('Widget _taskList() {').last
+      .split('String _labMoney(').first;
     expect(jobDetailSection, isNot(contains("'Mark all tasks Done'")));
     expect(jobDetailSection, contains("'Tasks (TEST)'"));
-    expect(jobDetailSection, contains("'Work Log'"));
-    expect(taskListSection, contains("'Mark all tasks Done'"));
+    expect(jobDetailSection, isNot(contains("title: const Text('Work Log'")));
+    expect(taskListSection, contains('Original work · Invoice #6342'));
+    expect(taskListSection, contains('Additional / recheck work'));
+    expect(taskListSection, contains('...original.map(_taskCard)'));
+    expect(taskListSection, contains('...additional.map(_taskCard)'));
+    expect(taskListSection, contains('Mark all active tasks Done'));
     expect(main, contains('Complete job J-24?'));
     expect(main, contains('_jobStatusControl()'));
     expect(main, contains('onSelected: _changeJobStatus'));
     expect(main, contains('All tasks are Done'));
-    expect(main, contains("subtitle: 'Completion history · Read-only'"));
-    // Font hierarchy: payroll hours are prominent; Work Log allocations
-    // remain legible in the compact, read-only ledger.
-    final payrollSection = main.split('Widget _payrollPage() {').last
-      .split('Widget _settingsPage()').first;
-    expect(payrollSection, contains('fontSize: 22'));
-    expect(payrollSection, contains('fontWeight: FontWeight.w800'));
-    final fullLogSection = main.split('Widget _workLogPage() {').last
-      .split('Widget _taskList({bool history = false})').first;
-    expect(fullLogSection, contains('fontSize: 14.5'));
-    expect(fullLogSection, contains('fontWeight: FontWeight.w600'));
-    expect(main, contains('Widget _workLogPage()'));
-    // Work Log is a passive chronological ledger: no edit pencil, no onTap.
-    final logSection = main.split('Widget _workLogPage() {').last
-      .split('Widget _taskList({bool history = false})').first;
-    expect(logSection, contains("DateFormat('yyyy-MM-dd')"));
-    expect(logSection, contains("DateFormat('h:mm a')"));
-    expect(logSection, contains('records.sort('));
-    expect(logSection, contains('Previous completion'));
-    expect(logSection, isNot(contains('Icons.edit_outlined')));
-    expect(logSection, isNot(contains('onTap:')));
-    expect(logSection, isNot(contains('_editTask(')));
+    expect(main, isNot(contains('Widget _workLogPage()')));
+    expect(main, isNot(contains('_displayArchivedAssignment(')));
+    expect(main, contains('fontSize: 22'));
+    expect(main, contains('fontSize: 14.5'));
     final taskCardSection = main.split('Widget _taskCard(').last
       .split('Future<void> _editTask(').first;
-    expect(taskCardSection, contains('Icons.edit_outlined'));
-    expect(taskCardSection, contains('onTap: () => _editTask(task)'));
-    expect(main, contains('if (history) return _workLogPage();'));
-
+    expect(taskCardSection, contains('record?['));
+    expect(taskCardSection, contains('_completedAssignment(record)'));
+    expect(taskCardSection, contains('Icons.lock_outline'));
+    expect(taskCardSection, contains('onTap: done ? null :'));
+    expect(main, contains('Pay mechanic for this task'));
+    expect(main, contains('Unpaid (0 hrs)'));
     expect(main, contains('_confirmCompleteAllTasks'));
     expect(main, contains('completeConfirmedJobTasks('));
     expect(main, contains('Assign invoice labor'));
-    expect(main, contains('onTap: () => _editInvoiceLabor(task)'));
+    expect(main, contains('onTap: locked ? null : () => _editInvoiceLabor(task)'));
     expect(main, contains('allocationsByLine'));
 
     expect(main, contains('_assignLeadMechanic'));
@@ -155,7 +142,7 @@ void main() {
     expect(copy, contains('width: 92'));
     expect(copy, contains("Text('Labor'"));
     expect(copy, contains("Key('labor-hours-edit-"));
-    expect(copy, contains('onTap: () => _editInvoiceLabor(task)'));
+    expect(copy, contains('onTap: locked ? null : () => _editInvoiceLabor(task)'));
     expect(copy, contains('_invoiceMechanicSummary(task)'));
     expect(copy, contains("task['source_invoice_hours']"));
     expect(copy, contains("'document_id'] == BriskersLabFixture.invoiceId"));
@@ -240,7 +227,8 @@ void main() {
         (t) => t['line_id'] == line);
       expect(extra['status'], 'done');
       expect(extra['source_missing'], 0);
-      expect((await store.priorCompletions(shop, job)).length, 4);
+      expect((await store.completedWork(shop, job)).length, 5);
+      expect(await store.priorCompletions(shop, job), isEmpty);
       expect(await store.list('production-company', job), isEmpty);
     } finally {
       await db.close();
@@ -340,29 +328,30 @@ void main() {
         businessId: shop, jobId: job, statusCode: 'needs_recheck');
       expect(await store.jobStatus(shop, job), 'needs_recheck');
       expect((await store.list(shop, job)).every((t) =>
-        t['status'] == 'in_progress'), isTrue);
+        t['status'] == 'done'), isTrue);
       expect(await store.earnedHoursPreview(shop, job), original);
       final frozen = await store.preservedPayrollPreview(shop, job);
       expect(frozen.taskKeys.length, 4);
       expect(frozen.hoursByMechanic, original);
 
-      // Editing and re-completing the SAME task is not new payroll.
-      await store.saveAllocations(
+      // Editing the SAME finished task must be blocked, not just ignored.
+      await expectLater(store.saveAllocations(
         businessId: shop, jobId: job, documentId: invoice,
         lineId: 'lab-transmission',
-        hoursByEmployee: {'lab-raz': 1.5},
-      );
-      await store.editTask(
+        hoursByEmployee: {'lab-raz': 1.5}),
+        throwsStateError);
+      await expectLater(store.editTask(
         businessId: shop, jobId: job, documentId: invoice,
-        lineId: 'lab-transmission', status: 'done',
-      );
+        lineId: 'lab-transmission', status: 'in_progress'),
+        throwsStateError);
       expect(await store.earnedHoursPreview(shop, job), original);
       await store.changeJobStatus(businessId: shop, jobId: job,
         statusCode: 'completed', confirmedTasks: ack);
       await store.changeJobStatus(businessId: shop, jobId: job,
         statusCode: 'in_progress');
       expect(await store.earnedHoursPreview(shop, job), original);
-      expect((await store.priorCompletions(shop, job)).length, 8);
+      expect(await store.priorCompletions(shop, job), isEmpty);
+      expect((await store.completedWork(shop, job)).length, 4);
 
       // Separate new recheck work can earn a distinct, additional credit.
       await store.reconcileDocument(businessId: shop, jobId: job,
@@ -427,6 +416,10 @@ void main() {
         'Replace rear differential fluid', 'lab-chris', 0.8,
         'lab-chris: 0.8 hrs', 1761000500000, 1761000600000]);
       expect(await store.earnedHoursPreview(shop, job), before);
+      final history = await store.completedWork(shop, job);
+      expect(history.length, 1);
+      expect(history.single['completed_at'], 1761000000000);
+      expect((history.single['payroll_allocations'] as List).length, 2);
     } finally {
       await db.close();
     }
@@ -518,19 +511,20 @@ void main() {
 
       final reopened = await store.changeJobStatus(
         businessId: shop, jobId: job, statusCode: 'in_progress');
-      expect(reopened, 4);
+      expect(reopened, 0);
       expect(await store.jobStatus(shop, job), 'in_progress');
       final pending = await store.list(shop, job);
-      expect(pending.every((task) => task['status'] == 'in_progress'), isTrue);
-      expect(pending.every((task) => task['completed_at'] == null), isTrue);
-      final archive = await store.priorCompletions(shop, job);
-      expect(archive.length, 4);
-      expect(archive.singleWhere(
+      expect(pending.every((task) => task['status'] == 'done'), isTrue);
+      expect(pending.every((task) => task['completed_at'] is int), isTrue);
+      expect(await store.priorCompletions(shop, job), isEmpty);
+      final history = await store.completedWork(shop, job);
+      expect(history.length, 4);
+      expect(history.singleWhere(
         (task) => task['line_id'] == 'lab-valve-covers')['completed_at'],
         earlierTime);
-      expect(archive.singleWhere(
+      expect((history.singleWhere(
         (task) => task['line_id'] == 'lab-transmission')
-          ['assignment_summary'].toString(), contains('lab-chris'));
+          ['payroll_allocations'] as List).length, 2);
       expect((await store.allocations(businessId: shop, jobId: job,
         documentId: invoice, lineId: 'lab-transmission')).length, 2);
       expect(await store.leadMechanic(shop, job), 'lab-kam');
