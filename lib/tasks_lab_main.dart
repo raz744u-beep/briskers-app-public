@@ -45,7 +45,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Map<String, String> fullNames = const {};
   String? leadMechanicId;
   String jobStatusCode = 'open';
-  List<Map<String, dynamic>> earlierWorkLog = const [];
+  List<Map<String, dynamic>> completedWorkRows = const [];
   Map<String, List<Map<String, dynamic>>> allocationsByLine = {};
   Map<String, double> earnedPayrollPreviewHours = {};
   Map<String, int> testHourlyRates = {};
@@ -114,7 +114,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final currentJobStatus = await store.jobStatus(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
-    final archived = await store.priorCompletions(
+    final completedRecords = await store.completedWork(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final lead = await store.leadMechanic(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
@@ -125,7 +125,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       fullNames = names;
       leadMechanicId = lead;
       jobStatusCode = currentJobStatus;
-      earlierWorkLog = archived;
+      completedWorkRows = completedRecords;
       earnedPayrollPreviewHours = earnedHours;
       testHourlyRates = rates;
       testPayrollPayments = payments;
@@ -267,9 +267,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (index == 2) ...[
-            _menuEntry(Icons.rule_outlined, 'Tasks', 3),
-            const Divider(height: 1),
-            _menuEntry(Icons.history, 'Work Log', 4),
+            _menuEntry(Icons.rule_outlined, 'Tasks & completed work', 3),
           ],
           if (index == 7) ...[
             _menuEntry(Icons.account_balance_wallet_outlined, 'Payroll', 5),
@@ -281,15 +279,48 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ),
   );
 
+  String _identity(Map<String, dynamic> row) {
+    final doc = row['document_id']?.toString() ?? '';
+    final line = row['line_id']?.toString() ?? '';
+    return '${doc.length}:$doc$line';
+  }
+
+  Map<String, dynamic>? _firstCompletion(Map<String, dynamic> task) {
+    final id = _identity(task);
+    for (final record in completedWorkRows) {
+      if (_identity(record) == id) return record;
+    }
+    return null;
+  }
+
+  String _completedAssignment(Map<String, dynamic> record) {
+    final frozen = (record['payroll_allocations'] as List?)
+      ?.whereType<Map<String, dynamic>>().toList() ?? [];
+    if (frozen.isNotEmpty) {
+      return frozen.map((row) {
+        final hours = (row['hours'] as num?)?.toDouble() ?? 0;
+        return '${_employeeName(row['employee_id']?.toString())} '
+          '${hours.toStringAsFixed(1)} hrs';
+      }).join(' · ');
+    }
+    final mechanic = _employeeName(record['completed_by']?.toString());
+    return '$mechanic · Unpaid (0 hrs)';
+  }
+
   String _laborAssignment(Map<String, dynamic> task) {
     final allocations = allocationsByLine[task['line_id'].toString()] ?? [];
     if (allocations.isNotEmpty) {
       return allocations.map((a) => "${_employeeName(a['employee_id'].toString())}: ${a['hours']} hrs").join(' · ');
     }
+    final hours = (task['payroll_hours'] as num?)?.toDouble();
+    if (hours == 0) {
+      return "${_employeeName(task['employee_id']?.toString())} · Unpaid";
+    }
     return "${_employeeName(task['employee_id']?.toString())} · ${task['payroll_hours'] ?? '—'} hrs";
   }
 
   Future<void> _editInvoiceLabor(Map<String, dynamic> task) async {
+    if (_firstCompletion(task) != null) return;
     final existing = allocationsByLine[task['line_id'].toString()] ?? [];
     final notOnInvoice = task['document_id'] ==
       LocalJobTasksLabStore.recheckDocumentId;
@@ -436,6 +467,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   Future<void> _editTask(Map<String, dynamic> task) async {
+    if (_firstCompletion(task) != null) return;
     var status = task['status']?.toString() ?? 'planned';
     final description = TextEditingController(text: _description(task));
     final updated = await showModalBottomSheet<bool>(
