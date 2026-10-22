@@ -2050,9 +2050,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       children: [
         _sectionHeader('Invoice #6342',
           subtitle: 'Sanitized invoice layout · Offline Tasks TEST'),
-        Card(
-          margin: const EdgeInsets.fromLTRB(10, 0, 10, 6),
-          child: const ListTile(
+        const Card(
+          margin: EdgeInsets.fromLTRB(10, 0, 10, 6),
+          child: ListTile(
             leading: Icon(Icons.receipt_long_outlined,
               color: BriskersColors.invoices),
             title: Text('Richard Goff',
