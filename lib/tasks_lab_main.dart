@@ -46,6 +46,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   String? leadMechanicId;
   String jobStatusCode = 'open';
   List<Map<String, dynamic>> completedWorkRows = const [];
+  final Set<String> expandedTaskKeys = <String>{};
   Map<String, List<Map<String, dynamic>>> allocationsByLine = {};
   Map<String, double> earnedPayrollPreviewHours = {};
   Map<String, int> testHourlyRates = {};
@@ -559,73 +560,187 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (saved == true) await _refresh();
   }
 
-  // Each task appears ONCE. Completed records use immutable initial data,
-  // never the live editable row or repeated historical reopen events.
+  // Compact card summary uses frozen credits for completed work and
+  // current allocations only for tasks still in progress.
+  ({String mechanics, String hours}) _compactTaskCredit(
+      Map<String, dynamic> task, Map<String, dynamic>? completed) {
+    final splits = completed != null
+      ? (completed['payroll_allocations'] as List?)
+          ?.whereType<Map<String, dynamic>>().toList() ?? []
+      : allocationsByLine[task['line_id'].toString()] ?? [];
+    if (splits.isNotEmpty) {
+      final mechanics = splits.map((row) =>
+        _employeeName(row['employee_id']?.toString())).join(' + ');
+      final total = splits.fold<double>(0, (sum, row) =>
+        sum + ((row['hours'] as num?)?.toDouble() ?? 0));
+      return (mechanics: mechanics,
+        hours: total > 0 ? '${total.toStringAsFixed(1)} hrs' : 'Unpaid');
+    }
+    final mechanic = completed != null
+      ? completed['completed_by']?.toString()
+      : task['employee_id']?.toString();
+    final hours = completed != null ? 0.0
+      : (task['payroll_hours'] as num?)?.toDouble();
+    return (mechanics: _employeeName(mechanic),
+      hours: hours == null ? '—'
+        : hours == 0 ? 'Unpaid' : '${hours.toStringAsFixed(1)} hrs');
+  }
+
+  // A collapsed task is two lines high. Tapping any card expands its full
+  // description/completion details; editing stays in its separate pencil.
   Widget _taskCard(Map<String, dynamic> task) {
     final record = _firstCompletion(task);
     final done = record != null || task['status'] == 'done';
+    final description = record?['description']?.toString() ??
+      _description(task);
+    final credit = _compactTaskCredit(task, record);
+    final id = _identity(task);
+    final expanded = expandedTaskKeys.contains(id);
     final completedAt = record?['completed_at'];
     final stamp = completedAt is int
-      ? DateFormat('MMM d, h:mm a').format(
+      ? DateFormat('MMM d, yyyy · h:mm a').format(
           DateTime.fromMillisecondsSinceEpoch(completedAt)) : '';
+    final isRecheck = task['document_id'] ==
+      LocalJobTasksLabStore.recheckDocumentId;
+    final corrections = _taskCorrections(task);
+    final splitCount = record != null
+      ? (record['payroll_allocations'] as List?)?.length ?? 0
+      : allocationsByLine[task['line_id'].toString()]?.length ?? 0;
     return Card(
-      margin: const EdgeInsets.fromLTRB(10, 3, 10, 5),
-      child: ListTile(
-        contentPadding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
-        leading: Icon(
-          done ? Icons.check_circle : Icons.build_circle_outlined,
-          color: done ? const Color(0xFF169D70)
-            : const Color(0xFF417CC5)),
-        title: Text(record?['description']?.toString() ?? _description(task),
-          style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (task['document_id'] ==
-                LocalJobTasksLabStore.recheckDocumentId)
-              const Text('Additional work · Not on Invoice',
-                style: TextStyle(fontSize: 11,
-                  color: BriskersColors.jobs)),
-            Text(record == null
-              ? _laborAssignment(task)
-              : _completedAssignment(record),
-              style: TextStyle(
-                fontSize: done ? 14.5 : 13,
-                fontWeight: done ? FontWeight.w600 : FontWeight.w400)),
-            if (_taskCorrections(task).isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 3),
-                child: Text(
-                  '${_taskCorrections(task).length} owner correction(s) recorded',
-                  style: const TextStyle(fontSize: 11.5,
-                    color: BriskersColors.jobs,
-                    fontWeight: FontWeight.w600)),
+      margin: const EdgeInsets.fromLTRB(10, 2, 10, 2),
+      elevation: 0,
+      child: InkWell(
+        key: ValueKey('compact-task-$id'),
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => setState(() {
+          if (expanded) {
+            expandedTaskKeys.remove(id);
+          } else {
+            expandedTaskKeys.add(id);
+          }
+        }),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 7, 6, 7),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(
+                    done ? Icons.check_circle
+                      : task['status'] == 'in_progress'
+                        ? Icons.timelapse : Icons.radio_button_unchecked,
+                    size: 19,
+                    color: done ? const Color(0xFF169D70)
+                      : task['status'] == 'in_progress'
+                        ? BriskersColors.jobs : const Color(0xFF718096)),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(description,
+                          maxLines: expanded ? null : 1,
+                          overflow: expanded ? TextOverflow.visible
+                            : TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 14,
+                            fontWeight: FontWeight.w700, height: 1.16)),
+                        const SizedBox(height: 3),
+                        Row(children: [
+                          Expanded(child: Text(credit.mechanics,
+                            maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              color: Color(0xFF526273)))),
+                          const SizedBox(width: 6),
+                          Text(credit.hours,
+                            style: const TextStyle(fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF184C67))),
+                        ]),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  if (done)
+                    PopupMenuButton<String>(
+                      tooltip: 'Completed · Owner correction',
+                      icon: const Icon(Icons.lock_outline, size: 19,
+                        color: Color(0xFF64748B)),
+                      iconSize: 19,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 34, height: 38),
+                      onSelected: (action) {
+                        if (action == 'correct') {
+                          _ownerCorrectEarnedHours(task);
+                        }
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(
+                          value: 'correct',
+                          child: Text('Owner correction · TEST')),
+                      ],
+                    )
+                  else
+                    IconButton(
+                      tooltip: 'Edit task',
+                      onPressed: () => _editTask(task),
+                      icon: const Icon(Icons.edit_outlined, size: 19,
+                        color: BriskersColors.jobs),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 34, height: 38)),
+                  Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                    color: const Color(0xFF64748B), size: 18),
+                ],
               ),
-            if (done)
-              Text(stamp.isEmpty ? 'Completed · read-only'
-                : 'Completed $stamp · read-only',
-                style: const TextStyle(fontSize: 11,
-                  color: Color(0xFF64748B)))
-            else
-              _statusChip(task['status']?.toString() ?? 'planned'),
-          ],
+              if (expanded)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(28, 8, 8, 3),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (isRecheck)
+                        const Text('Additional work · Not on Invoice',
+                          style: TextStyle(fontSize: 12,
+                            color: Color(0xFF526273))),
+                      if (splitCount > 1)
+                        Text(record != null
+                          ? _completedAssignment(record)
+                          : _laborAssignment(task),
+                          style: const TextStyle(fontSize: 12.5,
+                            color: Color(0xFF526273))),
+                      Text(done
+                        ? stamp.isEmpty
+                          ? 'Completed · read-only'
+                          : 'Completed $stamp · read-only'
+                        : task['status'] == 'in_progress'
+                          ? 'In progress · Editable'
+                          : 'Planned · Editable',
+                        style: const TextStyle(fontSize: 12,
+                          color: Color(0xFF64748B))),
+                      if (corrections.isNotEmpty) ...[
+                        const SizedBox(height: 5),
+                        const Text('Owner corrections:',
+                          style: TextStyle(fontSize: 12,
+                            fontWeight: FontWeight.w700)),
+                        for (final correction in corrections)
+                          Text(
+                            '${(correction['delta_hours'] as num).toDouble() > 0 ? '+' : ''}'
+                            '${correction['delta_hours']} hrs · '
+                            '${_employeeName(correction['employee_id']?.toString())} · '
+                            '${correction['reason']}',
+                            style: const TextStyle(fontSize: 12,
+                              color: Color(0xFF526273))),
+                      ],
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ),
-        trailing: done
-          ? PopupMenuButton<String>(
-              tooltip: 'Completed · Owner correction',
-              icon: const Icon(Icons.lock_outline,
-                color: Color(0xFF64748B), size: 19),
-              onSelected: (action) {
-                if (action == 'correct') _ownerCorrectEarnedHours(task);
-              },
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: 'correct',
-                  child: Text('Owner correction · TEST')),
-              ])
-          : const Icon(Icons.edit_outlined, size: 19,
-              color: BriskersColors.jobs),
-        onTap: done ? null : () => _editTask(task),
       ),
     );
   }
