@@ -19,7 +19,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-CANDIDATE_BRANCH = "release/bugs14-15-all-fixes-20261021"
+CANDIDATE_BRANCH = "release/offline-first-stability-post-b2373-20261021"
 BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
 REQUIRED_WORKFLOWS = {
     "diagnostics.yml": "Briskers Diagnostics",
