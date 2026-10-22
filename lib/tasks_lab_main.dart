@@ -50,6 +50,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Map<String, double> earnedPayrollPreviewHours = {};
   Map<String, int> testHourlyRates = {};
   List<Map<String, dynamic>> testPayrollPayments = const [];
+  int invoiceTestTab = 0;
   int page = 0;
   int? expandedMenu;
   double menuAnchorX = 180;
@@ -1942,42 +1943,198 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ],
   );
 
-  Widget _testInvoicePage() => ListView(
-    children: [
-      _sectionHeader('Invoices',
-        subtitle: 'Read-only sanitized source for Tasks'),
-      Card(
-        margin: const EdgeInsets.symmetric(horizontal: 10),
-        child: Column(children: [
-          const ListTile(
+  /// Recreates the real invoice Items arrangement for phone layout QA:
+  /// Item | Qty | Amount, with a mechanic/hour edit control by each labor
+  /// heading. Price data and source invoice editing are never introduced.
+  String _invoiceMechanicSummary(Map<String, dynamic> task) {
+    final rows = allocationsByLine[task['line_id'].toString()] ?? const [];
+    if (rows.isNotEmpty) {
+      return rows.map((a) {
+        final hours = (a['hours'] as num?)?.toDouble() ?? 0;
+        return '${_employeeName(a['employee_id']?.toString())} '
+          '${hours.toStringAsFixed(1)}h';
+      }).join(' · ');
+    }
+    final hours = (task['payroll_hours'] as num?)?.toDouble();
+    return '${_employeeName(task['employee_id']?.toString())} '
+      '${hours == null ? '—' : hours.toStringAsFixed(1)}h';
+  }
+
+  Widget _testInvoiceLaborRow(Map<String, dynamic> task) {
+    final book = (task['source_invoice_hours'] as num?)?.toDouble();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 11),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFFE1E6E9)))),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Text('Labor', style: TextStyle(
+                fontSize: 16, fontWeight: FontWeight.w800,
+                color: Color(0xFF0D1528))),
+              const SizedBox(width: 8),
+              Expanded(child: Align(
+                alignment: Alignment.centerRight,
+                child: InkWell(
+                  key: ValueKey('labor-hours-edit-${task['line_id']}'),
+                  onTap: () => _editInvoiceLabor(task),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 5, 0, 5),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.engineering_outlined, size: 17,
+                        color: BriskersColors.jobs),
+                      const SizedBox(width: 4),
+                      Flexible(child: Text(_invoiceMechanicSummary(task),
+                        maxLines: 2,
+                        textAlign: TextAlign.right,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12.5, fontWeight: FontWeight.w700,
+                          color: BriskersColors.jobs))),
+                      const SizedBox(width: 5),
+                      const Icon(Icons.edit_outlined, size: 18,
+                        color: BriskersColors.jobs),
+                    ]),
+                  ),
+                ),
+              )),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: Text(
+                _description(task),
+                style: const TextStyle(
+                  fontSize: 13.5, height: 1.25,
+                  color: Color(0xFF405064)))),
+              SizedBox(width: 58, child: Text(
+                book == null ? '—' : book.toStringAsFixed(1),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 15.5, color: Color(0xFF182239)))),
+              const SizedBox(width: 92, child: Text('—',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 15.5, color: Color(0xFF182239)))),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _invoiceRedactedAmount(String label, {bool bold = false}) =>
+    Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(children: [
+        Text(label, style: TextStyle(
+          fontWeight: bold ? FontWeight.w800 : FontWeight.w400)),
+        const Spacer(),
+        Text('—', style: TextStyle(
+          fontWeight: bold ? FontWeight.w800 : FontWeight.w400)),
+      ]),
+    );
+
+  Widget _testInvoicePage() {
+    final lines = tasks.where((task) =>
+      task['source_missing'] != 1 &&
+      task['document_id'] == BriskersLabFixture.invoiceId).toList();
+    const tabs = ['Items', 'Payment', 'Notes', 'Expenses'];
+    return ListView(
+      children: [
+        _sectionHeader('Invoice #6342',
+          subtitle: 'Sanitized invoice layout · Offline Tasks TEST'),
+        Card(
+          margin: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+          child: const ListTile(
             leading: Icon(Icons.receipt_long_outlined,
               color: BriskersColors.invoices),
-            title: Text('Invoice #6342',
+            title: Text('Richard Goff',
               style: TextStyle(fontWeight: FontWeight.w800)),
-            subtitle: Text('Richard Goff · 2012 Hyundai Equus'),
+            subtitle: Text('2012 Hyundai Equus · Job J-24'),
           ),
-          const Divider(height: 1),
-          for (final task in tasks.where((t) =>
-              t['source_missing'] != 1 &&
-              t['document_id'] == BriskersLabFixture.invoiceId))
-            ListTile(
-              dense: true,
-              title: Text(task['source_description']?.toString() ?? 'Labor'),
-              subtitle: Text(_laborAssignment(task)),
-              trailing: const Icon(Icons.edit_outlined),
-              onTap: () => _editInvoiceLabor(task),
-            ),
+        ),
+        Container(
+          margin: const EdgeInsets.only(top: 4),
+          decoration: const BoxDecoration(color: Colors.white,
+            border: Border(bottom: BorderSide(color: Color(0xFFE4E9EB)))),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              for (var i = 0; i < tabs.length; i++)
+                TextButton(
+                  onPressed: () => setState(() => invoiceTestTab = i),
+                  style: TextButton.styleFrom(
+                    foregroundColor: i == invoiceTestTab
+                      ? BriskersColors.invoices : const Color(0xFF64748B),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 17, vertical: 11)),
+                  child: Text(tabs[i], style: TextStyle(
+                    fontWeight: i == invoiceTestTab
+                      ? FontWeight.w800 : FontWeight.w500)),
+                ),
+            ]),
+          ),
+        ),
+        if (invoiceTestTab == 0) ...[
+          Container(
+            color: const Color(0xFFF2F6F7),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16, vertical: 9),
+            child: const Row(children: [
+              Expanded(child: Text('Item', style: TextStyle(
+                color: Color(0xFF405064),
+                fontWeight: FontWeight.w500))),
+              SizedBox(width: 58, child: Text('Qty',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Color(0xFF405064),
+                  fontWeight: FontWeight.w500))),
+              SizedBox(width: 92, child: Text('Amount',
+                textAlign: TextAlign.right,
+                style: TextStyle(color: Color(0xFF405064),
+                  fontWeight: FontWeight.w500))),
+            ]),
+          ),
+          for (final task in lines) _testInvoiceLaborRow(task),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 17, 18, 8),
+            child: Column(children: [
+              _invoiceRedactedAmount('Subtotal'),
+              _invoiceRedactedAmount('Taxes'),
+              const Divider(height: 16),
+              _invoiceRedactedAmount('TOTAL', bold: true),
+              _invoiceRedactedAmount('Amount Paid'),
+              _invoiceRedactedAmount('Balance Due', bold: true),
+            ]),
+          ),
           const Padding(
-            padding: EdgeInsets.all(12),
-            child: Text('Financial totals are intentionally not copied. '
-              'Edit test tasks from Jobs → Tasks.',
+            padding: EdgeInsets.fromLTRB(16, 6, 16, 16),
+            child: Text(
+              'Financial amounts are intentionally redacted (—), not zero. '
+              'Tap the small pencil beside a labor item to edit ONLY the '
+              'test mechanic hours and assignments. The invoice Qty '
+              'stays at billed book time. No live invoice is changed.',
               style: TextStyle(fontSize: 12,
                 color: Color(0xFF667085))),
           ),
-        ]),
-      ),
-    ],
-  );
+        ] else
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Text(
+              '${tabs[invoiceTestTab]} data is not copied into '
+              'this isolated test. Return to Items to test the '
+              'invoice labor layout.',
+              style: const TextStyle(color: Color(0xFF64748B))),
+          ),
+      ],
+    );
+  }
 
   Widget _morePage() => ListView(children: [
     _sectionHeader('More', subtitle: 'Tasks TEST features'),
