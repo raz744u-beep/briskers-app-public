@@ -666,12 +666,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   if (done)
                     PopupMenuButton<String>(
                       tooltip: 'Completed · Owner correction',
-                      icon: const Icon(Icons.lock_outline, size: 19,
-                        color: Color(0xFF64748B)),
-                      iconSize: 19,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints.tightFor(
-                        width: 34, height: 38),
+                      child: const SizedBox(
+                        width: 34, height: 34,
+                        child: Icon(Icons.lock_outline, size: 19,
+                          color: Color(0xFF64748B))),
                       onSelected: (action) {
                         if (action == 'correct') {
                           _ownerCorrectEarnedHours(task);
