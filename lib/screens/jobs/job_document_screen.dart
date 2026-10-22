@@ -8081,7 +8081,8 @@ class _DocumentTabsHeaderDelegate
           ),
           tabs: [
             DocumentTabLabel(
-              label: tr('itemsTab'), alignment: Alignment.center),
+              label: tr('itemsTab'),
+              alignment: isEstimate ? Alignment.center : Alignment.centerLeft),
             if (!isEstimate)
               DocumentTabLabel(label: tr('paymentTab')),
             DocumentTabLabel(
