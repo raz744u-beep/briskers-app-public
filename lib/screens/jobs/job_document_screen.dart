@@ -8081,13 +8081,12 @@ class _DocumentTabsHeaderDelegate
           ),
           tabs: [
             DocumentTabLabel(
-              label: tr('itemsTab'), alignment: Alignment.centerLeft),
+              label: tr('itemsTab'), alignment: Alignment.center),
             if (!isEstimate)
               DocumentTabLabel(label: tr('paymentTab')),
             DocumentTabLabel(
               label: tr('notesTab'),
-              alignment: isEstimate
-                  ? Alignment.centerRight : Alignment.center),
+              alignment: Alignment.center),
             if (!isEstimate)
               const DocumentTabLabel(
                 label: 'Expenses', alignment: Alignment.centerRight),
