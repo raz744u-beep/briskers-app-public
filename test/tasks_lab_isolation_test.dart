@@ -153,6 +153,122 @@ void main() {
     expect(copy, isNot(contains('unit_price')));
   });
 
+  test('Completed originals lock immediately; repeated recheck cycles create no duplicates',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    const shop = BriskersLabFixture.businessId;
+    const job = BriskersLabFixture.jobId;
+    const invoice = BriskersLabFixture.invoiceId;
+    try {
+      await store.reconcileDocument(
+        businessId: shop, jobId: job, documentId: invoice,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice));
+      await store.saveLeadMechanic(shop, job, 'lab-chris');
+      await store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-transmission',
+        hoursByEmployee: {'lab-chris': 2.0});
+      await store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-transmission', status: 'done');
+      final original = await store.completedWork(shop, job);
+      expect(original.length, 1);
+      final first = original.single;
+      expect(first['description'], contains('transmission pan'));
+      expect((first['payroll_allocations'] as List).single['hours'], 2.0);
+      expect((await store.earnedHoursPreview(shop, job))['lab-chris'], 2.0);
+
+      await expectLater(store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-transmission',
+        hoursByEmployee: {'lab-kam': 3.5}), throwsStateError);
+      await expectLater(store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-transmission', status: 'in_progress'),
+        throwsStateError);
+      await expectLater(store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: 'lab-transmission', description: 'Rewrite past',
+        editDescription: true), throwsStateError);
+      await store.saveLeadMechanic(shop, job, 'lab-kam');
+      final stillOriginal = (await store.list(shop, job)).singleWhere(
+        (task) => task['line_id'] == 'lab-transmission');
+      expect(stillOriginal['employee_id'], 'lab-chris');
+      expect((await store.completedWork(shop, job)).single['completed_at'],
+        first['completed_at']);
+
+      // Close all original tasks and reopen without resetting one of them.
+      final ack = [
+        for (final task in await store.list(shop, job)) {
+          'document_id': task['document_id'].toString(),
+          'line_id': task['line_id'].toString(),
+        },
+      ];
+      await store.changeJobStatus(
+        businessId: shop, jobId: job, statusCode: 'completed',
+        confirmedTasks: ack);
+      await store.changeJobStatus(
+        businessId: shop, jobId: job, statusCode: 'needs_recheck');
+      expect((await store.list(shop, job)).every((task) =>
+        task['status'] == 'done'), isTrue);
+      expect((await store.completedWork(shop, job)).length, 4);
+      final earningsBefore = await store.earnedHoursPreview(shop, job);
+
+      // Unpaid work is still attributed to the assigned mechanic.
+      final unpaid = await store.addRecheckTask(
+        businessId: shop, jobId: job, employeeId: 'lab-kam',
+        description: 'Courtesy recheck', hours: 0.0);
+      await store.editTask(
+        businessId: shop, jobId: job,
+        documentId: LocalJobTasksLabStore.recheckDocumentId,
+        lineId: unpaid, status: 'done');
+      final frozenUnpaid = (await store.completedWork(shop, job))
+        .singleWhere((row) => row['line_id'] == unpaid);
+      expect(frozenUnpaid['completed_by'], 'lab-kam');
+      expect(frozenUnpaid['payroll_allocations'], isEmpty);
+      expect(await store.earnedHoursPreview(shop, job), earningsBefore);
+      await expectLater(store.editTask(
+        businessId: shop, jobId: job,
+        documentId: LocalJobTasksLabStore.recheckDocumentId,
+        lineId: unpaid, description: 'Change old task',
+        editDescription: true), throwsStateError);
+
+      // Additional paid work is a NEW task, not another completion
+      // record for the original invoice labor.
+      final paid = await store.addRecheckTask(
+        businessId: shop, jobId: job, employeeId: 'lab-chris',
+        description: 'Extra troubleshooting', hours: 1.7);
+      await store.editTask(
+        businessId: shop, jobId: job,
+        documentId: LocalJobTasksLabStore.recheckDocumentId,
+        lineId: paid, status: 'done');
+      expect((await store.earnedHoursPreview(shop, job))['lab-chris'],
+        closeTo((earningsBefore['lab-chris'] ?? 0) + 1.7, 0.000001));
+      final cycle = [
+        for (final task in await store.list(shop, job)) {
+          'document_id': task['document_id'].toString(),
+          'line_id': task['line_id'].toString(),
+        },
+      ];
+      await store.changeJobStatus(
+        businessId: shop, jobId: job, statusCode: 'completed',
+        confirmedTasks: cycle);
+      await store.changeJobStatus(
+        businessId: shop, jobId: job, statusCode: 'in_progress');
+      expect((await store.completedWork(shop, job)).length, 6);
+      expect(await store.priorCompletions(shop, job), isEmpty);
+      expect((await store.list(shop, job)).where(
+        (task) => task['status'] == 'done').length, 6);
+      final distinct = (await store.completedWork(shop, job))
+        .map((row) => '${row['document_id']}:${row['line_id']}').toSet();
+      expect(distinct.length, 6);
+    } finally {
+      await db.close();
+    }
+  });
+
   test('Unbilled recheck task increases only new earned hours and not invoice',
       () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
