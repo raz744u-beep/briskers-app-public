@@ -101,6 +101,17 @@ class LocalJobTasksLabStore {
       ON local_lab_payroll_disbursements (
         business_id, employee_id, paid_at)
     ''');
+    // One completion entry per task identity, regardless of rechecks.
+    // Mechanic/payroll snapshots live in the existing immutable hours table.
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_task_first_completion_lab (
+        business_id TEXT NOT NULL, job_id TEXT NOT NULL,
+        document_id TEXT NOT NULL, line_id TEXT NOT NULL,
+        description TEXT NOT NULL, completed_at INTEGER NOT NULL,
+        completed_by TEXT,
+        PRIMARY KEY(business_id, job_id, document_id, line_id)
+      )
+    ''');
     await db.customStatement('''
       CREATE TABLE IF NOT EXISTS local_job_lead_lab (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL,
@@ -215,6 +226,89 @@ class LocalJobTasksLabStore {
     }
   }
 
+  Future<void> _backfillFirstCompletionsFromLegacy(
+      String businessId, String jobId) async {
+    // Earlier APKs wrote a separate archive record on each reopen. Keep
+    // only the FIRST event by task key, not a duplicate log item per cycle.
+    final rows = await db.customSelect(
+      'SELECT document_id, line_id, description, employee_id, completed_at '
+      'FROM local_task_completion_history_lab '
+      'WHERE business_id=? AND job_id=? ORDER BY completed_at ASC, id ASC',
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    for (final row in rows) {
+      await db.customStatement(
+        'INSERT OR IGNORE INTO local_task_first_completion_lab '
+        '(business_id, job_id, document_id, line_id, description, '
+        'completed_at, completed_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [businessId, jobId, row.read<String>('document_id'),
+          row.read<String>('line_id'), row.read<String>('description'),
+          row.read<int>('completed_at'),
+          row.readNullable<String>('employee_id')],
+      );
+    }
+  }
+
+  Future<void> _freezeFirstCompletedTasks(
+      String businessId, String jobId, int now) async {
+    // Backfill older test-phone completion events without touching them.
+    await _backfillPreservedHoursFromHistory(businessId, jobId);
+    await _backfillFirstCompletionsFromLegacy(businessId, jobId);
+    final done = await db.customSelect(
+      'SELECT document_id, line_id, '
+      'COALESCE(custom_description, source_description) AS description, '
+      'completed_at, employee_id FROM local_job_tasks_lab '
+      "WHERE business_id=? AND job_id=? AND source_missing=0 AND status='done'",
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    for (final row in done) {
+      await db.customStatement(
+        'INSERT OR IGNORE INTO local_task_first_completion_lab '
+        '(business_id, job_id, document_id, line_id, description, '
+        'completed_at, completed_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [businessId, jobId, row.read<String>('document_id'),
+          row.read<String>('line_id'), row.read<String>('description'),
+          row.readNullable<int>('completed_at') ?? now,
+          row.readNullable<String>('employee_id')],
+      );
+    }
+    await _preservePayrollOnReopen(businessId, jobId, now);
+  }
+
+  /// One read-only completed-work entry per task, with the ORIGINAL frozen
+  /// payroll allocations. Later reopen/recheck cycles never repeat it.
+  Future<List<Map<String, dynamic>>> completedWork(
+      String businessId, String jobId) async {
+    await ensureTables(db);
+    await db.transaction(() async {
+      await _freezeFirstCompletedTasks(
+        businessId, jobId, DateTime.now().millisecondsSinceEpoch);
+    });
+    final rows = await db.customSelect(
+      'SELECT * FROM local_task_first_completion_lab '
+      'WHERE business_id=? AND job_id=? '
+      'ORDER BY completed_at DESC, document_id, line_id',
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    final output = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      final record = Map<String, dynamic>.from(row.data);
+      final allocations = await db.customSelect(
+        'SELECT employee_id, hours FROM local_payroll_preserved_hours_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=? '
+        'ORDER BY employee_id',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(row.read<String>('document_id')),
+          Variable<String>(row.read<String>('line_id'))],
+      ).get();
+      record['payroll_allocations'] = [
+        for (final a in allocations) Map<String, dynamic>.from(a.data),
+      ];
+      output.add(record);
+    }
+    return output;
+  }
+
   /// Immutable snapshots from the first completed work cycle. The marker
   /// exists even when a task had no mechanic, preventing later double credit.
   Future<({Map<String, double> hoursByMechanic, Set<String> taskKeys})>
@@ -249,9 +343,7 @@ class LocalJobTasksLabStore {
     );
   }
 
-  /// Freeze the original per-mechanic hours when a Completed job is reopened.
-  /// A unique task marker prevents any later completion cycle crediting the
-  /// original labor again. Additional recheck work needs a distinct task.
+  /// Freeze each task's first earned payroll allocation only once.
   Future<void> _preservePayrollOnReopen(
       String businessId, String jobId, int capturedAt) async {
     await _backfillPreservedHoursFromHistory(businessId, jobId);
@@ -402,46 +494,11 @@ class LocalJobTasksLabStore {
           "AND status!='done'",
           [now, now, businessId, jobId],
         );
+        await _freezeFirstCompletedTasks(businessId, jobId, now);
       } else if (previous == 'completed') {
-        // Snapshot earned hours before task reactivation. This runs inside
-        // the same transaction as archived completion and status changes.
-        await _preservePayrollOnReopen(businessId, jobId, now);
-        // Preserve previous completion events in history for audit/work log.
-        await db.customStatement('''
-          INSERT INTO local_task_completion_history_lab
-          (business_id, job_id, document_id, line_id, description,
-           employee_id, payroll_hours, assignment_summary,
-           completed_at, reopened_at)
-          SELECT t.business_id, t.job_id, t.document_id, t.line_id,
-            COALESCE(t.custom_description, t.source_description),
-            t.employee_id, t.payroll_hours,
-            COALESCE(
-              (SELECT group_concat(a.employee_id || ': ' || a.hours || ' hrs', ', ')
-               FROM local_task_allocations_lab a
-               WHERE a.business_id=t.business_id AND a.job_id=t.job_id
-                 AND a.document_id=t.document_id AND a.line_id=t.line_id),
-              t.employee_id || ': ' || t.payroll_hours || ' hrs',
-              'Unassigned'
-            ),
-            t.completed_at, ?
-          FROM local_job_tasks_lab t WHERE t.business_id=? AND t.job_id=?
-            AND t.source_missing=0 AND t.status='done'
-            AND t.completed_at IS NOT NULL
-        ''', [now, businessId, jobId]);
-        final completed = await db.customSelect(
-          "SELECT COUNT(*) AS count FROM local_job_tasks_lab "
-          "WHERE business_id=? AND job_id=? AND source_missing=0 "
-          "AND status='done'",
-          variables: [Variable<String>(businessId), Variable<String>(jobId)],
-        ).getSingle();
-        affected = completed.read<int>('count');
-        await db.customStatement(
-          "UPDATE local_job_tasks_lab SET status='in_progress', "
-          "completed_at=NULL, updated_at=? "
-          "WHERE business_id=? AND job_id=? AND source_missing=0 "
-          "AND status='done'",
-          [now, businessId, jobId],
-        );
+        // Completed task identities remain Done. Starting another work
+        // cycle only changes the job status; new labor is a NEW task.
+        await _freezeFirstCompletedTasks(businessId, jobId, now);
       }
       await db.customStatement(
         'INSERT INTO local_job_status_lab '
@@ -515,8 +572,8 @@ class LocalJobTasksLabStore {
   }) async {
     await ensureTables(db);
     if ([businessId, jobId, description].any((v) => v.trim().isEmpty) ||
-        !hours.isFinite || hours <= 0) {
-      throw ArgumentError('Description and positive hours required');
+        !hours.isFinite || hours < 0) {
+      throw ArgumentError('Description and nonnegative hours required');
     }
     if (await jobStatus(businessId, jobId) == 'completed') {
       throw StateError('Reopen the job before adding recheck labor');
@@ -695,6 +752,16 @@ class LocalJobTasksLabStore {
       ).getSingleOrNull();
       if (row == null) throw StateError('Task not found');
       final previousStatus = row.read<String>('status');
+      final frozen = await db.customSelect(
+        'SELECT 1 FROM local_payroll_preserved_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(documentId), Variable<String>(lineId)],
+      ).getSingleOrNull();
+      if (previousStatus == 'done' || frozen != null) {
+        throw StateError('Completed work is read-only. '
+          'Add a separate recheck task instead.');
+      }
       final finished = status == 'done'
           ? (previousStatus == 'done'
               ? row.readNullable<int>('completed_at') ??
@@ -722,6 +789,10 @@ class LocalJobTasksLabStore {
         "WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?",
         [...args, businessId, jobId, documentId, lineId],
       );
+      if (status == 'done') {
+        await _freezeFirstCompletedTasks(
+          businessId, jobId, DateTime.now().millisecondsSinceEpoch);
+      }
       // Only the Open status auto-promotes; pause/recheck statuses remain.
       if (status == 'in_progress' || status == 'done') {
         if (await jobStatus(businessId, jobId) == 'open') {
@@ -772,12 +843,22 @@ class LocalJobTasksLabStore {
     }
     await db.transaction(() async {
       final task = await db.customSelect(
-        'SELECT line_id FROM local_job_tasks_lab '
+        'SELECT line_id, status FROM local_job_tasks_lab '
         'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
         variables: [Variable<String>(businessId), Variable<String>(jobId),
           Variable<String>(documentId), Variable<String>(lineId)],
       ).getSingleOrNull();
       if (task == null) throw StateError('Labor task not found');
+      final frozen = await db.customSelect(
+        'SELECT 1 FROM local_payroll_preserved_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(documentId), Variable<String>(lineId)],
+      ).getSingleOrNull();
+      if (task.read<String>('status') == 'done' || frozen != null) {
+        throw StateError('Completed payroll cannot be edited. '
+          'Create a separate recheck task.');
+      }
       // Billed book time is a default, never a ceiling on earned payroll.
       // The task's source_invoice_hours / invoice price remain unchanged.
       await db.customStatement(
@@ -858,6 +939,7 @@ class LocalJobTasksLabStore {
         "AND status!='done'",
         [now, now, businessId, jobId],
       );
+      await _freezeFirstCompletedTasks(businessId, jobId, now);
       return remaining;
     });
   }
