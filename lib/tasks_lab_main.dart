@@ -50,6 +50,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Map<String, double> earnedPayrollPreviewHours = {};
   Map<String, int> testHourlyRates = {};
   List<Map<String, dynamic>> testPayrollPayments = const [];
+  List<Map<String, dynamic>> earnedCorrections = const [];
   int invoiceTestTab = 0;
   int page = 0;
   int? expandedMenu;
@@ -110,6 +111,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       lineId: task['line_id'].toString())));
     final rates = await store.payrollRates(BriskersLabFixture.businessId);
     final payments = await store.payrollTestPayments(BriskersLabFixture.businessId);
+    final corrections = await store.earnedHourCorrections(
+      BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final earnedHours = await store.earnedHoursPreview(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final currentJobStatus = await store.jobStatus(
@@ -129,6 +132,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       earnedPayrollPreviewHours = earnedHours;
       testHourlyRates = rates;
       testPayrollPayments = payments;
+      earnedCorrections = corrections;
       allocationsByLine = {for (var i = 0; i < rows.length; i++)
         rows[i]['line_id'].toString(): allocations[i]};
       loading = false;
@@ -434,6 +438,125 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ));
   }
 
+  List<Map<String, dynamic>> _taskCorrections(
+      Map<String, dynamic> task) => earnedCorrections.where((row) =>
+        row['document_id'] == task['document_id'] &&
+        row['line_id'] == task['line_id']).toList();
+
+  Future<void> _ownerCorrectEarnedHours(Map<String, dynamic> task) async {
+    final completed = _firstCompletion(task);
+    if (completed == null) return;
+    String employeeId = '';
+    final allocations = (completed['payroll_allocations'] as List?)
+      ?.whereType<Map<String, dynamic>>().toList() ?? [];
+    if (allocations.isNotEmpty) {
+      employeeId = allocations.first['employee_id']?.toString() ?? '';
+    } else {
+      employeeId = completed['completed_by']?.toString() ?? '';
+    }
+    if (!BriskersLabFixture.employees.any((e) =>
+        e['id'] == employeeId && e['role'] != 'secretary')) {
+      employeeId = '';
+    }
+    final delta = TextEditingController();
+    final reason = TextEditingController();
+    final saved = await showModalBottomSheet<bool>(
+      context: context, isScrollControlled: true,
+      showDragHandle: true, useSafeArea: true,
+      builder: (sheet) => StatefulBuilder(builder: (sheet, update) =>
+        Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16,
+            MediaQuery.viewInsetsOf(sheet).bottom + 22),
+          child: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Owner correction · TEST',
+                style: TextStyle(fontSize: 20,
+                  fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              const Text('Original completion and paid transactions remain '
+                'unchanged. Add a reasoned hour adjustment to earnings.',
+                style: TextStyle(fontSize: 12.5,
+                  color: Color(0xFF64748B))),
+              const SizedBox(height: 10),
+              Text(completed['description']?.toString() ?? 'Completed labor'),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                initialValue: employeeId,
+                decoration: const InputDecoration(
+                  labelText: 'Mechanic to adjust',
+                  border: OutlineInputBorder()),
+                items: [
+                  const DropdownMenuItem(value: '',
+                    child: Text('Select mechanic')),
+                  for (final employee in BriskersLabFixture.employees)
+                    if (employee['role'] != 'secretary')
+                      DropdownMenuItem(
+                        value: employee['id']!,
+                        child: Text(_employeeName(employee['id']))),
+                ],
+                onChanged: (value) =>
+                  update(() => employeeId = value ?? ''),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: delta,
+                keyboardType: const TextInputType.numberWithOptions(
+                  signed: true, decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Adjustment in hours (+ or −)',
+                  helperText: 'Example: +1.0 for an extra hour; '
+                    '-0.5 to correct over-credit',
+                  border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reason,
+                minLines: 2, maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Reason (required)',
+                  border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: () async {
+                  final change = double.tryParse(delta.text.trim());
+                  if (employeeId.isEmpty || change == null ||
+                      !change.isFinite || change == 0 ||
+                      reason.text.trim().length < 6) {
+                    ScaffoldMessenger.of(sheet).showSnackBar(
+                      const SnackBar(content: Text(
+                        'Choose a mechanic, nonzero hours, and a reason')));
+                    return;
+                  }
+                  try {
+                    await store.recordOwnerEarnedHoursCorrection(
+                      businessId: BriskersLabFixture.businessId,
+                      jobId: BriskersLabFixture.jobId,
+                      documentId: task['document_id'].toString(),
+                      lineId: task['line_id'].toString(),
+                      employeeId: employeeId,
+                      deltaHours: change, reason: reason.text);
+                    if (sheet.mounted) Navigator.pop(sheet, true);
+                  } catch (error) {
+                    if (sheet.mounted) ScaffoldMessenger.of(sheet)
+                      .showSnackBar(SnackBar(content: Text('$error')));
+                  }
+                },
+                icon: const Icon(Icons.edit_note_outlined),
+                label: const Text('Record Owner Correction'),
+              ),
+            ],
+          )),
+        ),
+      )),
+    );
+    delta.dispose();
+    reason.dispose();
+    if (saved == true) await _refresh();
+  }
+
   // Each task appears ONCE. Completed records use immutable initial data,
   // never the live editable row or repeated historical reopen events.
   Widget _taskCard(Map<String, dynamic> task) {
@@ -467,6 +590,15 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               style: TextStyle(
                 fontSize: done ? 14.5 : 13,
                 fontWeight: done ? FontWeight.w600 : FontWeight.w400)),
+            if (_taskCorrections(task).isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Text(
+                  '${_taskCorrections(task).length} owner correction(s) recorded',
+                  style: const TextStyle(fontSize: 11.5,
+                    color: BriskersColors.jobs,
+                    fontWeight: FontWeight.w600)),
+              ),
             if (done)
               Text(stamp.isEmpty ? 'Completed · read-only'
                 : 'Completed $stamp · read-only',
@@ -476,9 +608,21 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               _statusChip(task['status']?.toString() ?? 'planned'),
           ],
         ),
-        trailing: Icon(done ? Icons.lock_outline : Icons.edit_outlined,
-          size: 19, color: done
-            ? const Color(0xFF64748B) : BriskersColors.jobs),
+        trailing: done
+          ? PopupMenuButton<String>(
+              tooltip: 'Completed · Owner correction',
+              icon: const Icon(Icons.lock_outline,
+                color: Color(0xFF64748B), size: 19),
+              onSelected: (action) {
+                if (action == 'correct') _ownerCorrectEarnedHours(task);
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'correct',
+                  child: Text('Owner correction · TEST')),
+              ])
+          : const Icon(Icons.edit_outlined, size: 19,
+              color: BriskersColors.jobs),
         onTap: done ? null : () => _editTask(task),
       ),
     );
