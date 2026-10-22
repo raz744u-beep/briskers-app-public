@@ -112,6 +112,22 @@ class LocalJobTasksLabStore {
         PRIMARY KEY(business_id, job_id, document_id, line_id)
       )
     ''');
+    // TEST-only append-only correction ledger. Never edits original
+    // completed-task descriptions, mechanic allocations or paid transactions.
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_lab_earned_hours_corrections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_id TEXT NOT NULL, job_id TEXT NOT NULL,
+        document_id TEXT NOT NULL, line_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL, delta_hours REAL NOT NULL,
+        reason TEXT NOT NULL, recorded_at INTEGER NOT NULL
+      )
+    ''');
+    await db.customStatement('''
+      CREATE INDEX IF NOT EXISTS idx_lab_earned_corrections_task
+      ON local_lab_earned_hours_corrections
+      (business_id, job_id, document_id, line_id)
+    ''');
     await db.customStatement('''
       CREATE TABLE IF NOT EXISTS local_job_lead_lab (
         business_id TEXT NOT NULL, job_id TEXT NOT NULL,
@@ -401,6 +417,81 @@ class LocalJobTasksLabStore {
     }
   }
 
+  Future<List<Map<String, dynamic>>> earnedHourCorrections(
+      String businessId, String jobId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT id, document_id, line_id, employee_id, delta_hours, '
+      'reason, recorded_at FROM local_lab_earned_hours_corrections '
+      'WHERE business_id=? AND job_id=? ORDER BY id ASC',
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
+
+  /// Explicit owner-only correction in the isolated test owner workflow.
+  /// A signed delta adjusts preview earnings without modifying the original
+  /// completion snapshot, invoice, or simulated historical disbursements.
+  /// Production role enforcement still needs integration before deployment.
+  Future<void> recordOwnerEarnedHoursCorrection({
+    required String businessId, required String jobId,
+    required String documentId, required String lineId,
+    required String employeeId, required double deltaHours,
+    required String reason,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, jobId, documentId, lineId, employeeId]
+        .any((value) => value.trim().isEmpty) ||
+        !deltaHours.isFinite || deltaHours == 0 ||
+        deltaHours.abs() > 100000 ||
+        reason.trim().length < 6) {
+      throw ArgumentError('Mechanic, nonzero adjustment and reason required');
+    }
+    await db.transaction(() async {
+      // Also handles old phone history safely before the correction.
+      await _freezeFirstCompletedTasks(
+        businessId, jobId, DateTime.now().millisecondsSinceEpoch);
+      final task = await db.customSelect(
+        'SELECT 1 FROM local_task_first_completion_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(documentId), Variable<String>(lineId)],
+      ).getSingleOrNull();
+      if (task == null) {
+        throw StateError('Only completed work can be corrected');
+      }
+      final frozen = await db.customSelect(
+        'SELECT hours FROM local_payroll_preserved_hours_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? '
+        'AND line_id=? AND employee_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(documentId), Variable<String>(lineId),
+          Variable<String>(employeeId)],
+      ).getSingleOrNull();
+      final prior = await db.customSelect(
+        'SELECT COALESCE(SUM(delta_hours), 0) AS total '
+        'FROM local_lab_earned_hours_corrections '
+        'WHERE business_id=? AND job_id=? AND document_id=? '
+        'AND line_id=? AND employee_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(documentId), Variable<String>(lineId),
+          Variable<String>(employeeId)],
+      ).getSingle();
+      final existing = (frozen?.read<double>('hours') ?? 0) +
+          prior.read<double>('total');
+      if (existing + deltaHours < -0.000001) {
+        throw StateError('Cannot reduce earned hours below zero');
+      }
+      await db.customStatement(
+        'INSERT INTO local_lab_earned_hours_corrections '
+        '(business_id, job_id, document_id, line_id, employee_id, '
+        'delta_hours, reason, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [businessId, jobId, documentId, lineId, employeeId, deltaHours,
+          reason.trim(), DateTime.now().millisecondsSinceEpoch],
+      );
+    });
+  }
+
   /// Payroll PREVIEW, not real payment: frozen original earned hours plus
   /// currently Done tasks that have never been credited. Reopening the same
   /// labor line does not credit it again. Distinct recheck tasks can earn hours.
@@ -437,6 +528,12 @@ class LocalJobTasksLabStore {
           result[id] = (result[id] ?? 0) + hours;
         }
       }
+    }
+    // Append-only corrections affect earned balance, not original history.
+    for (final adjustment in await earnedHourCorrections(businessId, jobId)) {
+      final mechanic = adjustment['employee_id'] as String;
+      final hours = (adjustment['delta_hours'] as num).toDouble();
+      result[mechanic] = (result[mechanic] ?? 0) + hours;
     }
     return result;
   }
