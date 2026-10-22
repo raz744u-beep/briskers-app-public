@@ -92,6 +92,9 @@ void main() {
     expect(taskCardSection, contains('Icons.lock_outline'));
     expect(taskCardSection, contains('onTap: done ? null :'));
     expect(main, contains('Pay mechanic for this task'));
+    expect(main, contains('Owner correction · TEST'));
+    expect(main, contains('recordOwnerEarnedHoursCorrection('));
+
     expect(main, contains('Unpaid (0 hrs)'));
     expect(main, contains('_confirmCompleteAllTasks'));
     expect(main, contains('completeConfirmedJobTasks('));
@@ -151,6 +154,75 @@ void main() {
     expect(copy, isNot(contains('store.saveAllocations(')));
     expect(copy, isNot(contains('store.editTask(')));
     expect(copy, isNot(contains('unit_price')));
+  });
+
+  test('Owner earned-hours correction is append-only with a reason',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    const shop = BriskersLabFixture.businessId;
+    const job = BriskersLabFixture.jobId;
+    const invoice = BriskersLabFixture.invoiceId;
+    const line = 'lab-transmission';
+    try {
+      await store.reconcileDocument(
+        businessId: shop, jobId: job, documentId: invoice,
+        laborLines: LocalJobTasksLabStore.laborLines(
+          BriskersLabFixture.invoice));
+      await store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: line, hoursByEmployee: {'lab-chris': 1.5});
+      await expectLater(store.recordOwnerEarnedHoursCorrection(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: line, employeeId: 'lab-chris',
+        deltaHours: 1, reason: 'Prior to completion'),
+        throwsStateError);
+      await store.editTask(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: line, status: 'done');
+      final frozen = (await store.completedWork(shop, job)).single;
+      expect((frozen['payroll_allocations'] as List).single['hours'], 1.5);
+      await store.recordLabPayrollPayment(
+        businessId: shop, employeeId: 'lab-chris', cents: 2000,
+        kind: 'advance', method: 'cash', note: 'Unchanged test payment',
+        paidAt: DateTime(2026, 10, 21));
+      await store.recordOwnerEarnedHoursCorrection(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: line, employeeId: 'lab-chris',
+        deltaHours: 0.75, reason: 'Owner approved extra time');
+      expect((await store.earnedHoursPreview(shop, job))['lab-chris'], 2.25);
+      await store.recordOwnerEarnedHoursCorrection(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: line, employeeId: 'lab-chris',
+        deltaHours: -0.25, reason: 'Adjusted time entry');
+      expect((await store.earnedHoursPreview(shop, job))['lab-chris'], 2.0);
+      await expectLater(store.recordOwnerEarnedHoursCorrection(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: line, employeeId: 'lab-chris',
+        deltaHours: -3.0, reason: 'Invalid excessive reduction'),
+        throwsStateError);
+      await expectLater(store.recordOwnerEarnedHoursCorrection(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: line, employeeId: 'lab-chris',
+        deltaHours: 1.0, reason: 'No'),
+        throwsArgumentError);
+      final history = await store.earnedHourCorrections(shop, job);
+      expect(history.length, 2);
+      expect(history.map((row) => row['delta_hours']).toList(), [0.75, -0.25]);
+      expect(history.first['reason'], 'Owner approved extra time');
+      expect(await store.earnedHourCorrections('other-shop', job), isEmpty);
+      expect((await store.completedWork(shop, job)).single['description'],
+        frozen['description']);
+      expect(((await store.completedWork(shop, job)).single
+        ['payroll_allocations'] as List).single['hours'], 1.5);
+      expect((await store.payrollTestPayments(shop)).single['cents'], 2000);
+      await expectLater(store.saveAllocations(
+        businessId: shop, jobId: job, documentId: invoice,
+        lineId: line, hoursByEmployee: {'lab-chris': 2.0}),
+        throwsStateError);
+    } finally {
+      await db.close();
+    }
   });
 
   test('Completed originals lock immediately; repeated recheck cycles create no duplicates',
