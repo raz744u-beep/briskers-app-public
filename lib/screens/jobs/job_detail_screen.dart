@@ -5388,13 +5388,15 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   borderRadius: BorderRadius.circular(9),
                   color: const Color(0xFFE5F2FC),
                   child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    child: Row(children: [
-                      Icon(Icons.cloud_off_outlined, size: 18),
-                      SizedBox(width: 8),
-                      Expanded(child: Text('Showing saved job data • offline-capable work can still be edited',
-                        style: TextStyle(fontWeight: FontWeight.w700))),
-                    ]),
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                    child: Tooltip(
+                      message: 'Showing saved job data. Offline edits sync later.',
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.cloud_off_outlined, size: 15),
+                        SizedBox(width: 5),
+                        Text('Offline', style: TextStyle(fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
                   ),
                 ),
               ),
