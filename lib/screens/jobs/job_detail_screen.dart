@@ -2681,7 +2681,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           ) ||
           await LocalJobRetirement.isJobBlocked(
             localDatabase, widget.businessId, id,
-          )) continue;
+          )) {
+        continue;
+      }
       switch (findingJobChoice(candidate['status'], resolving: true)) {
         case FindingJobChoice.active:
           active.add(candidate);
