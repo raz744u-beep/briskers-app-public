@@ -16,7 +16,7 @@ void main() {
     final code = s.substring(chooser, resolver + 850);
     expect(code, contains('customer_id=? AND vehicle_id=?'));
     expect(code, contains('FindingJobChoice.completedHistory'));
-    expect(code, contains('Confirm repairing repair'), isFalse);
+    expect(code, isNot(contains('Confirm repairing repair')));
     expect(code, contains('Confirm repair'));
     expect(code, contains('repairJobId'));
     expect(code, contains('await _chooseFindingResolutionJob(finding)'));
