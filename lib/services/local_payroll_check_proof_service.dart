@@ -112,11 +112,11 @@ class LocalPayrollCheckProofService {
 
     final length = await selectedPhoto.length();
     if (length <= 0 || length > maxPhotoBytes) {
-      throw FormatException('Check photo must be between 1 byte and 20 MiB.');
+      throw const FormatException('Check photo must be between 1 byte and 20 MiB.');
     }
     final bytes = await selectedPhoto.readAsBytes();
     if (bytes.isEmpty || bytes.length > maxPhotoBytes) {
-      throw FormatException('Check photo exceeds the allowed size.');
+      throw const FormatException('Check photo exceeds the allowed size.');
     }
     final extension = _extension(bytes);
     if (extension == null) {
