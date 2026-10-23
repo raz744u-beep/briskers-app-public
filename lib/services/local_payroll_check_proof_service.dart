@@ -295,6 +295,18 @@ class LocalPayrollCheckProofService {
           sha256.convert(bytes).toString() != digest) {
         throw const FormatException('Check photo changed.');
       }
+      if (extension == '.png') {
+        final canonical = image.encodePng(
+          image
+              .decodePng(bytes)!
+              .convert(format: image.Format.uint8, numChannels: 4),
+        );
+        if (sha256.convert(canonical).toString() != digest) {
+          throw const FormatException(
+            'Reselect this photo to normalize its metadata before submission.',
+          );
+        }
+      }
       if (extension == '.webp') {
         throw const FormatException(
           'Reselect this photo to save a server-compatible PNG before submission.',

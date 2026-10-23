@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 
 import 'package:briskers_app/core/payroll_payment_contract.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
@@ -110,6 +111,41 @@ void main() {
       throwsA(anything),
     );
   });
+
+  test(
+    'legacy noncanonical PNG must be reselected before a payment freezes',
+    () async {
+      final saved = await photos.stageForDraft(
+        isOwner: true,
+        ownerUserId: 'owner-1',
+        draft: newDraft(),
+        method: check,
+        selectedPhoto: XFile(pickerPhoto.path),
+      );
+      final files = await workingDirectory
+          .list(recursive: true)
+          .where(
+            (f) =>
+                f is File && f.path.endsWith('${saved.checkProofSha256}.png'),
+          )
+          .toList();
+      final legacyDigest = sha256.convert(png).toString();
+      await File(
+        '${File(files.single.path).parent.path}/$legacyDigest.png',
+      ).writeAsBytes(png);
+      await expectLater(
+        photos.readFrozenProofBytes(
+          isOwner: true,
+          ownerUserId: 'owner-1',
+          businessId: 'shop-1',
+          operationId: saved.operationId,
+          digest: legacyDigest,
+          byteSize: png.length,
+        ),
+        throwsFormatException,
+      );
+    },
+  );
 
   test(
     'Check photo copied privately and survives picker temp file removal',

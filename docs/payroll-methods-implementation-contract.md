@@ -57,8 +57,10 @@ source/category separation, immutable proof, transaction replay, current ledger
 triggers, catalog defaults and historical labels. Actual localhost Auth,
 PostgREST, Storage and Edge tests passed with synthetic users/objects. No private
 schema is published here. Reserved server registration keys seed Cash, Check,
-Zelle and ACH once per shop, preserving later renames/disabling across devices. The fixture is a selected schema with documented
-omitted unrelated foreign keys, not a full deployment rehearsal.
+Zelle and ACH once per shop, preserving later renames/disabling across devices. The expanded SQL fixture includes all foreign keys in the dependency closure.
+It applies 36 of 71 inventoried triggers; 35 omitted triggers still require full
+migration and ACL rehearsal. Actual service tests use the earlier selected
+fixture. Neither fixture establishes hosted deployment readiness.
 
 Deployment still requires explicit approval, full migration/ACL review and a
 separate code activation. Historical customer-category repair also requires
