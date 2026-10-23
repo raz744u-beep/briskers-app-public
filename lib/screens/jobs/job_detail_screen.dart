@@ -479,8 +479,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             widget.businessId,
             widget.jobId,
           );
-          if (profitability != null &&
-              JobProfitabilitySummary.fromRpc(profitability) != null) {
+          if (JobProfitabilitySummary.fromRpc(profitability) != null) {
             _saveVerifiedProfitability(profitability);
           }
         } catch (_) {
