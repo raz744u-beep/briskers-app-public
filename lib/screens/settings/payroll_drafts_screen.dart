@@ -6,10 +6,15 @@ import 'package:intl/intl.dart';
 import '../../core/payroll_payment_contract.dart';
 import '../../services/payroll_owner_session.dart';
 import '../../services/local_financial_cache.dart';
+import '../../services/local_payroll_outbox.dart';
+import '../../services/payroll_authoritative_sync.dart';
+import '../../services/payroll_posting_gateway.dart';
+import '../../local/local_database_provider.dart';
 import '../../services/local_payroll_check_proof_service.dart';
 import '../../services/local_payroll_draft_store.dart';
 import '../../services/local_payroll_method_store.dart';
 import 'payroll_methods_screen.dart';
+import 'payroll_receipts_screen.dart';
 
 /// Owner-only, local-only preparation of payroll payments.
 /// NO financial transactions, payroll posting or server sync occurs here.
@@ -24,6 +29,10 @@ class PayrollDraftsScreen extends StatefulWidget {
     this.methodStore,
     this.proofService,
     this.loadSourceAccounts,
+    this.authoritativeSync,
+    this.authoritativeGateway,
+    this.outbox,
+    this.postingGateway,
   });
 
   final String businessId;
@@ -33,6 +42,10 @@ class PayrollDraftsScreen extends StatefulWidget {
   final LocalPayrollDraftStore? draftStore;
   final LocalPayrollMethodStore? methodStore;
   final LocalPayrollCheckProofService? proofService;
+  final PayrollAuthoritativeSync? authoritativeSync;
+  final PayrollAuthoritativeGateway? authoritativeGateway;
+  final LocalPayrollOutbox? outbox;
+  final PayrollPostingGateway? postingGateway;
   final Future<List<Map<String, dynamic>>> Function()? loadSourceAccounts;
 
   @override
@@ -45,6 +58,16 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
   late final PayrollOwnerSession _session;
   Route<dynamic>? _dialog;
   bool _proofIntact = false;
+  bool _hasServerCatalog = false;
+  late final LocalPayrollOutbox _outbox;
+  late final PayrollPostingGateway _postingGateway;
+  Set<String> _frozenOperations = {};
+  DateTime? _payrollPeriod;
+  bool get _postingApproved =>
+      _postingGateway is PayrollPostingActivation &&
+      (_postingGateway as PayrollPostingActivation).canQueueOffline;
+  PayrollAuthoritativeSync? _remote;
+  late final PayrollAuthoritativeGateway _remoteGateway;
   final _amount = TextEditingController();
   final _reference = TextEditingController();
   late final LocalPayrollMethodStore _catalog;
@@ -75,6 +98,9 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     if (!mounted) return;
     setState(() {
       _saved = [];
+      _hasServerCatalog = false;
+      _frozenOperations = {};
+      _payrollPeriod = null;
       _accounts = [];
       _sourceAccountId = null;
       _methods = [];
@@ -112,22 +138,29 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     if (!_authorized || _busy) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => PayrollMethodsScreen(
-          businessId: widget.businessId,
-          isOwner: widget.isOwner,
-          employees: widget.employees,
-        ),
+        builder: (_) => _hasServerCatalog
+            ? PayrollReceiptsScreen(
+                businessId: widget.businessId,
+                isOwner: widget.isOwner,
+                employees: widget.employees,
+                synchronizer: _remote,
+                gateway: _remoteGateway,
+                outbox: _outbox,
+                postingGateway: _postingGateway,
+              )
+            : PayrollMethodsScreen(
+                businessId: widget.businessId,
+                isOwner: widget.isOwner,
+                employees: widget.employees,
+              ),
       ),
     );
     if (mounted) await _load();
   }
 
   String get _weekStart {
-    final day = DateTime(
-      _paymentDate.year,
-      _paymentDate.month,
-      _paymentDate.day,
-    );
+    final selected = _payrollPeriod ?? _paymentDate;
+    final day = DateTime(selected.year, selected.month, selected.day);
     final start = day.subtract(Duration(days: day.weekday - DateTime.monday));
     return DateFormat('yyyy-MM-dd').format(start);
   }
@@ -152,6 +185,44 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
           businessId: widget.businessId,
           isOwner: widget.isOwner,
         );
+    _remote = widget.authoritativeSync;
+    _remoteGateway =
+        widget.authoritativeGateway ??
+        PayrollPostingGatewayV1(
+          businessId: widget.businessId,
+          isContextCurrent: () => _authorized,
+          readProofBytes: (p) => _proofs.readFrozenProofBytes(
+            isOwner: widget.isOwner,
+            ownerUserId: _ownerId!,
+            businessId: widget.businessId,
+            operationId: p['operation_id'] as String,
+            digest: p['proof_sha256'] as String,
+            byteSize: p['proof_size'] as int,
+          ),
+        );
+    _postingGateway =
+        widget.postingGateway ??
+        (_remoteGateway is PayrollPostingGateway
+            ? _remoteGateway as PayrollPostingGateway
+            : PayrollPostingGatewayV1(
+                businessId: widget.businessId,
+                isContextCurrent: () => _authorized,
+                readProofBytes: (_) async =>
+                    throw StateError('Posting unavailable.'),
+              ));
+    _outbox =
+        widget.outbox ??
+        LocalPayrollOutbox(
+          database: localDatabase,
+          businessId: widget.businessId,
+          ownerUserId: _ownerId ?? '',
+          isContextCurrent: () => mounted && _authorized,
+          verifyLocalProof: (d) => _proofs.isProofIntact(
+            isOwner: widget.isOwner,
+            ownerUserId: _ownerId!,
+            draft: d,
+          ),
+        );
     _session.addListener(_invalidate);
     _load();
   }
@@ -163,6 +234,32 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     _amount.dispose();
     _reference.dispose();
     super.dispose();
+  }
+
+  Future<Map<String, dynamic>?> _confirmedCatalog() async {
+    var supported = false;
+    try {
+      supported = await _remoteGateway.supportsReviewedPayrollV1(
+        widget.businessId,
+      );
+    } catch (_) {
+      supported = true;
+    }
+    if (!mounted || !_authorized) return null;
+    if (!supported && _remote == null) return null;
+    _remote ??= PayrollAuthoritativeSync(
+      database: localDatabase,
+      businessId: widget.businessId,
+      ownerUserId: _ownerId!,
+      isContextCurrent: () => _authorized,
+    );
+    try {
+      if (supported) await _remote!.synchronize(_remoteGateway);
+    } catch (_) {
+      /* Keep confirmed cache offline. */
+    }
+    if (!mounted || !_authorized) return null;
+    return _remote!.catalog();
   }
 
   Future<void> _load() async {
@@ -212,6 +309,38 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
         // A missing cache must not prevent opening an existing unpaid draft.
       }
       if (!mounted || !_authorized) return;
+      final remote = await _confirmedCatalog();
+      if (!mounted || !_authorized) return;
+      var effectiveMethods = methods;
+      var effectiveDefaults = defaults;
+      final confirmed = remote?['confirmed'] == true;
+      if (confirmed) {
+        effectiveMethods = (remote!['methods'] as List)
+            .map(
+              (m) => PayrollPaymentMethod(
+                id: m['client_key'] as String,
+                businessId: widget.businessId,
+                label: m['label'] as String,
+                kind: PayrollPaymentMethodKind.values.byName(
+                  m['kind'] as String,
+                ),
+                enabled: m['enabled'] as bool,
+                sortOrder: m['sort_order'] as int,
+                version: m['version'] as int,
+              ),
+            )
+            .toList();
+        final keys = {
+          for (final m in remote['methods'] as List)
+            m['id']: m['client_key'] as String,
+        };
+        effectiveDefaults = {
+          for (final d in remote['employee_defaults'] as List)
+            d['employee_id'] as String: keys[d['method_id']]!,
+        };
+      }
+      final statuses = await _outbox.statuses();
+      if (!mounted || !_authorized) return;
       final unique = <String, Map<String, dynamic>>{};
       for (final account in accounts) {
         final id = account['id']?.toString() ?? '';
@@ -224,8 +353,12 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       }
       setState(() {
         _accounts = unique.values.toList();
-        _methods = methods;
-        _defaults = defaults;
+        _frozenOperations = statuses
+            .map((r) => r['operation_id'] as String)
+            .toSet();
+        _hasServerCatalog = confirmed;
+        _methods = effectiveMethods;
+        _defaults = effectiveDefaults;
         _saved = rows;
         _loading = false;
         _message = null;
@@ -250,6 +383,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       _employeeId = null;
       _methodId = null;
       _paymentDate = DateTime.now();
+      _payrollPeriod = null;
       _selectedCheck = null;
       _amount.clear();
       _reference.clear();
@@ -280,6 +414,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       _employeeId = draft.employeeId;
       _methodId = draft.methodId;
       _paymentDate = draft.paymentDate.toLocal();
+      _payrollPeriod = DateTime.tryParse(draft.payrollWeekKey);
       _selectedCheck = null;
       _amount.text = (draft.amountCents / 100).toStringAsFixed(2);
       _reference.text = draft.reference ?? '';
@@ -407,10 +542,139 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     }
   }
 
+  Future<void> _confirmPayment(PayrollPaymentDraft draft) async {
+    if (!_authorized || _busy || !_postingApproved || !_hasServerCatalog) {
+      return;
+    }
+    final matches = _methods
+        .where((m) => m.id == draft.methodId && m.enabled)
+        .toList();
+    if (matches.length != 1 ||
+        !LocalPayrollOutbox.isUuid(draft.sourceAccountId ?? '') ||
+        !_accounts.any((a) => a['id'] == draft.sourceAccountId)) {
+      setState(
+        () => _message =
+            'Choose a confirmed payment method and a cached source account before submitting.',
+      );
+      return;
+    }
+    final method = matches.single;
+    if (draft.validateForSubmission(method).isNotEmpty) {
+      setState(
+        () => _message =
+            'Complete the payment details and save a valid Check photo first.',
+      );
+      return;
+    }
+    if (method.requiresCheckPhoto) {
+      try {
+        await _proofs.readFrozenProofBytes(
+          isOwner: widget.isOwner,
+          ownerUserId: _ownerId!,
+          businessId: widget.businessId,
+          operationId: draft.operationId,
+          digest: draft.checkProofSha256!,
+          byteSize: draft.checkProofSizeBytes!,
+        );
+      } catch (_) {
+        if (mounted && _authorized) {
+          setState(
+            () => _message =
+                'Reselect and save a readable Check photo before submitting.',
+          );
+        }
+        return;
+      }
+    }
+    if (!mounted || !_authorized) return;
+    final source =
+        _accounts.firstWhere((a) => a['id'] == draft.sourceAccountId)['name'] ??
+        'Source account';
+    final route = DialogRoute<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm payroll payment'),
+        content: Text(
+          '${_employeeName(draft.employeeId)}\nUSD ${(draft.amountCents / 100).toStringAsFixed(2)} via ${method.label}\nFrom: $source\nPayment date: ${DateFormat('yyyy-MM-dd').format(draft.paymentDate)}\nPayroll week: ${draft.payrollWeekKey}\n\nThe payment stays NOT PAID until a server receipt is confirmed. Submitted details cannot be edited.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep draft'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Confirm and queue'),
+          ),
+        ],
+      ),
+    );
+    _dialog = route;
+    final accepted = await Navigator.of(context).push(route);
+    _dialog = null;
+    if (!mounted || !_authorized || accepted != true) return;
+    setState(() => _busy = true);
+    final frozen = PayrollPaymentDraft(
+      businessId: draft.businessId,
+      employeeId: draft.employeeId,
+      operationId: draft.operationId,
+      methodId: method.id,
+      methodLabelSnapshot: method.label,
+      amountCents: draft.amountCents,
+      paymentDate: draft.paymentDate,
+      payrollWeekKey: draft.payrollWeekKey,
+      sourceAccountId: draft.sourceAccountId,
+      reference: draft.reference,
+      checkProofAttachmentId: draft.checkProofAttachmentId,
+      checkProofDurablyStored: draft.checkProofDurablyStored,
+      checkProofSizeBytes: draft.checkProofSizeBytes,
+      checkProofSha256: draft.checkProofSha256,
+    );
+    var queued = false, posted = false;
+    try {
+      await _drafts.save(
+        isOwner: widget.isOwner,
+        ownerUserId: _ownerId!,
+        draft: frozen,
+        isContextCurrent: () => mounted && _authorized,
+      );
+      await _outbox.enqueue(frozen, method);
+      queued = true;
+      if (!mounted || !_authorized) return;
+      posted = await _outbox.syncOne(frozen.operationId, _postingGateway);
+    } catch (_) {
+      /* Preserve the frozen operation for an identical retry. */
+    }
+    if (!mounted || !_authorized) return;
+    await _load();
+    if (!mounted || !_authorized) return;
+    final states = await _outbox.statuses();
+    if (!mounted || !_authorized) return;
+    final isVoid = states.any(
+      (s) => s['operation_id'] == draft.operationId && s['state'] == 'void',
+    );
+    setState(() {
+      _busy = false;
+      _message = isVoid
+          ? 'Payment void — NOT PAID.'
+          : posted
+          ? 'Payroll receipt confirmed.'
+          : queued
+          ? 'Payment queued — NOT PAID. Open receipts to retry when connected.'
+          : 'Payment was not queued. Review its details and try again.';
+    });
+  }
+
   Future<void> _choosePhoto(ImageSource source) async {
     if (!_authorized || _busy) return;
     try {
-      final chosen = await ImagePicker().pickImage(source: source);
+      final chosen = await ImagePicker().pickImage(
+        source: source,
+        imageQuality: 90,
+        maxWidth: 4096,
+        maxHeight: 4096,
+        requestFullMetadata: false,
+      );
       if (!mounted || !_authorized || chosen == null) return;
       setState(() {
         _selectedCheck = chosen;
@@ -475,6 +739,9 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     final employeeKnown =
         _employeeId == null ||
         staff.any((e) => e['id']?.toString() == _employeeId);
+    final visibleDrafts = _saved
+        .where((d) => !_frozenOperations.contains(d.operationId))
+        .toList();
     return Scaffold(
       appBar: AppBar(title: const Text('Payroll Drafts')),
       body: !_authorized
@@ -484,17 +751,19 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                const Card(
+                Card(
                   child: Padding(
-                    padding: EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(12),
                     child: Row(
                       children: [
-                        Icon(Icons.lock_outline),
-                        SizedBox(width: 10),
+                        const Icon(Icons.lock_outline),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Draft only — NOT PAID. Nothing here creates an expense, sends a payment or syncs payroll.',
-                            style: TextStyle(fontWeight: FontWeight.w600),
+                            _postingApproved
+                                ? 'Drafts remain NOT PAID until a server receipt confirms posting. Submitted details cannot be edited.'
+                                : 'Draft only — NOT PAID. Nothing here creates an expense, sends a payment or syncs payroll.',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
                         ),
                       ],
@@ -505,6 +774,25 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                   onPressed: _busy ? null : _configureMethods,
                   icon: const Icon(Icons.tune),
                   label: const Text('Payment methods & employee defaults'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _busy
+                      ? null
+                      : () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => PayrollReceiptsScreen(
+                              businessId: widget.businessId,
+                              isOwner: widget.isOwner,
+                              employees: widget.employees,
+                              synchronizer: _remote,
+                              gateway: _remoteGateway,
+                              outbox: _outbox,
+                              postingGateway: _postingGateway,
+                            ),
+                          ),
+                        ),
+                  icon: const Icon(Icons.receipt_long),
+                  label: const Text('Confirmed payroll receipts'),
                 ),
                 if (_message != null)
                   Padding(
@@ -654,8 +942,13 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                               initialDate: _paymentDate,
                               firstDate: DateTime(2015),
                               lastDate: DateTime(2100),
+                              builder: (context, child) {
+                                _dialog = ModalRoute.of(context);
+                                return child!;
+                              },
                             );
-                            if (chosen != null && mounted) {
+                            _dialog = null;
+                            if (chosen != null && mounted && _authorized) {
                               setState(() => _paymentDate = chosen);
                             }
                           },
@@ -665,9 +958,30 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Text('Payroll week starts $_weekStart'),
+                  OutlinedButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () async {
+                            final chosen = await showDatePicker(
+                              context: context,
+                              initialDate: _payrollPeriod ?? _paymentDate,
+                              firstDate: DateTime(2015),
+                              lastDate: DateTime(2100),
+                              builder: (context, child) {
+                                _dialog = ModalRoute.of(context);
+                                return child!;
+                              },
+                            );
+                            _dialog = null;
+                            if (mounted && _authorized && chosen != null) {
+                              setState(() => _payrollPeriod = chosen);
+                            }
+                          },
+                    icon: const Icon(Icons.date_range),
+                    label: Text('Payroll week starts $_weekStart'),
+                  ),
                   const Text(
-                    'Category: Payroll. Source cash/bank account must be verified separately before posting becomes available.',
+                    'Category: Payroll. Source account is verified before posting.',
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -681,7 +995,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                   if (_selectedMethod?.requiresCheckPhoto == true) ...[
                     const SizedBox(height: 12),
                     const Text(
-                      'Check photo is required before future payment posting.',
+                      'Check photo is required before a payment can be posted.',
                     ),
                     Wrap(
                       spacing: 8,
@@ -733,12 +1047,12 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                   'Saved local drafts',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
-                if (_saved.isEmpty)
+                if (visibleDrafts.isEmpty)
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 14),
                     child: Text('No unpaid drafts on this device.'),
                   ),
-                for (final d in _saved)
+                for (final d in visibleDrafts)
                   Card(
                     child: ListTile(
                       leading: const Icon(Icons.edit_note_outlined),
@@ -750,19 +1064,38 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (_postingApproved &&
+                              !_frozenOperations.contains(d.operationId))
+                            IconButton(
+                              tooltip: 'Confirm payroll payment',
+                              onPressed: _busy
+                                  ? null
+                                  : () => _confirmPayment(d),
+                              icon: const Icon(Icons.send_outlined),
+                            ),
                           IconButton(
                             tooltip: 'Edit unpaid draft',
-                            onPressed: _busy ? null : () => _openDraft(d),
+                            onPressed:
+                                _busy ||
+                                    _frozenOperations.contains(d.operationId)
+                                ? null
+                                : () => _openDraft(d),
                             icon: const Icon(Icons.edit_outlined),
                           ),
                           IconButton(
                             tooltip: 'Discard unpaid draft',
-                            onPressed: _busy ? null : () => _discard(d),
+                            onPressed:
+                                _busy ||
+                                    _frozenOperations.contains(d.operationId)
+                                ? null
+                                : () => _discard(d),
                             icon: const Icon(Icons.delete_outline),
                           ),
                         ],
                       ),
-                      onTap: _busy ? null : () => _openDraft(d),
+                      onTap: _busy || _frozenOperations.contains(d.operationId)
+                          ? null
+                          : () => _openDraft(d),
                     ),
                   ),
               ],

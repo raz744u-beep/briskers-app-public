@@ -8,6 +8,10 @@ import '../local/briskers_local_database.dart' show BriskersLocalDatabase;
 
 /// No production implementation is installed. An approved backend must supply
 /// this transport; neither a local UUID nor a UI preference enables posting.
+abstract interface class PayrollPostingActivation {
+  bool get canQueueOffline;
+}
+
 abstract interface class PayrollPostingGateway {
   Future<bool> supportsReviewedPayrollV1(String businessId);
   Future<String> registerMethod(PayrollPaymentMethod method);
@@ -22,11 +26,13 @@ class PayrollPostingReceipt {
     required this.operationId,
     required this.transactionId,
     required this.amountCents,
+    this.status = 'posted',
   });
   final String businessId;
   final String operationId;
   final String transactionId;
   final int amountCents;
+  final String status;
 }
 
 /// Independent, durable queue for the reviewed payroll adapter. The normal app
@@ -165,6 +171,28 @@ class LocalPayrollOutbox {
     });
   }
 
+  Future<List<Map<String, dynamic>>> statuses() async {
+    await _tables();
+    final rows = await _db
+        .customSelect(
+          'SELECT operation_id,frozen_json,state,transaction_id FROM local_payroll_outbox WHERE business_id=? AND owner_user_id=?',
+          variables: [Variable(businessId), Variable(ownerUserId)],
+        )
+        .get();
+    _guard();
+    return rows
+        .map(
+          (row) => {
+            ...Map<String, dynamic>.from(
+              jsonDecode(row.read<String>('frozen_json')) as Map,
+            ),
+            'state': row.read<String>('state'),
+            'transaction_id': row.readNullable<String>('transaction_id'),
+          },
+        )
+        .toList();
+  }
+
   /// Returns false when no reviewed capability exists, work is leased, or no
   /// authoritative receipt exists yet. Offline callers keep the local row.
   Future<bool> syncOne(
@@ -251,15 +279,22 @@ class LocalPayrollOutbox {
       if (receipt.businessId != businessId ||
           receipt.operationId != operationId ||
           receipt.amountCents != server['amount_cents'] ||
-          !isUuid(receipt.transactionId)) {
+          !isUuid(receipt.transactionId) ||
+          !['posted', 'void'].contains(receipt.status)) {
         throw StateError('Posting receipt does not match the frozen payment.');
       }
       await _db.customStatement(
-        '''UPDATE local_payroll_outbox SET state='posted',
+        '''UPDATE local_payroll_outbox SET state=?,
         transaction_id=?, lease_until=0 WHERE business_id=? AND owner_user_id=? AND operation_id=?''',
-        [receipt.transactionId, businessId, ownerUserId, operationId],
+        [
+          receipt.status,
+          receipt.transactionId,
+          businessId,
+          ownerUserId,
+          operationId,
+        ],
       );
-      return true;
+      return receipt.status == 'posted';
     } finally {
       // A lost response remains queued and reuses the exact persisted payload.
       await _db.customStatement(

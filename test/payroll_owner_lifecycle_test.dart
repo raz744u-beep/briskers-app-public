@@ -6,6 +6,7 @@ import 'package:briskers_app/screens/settings/payroll_drafts_screen.dart';
 import 'package:briskers_app/services/local_payroll_draft_store.dart';
 import 'package:briskers_app/services/local_payroll_method_store.dart';
 import 'package:briskers_app/services/payroll_owner_session.dart';
+import 'package:briskers_app/services/local_payroll_outbox.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -109,6 +110,14 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: PayrollDraftsScreen(
+            outbox: LocalPayrollOutbox(
+              database: db,
+              businessId: session.businessId,
+              ownerUserId: session.ownerUserId!,
+              isContextCurrent: () =>
+                  session.allows(businessId: session.businessId, isOwner: true),
+              verifyLocalProof: (_) async => false,
+            ),
             loadSourceAccounts: () async => [],
             businessId: 'shop',
             isOwner: true,
@@ -156,6 +165,14 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: PayrollDraftsScreen(
+            outbox: LocalPayrollOutbox(
+              database: db,
+              businessId: session.businessId,
+              ownerUserId: session.ownerUserId!,
+              isContextCurrent: () =>
+                  session.allows(businessId: session.businessId, isOwner: true),
+              verifyLocalProof: (_) async => false,
+            ),
             loadSourceAccounts: () async => [],
             businessId: 'shop',
             isOwner: true,
@@ -215,6 +232,14 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: PayrollDraftsScreen(
+          outbox: LocalPayrollOutbox(
+            database: db,
+            businessId: session.businessId,
+            ownerUserId: session.ownerUserId!,
+            isContextCurrent: () =>
+                session.allows(businessId: session.businessId, isOwner: true),
+            verifyLocalProof: (_) async => false,
+          ),
           loadSourceAccounts: () async => [],
           businessId: 'shop',
           isOwner: true,
@@ -284,6 +309,14 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: PayrollDraftsScreen(
+          outbox: LocalPayrollOutbox(
+            database: db,
+            businessId: session.businessId,
+            ownerUserId: session.ownerUserId!,
+            isContextCurrent: () =>
+                session.allows(businessId: session.businessId, isOwner: true),
+            verifyLocalProof: (_) async => false,
+          ),
           businessId: 'shop',
           isOwner: true,
           employees: const [

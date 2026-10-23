@@ -38,6 +38,7 @@ PayrollPaymentDraft draft({int amount = 50000, String source = account}) =>
 
 class FakeServer implements PayrollPostingGateway {
   bool supported = true;
+  String status = 'posted';
   bool loseResponse = true;
   int ledgerInserts = 0;
   int calls = 0;
@@ -70,6 +71,7 @@ class FakeServer implements PayrollPostingGateway {
       throw const SocketException('lost response');
     }
     return PayrollPostingReceipt(
+      status: status,
       businessId: 'shop',
       operationId: operation,
       transactionId: transaction,
@@ -164,6 +166,42 @@ void main() {
       } finally {
         await db.close();
         await directory.delete(recursive: true);
+      }
+    },
+  );
+
+  test(
+    'void receipt is terminal and pending receipt never claims paid',
+    () async {
+      for (final status in ['void', 'pending']) {
+        final db = BriskersLocalDatabase(NativeDatabase.memory());
+        final queue = LocalPayrollOutbox(
+          database: db,
+          businessId: 'shop',
+          ownerUserId: 'owner',
+          isContextCurrent: () => true,
+          verifyLocalProof: (_) async => true,
+        );
+        final server = FakeServer()
+          ..loseResponse = false
+          ..status = status;
+        try {
+          await queue.enqueue(draft(), method);
+          if (status == 'void') {
+            expect(await queue.syncOne(operation, server), false);
+            expect(await queue.syncOne(operation, server), false);
+            expect(server.calls, 1);
+            expect((await queue.statuses()).single['state'], 'void');
+          } else {
+            await expectLater(
+              queue.syncOne(operation, server),
+              throwsStateError,
+            );
+            expect((await queue.statuses()).single['state'], 'queued');
+          }
+        } finally {
+          await db.close();
+        }
       }
     },
   );

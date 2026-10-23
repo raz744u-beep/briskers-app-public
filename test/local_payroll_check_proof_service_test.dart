@@ -76,6 +76,41 @@ void main() {
     }
   });
 
+  test('WebP is normalized to validated PNG for durable server proof', () async {
+    await pickerPhoto.writeAsBytes(
+      base64Decode(
+        'UklGRjYAAABXRUJQVlA4ICoAAADwAQCdASoCAAIAAUAmJaACdLoB+AAETAAA/ttR//G7IVD7ef++9AbwMAA=',
+      ),
+    );
+    final saved = await photos.stageForDraft(
+      isOwner: true,
+      ownerUserId: 'owner-1',
+      draft: newDraft(),
+      method: check,
+      selectedPhoto: XFile(pickerPhoto.path),
+    );
+    final bytes = await photos.readFrozenProofBytes(
+      isOwner: true,
+      ownerUserId: 'owner-1',
+      businessId: 'shop-1',
+      operationId: saved.operationId,
+      digest: saved.checkProofSha256!,
+      byteSize: saved.checkProofSizeBytes!,
+    );
+    expect(image.decodePng(bytes), isNotNull);
+    await expectLater(
+      photos.readFrozenProofBytes(
+        isOwner: true,
+        ownerUserId: 'owner-2',
+        businessId: 'shop-1',
+        operationId: saved.operationId,
+        digest: saved.checkProofSha256!,
+        byteSize: saved.checkProofSizeBytes!,
+      ),
+      throwsA(anything),
+    );
+  });
+
   test(
     'Check photo copied privately and survives picker temp file removal',
     () async {

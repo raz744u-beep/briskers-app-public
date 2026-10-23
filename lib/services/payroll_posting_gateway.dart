@@ -6,11 +6,16 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/payroll_payment_contract.dart';
 import '../core/supabase_config.dart';
 import 'local_payroll_outbox.dart';
+import 'payroll_authoritative_sync.dart';
 
 /// Prepared transport for the private reviewed v1 contract. Deliberately not
 /// wired into the app. Deployment approval requires a separate reviewed source
 /// change; a server response or user setting cannot enable this gate.
-final class PayrollPostingGatewayV1 implements PayrollPostingGateway {
+final class PayrollPostingGatewayV1
+    implements
+        PayrollPostingGateway,
+        PayrollAuthoritativeGateway,
+        PayrollPostingActivation {
   PayrollPostingGatewayV1({
     required this.businessId,
     required this.isContextCurrent,
@@ -21,6 +26,8 @@ final class PayrollPostingGatewayV1 implements PayrollPostingGateway {
   final Future<Uint8List> Function(Map<String, dynamic>) readProofBytes;
 
   bool get _deploymentApproved => false;
+  @override
+  bool get canQueueOffline => _deploymentApproved && isContextCurrent();
   void _guard([Map<String, dynamic>? payload]) {
     if (!_deploymentApproved || !isContextCurrent()) {
       throw StateError(
@@ -143,7 +150,9 @@ final class PayrollPostingGatewayV1 implements PayrollPostingGateway {
       params: {'p': frozenPayload},
     );
     _guard(frozenPayload);
-    if (result is! Map || result['amount_cents'] is! int) {
+    if (result is! Map ||
+        result['amount_cents'] is! int ||
+        !['posted', 'void'].contains(result['status'])) {
       throw StateError('Invalid authoritative payroll receipt.');
     }
     return PayrollPostingReceipt(
@@ -151,6 +160,38 @@ final class PayrollPostingGatewayV1 implements PayrollPostingGateway {
       operationId: result['operation_id'] as String,
       transactionId: result['transaction_id'] as String,
       amountCents: result['amount_cents'] as int,
+      status: result['status'] as String,
     );
+  }
+
+  @override
+  Future<Map<String, dynamic>> fetchPayrollState(String businessId) async {
+    _guard();
+    if (businessId != this.businessId) {
+      throw StateError('Payroll scope mismatch.');
+    }
+    final result = await networkSupabase.rpc(
+      'briskers_payroll_state_v1',
+      params: {'b': businessId},
+    );
+    _guard();
+    if (result is! Map) throw StateError('Invalid payroll state.');
+    return Map<String, dynamic>.from(result);
+  }
+
+  @override
+  Future<void> applyCatalogMutation(
+    String businessId,
+    Map<String, dynamic> mutation,
+  ) async {
+    _guard();
+    if (businessId != this.businessId) {
+      throw StateError('Payroll scope mismatch.');
+    }
+    await networkSupabase.rpc(
+      'briskers_mutate_payroll_catalog_v1',
+      params: {'b': businessId, 'p': mutation},
+    );
+    _guard();
   }
 }

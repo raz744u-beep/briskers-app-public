@@ -141,7 +141,7 @@ class LocalPayrollCheckProofService {
           info.width <= 0 ||
           info.height <= 0 ||
           info.width * info.height > maxPhotoPixels ||
-          info.numFrames != 1) {
+          (info is image.WebPInfo ? info.hasAnimation : info.numFrames != 1)) {
         return false;
       }
       final decoded = decoder!.decodeFrame(0);
@@ -183,15 +183,26 @@ class LocalPayrollCheckProofService {
         'Check photo must be between 1 byte and 20 MiB.',
       );
     }
-    final bytes = await selectedPhoto.readAsBytes();
+    var bytes = await selectedPhoto.readAsBytes();
     if (bytes.isEmpty || bytes.length > maxPhotoBytes) {
       throw const FormatException('Check photo exceeds the allowed size.');
     }
-    final extension = _extension(bytes);
+    var extension = _extension(bytes);
     if (extension == null || !_decodes(bytes)) {
       throw const FormatException(
         'Choose a readable JPEG, PNG or WebP photo, up to 16 megapixels. Convert HEIC to JPEG first.',
       );
+    }
+
+    if (extension == '.webp') {
+      // Normalize decoded WebP for the reviewed PNG/JPEG-only server contract.
+      bytes = Uint8List.fromList(image.encodePng(image.decodeImage(bytes)!));
+      extension = '.png';
+      if (bytes.length > maxPhotoBytes) {
+        throw const FormatException(
+          'Converted Check photo exceeds 20 MiB. Choose a smaller photo.',
+        );
+      }
     }
 
     final digest = sha256.convert(bytes).toString();
@@ -246,6 +257,45 @@ class LocalPayrollCheckProofService {
     } finally {
       if (await temporary.exists()) await temporary.delete();
     }
+  }
+
+  Future<Uint8List> readFrozenProofBytes({
+    required bool isOwner,
+    required String ownerUserId,
+    required String businessId,
+    required String operationId,
+    required String digest,
+    required int byteSize,
+  }) async {
+    _requireOwner(isOwner, businessId, ownerUserId, operationId);
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(digest) ||
+        byteSize <= 0 ||
+        byteSize > maxPhotoBytes) {
+      throw const FormatException('Invalid frozen proof metadata.');
+    }
+    final directory = await _privateDirectory(
+      businessId,
+      ownerUserId,
+      operationId,
+    );
+    for (final extension in ['.jpg', '.png', '.webp']) {
+      final file = File('${directory.path}/$digest$extension');
+      if (!await file.exists()) continue;
+      final bytes = await file.readAsBytes();
+      if (bytes.length != byteSize ||
+          _extension(bytes) != extension ||
+          !_decodes(bytes) ||
+          sha256.convert(bytes).toString() != digest) {
+        throw const FormatException('Check photo changed.');
+      }
+      if (extension == '.webp') {
+        throw const FormatException(
+          'Reselect this photo to save a server-compatible PNG before submission.',
+        );
+      }
+      return bytes;
+    }
+    throw const FileSystemException('Private Check photo is unavailable.');
   }
 
   /// Re-open and checksum the actual file after restart.

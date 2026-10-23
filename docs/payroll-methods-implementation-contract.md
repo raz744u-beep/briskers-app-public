@@ -1,26 +1,25 @@
 # Payroll methods — issue #297
 
-Status: Owner-only local draft preparation and local method configuration are
-implemented; server payroll registration/posting/sync remain unavailable.
-Settings → Employees → Payroll Drafts → Payment methods & employee defaults
-supports add, rename, disable, reorder, durable UUID identities, and per-employee
-defaults with a per-draft override. Local configuration is isolated by shop and
-Owner. These UUIDs are not proof of server registration and are never submitted.
-Older provisional draft methods require an explicit new choice; no automatic
-mapping by name. Renames leave saved draft label snapshots unchanged. Imported
-payments are untouched; unknown historical methods must not be inferred.
+Status: Owner draft/configuration, authoritative catalog/default/history cache,
+confirmation, frozen outbox replay and receipt UI are implemented with a source
+approval gate that remains **off**. No live payroll submission is enabled.
 
-An isolated durable outbox engine now freezes an operation and proof manifest
-in one SQLite transaction. It rejects changed payloads and draft edits/discard
-after enqueue; restart/lost-response retries reuse the stored server method
-mapping and operation. It requires an explicitly reviewed gateway capability,
-and only an authoritative matching receipt marks the queue posted. The app has
-no active gateway or enqueue/post UI: this is tested integration groundwork.
-No actual payment, upload or payroll expense is enabled. Local
-source account IDs are preserved when editing, but account selection/validation
-and verified Payroll category resolution still require the backend contract.
-Check photos remain app-private device copies, not remotely verified attachments.
-The screen says NOT PAID. This is not completion of #297.
+Local methods have stable registration keys. Confirmed catalogs use distinct
+server UUIDs, never provisional IDs or label matching. The confirmed cache and
+pending configuration queue survive restart and are scoped to shop and actor.
+Add/rename/disable/reorder and employee defaults use immutable mutation IDs and
+optimistic versions. Conflicts retain pending edits while refreshing history.
+A per-payment override, separate source account and independent payroll week
+are supported. Unknown historical methods display Not recorded, without account
+or current-label inference. Imported amounts/dates remain unchanged.
+
+With a separately approved backend and code activation, a saved payment requires
+explicit confirmation before its payload/proof are frozen atomically. Lost
+responses retry the same operation; queued payments remain NOT PAID until a
+matching authoritative receipt. Pending/void receipts never appear as posted.
+The production build cannot activate posting from a server flag or user setting.
+Private synthetic contracts and actual local service tests exercise this future
+path; they are not evidence of hosted deployment or live financial acceptance.
 
 Owner route identity and shop are captured at entry. Auth changes revoke that
 route permanently, clear sensitive state and dismiss confirmation dialogs; late
@@ -31,8 +30,10 @@ Check proof is decoded and checksum-verified on reopening/saving. Header-only or
 truncated images cannot qualify. Changing employee, operation, method, amount,
 calendar date, payroll week, account or reference invalidates reuse. The Owner
 must choose/reconfirm the photo for the changed terms. JPEG/PNG/WebP decoding is
-supported locally within size/pixel limits; HEIC fails closed pending a verified
-cross-platform conversion path. No unsupported bytes are marked verified.
+supported within size/pixel limits; WebP is normalized to PNG. Native image
+picking requests JPEG conversion without metadata and bounded dimensions. Direct
+HEIC bytes fail closed. Native camera/library HEIC acceptance still needs device
+review; no unsupported bytes are marked verified.
 
 ### Proof retention and cleanup policy
 
@@ -47,31 +48,38 @@ discard currently removes the draft row and deliberately retains private bytes.
 
 ## Remaining backend gate
 
-A read-only function inventory on October 23 found the customer payment RPC but
-no payroll/proof RPC in the app schemas. Before implementing a posting adapter,
-review a private backend contract for method registration/reconciliation, stable
-operation UUIDs, employee membership, eligible source accounts, Payroll category,
-Owner/authorized-office permissions, proof ownership/checksum/private storage,
-and atomic idempotent ledger posting. Validate against an isolated current schema
-with synthetic fixtures: concurrency, lost responses, restart, cross-device
-replay, permission denial and exactly one expense per operation. No guessed RPC
-or raw client ledger insert is an acceptable fallback. Local UUIDs need explicit
-server acceptance or a durable ID mapping before any submission can be enabled.
-Backend deployment and any historical repair require separate approval.
+Private review-only SQL, proof verifier and synthetic tests have been prepared
+outside this public repository. They cover registration, permission checks,
+source/category separation, immutable proof, transaction replay, current ledger
+triggers, catalog defaults and historical labels. Actual localhost Auth,
+PostgREST, Storage and Edge tests passed with synthetic users/objects. No private
+schema is published here. The fixture is a selected schema with documented
+omitted unrelated foreign keys, not a full deployment rehearsal.
+
+Deployment still requires explicit approval, full migration/ACL review and a
+separate code activation. Historical customer-category repair also requires
+separate approval. The current artifact cannot post payroll. Remaining issue
+#297 implementation/acceptance work includes job/labor allocation selection and
+permission-aware office/mechanic entry points; do not close the issue on this
+Owner-only UI. Existing server contract tests cover partial/extra unallocated
+amounts and reject labor allocations exceeding earned balances. No Tasks #305
+implementation is included.
 
 ## Correction batch acceptance gates
 
 - #292 compact Jobs filter: client correction; Owner visual acceptance pending.
 - #293 Customers category: 24 local synthetic PostgreSQL assertions pass. Patch
-  and guarded repair remain review-only; current-schema trigger/concurrency and
-  fee-report integration validation, deployment and real repair are not done.
+  and guarded repair remain review-only. Private selected-current-schema tests
+  also preserve protected fields under existing ledger triggers. Deployment,
+  real repair and Owner report acceptance are not done.
 - #294 canonical mechanic display: client correction; Owner acceptance pending.
 - #295 consolidated local Service History: client correction; offline/reconnect
   and cross-device Owner acceptance pending.
 - #296 compact saved-data indication and Estimate tabs: client correction;
   Owner visual/navigation acceptance pending.
-- #297 local draft/configuration only; backend, financial outbox/posting, secure
-  upload, authorized-office/mechanic views and Owner acceptance remain open.
+- #297 gated client and private synthetic backend prepared. Allocation editor,
+  office/mechanic UI, full deployment validation, activation and Owner acceptance
+  remain open; live payroll is not enabled.
 
 Passing code/CI or producing an APK does not close these six issues. Signed
 regular candidate preparation does not authorize installation or deployment.
