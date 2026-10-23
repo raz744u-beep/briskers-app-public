@@ -109,6 +109,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: PayrollDraftsScreen(
+            loadSourceAccounts: () async => [],
             businessId: 'shop',
             isOwner: true,
             employees: const [
@@ -155,6 +156,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: PayrollDraftsScreen(
+            loadSourceAccounts: () async => [],
             businessId: 'shop',
             isOwner: true,
             employees: const [
@@ -213,6 +215,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: PayrollDraftsScreen(
+          loadSourceAccounts: () async => [],
           businessId: 'shop',
           isOwner: true,
           employees: const [
@@ -242,6 +245,83 @@ void main() {
       )).single.sourceAccountId,
       'bank',
     );
+    await tester.pumpWidget(const SizedBox());
+    session.dispose();
+    await db.close();
+  });
+  testWidgets('offline source choice stays distinct and survives saving', (
+    tester,
+  ) async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final drafts = LocalPayrollDraftStore(database: db);
+    final methods = LocalPayrollMethodStore(database: db);
+    final cash = (await methods.load(
+      isOwner: true,
+      businessId: 'shop',
+      ownerUserId: 'owner',
+    )).first;
+    final session = PayrollOwnerSession(
+      businessId: 'shop',
+      isOwner: true,
+      currentUserId: () => 'owner',
+      userChanges: const Stream.empty(),
+    );
+    await drafts.save(
+      isOwner: true,
+      ownerUserId: 'owner',
+      draft: PayrollPaymentDraft(
+        businessId: 'shop',
+        employeeId: 'employee',
+        operationId: 'op',
+        methodId: cash.id,
+        methodLabelSnapshot: cash.label,
+        amountCents: 50000,
+        paymentDate: DateTime(2026, 10, 23),
+        payrollWeekKey: '2026-10-19',
+        sourceAccountId: 'bank',
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PayrollDraftsScreen(
+          businessId: 'shop',
+          isOwner: true,
+          employees: const [
+            {'id': 'employee', 'name': 'Private Employee'},
+          ],
+          ownerSession: session,
+          draftStore: drafts,
+          methodStore: methods,
+          loadSourceAccounts: () async => [
+            {'id': 'bank', 'name': 'Old Bank'},
+            {'id': 'new-bank', 'name': 'New Bank'},
+            {'id': 'foreign', 'name': 'Foreign', 'business_id': 'other'},
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit unpaid draft'));
+    await tester.pumpAndSettle();
+    final source = find.byKey(const ValueKey('source-bank'));
+    await tester.ensureVisible(source);
+    await tester.tap(source);
+    await tester.pumpAndSettle();
+    expect(find.text('Foreign'), findsNothing);
+    await tester.tap(find.text('New Bank').last);
+    await tester.pumpAndSettle();
+    final save = find.text('Save local draft — NOT PAID');
+    await tester.ensureVisible(save);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    final saved = (await drafts.load(
+      isOwner: true,
+      businessId: 'shop',
+      ownerUserId: 'owner',
+    )).single;
+    expect(saved.sourceAccountId, 'new-bank');
+    expect(saved.methodId, cash.id);
+    expect(saved.amountCents, 50000);
     await tester.pumpWidget(const SizedBox());
     session.dispose();
     await db.close();

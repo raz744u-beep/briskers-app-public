@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/payroll_payment_contract.dart';
 import '../../services/payroll_owner_session.dart';
+import '../../services/local_financial_cache.dart';
 import '../../services/local_payroll_check_proof_service.dart';
 import '../../services/local_payroll_draft_store.dart';
 import '../../services/local_payroll_method_store.dart';
@@ -22,6 +23,7 @@ class PayrollDraftsScreen extends StatefulWidget {
     this.draftStore,
     this.methodStore,
     this.proofService,
+    this.loadSourceAccounts,
   });
 
   final String businessId;
@@ -31,6 +33,7 @@ class PayrollDraftsScreen extends StatefulWidget {
   final LocalPayrollDraftStore? draftStore;
   final LocalPayrollMethodStore? methodStore;
   final LocalPayrollCheckProofService? proofService;
+  final Future<List<Map<String, dynamic>>> Function()? loadSourceAccounts;
 
   @override
   State<PayrollDraftsScreen> createState() => _PayrollDraftsScreenState();
@@ -51,6 +54,8 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
   List<PayrollPaymentDraft> _saved = const [];
   String? _employeeId;
   String? _methodId;
+  String? _sourceAccountId;
+  List<Map<String, dynamic>> _accounts = [];
   DateTime _paymentDate = DateTime.now();
   String? _operationId;
   PayrollPaymentDraft? _editing;
@@ -70,6 +75,8 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     if (!mounted) return;
     setState(() {
       _saved = [];
+      _accounts = [];
+      _sourceAccountId = null;
       _methods = [];
       _defaults = {};
       _employeeId = null;
@@ -187,7 +194,36 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
         ownerUserId: _ownerId!,
       );
       if (!mounted || !_authorized) return;
+      var accounts = <Map<String, dynamic>>[];
+      try {
+        final load = widget.loadSourceAccounts;
+        accounts = load != null
+            ? await load()
+            : List<dynamic>.from(
+                    (await LocalFinancialCache().loadOptions(
+                          widget.businessId,
+                        ))['accounts'] ??
+                        const [],
+                  )
+                  .whereType<Map>()
+                  .map((row) => Map<String, dynamic>.from(row))
+                  .toList();
+      } catch (_) {
+        // A missing cache must not prevent opening an existing unpaid draft.
+      }
+      if (!mounted || !_authorized) return;
+      final unique = <String, Map<String, dynamic>>{};
+      for (final account in accounts) {
+        final id = account['id']?.toString() ?? '';
+        if (id.isNotEmpty &&
+            account['active'] != false &&
+            (account['business_id'] == null ||
+                account['business_id'] == widget.businessId)) {
+          unique[id] = account;
+        }
+      }
       setState(() {
+        _accounts = unique.values.toList();
         _methods = methods;
         _defaults = defaults;
         _saved = rows;
@@ -209,6 +245,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     setState(() {
       _editing = null;
       _proofIntact = false;
+      _sourceAccountId = null;
       _operationId = LocalPayrollMethodStore.newIdentity();
       _employeeId = null;
       _methodId = null;
@@ -238,6 +275,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       _busy = false;
       _proofIntact = intact;
       _editing = draft;
+      _sourceAccountId = draft.sourceAccountId;
       _operationId = draft.operationId;
       _employeeId = draft.employeeId;
       _methodId = draft.methodId;
@@ -288,7 +326,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
           amountCents: cents,
           paymentDate: _paymentDate,
           payrollWeekKey: _weekStart,
-          sourceAccountId: previous.sourceAccountId,
+          sourceAccountId: _sourceAccountId,
           reference: reference,
         );
     return PayrollPaymentDraft(
@@ -302,7 +340,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       amountCents: cents,
       paymentDate: _paymentDate,
       payrollWeekKey: _weekStart,
-      sourceAccountId: previous?.sourceAccountId,
+      sourceAccountId: _sourceAccountId,
       reference: reference,
       checkProofAttachmentId: retainProof
           ? previous.checkProofAttachmentId
@@ -515,6 +553,47 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                       child: Text(
                         'This employee is not in the loaded roster. Saving is disabled.',
                       ),
+                    ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    key: ValueKey('source-$_sourceAccountId'),
+                    initialValue: _sourceAccountId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText:
+                          'Source account (separate from payment method)',
+                      border: OutlineInputBorder(),
+                      helperText:
+                          'Category: Payroll. Account choice does not post a payment.',
+                    ),
+                    items: [
+                      if (_sourceAccountId != null &&
+                          !_accounts.any(
+                            (a) => a['id']?.toString() == _sourceAccountId,
+                          ))
+                        DropdownMenuItem(
+                          value: _sourceAccountId,
+                          child: const Text(
+                            'Saved account — unavailable offline',
+                          ),
+                        ),
+                      ..._accounts.map(
+                        (a) => DropdownMenuItem(
+                          value: a['id'].toString(),
+                          child: Text(a['name']?.toString() ?? 'Account'),
+                        ),
+                      ),
+                    ],
+                    onChanged: _busy
+                        ? null
+                        : (value) => setState(() {
+                            _sourceAccountId = value;
+                            _selectedCheck = null;
+                          }),
+                  ),
+                  if (_accounts.isEmpty)
+                    const Text(
+                      'No account choices cached. Open Financials online to refresh them; the unpaid draft can still be saved.',
                     ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
