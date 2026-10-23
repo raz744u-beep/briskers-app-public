@@ -1148,7 +1148,7 @@ class _JobsScreenState extends State<JobsScreen>
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const Spacer(),
                     if (_rows != null)
                       Text(
                         '${tr('total')} $_totalCount',
