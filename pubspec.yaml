@@ -29,7 +29,7 @@ dependencies:
   drift: 2.32.1
   drift_flutter: 0.3.1
   path_provider: 2.1.5
-  crypto: 3.0.6
+  crypto: 3.0.7
   workmanager: ^0.10.10
   saf: ^2.1.2
 
