@@ -6,6 +6,7 @@ import '../../core/briskers_colors.dart';
 import '../../services/briskers_api.dart';
 import 'employee_edit_screen.dart';
 import 'employee_positions_screen.dart';
+import 'payroll_drafts_screen.dart';
 
 class EmployeesSettingsScreen extends StatefulWidget {
   const EmployeesSettingsScreen({
@@ -374,6 +375,29 @@ class _EmployeesSettingsScreenState
         icon: const Icon(Icons.groups_2_outlined),
         label: const Text('Manage'),
       ),
+      // Employee roster is already loaded here: reuse exact IDs for local-only
+      // draft preparation. Never expose an actual Pay/Posted action.
+      bottomNavigationBar: widget.isOwner && _employees != null
+          ? SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: OutlinedButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PayrollDraftsScreen(
+                        businessId: widget.businessId,
+                        isOwner: widget.isOwner,
+                        employees: _employees!,
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.edit_note_outlined),
+                  label: const Text('Payroll Drafts — NOT PAID'),
+                ),
+              ),
+            )
+          : null,
       body: _employees == null
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
