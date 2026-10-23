@@ -1516,7 +1516,8 @@ class _QuickDialogState extends State<_QuickDialog> {
     return Theme(
       data: moduleModalTheme(Theme.of(context), accent),
       child: AlertDialog(
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark
+          ? const Color(0xFF202124) : Colors.white,
       insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       title: Text(
         widget.template == null ? 'Add quick transaction' : 'Edit quick transaction',
