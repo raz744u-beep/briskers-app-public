@@ -606,9 +606,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           // These local reads are independent. Start both together so a
           // slow settings lookup cannot serialize cached invoice first paint.
           final local = await Future.wait<dynamic>([
-            _withRecoveredDocumentDate(
-              await _offlineInvoiceTax.projectPending(
-                  widget.businessId, widget.documentId, cached)),
+            _offlineInvoiceTax.projectPending(
+                widget.businessId, widget.documentId, cached)
+              .then(_withRecoveredDocumentDate),
             _taxSettingsCache.load(widget.businessId),
           ]);
           final recovered = await _withLocalPayments(
@@ -8081,13 +8081,13 @@ class _DocumentTabsHeaderDelegate
           ),
           tabs: [
             DocumentTabLabel(
-              label: tr('itemsTab'), alignment: Alignment.centerLeft),
+              label: tr('itemsTab'),
+              alignment: isEstimate ? Alignment.center : Alignment.centerLeft),
             if (!isEstimate)
               DocumentTabLabel(label: tr('paymentTab')),
             DocumentTabLabel(
               label: tr('notesTab'),
-              alignment: isEstimate
-                  ? Alignment.centerRight : Alignment.center),
+              alignment: Alignment.center),
             if (!isEstimate)
               const DocumentTabLabel(
                 label: 'Expenses', alignment: Alignment.centerRight),

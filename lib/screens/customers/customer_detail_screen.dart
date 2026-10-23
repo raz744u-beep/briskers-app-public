@@ -15,9 +15,9 @@ import '../../core/briskers_i18n.dart';
 import '../../core/document_presentation.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_vehicle_sync_service.dart';
-import '../../services/customer_detail_cache.dart';
 import '../../services/customer_document_summary_service.dart';
 import '../../services/local_document_repository.dart';
+import '../../services/local_job_repository.dart';
 import '../../services/customer_document_recency.dart';
 import '../../services/customer_job_recency.dart';
 import '../../local/local_database_provider.dart';
@@ -34,7 +34,6 @@ import '../jobs/blank_invoice_setup_screen.dart';
 import 'customer_quick_actions.dart';
 import 'customer_problem_flag_card.dart';
 import 'customer_account_section.dart';
-import 'customer_appointments_section.dart';
 import 'customer_notes_section.dart';
 import 'customer_service_history_section.dart';
 import 'customer_vehicles_section.dart';
@@ -64,7 +63,6 @@ class CustomerDetailScreen extends StatefulWidget {
 
 class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   static const _api = BriskersApi();
-  static const _sectionCache = CustomerDetailCache();
   final CustomerVehicleSyncService _sync =
       CustomerVehicleSyncService();
   final LocalCustomerRepository _localCustomers =
@@ -85,49 +83,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   int _customerTab = 0; // Overview, Info, Vehicles, Notes.
   int _activityRevision = 0;
 
-  Future<Map<String, dynamic>> _loadOfflineSections() async {
-    final visibility = _jobVisibility;
-    final generation = visibility.epoch;
-    Future<List<Map<String, dynamic>>> listSection(String key) async {
-      final raw = await _sectionCache.load(
-        widget.businessId,
-        widget.customerId,
-        key,
-      );
-      return raw is List
-          ? raw
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList()
-          : <Map<String, dynamic>>[];
-    }
-
-    final appointments = await visibility.filter(
-        await listSection('appointments'), jobIdKey: 'job_id');
-
-    final historyRaw = await _sectionCache.load(
-      widget.businessId,
-      widget.customerId,
-      'service_history',
-    );
-    final history = historyRaw is Map
-        ? Map<String, dynamic>.from(historyRaw)
-        : <String, dynamic>{};
-
-    history['jobs'] = await visibility.filter(
-      List<dynamic>.from(history['jobs'] ?? const [])
-          .whereType<Map>().map((row) => Map<String, dynamic>.from(row)),
-      cached: true,
-    );
-    if (!visibility.isCurrent(generation)) return const {};
-    return <String, dynamic>{
-      'appointments': appointments,
-      'history': history,
-    };
-  }
-
-
-
   Future<List<Map<String, dynamic>>> _activeCustomerItems() async {
     final visibility = _jobVisibility;
     final generation = visibility.epoch;
@@ -146,26 +101,12 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         'title':a.read<String>('title'),
         'status':a.read<String>('status')});
     }
-    final jobs = await localDatabase.customSelect(
-      "SELECT * FROM local_jobs WHERE business_id=? AND customer_id=? "
-      "",
-      variables: vars).get();
-    for (final j in jobs) {
-      final rawStatus = j.read<String>('status');
-      final formattedStatus = rawStatus.replaceAll('_', ' ');
-      final jobStatus = formattedStatus.isEmpty ? 'Open' :
-          formattedStatus[0].toUpperCase() + formattedStatus.substring(1);
-      rows.add({'type':'Job','id':j.read<String>('id'),
-        'job_id':j.read<String>('id'),
-        'title':j.read<String>('title'),
-        'number':j.readNullable<String>('job_number') ?? 'Pending sync',
-        'created_at': j.readNullable<DateTime>('created_at')?.toIso8601String(),
-        'status':jobStatus,
-        'job_snapshot': <String, dynamic>{
-          ...j.data,
-          'customer_name': _data?['customer']?['name'] ?? '',
-          'vehicle': j.data['vehicle_label'],
-        } });
+    final jobs = await LocalJobRepository().forCustomer(
+      widget.businessId, widget.customerId);
+    for (final job in jobs) {
+      rows.add({...job, 'type': 'Job', 'job_id': job['id'],
+        'number': job['job_number'] ?? 'Pending sync',
+        'job_snapshot': job});
     }
     final docs = await CustomerDocumentSummaryService().forCustomer(
       widget.businessId, widget.customerId, includeClosed: true);
@@ -269,6 +210,23 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       await _refreshEditedCustomerDocument(id);
       return;
     }
+    _invalidateCustomerActivity();
+  }
+
+  Future<void> _showCustomerServiceHistory() async {
+    await Navigator.push<void>(context, MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('Service History')),
+        body: ListView(children: [CustomerServiceHistorySection(
+          businessId: widget.businessId,
+          customerId: widget.customerId,
+          vehicles: List<dynamic>.from(_data?['vehicles'] ?? const []),
+          roleCode: widget.roleCode,
+          initiallyExpanded: true,
+        )]),
+        bottomNavigationBar: widget.sharedBottomNavigationBar,
+      ),
+    ));
     _invalidateCustomerActivity();
   }
 
@@ -629,7 +587,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       final invoices = rows.where((item) => item['type'] == 'invoice').toList();
       final estimates = rows.where((item) => item['type'] == 'estimate').toList();
       final appointments = rows.where((item) => item['type'] == 'Appointment').toList();
-      final visits = rows.where((item) => item['type'] == 'Visit').toList();
       final docs = [...invoices, ...estimates];
       docs.sort(compareCustomerDocumentRecency);
       final balance = invoices.fold<int>(0, (sum, item) =>
@@ -652,9 +609,11 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           Text('${items.length}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
           const SizedBox(width: 6), const Icon(Icons.chevron_right, size: 18),
         ]),
-        onTap: () => title == 'Invoices' || title == 'Estimates'
-            ? _showCustomerDocuments(title)
-            : _showOverviewList(title, items),
+        onTap: () => title == 'Jobs'
+            ? _showCustomerServiceHistory()
+            : title == 'Invoices' || title == 'Estimates'
+              ? _showCustomerDocuments(title)
+              : _showOverviewList(title, items),
       );
       return Card(child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -675,7 +634,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
           link('Invoices', Icons.receipt_long_outlined, BriskersColors.invoices, invoices),
           link('Estimates', Icons.description_outlined, BriskersColors.estimates, estimates),
           link('Appointments', Icons.calendar_today_outlined, BriskersColors.schedule, appointments),
-          link('Visits', Icons.history_outlined, BriskersColors.jobs, visits),
           link('Payments', Icons.payments_outlined, BriskersColors.invoices, paymentInvoices),
           if (balance > 0 || pending > 0) ...[
             const Divider(height: 12),
@@ -720,163 +678,6 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
       ));
     },
   );
-
-  Widget _offlineCountCard({
-    required IconData icon,
-    required String title,
-    required String emptyText,
-    required List<Map<String, dynamic>> rows,
-    String Function(Map<String, dynamic>)? label
-  }) {
-    return Card(
-      child: ExpansionTile(
-        maintainState: false,
-        leading: Icon(icon),
-        title: Text(
-          title,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          rows.isEmpty
-              ? emptyText
-              : rows.length == 1
-                  ? '1 saved item'
-                  : '${rows.length} saved items',
-        ),
-        children: rows.isEmpty
-            ? const <Widget>[
-                Padding(
-                  padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('No saved data yet.'),
-                  ),
-                ),
-              ]
-            : rows.map((row) {
-                final text = label?.call(row) ?? '';
-                return ListTile(
-                  dense: true,
-                  title: Text(
-                    text.isEmpty ? 'Saved item' : text,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                );
-              }).toList(),
-      ),
-    );
-  }
-
-  Widget _offlineCustomerSections() {
-    return FutureBuilder<Map<String, dynamic>>(
-      key: ValueKey(('offline-customer-sections', _jobVisibility.epoch)),
-      future: _loadOfflineSections(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Card(
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  SizedBox(width: 12),
-                  Text('Loading saved customer details...'),
-                ],
-              ),
-            ),
-          );
-        }
-
-        final data = snapshot.data ?? const <String, dynamic>{};
-        final appointments = List<Map<String, dynamic>>.from(
-          data['appointments'] ?? const <Map<String, dynamic>>[],
-        );
-        final history = Map<String, dynamic>.from(
-          data['history'] ?? const <String, dynamic>{},
-        );
-        final jobs = List<dynamic>.from(history['jobs'] ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList();
-        final documents = List<dynamic>.from(history['documents'] ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList();
-        final expenses = List<dynamic>.from(history['expenses'] ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList();
-
-        return Column(
-          children: [
-
-            _offlineCountCard(
-              icon: Icons.calendar_month_outlined,
-              title: 'Appointments',
-              emptyText: 'No saved appointments',
-              rows: appointments,
-              label: (row) {
-                final title = row['title']?.toString().trim() ?? '';
-                final starts = row['starts_at']?.toString().trim() ?? '';
-                return [starts, title].where((x) => x.isNotEmpty).join(' • ');
-              },
-            ),
-            const SizedBox(height: 18),
-            Card(
-              child: ExpansionTile(
-                leading: const Icon(Icons.history_outlined),
-                title: const Text(
-                  'Service History',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-                subtitle: Text(
-                  '${jobs.length} jobs • ${documents.length} documents • ${expenses.length} expenses',
-                ),
-                children: [
-                  if (jobs.isEmpty && documents.isEmpty && expenses.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text('No saved service history yet.'),
-                      ),
-                    )
-                  else ...[
-                    for (final job in jobs.take(12))
-                      ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.build_outlined),
-                        title: Text(
-                          [
-                            job['job_number']?.toString() ?? '',
-                            job['title']?.toString() ?? '',
-                          ].where((x) => x.isNotEmpty).join(' — '),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    if (jobs.length > 12)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text('+ ${jobs.length - 12} more jobs saved'),
-                        ),
-                      ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
 
   String get _detailCacheKey =>
       'briskers_customer_detail_${widget.businessId}_${widget.customerId}';
@@ -1561,31 +1362,15 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                 padding: const EdgeInsets.all(16),
                 children: [
                   if (_showingLocal)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: BriskersColors.customers.withValues(
-                          alpha: 0.08,
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 4),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Tooltip(
+                          message: 'Using saved local records. Edits sync on reconnection.',
+                          child: Icon(Icons.cloud_off_outlined,
+                            size: 17, color: Color(0xFF667085)),
                         ),
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.cloud_off_outlined, size: 18),
-                          SizedBox(width: 7),
-                          Expanded(
-                            child: Text(
-                              'Showing saved customer and vehicle data • edits save locally and sync when reconnected',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
                       ),
                     ),
                   Row(children: [
@@ -1732,20 +1517,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 18),
-                  if (_customerTab == 0 && BriskersConnectionModeController.instance.forceOffline)
-                    _offlineCustomerSections()
-                  else if (_customerTab == 0) ...[
-                    CustomerAppointmentsSection(
-                      businessId: widget.businessId,
-                      customerId: widget.customerId,
-                    ),
-                    const SizedBox(height: 18),
-                    CustomerServiceHistorySection(
-                  roleCode: widget.roleCode,
-                      businessId: widget.businessId,
-                      customerId: widget.customerId,
-                      vehicles: vehicles,
-                    ),
+                  if (_customerTab == 0) ...[
                     if (_onlineReady && widget.roleCode == 'owner') ...[
                       const SizedBox(height: 18),
                       CustomerAccountSection(

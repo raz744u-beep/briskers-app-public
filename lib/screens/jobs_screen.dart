@@ -989,7 +989,8 @@ class _JobsScreenState extends State<JobsScreen>
                           ),
                     ),
                     const SizedBox(width: 8),
-                    Expanded(
+                    Flexible(
+                      fit: FlexFit.loose,
                       child: PopupMenuButton<String>(
                         tooltip: tr('filterJobs'),
                         onSelected: (value) {
@@ -1095,7 +1096,7 @@ class _JobsScreenState extends State<JobsScreen>
                                     selected['color_hex']?.toString(),
                                   );
                             final label = _selectedStatus == '__open__'
-                                ? _text('Open jobs', 'Trabajos abiertos')
+                                ? _text('Open', 'Abiertos')
                                 : _selectedStatus == 'paid_still_open'
                                 ? _text(
                                     'Paid, Still Open',

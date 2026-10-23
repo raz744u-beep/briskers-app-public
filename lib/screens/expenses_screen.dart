@@ -18,6 +18,7 @@ import '../services/local_attachment_cache.dart';
 import '../services/local_financial_cache.dart';
 import '../services/invoice_payment_feed.dart';
 import '../services/expenses_period_totals.dart';
+import '../services/verified_expense_totals_cache.dart';
 import '../services/expenseiq_local_photo_sync.dart';
 import '../services/expenseiq_background_scheduler.dart';
 import '../widgets/briskers_page_header.dart';
@@ -581,6 +582,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final counterpartyId = _counterpartyFilterId;
     final scope = [
       businessId,
+      widget.roleCode,
       startDate?.toIso8601String() ?? '',
       endDate?.toIso8601String() ?? '',
       search,
@@ -590,12 +592,27 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       counterpartyId ?? '',
     ].join('|');
     if (offline) {
-      ++_periodEpoch;
+      final epoch = ++_periodEpoch;
       _pendingPeriodScope = null;
+      final saved = await const VerifiedExpenseTotalsCache().load(scope);
+      if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
+          businessId != widget.businessId) {
+        return;
+      }
       setState(() {
-        _periodTotals = null;
+        final sameScope = _lastPeriodScope == scope && _periodTotals != null;
+        if (saved != null) {
+          _periodTotals = saved.totals;
+          _lastPeriodScope = scope;
+          _lastPeriodAt = saved.at;
+        } else if (!sameScope) {
+          _periodTotals = null;
+          _lastPeriodAt = null;
+        }
         _periodCalculating = false;
-        _periodError = 'Complete totals require an online refresh.';
+        _periodError = _periodTotals == null
+          ? 'Complete totals require an online refresh.'
+          : 'Offline · last verified ${DateFormat('MMM d, yyyy h:mm a').format(_lastPeriodAt!)} · later changes excluded';
       });
       return;
     }
@@ -647,6 +664,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         _periodCalculating = false;
         _periodError = null;
       });
+      // Persistence failure cannot invalidate a successfully verified total.
+      try {
+        await const VerifiedExpenseTotalsCache().save(scope, totals, _lastPeriodAt!);
+      } catch (_) { /* Keep the verified in-memory result. */ }
     } catch (_) {
       if (!current()) return;
       setState(() {
@@ -1215,12 +1236,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final id = transaction['id']?.toString() ?? '';
     if (id.isEmpty) return;
     NavigationContentTiming.start('expense_detail');
+    var changed = false;
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => ExpenseDetailScreen(
           businessId: widget.businessId,
           transactionId: id,
+          onChanged: () => changed = true,
           allowRecurring: _allowRecurring,
           canDeleteTransaction: widget.roleCode == 'owner',
           // The tapped list row is safe to show as a non-editable preview.
@@ -1229,8 +1252,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    // Keep the cached list on screen while refreshing in the background.
-    unawaited(_load(showLoading: false));
+    // Reading a detail does not invalidate the entire list. Actual mutations
+    // refresh in the background while preserving the existing first frame.
+    if (changed && mounted) {
+      unawaited(_load(showLoading: false, forceTotals: true));
+    }
   }
 
   Future<void> _editTransactionFromList(String transactionId) async {

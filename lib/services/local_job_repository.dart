@@ -318,6 +318,21 @@ class LocalJobRepository {
     return rows.map(_jobListMap).toList();
   }
 
+  /// Customer navigation uses the same card projection as the main Jobs list.
+  Future<List<Map<String, dynamic>>> forCustomer(
+    String businessId, String customerId,
+  ) async {
+    await LocalJobRetirement.ensureSchema(_database);
+    final rows = await _database.customSelect(
+      "SELECT j.*, 0 AS open_findings, j.server_updated_at AS activity_at, "
+      "j.created_at AS job_date_at, NULL AS last_accessed_at "
+      "FROM local_jobs j WHERE j.business_id=? AND j.customer_id=? "
+      "AND ${_visibleJobSql('j')}",
+      variables: [Variable<String>(businessId), Variable<String>(customerId)],
+    ).get();
+    return rows.map(_jobListMap).toList();
+  }
+
   Future<String?> jobNumberForJob(String businessId, String jobId) async {
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;
@@ -555,7 +570,8 @@ class LocalJobRepository {
             'job_number': row.readNullable<String>('job_number'),
             'title': row.read<String>('title'),
             'customer_name': row.readNullable<String>('customer_name'),
-            'vehicle': row.readNullable<String>('vehicle_label'),
+            'vehicle_id': row.readNullable<String>('vehicle_id'),
+      'vehicle': row.readNullable<String>('vehicle_label'),
             'status': row.read<String>('status'),
             '_local_snapshot': true,
           },
@@ -872,6 +888,7 @@ class LocalJobRepository {
       'status_color': row.readNullable<String>('status_color'),
       'status_icon': row.readNullable<String>('status_icon'),
       'customer_name': row.readNullable<String>('customer_name'),
+      'vehicle_id': row.readNullable<String>('vehicle_id'),
       'vehicle': row.readNullable<String>('vehicle_label'),
       'planned_hours': row.data['planned_hours'],
       'assigned_employee': row.readNullable<String>('assigned_employee_name'),
