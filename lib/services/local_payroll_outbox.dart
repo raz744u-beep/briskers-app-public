@@ -284,7 +284,7 @@ class LocalPayrollOutbox {
           receipt.operationId != operationId ||
           receipt.amountCents != server['amount_cents'] ||
           !isUuid(receipt.transactionId) ||
-          !['posted', 'void'].contains(receipt.status)) {
+          !['posted', 'void', 'removed'].contains(receipt.status)) {
         throw StateError('Posting receipt does not match the frozen payment.');
       }
       await _db.customStatement(

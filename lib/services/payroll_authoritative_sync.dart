@@ -106,7 +106,9 @@ class PayrollAuthoritativeSync {
     );
     return includePending
         ? receipts
-        : receipts.where((r) => r['status'] != 'pending').toList();
+        : receipts
+              .where((r) => ['posted', 'void'].contains(r['status']))
+              .toList();
   }
 
   Future<int> pendingCount() async {
@@ -289,6 +291,45 @@ class PayrollAuthoritativeSync {
             }),
           ],
         );
+        // The server returns a complete history snapshot. Remember removals so
+        // an older local posting receipt cannot resurrect reclassified history.
+        final received = (state['receipts'] as List)
+            .map((r) => r['transaction_id'])
+            .toSet();
+        final known = await _db
+            .customSelect(
+              'SELECT transaction_id FROM payroll_receipt_cache WHERE business_id=? AND owner_id=?',
+              variables: _scope,
+            )
+            .get();
+        final knownIds = known
+            .map((r) => r.read<String>('transaction_id'))
+            .toSet();
+        final hasOutbox = await _db
+            .customSelect(
+              "SELECT name FROM sqlite_master WHERE type='table' AND name='local_payroll_outbox'",
+            )
+            .getSingleOrNull();
+        if (hasOutbox != null) {
+          final local = await _db
+              .customSelect(
+                'SELECT transaction_id FROM local_payroll_outbox WHERE business_id=? AND owner_user_id=? AND transaction_id IS NOT NULL',
+                variables: _scope,
+              )
+              .get();
+          knownIds.addAll(local.map((r) => r.read<String>('transaction_id')));
+        }
+        for (final id in knownIds.difference(received)) {
+          await _db.customStatement(
+            'INSERT INTO payroll_receipt_cache VALUES(?,?,?,?) ON CONFLICT(business_id,owner_id,transaction_id) DO UPDATE SET receipt_json=excluded.receipt_json',
+            [
+              businessId,
+              ownerUserId,
+              id,
+              jsonEncode({'transaction_id': id, 'status': 'removed'}),
+            ],
+          );
+        }
         for (final receipt in state['receipts'] as List) {
           await _db.customStatement(
             '''INSERT INTO payroll_receipt_cache VALUES(?,?,?,?)

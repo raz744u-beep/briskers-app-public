@@ -34,6 +34,9 @@ class PostingCatalogGateway extends fixture.CatalogGateway
   @override
   Future<PayrollPostingReceipt> post(Map<String, dynamic> payload) async {
     posts++;
+    state['receipts'] = [
+      {...payload, 'transaction_id': fixture.pid(80), 'status': 'posted'},
+    ];
     if (!lost) {
       lost = true;
       throw const SocketException('Lost reply');
@@ -133,6 +136,17 @@ void main() {
       expect((await queue.statuses()).single['state'], 'posted');
       expect(gateway.posts, 2);
       expect(find.textContaining('Posted • 2026-10-23'), findsOneWidget);
+      gateway.state['revision'] = 2;
+      gateway.state['receipts'] = <dynamic>[];
+      await tester.tap(find.byTooltip('Sync payroll'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Posted • 2026-10-23'), findsNothing);
+      expect(
+        find.text('No confirmed payroll receipts cached.'),
+        findsOneWidget,
+      );
+      expect(gateway.posts, 2); // A removed receipt never re-posts its expense.
+
       await tester.pumpWidget(const SizedBox());
       session.dispose();
       await db.close();

@@ -30,7 +30,7 @@ class LocalPayrollCheckProofService {
        _drafts = drafts ?? LocalPayrollDraftStore();
 
   static const int maxPhotoBytes = 20 * 1024 * 1024;
-  static const int maxPhotoPixels = 16 * 1024 * 1024;
+  static const int maxPhotoPixels = 16000000;
   static const String _folderName = 'briskers_private/payroll_check_proofs';
 
   final PayrollProofDirectoryProvider _directoryProvider;
@@ -194,9 +194,15 @@ class LocalPayrollCheckProofService {
       );
     }
 
-    if (extension == '.webp') {
-      // Normalize decoded WebP for the reviewed PNG/JPEG-only server contract.
-      bytes = Uint8List.fromList(image.encodePng(image.decodeImage(bytes)!));
+    if (extension == '.webp' || extension == '.png') {
+      // Canonical 8-bit PNG removes compressed metadata and bounds server decode.
+      bytes = Uint8List.fromList(
+        image.encodePng(
+          image
+              .decodeImage(bytes)!
+              .convert(format: image.Format.uint8, numChannels: 4),
+        ),
+      );
       extension = '.png';
       if (bytes.length > maxPhotoBytes) {
         throw const FormatException(

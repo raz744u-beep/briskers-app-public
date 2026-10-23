@@ -739,8 +739,8 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       final chosen = await ImagePicker().pickImage(
         source: source,
         imageQuality: 90,
-        maxWidth: 4096,
-        maxHeight: 4096,
+        maxWidth: 4000,
+        maxHeight: 4000,
         requestFullMetadata: false,
       );
       if (!mounted || !_authorized || chosen == null) return;

@@ -176,7 +176,7 @@ void main() {
   test(
     'void receipt is terminal and pending receipt never claims paid',
     () async {
-      for (final status in ['void', 'pending']) {
+      for (final status in ['void', 'removed', 'pending']) {
         final db = BriskersLocalDatabase(NativeDatabase.memory());
         final queue = LocalPayrollOutbox(
           database: db,
@@ -190,11 +190,11 @@ void main() {
           ..status = status;
         try {
           await queue.enqueue(draft(), method);
-          if (status == 'void') {
+          if (status != 'pending') {
             expect(await queue.syncOne(operation, server), false);
             expect(await queue.syncOne(operation, server), false);
             expect(server.calls, 1);
-            expect((await queue.statuses()).single['state'], 'void');
+            expect((await queue.statuses()).single['state'], status);
           } else {
             await expectLater(
               queue.syncOne(operation, server),

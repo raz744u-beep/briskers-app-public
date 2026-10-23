@@ -210,7 +210,7 @@ class _PayrollReceiptsScreenState extends State<PayrollReceiptsScreen> {
   ) {
     final known = receipts.map((r) => r['transaction_id']).toSet();
     _receipts = [
-      ...receipts.where((r) => r['status'] != 'pending'),
+      ...receipts.where((r) => ['posted', 'void'].contains(r['status'])),
       ...payments
           .where(
             (p) =>

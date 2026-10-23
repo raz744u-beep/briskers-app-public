@@ -123,7 +123,18 @@ void main() {
       );
       expect(submitted.checkProofDurablyStored, true);
       expect(submitted.checkProofSha256, matches(RegExp(r'^[a-f0-9]{64}$')));
-      expect(submitted.checkProofSizeBytes, png.length);
+      final canonical = await photos.readFrozenProofBytes(
+        isOwner: true,
+        ownerUserId: 'owner-1',
+        businessId: 'shop-1',
+        operationId: submitted.operationId,
+        digest: submitted.checkProofSha256!,
+        byteSize: submitted.checkProofSizeBytes!,
+      );
+      expect(submitted.checkProofSizeBytes, canonical.length);
+      final decoded = image.decodePng(canonical)!;
+      expect([decoded.width, decoded.height], [2, 2]);
+      expect(decoded.getPixel(0, 0).r, image.decodePng(png)!.getPixel(0, 0).r);
       expect(
         submitted.checkProofAttachmentId,
         'local-check-${submitted.checkProofSha256}',

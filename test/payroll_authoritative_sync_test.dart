@@ -107,6 +107,31 @@ PayrollAuthoritativeSync service(
 );
 void main() {
   test(
+    'complete snapshot removal leaves tombstone rather than stale paid history',
+    () async {
+      final db = BriskersLocalDatabase(NativeDatabase.memory());
+      final sync = service(db), gateway = CatalogGateway();
+      try {
+        await sync.synchronize(gateway);
+        expect(await sync.receipts(), hasLength(1));
+        gateway.state = snapshot(revision: 2);
+        gateway.state['receipts'] = <dynamic>[];
+        await sync.synchronize(gateway);
+        expect(await sync.receipts(), isEmpty);
+        expect(
+          (await sync.receipts(includePending: true)).single['status'],
+          'removed',
+        );
+        gateway.state = snapshot(revision: 3);
+        await sync.synchronize(gateway);
+        expect((await sync.receipts()).single['status'], 'posted');
+      } finally {
+        await db.close();
+      }
+    },
+  );
+
+  test(
     'settings conflict still refreshes void history and preserves pending edit',
     () async {
       final db = BriskersLocalDatabase(NativeDatabase.memory());

@@ -154,7 +154,7 @@ final class PayrollPostingGatewayV1
     _guard(frozenPayload);
     if (result is! Map ||
         result['amount_cents'] is! int ||
-        !['posted', 'void'].contains(result['status'])) {
+        !['posted', 'void', 'removed'].contains(result['status'])) {
       throw StateError('Invalid authoritative payroll receipt.');
     }
     return PayrollPostingReceipt(
