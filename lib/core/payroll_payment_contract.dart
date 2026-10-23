@@ -1,0 +1,151 @@
+/// Data-only foundation for #297 payroll payment methods.
+///
+/// This file deliberately does NOT post financial transactions, persist proof
+/// photos, grant permissions, or implement sync. Those operations require the
+/// reviewed shop-scoped backend contract described in
+/// docs/payroll-methods-implementation-contract.md.
+///
+/// Method IDs are shop-scoped identities. A method's display name may change;
+/// its [kind] must not be inferred from the name (especially for Check).
+enum PayrollPaymentMethodKind { cash, check, zelle, ach, custom }
+
+class PayrollPaymentMethod {
+  const PayrollPaymentMethod({
+    required this.id,
+    required this.businessId,
+    required this.label,
+    required this.kind,
+    required this.enabled,
+    required this.sortOrder,
+    required this.version,
+  });
+
+  final String id;
+  final String businessId;
+  final String label;
+  final PayrollPaymentMethodKind kind;
+  final bool enabled;
+  final int sortOrder;
+  final int version;
+
+  bool get requiresCheckPhoto => kind == PayrollPaymentMethodKind.check;
+}
+
+/// Select a saved employee default, or a one-time payment-level override.
+///
+/// No automatic fallback: a deleted/disabled/missing default requires explicit
+/// Owner choice. Existing historical payments keep their label snapshots.
+class PayrollPaymentMethodChoice {
+  const PayrollPaymentMethodChoice._();
+
+  static PayrollPaymentMethod? resolve({
+    required String businessId,
+    required List<PayrollPaymentMethod> methods,
+    String? employeeDefaultId,
+    String? paymentOverrideId,
+  }) {
+    final id = paymentOverrideId ?? employeeDefaultId;
+    if (id == null || id.trim().isEmpty) return null;
+
+    final matches = methods
+        .where((m) => m.id == id && m.businessId == businessId && m.enabled)
+        .toList();
+    // A duplicated ID is not a safe method choice.
+    return matches.length == 1 ? matches.single : null;
+  }
+}
+
+enum PayrollDraftProblem {
+  wrongShop,
+  paymentMethodUnavailable,
+  missingEmployee,
+  missingOperationId,
+  invalidAmount,
+  missingPayrollWeek,
+  checkProofNotDurable,
+  checkProofInvalid,
+}
+
+/// An intended payment, not proof that a payment has posted.
+///
+/// One stable operation ID must be reused on every offline replay. Persist the
+/// method ID AND label snapshot so renamed methods preserve older records.
+class PayrollPaymentDraft {
+  const PayrollPaymentDraft({
+    required this.businessId,
+    required this.employeeId,
+    required this.operationId,
+    required this.methodId,
+    required this.methodLabelSnapshot,
+    required this.amountCents,
+    required this.paymentDate,
+    required this.payrollWeekKey,
+    this.sourceAccountId,
+    this.reference,
+    this.checkProofAttachmentId,
+    this.checkProofDurablyStored = false,
+    this.checkProofSizeBytes,
+    this.checkProofSha256,
+  });
+
+  final String businessId;
+  final String employeeId;
+  final String operationId;
+  final String methodId;
+  final String methodLabelSnapshot;
+  final int amountCents;
+  final DateTime paymentDate;
+  final String payrollWeekKey;
+
+  /// A bank/cash account is NOT a payment method or an expense category.
+  final String? sourceAccountId;
+  final String? reference;
+
+  /// Identifiers for a proof already copied into durable private app storage.
+  /// This contract does not itself read or upload attachment bytes.
+  final String? checkProofAttachmentId;
+  final bool checkProofDurablyStored;
+  final int? checkProofSizeBytes;
+  final String? checkProofSha256;
+
+  List<PayrollDraftProblem> validateForSubmission(
+    PayrollPaymentMethod? method,
+  ) {
+    final problems = <PayrollDraftProblem>[];
+    if (businessId.trim().isEmpty ||
+        (method != null && method.businessId != businessId)) {
+      problems.add(PayrollDraftProblem.wrongShop);
+    }
+    if (method == null || !method.enabled || method.id != methodId ||
+        methodLabelSnapshot.trim().isEmpty) {
+      problems.add(PayrollDraftProblem.paymentMethodUnavailable);
+    }
+    if (employeeId.trim().isEmpty) {
+      problems.add(PayrollDraftProblem.missingEmployee);
+    }
+    if (operationId.trim().isEmpty) {
+      problems.add(PayrollDraftProblem.missingOperationId);
+    }
+    if (amountCents <= 0) {
+      problems.add(PayrollDraftProblem.invalidAmount);
+    }
+    if (payrollWeekKey.trim().isEmpty) {
+      problems.add(PayrollDraftProblem.missingPayrollWeek);
+    }
+
+    if (method?.requiresCheckPhoto == true) {
+      if (!checkProofDurablyStored ||
+          checkProofAttachmentId == null ||
+          checkProofAttachmentId!.trim().isEmpty) {
+        problems.add(PayrollDraftProblem.checkProofNotDurable);
+      }
+      if (checkProofSizeBytes == null ||
+          checkProofSizeBytes! <= 0 ||
+          checkProofSha256 == null ||
+          !RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(checkProofSha256!)) {
+        problems.add(PayrollDraftProblem.checkProofInvalid);
+      }
+    }
+    return List.unmodifiable(problems);
+  }
+}
