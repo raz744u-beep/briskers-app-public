@@ -316,7 +316,25 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   controller: _search,
                   hintText: tr('searchCustomers'),
                   leading: const Icon(Icons.search),
-                  onChanged: _onSearchChanged,
+                  trailing: [
+                    if (_search.text.isNotEmpty)
+                      IconButton(
+                        tooltip: 'Clear customer search',
+                        icon: const Icon(Icons.close),
+                        onPressed: () {
+                          _searchDebounce?.cancel();
+                          ++_loadRequest;
+                          ++_searchRequest; // invalidate any stale search
+                          _search.clear();
+                          setState(() {});
+                          _runSearch();
+                        },
+                      ),
+                  ],
+                  onChanged: (value) {
+                    setState(() {});
+                    _onSearchChanged(value);
+                  },
                   onSubmitted: (_) {
                     _searchDebounce?.cancel();
                     _runSearch();
