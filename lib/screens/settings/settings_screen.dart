@@ -10,6 +10,7 @@ import 'email_templates_settings_screen.dart';
 import 'diagnostics_screen.dart';
 import 'document_numbering_settings_screen.dart';
 import 'employees_settings_screen.dart';
+import 'payroll_access_screen.dart';
 import 'expense_settings_screen.dart';
 import 'job_statuses_settings_screen.dart';
 import 'kiosk_checkin_settings_screen.dart';
@@ -305,6 +306,19 @@ class SettingsScreen extends StatelessWidget {
               },
             ),
           const Divider(),
+          if (roleCode != 'owner')
+            ListTile(
+              leading: const Icon(Icons.payments_outlined),
+              title: const Text('My payroll'),
+              subtitle: const Text('Personal pay records and authorized payroll access'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => PayrollAccessScreen(businessId: businessId),
+                ),
+              ),
+            ),
           ListTile(
             leading: const Icon(
               Icons.people_alt_outlined,

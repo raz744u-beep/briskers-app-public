@@ -7,6 +7,7 @@ import '../core/payroll_payment_contract.dart';
 import '../core/supabase_config.dart';
 import 'local_payroll_outbox.dart';
 import 'payroll_authoritative_sync.dart';
+import 'payroll_personal_history.dart';
 
 /// Prepared transport for the private reviewed v1 contract. Deliberately not
 /// wired into the app. Deployment approval requires a separate reviewed source
@@ -15,7 +16,8 @@ final class PayrollPostingGatewayV1
     implements
         PayrollPostingGateway,
         PayrollAuthoritativeGateway,
-        PayrollPostingActivation {
+        PayrollPostingActivation,
+        PayrollRoleGateway {
   PayrollPostingGatewayV1({
     required this.businessId,
     required this.isContextCurrent,
@@ -170,6 +172,11 @@ final class PayrollPostingGatewayV1
     if (businessId != this.businessId) {
       throw StateError('Payroll scope mismatch.');
     }
+    await networkSupabase.rpc(
+      'briskers_initialize_payroll_methods_v1',
+      params: {'b': businessId},
+    );
+    _guard();
     final result = await networkSupabase.rpc(
       'briskers_payroll_state_v1',
       params: {'b': businessId},
@@ -193,5 +200,32 @@ final class PayrollPostingGatewayV1
       params: {'b': businessId, 'p': mutation},
     );
     _guard();
+  }
+
+  @override
+  Future<Map<String, dynamic>> fetchAccess(String shop) async {
+    if (!_deploymentApproved) return {'enabled': false};
+    _guard();
+    if (shop != businessId) throw StateError('Payroll scope mismatch.');
+    final value = await networkSupabase.rpc(
+      'briskers_payroll_access_v1',
+      params: {'b': shop},
+    );
+    _guard();
+    if (value is! Map) throw StateError('Invalid payroll access.');
+    return Map<String, dynamic>.from(value);
+  }
+
+  @override
+  Future<Map<String, dynamic>> fetchOwnHistory(String shop) async {
+    _guard();
+    if (shop != businessId) throw StateError('Payroll scope mismatch.');
+    final value = await networkSupabase.rpc(
+      'briskers_my_payroll_v1',
+      params: {'b': shop},
+    );
+    _guard();
+    if (value is! Map) throw StateError('Invalid personal payroll history.');
+    return Map<String, dynamic>.from(value);
   }
 }

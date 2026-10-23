@@ -13,10 +13,12 @@ class EmployeesSettingsScreen extends StatefulWidget {
     super.key,
     required this.businessId,
     required this.isOwner,
+    this.canManagePayroll = false,
   });
 
   final String businessId;
   final bool isOwner;
+  final bool canManagePayroll;
 
   @override
   State<EmployeesSettingsScreen> createState() =>
@@ -375,9 +377,9 @@ class _EmployeesSettingsScreenState
         icon: const Icon(Icons.groups_2_outlined),
         label: const Text('Manage'),
       ),
-      // Employee roster is already loaded here: reuse exact IDs for local-only
-      // draft preparation. Never expose an actual Pay/Posted action.
-      bottomNavigationBar: widget.isOwner && _employees != null
+      // Reuse exact roster IDs. Office access is granted by the payroll portal;
+      // the posting transport remains separately deployment-gated.
+      bottomNavigationBar: (widget.isOwner || widget.canManagePayroll) && _employees != null
           ? SafeArea(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -388,6 +390,7 @@ class _EmployeesSettingsScreenState
                       builder: (_) => PayrollDraftsScreen(
                         businessId: widget.businessId,
                         isOwner: widget.isOwner,
+                        isAuthorizedOffice: widget.canManagePayroll,
                         employees: _employees!,
                       ),
                     ),

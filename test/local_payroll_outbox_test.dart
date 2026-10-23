@@ -7,6 +7,7 @@ import 'package:briskers_app/services/local_payroll_draft_store.dart';
 import 'package:briskers_app/services/local_payroll_outbox.dart';
 import 'package:briskers_app/services/payroll_posting_gateway.dart';
 import 'package:drift/native.dart';
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 
 const employee = '00000000-0000-4000-8000-000000000001';
@@ -90,6 +91,8 @@ void main() {
         readProofBytes: (_) async => Uint8List(0),
       );
       expect(await adapter.supportsReviewedPayrollV1('shop'), false);
+      expect(await adapter.fetchAccess('shop'), {'enabled': false});
+      await expectLater(adapter.fetchOwnHistory('shop'), throwsStateError);
       await expectLater(adapter.registerMethod(method), throwsStateError);
       await expectLater(adapter.prepare({}), throwsStateError);
       await expectLater(adapter.post({}), throwsStateError);
@@ -202,6 +205,68 @@ void main() {
         } finally {
           await db.close();
         }
+      }
+    },
+  );
+
+  test(
+    'partial labor allocation survives draft restart and freezes with advance remainder',
+    () async {
+      final db = BriskersLocalDatabase(NativeDatabase.memory());
+      final store = LocalPayrollDraftStore(database: db);
+      final queue = LocalPayrollOutbox(
+        database: db,
+        businessId: 'shop',
+        ownerUserId: 'owner',
+        isContextCurrent: () => true,
+        verifyLocalProof: (_) async => true,
+      );
+      final payment = PayrollPaymentDraft(
+        businessId: 'shop',
+        employeeId: employee,
+        operationId: operation,
+        methodId: method.id,
+        methodLabelSnapshot: method.label,
+        amountCents: 50000,
+        paymentDate: DateTime(2026, 10, 23),
+        payrollWeekKey: '2026-10-19',
+        sourceAccountId: account,
+        laborAllocations: const [
+          PayrollLaborAllocation(laborId: transaction, amountCents: 20000),
+        ],
+      );
+      try {
+        await store.save(isOwner: true, ownerUserId: 'owner', draft: payment);
+        final loaded = (await LocalPayrollDraftStore(
+          database: db,
+        ).load(isOwner: true, businessId: 'shop', ownerUserId: 'owner')).single;
+        expect(loaded.laborAllocations.single.amountCents, 20000);
+        expect(
+          loaded.proofMatchesTerms(
+            businessId: 'shop',
+            employeeId: employee,
+            operationId: operation,
+            methodId: method.id,
+            amountCents: 50000,
+            paymentDate: payment.paymentDate,
+            payrollWeekKey: payment.payrollWeekKey,
+            sourceAccountId: account,
+            reference: null,
+          ),
+          false,
+        );
+        await queue.enqueue(loaded, method);
+        final row = await db
+            .customSelect('SELECT frozen_json FROM local_payroll_outbox')
+            .getSingle();
+        expect(
+          jsonDecode(row.read<String>('frozen_json'))['labor_allocations'],
+          [
+            {'labor_id': transaction, 'amount_cents': 20000},
+          ],
+        );
+      } finally {
+        await db.close();
       }
     },
   );

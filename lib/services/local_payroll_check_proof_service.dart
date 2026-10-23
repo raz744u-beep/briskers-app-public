@@ -240,6 +240,7 @@ class LocalPayrollCheckProofService {
         amountCents: draft.amountCents,
         paymentDate: draft.paymentDate,
         payrollWeekKey: draft.payrollWeekKey,
+        laborAllocations: draft.laborAllocations,
         sourceAccountId: draft.sourceAccountId,
         reference: draft.reference,
         checkProofAttachmentId: 'local-check-$digest',

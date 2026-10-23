@@ -127,6 +127,10 @@ class LocalPayrollOutbox {
       'payment_date':
           '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}',
       'payroll_week': draft.payrollWeekKey,
+      if (draft.laborAllocations.isNotEmpty)
+        'labor_allocations': draft.laborAllocations
+            .map((a) => a.toJson())
+            .toList(),
       'reference': draft.reference,
       'proof_id': method.requiresCheckPhoto
           ? draft.checkProofAttachmentId

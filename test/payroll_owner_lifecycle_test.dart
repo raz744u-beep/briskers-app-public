@@ -345,6 +345,7 @@ void main() {
     await tester.pumpAndSettle();
     final save = find.text('Save local draft — NOT PAID');
     await tester.ensureVisible(save);
+    await tester.pumpAndSettle();
     await tester.tap(save);
     await tester.pumpAndSettle();
     final saved = (await drafts.load(

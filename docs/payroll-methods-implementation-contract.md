@@ -1,7 +1,8 @@
 # Payroll methods — issue #297
 
-Status: Owner draft/configuration, authoritative catalog/default/history cache,
-confirmation, frozen outbox replay and receipt UI are implemented with a source
+Status: Owner/authorized-office drafts, authoritative catalog/default/history cache,
+confirmation, frozen outbox replay, earned-labor allocation and receipt UI are
+implemented with a source
 approval gate that remains **off**. No live payroll submission is enabled.
 
 Local methods have stable registration keys. Confirmed catalogs use distinct
@@ -10,7 +11,9 @@ pending configuration queue survive restart and are scoped to shop and actor.
 Add/rename/disable/reorder and employee defaults use immutable mutation IDs and
 optimistic versions. Conflicts retain pending edits while refreshing history.
 A per-payment override, separate source account and independent payroll week
-are supported. Unknown historical methods display Not recorded, without account
+are supported. Confirmed earned labor can receive full/partial allocations; Job
+labels must be cached before selection. Unallocated remainders remain advances
+or extra amounts. Task creation remains deferred to #305. Unknown historical methods display Not recorded, without account
 or current-label inference. Imported amounts/dates remain unchanged.
 
 With a separately approved backend and code activation, a saved payment requires
@@ -53,17 +56,18 @@ outside this public repository. They cover registration, permission checks,
 source/category separation, immutable proof, transaction replay, current ledger
 triggers, catalog defaults and historical labels. Actual localhost Auth,
 PostgREST, Storage and Edge tests passed with synthetic users/objects. No private
-schema is published here. The fixture is a selected schema with documented
+schema is published here. Reserved server registration keys seed Cash, Check,
+Zelle and ACH once per shop, preserving later renames/disabling across devices. The fixture is a selected schema with documented
 omitted unrelated foreign keys, not a full deployment rehearsal.
 
 Deployment still requires explicit approval, full migration/ACL review and a
 separate code activation. Historical customer-category repair also requires
-separate approval. The current artifact cannot post payroll. Remaining issue
-#297 implementation/acceptance work includes job/labor allocation selection and
-permission-aware office/mechanic entry points; do not close the issue on this
-Owner-only UI. Existing server contract tests cover partial/extra unallocated
-amounts and reject labor allocations exceeding earned balances. No Tasks #305
-implementation is included.
+separate approval. The current artifact cannot post payroll. Permission-aware office/mechanic entry points are implemented. Office management
+requires a fresh server grant; personal records are cached by actor/shop and
+exclude source accounts, proof URLs and company totals. Revocation/auth switching
+fails closed. Native camera/library HEIC acceptance, full migration/ACL validation,
+backend deployment/activation and Owner acceptance remain explicit gates.
+Reference-aware cleanup remains deliberately disabled under the policy above.
 
 ## Correction batch acceptance gates
 
@@ -77,8 +81,8 @@ implementation is included.
   and cross-device Owner acceptance pending.
 - #296 compact saved-data indication and Estimate tabs: client correction;
   Owner visual/navigation acceptance pending.
-- #297 gated client and private synthetic backend prepared. Allocation editor,
-  office/mechanic UI, full deployment validation, activation and Owner acceptance
+- #297 gated client, allocation editor, office/mechanic UI and private synthetic
+  backend prepared. Full deployment validation, activation and Owner acceptance
   remain open; live payroll is not enabled.
 
 Passing code/CI or producing an APK does not close these six issues. Signed

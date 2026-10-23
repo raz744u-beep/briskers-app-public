@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/payroll_payment_contract.dart';
 import '../../services/payroll_owner_session.dart';
 import '../../services/local_financial_cache.dart';
+import '../../services/local_job_repository.dart';
 import '../../services/local_payroll_outbox.dart';
 import '../../services/payroll_authoritative_sync.dart';
 import '../../services/payroll_posting_gateway.dart';
@@ -15,14 +16,16 @@ import '../../services/local_payroll_draft_store.dart';
 import '../../services/local_payroll_method_store.dart';
 import 'payroll_methods_screen.dart';
 import 'payroll_receipts_screen.dart';
+import 'payroll_allocation_dialog.dart';
 
-/// Owner-only, local-only preparation of payroll payments.
-/// NO financial transactions, payroll posting or server sync occurs here.
+/// Local-first payment preparation for Owner or server-authorized office.
+/// Production posting remains disabled until separate backend approval.
 class PayrollDraftsScreen extends StatefulWidget {
   const PayrollDraftsScreen({
     super.key,
     required this.businessId,
     required this.isOwner,
+    this.isAuthorizedOffice = false,
     required this.employees,
     this.ownerSession,
     this.draftStore,
@@ -37,6 +40,8 @@ class PayrollDraftsScreen extends StatefulWidget {
 
   final String businessId;
   final bool isOwner;
+  final bool isAuthorizedOffice;
+
   final List<Map<String, dynamic>> employees;
   final PayrollOwnerSession? ownerSession;
   final LocalPayrollDraftStore? draftStore;
@@ -62,7 +67,10 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
   late final LocalPayrollOutbox _outbox;
   late final PayrollPostingGateway _postingGateway;
   Set<String> _frozenOperations = {};
+  bool get _canManage => widget.isOwner || widget.isAuthorizedOffice;
   DateTime? _payrollPeriod;
+  List<PayrollLaborAllocation> _allocations = [];
+  List<Map<String, dynamic>> _eligibleLabor = [];
   bool get _postingApproved =>
       _postingGateway is PayrollPostingActivation &&
       (_postingGateway as PayrollPostingActivation).canQueueOffline;
@@ -89,7 +97,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
 
   String? get _ownerId => _session.ownerUserId;
   bool get _authorized =>
-      _session.allows(businessId: widget.businessId, isOwner: widget.isOwner);
+      _session.allows(businessId: widget.businessId, isOwner: _canManage);
 
   void _invalidate() {
     final dialog = _dialog;
@@ -101,6 +109,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       _hasServerCatalog = false;
       _frozenOperations = {};
       _payrollPeriod = null;
+      _allocations = [];
       _accounts = [];
       _sourceAccountId = null;
       _methods = [];
@@ -122,7 +131,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
   @override
   void didUpdateWidget(covariant PayrollDraftsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.businessId != widget.businessId || !widget.isOwner) {
+    if (oldWidget.businessId != widget.businessId || !_canManage) {
       _session.invalidate();
     }
   }
@@ -141,7 +150,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
         builder: (_) => _hasServerCatalog
             ? PayrollReceiptsScreen(
                 businessId: widget.businessId,
-                isOwner: widget.isOwner,
+                isOwner: _canManage,
                 employees: widget.employees,
                 synchronizer: _remote,
                 gateway: _remoteGateway,
@@ -150,7 +159,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
               )
             : PayrollMethodsScreen(
                 businessId: widget.businessId,
-                isOwner: widget.isOwner,
+                isOwner: _canManage,
                 employees: widget.employees,
               ),
       ),
@@ -181,10 +190,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
         widget.proofService ?? LocalPayrollCheckProofService(drafts: _drafts);
     _session =
         widget.ownerSession ??
-        PayrollOwnerSession(
-          businessId: widget.businessId,
-          isOwner: widget.isOwner,
-        );
+        PayrollOwnerSession(businessId: widget.businessId, isOwner: _canManage);
     _remote = widget.authoritativeSync;
     _remoteGateway =
         widget.authoritativeGateway ??
@@ -192,7 +198,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
           businessId: widget.businessId,
           isContextCurrent: () => _authorized,
           readProofBytes: (p) => _proofs.readFrozenProofBytes(
-            isOwner: widget.isOwner,
+            isOwner: _canManage,
             ownerUserId: _ownerId!,
             businessId: widget.businessId,
             operationId: p['operation_id'] as String,
@@ -218,7 +224,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
           ownerUserId: _ownerId ?? '',
           isContextCurrent: () => mounted && _authorized,
           verifyLocalProof: (d) => _proofs.isProofIntact(
-            isOwner: widget.isOwner,
+            isOwner: _canManage,
             ownerUserId: _ownerId!,
             draft: d,
           ),
@@ -280,13 +286,13 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       );
       if (!mounted || !_authorized) return;
       final methods = await _catalog.load(
-        isOwner: widget.isOwner,
+        isOwner: _canManage,
         businessId: widget.businessId,
         ownerUserId: _ownerId!,
       );
       if (!mounted || !_authorized) return;
       final defaults = await _catalog.defaults(
-        isOwner: widget.isOwner,
+        isOwner: _canManage,
         businessId: widget.businessId,
         ownerUserId: _ownerId!,
       );
@@ -357,6 +363,9 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
             .map((r) => r['operation_id'] as String)
             .toSet();
         _hasServerCatalog = confirmed;
+        _eligibleLabor = (remote?['eligible_labor'] as List? ?? [])
+            .map((r) => Map<String, dynamic>.from(r as Map))
+            .toList();
         _methods = effectiveMethods;
         _defaults = effectiveDefaults;
         _saved = rows;
@@ -384,6 +393,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       _methodId = null;
       _paymentDate = DateTime.now();
       _payrollPeriod = null;
+      _allocations = [];
       _selectedCheck = null;
       _amount.clear();
       _reference.clear();
@@ -397,7 +407,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     var intact = false;
     try {
       intact = await _proofs.isProofIntact(
-        isOwner: widget.isOwner,
+        isOwner: _canManage,
         ownerUserId: _ownerId!,
         draft: draft,
       );
@@ -415,6 +425,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       _methodId = draft.methodId;
       _paymentDate = draft.paymentDate.toLocal();
       _payrollPeriod = DateTime.tryParse(draft.payrollWeekKey);
+      _allocations = List.of(draft.laborAllocations);
       _selectedCheck = null;
       _amount.text = (draft.amountCents / 100).toStringAsFixed(2);
       _reference.text = draft.reference ?? '';
@@ -445,6 +456,12 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       return null;
     }
     final cents = (value * 100).round();
+    if (_allocations.fold<int>(0, (n, a) => n + a.amountCents) > cents) {
+      setState(
+        () => _message = 'Labor allocations cannot exceed the actual payment.',
+      );
+      return null;
+    }
     final previous = _editing;
     final reference = _reference.text.trim().isEmpty
         ? null
@@ -461,6 +478,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
           amountCents: cents,
           paymentDate: _paymentDate,
           payrollWeekKey: _weekStart,
+          laborAllocations: _allocations,
           sourceAccountId: _sourceAccountId,
           reference: reference,
         );
@@ -475,6 +493,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       amountCents: cents,
       paymentDate: _paymentDate,
       payrollWeekKey: _weekStart,
+      laborAllocations: _allocations,
       sourceAccountId: _sourceAccountId,
       reference: reference,
       checkProofAttachmentId: retainProof
@@ -496,7 +515,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       final editing = _editing;
       if (editing != null && _selectedCheck == null) {
         _proofIntact = await _proofs.isProofIntact(
-          isOwner: widget.isOwner,
+          isOwner: _canManage,
           ownerUserId: _ownerId!,
           draft: editing,
         );
@@ -542,6 +561,40 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     }
   }
 
+  Future<void> _editAllocations() async {
+    if (!_authorized || _busy || _employeeId == null) return;
+    final choices = <Map<String, dynamic>>[];
+    final jobs = LocalJobRepository();
+    for (final row in _eligibleLabor.where(
+      (l) => l['employee_id'] == _employeeId,
+    )) {
+      String? label;
+      try {
+        label = await jobs.jobNumberForJob(
+          widget.businessId,
+          row['job_id'] as String,
+        );
+      } catch (_) {
+        /* Unknown job labels require a cache refresh. */
+      }
+      if (!mounted || !_authorized) return;
+      if (label != null) choices.add({...row, 'job_label': label});
+    }
+    final route = DialogRoute<List<PayrollLaborAllocation>>(
+      context: context,
+      builder: (_) =>
+          PayrollAllocationDialog(labor: choices, selected: _allocations),
+    );
+    _dialog = route;
+    final selected = await Navigator.of(context).push(route);
+    _dialog = null;
+    if (!mounted || !_authorized || selected == null) return;
+    setState(() {
+      _allocations = selected;
+      _selectedCheck = null;
+    });
+  }
+
   Future<void> _confirmPayment(PayrollPaymentDraft draft) async {
     if (!_authorized || _busy || !_postingApproved || !_hasServerCatalog) {
       return;
@@ -558,6 +611,20 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       );
       return;
     }
+    if (draft.laborAllocations.any(
+      (a) => !_eligibleLabor.any(
+        (l) =>
+            l['labor_id'] == a.laborId &&
+            l['employee_id'] == draft.employeeId &&
+            (l['available_cents'] as int) >= a.amountCents,
+      ),
+    )) {
+      setState(
+        () => _message =
+            'Review unavailable or changed labor allocations before submitting.',
+      );
+      return;
+    }
     final method = matches.single;
     if (draft.validateForSubmission(method).isNotEmpty) {
       setState(
@@ -569,7 +636,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     if (method.requiresCheckPhoto) {
       try {
         await _proofs.readFrozenProofBytes(
-          isOwner: widget.isOwner,
+          isOwner: _canManage,
           ownerUserId: _ownerId!,
           businessId: widget.businessId,
           operationId: draft.operationId,
@@ -595,7 +662,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Confirm payroll payment'),
         content: Text(
-          '${_employeeName(draft.employeeId)}\nUSD ${(draft.amountCents / 100).toStringAsFixed(2)} via ${method.label}\nFrom: $source\nPayment date: ${DateFormat('yyyy-MM-dd').format(draft.paymentDate)}\nPayroll week: ${draft.payrollWeekKey}\n\nThe payment stays NOT PAID until a server receipt is confirmed. Submitted details cannot be edited.',
+          '${_employeeName(draft.employeeId)}\nUSD ${(draft.amountCents / 100).toStringAsFixed(2)} via ${method.label}\nFrom: $source\nPayment date: ${DateFormat('yyyy-MM-dd').format(draft.paymentDate)}\nPayroll week: ${draft.payrollWeekKey}\nLabor allocated: ${(draft.laborAllocations.fold<int>(0, (n, a) => n + a.amountCents) / 100).toStringAsFixed(2)} across ${draft.laborAllocations.length} earned rows\n\nThe payment stays NOT PAID until a server receipt is confirmed. Submitted details cannot be edited.',
         ),
         actions: [
           TextButton(
@@ -623,6 +690,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       amountCents: draft.amountCents,
       paymentDate: draft.paymentDate,
       payrollWeekKey: draft.payrollWeekKey,
+      laborAllocations: draft.laborAllocations,
       sourceAccountId: draft.sourceAccountId,
       reference: draft.reference,
       checkProofAttachmentId: draft.checkProofAttachmentId,
@@ -633,7 +701,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     var queued = false, posted = false;
     try {
       await _drafts.save(
-        isOwner: widget.isOwner,
+        isOwner: _canManage,
         ownerUserId: _ownerId!,
         draft: frozen,
         isContextCurrent: () => mounted && _authorized,
@@ -782,7 +850,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                           MaterialPageRoute<void>(
                             builder: (_) => PayrollReceiptsScreen(
                               businessId: widget.businessId,
-                              isOwner: widget.isOwner,
+                              isOwner: _canManage,
                               employees: widget.employees,
                               synchronizer: _remote,
                               gateway: _remoteGateway,
@@ -831,6 +899,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                         ? null
                         : (v) => setState(() {
                             _employeeId = v;
+                            _allocations = [];
                             _methodId = _defaults[v];
                             _selectedCheck = null;
                           }),
@@ -1026,6 +1095,18 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                             : 'Saved photo is unavailable or damaged. Choose a readable photo again.',
                       ),
                   ],
+                  OutlinedButton.icon(
+                    onPressed: _busy || _employeeId == null
+                        ? null
+                        : _editAllocations,
+                    icon: const Icon(Icons.link),
+                    label: Text(
+                      'Earned labor allocations (${_allocations.length})',
+                    ),
+                  ),
+                  const Text(
+                    'Unallocated amounts are advances or extra payments. Actual payment is recorded once.',
+                  ),
                   const SizedBox(height: 14),
                   FilledButton(
                     onPressed: _busy || !employeeKnown ? null : _saveDraft,

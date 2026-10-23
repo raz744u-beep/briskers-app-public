@@ -78,6 +78,7 @@ class LocalPayrollDraftStore {
     'amount_cents': draft.amountCents,
     'payment_date': draft.paymentDate.toUtc().toIso8601String(),
     'payroll_week_key': draft.payrollWeekKey,
+    'labor_allocations': draft.laborAllocations.map((a) => a.toJson()).toList(),
     'source_account_id': draft.sourceAccountId,
     'reference': draft.reference,
     'check_proof_attachment_id': draft.checkProofAttachmentId,
@@ -111,6 +112,13 @@ class LocalPayrollDraftStore {
         amountCents: amount,
         paymentDate: date,
         payrollWeekKey: json['payroll_week_key']?.toString() ?? '',
+        laborAllocations: (json['labor_allocations'] as List? ?? [])
+            .map(
+              (a) => PayrollLaborAllocation.fromJson(
+                Map<String, dynamic>.from(a as Map),
+              ),
+            )
+            .toList(),
         sourceAccountId: json['source_account_id']?.toString(),
         reference: json['reference']?.toString(),
         checkProofAttachmentId: json['check_proof_attachment_id']?.toString(),

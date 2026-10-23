@@ -71,6 +71,7 @@ class PayrollAuthoritativeSync {
             'confirmed': false,
             'methods': <dynamic>[],
             'employee_defaults': <dynamic>[],
+            'eligible_labor': <dynamic>[],
           }
         : {
             ...Map<String, dynamic>.from(
@@ -284,6 +285,7 @@ class PayrollAuthoritativeSync {
               'confirmed': true,
               'methods': state['methods'],
               'employee_defaults': state['employee_defaults'],
+              'eligible_labor': state['eligible_labor'] ?? <dynamic>[],
             }),
           ],
         );
@@ -342,6 +344,20 @@ class PayrollAuthoritativeSync {
           !employees.add(raw['employee_id'] as String) ||
           !ids.contains(raw['method_id'])) {
         throw StateError('Invalid employee default identity.');
+      }
+    }
+    final laborIds = <String>{};
+    for (final raw in state['eligible_labor'] as List? ?? []) {
+      if (raw is! Map ||
+          raw['business_id'] != businessId ||
+          !LocalPayrollOutbox.isUuid(raw['labor_id']?.toString() ?? '') ||
+          !LocalPayrollOutbox.isUuid(raw['employee_id']?.toString() ?? '') ||
+          !LocalPayrollOutbox.isUuid(raw['job_id']?.toString() ?? '') ||
+          !laborIds.add(raw['labor_id'] as String) ||
+          raw['available_cents'] is! int ||
+          raw['available_cents'] < 0 ||
+          DateTime.tryParse(raw['earned_on']?.toString() ?? '') == null) {
+        throw StateError('Invalid earned labor identity.');
       }
     }
     final receipts = <String>{};

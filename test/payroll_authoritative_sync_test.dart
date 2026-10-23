@@ -46,6 +46,7 @@ Map<String, dynamic> snapshot({
 
 class CatalogGateway implements PayrollAuthoritativeGateway {
   bool available = true, loseResponse = false;
+  bool rejectMutation = false;
   int applications = 0, fetches = 0;
   Map<String, dynamic> state = snapshot();
   final applied = <String, String>{};
@@ -64,6 +65,7 @@ class CatalogGateway implements PayrollAuthoritativeGateway {
     String businessId,
     Map<String, dynamic> change,
   ) async {
+    if (rejectMutation) throw StateError('Version conflict');
     final id = change['operation_id'] as String, encoded = jsonEncode(change);
     if (applied.containsKey(id)) {
       if (applied[id] != encoded) throw StateError('changed replay');
@@ -104,6 +106,37 @@ PayrollAuthoritativeSync service(
   isContextCurrent: context ?? () => true,
 );
 void main() {
+  test(
+    'settings conflict still refreshes void history and preserves pending edit',
+    () async {
+      final db = BriskersLocalDatabase(NativeDatabase.memory());
+      final sync = service(db), gateway = CatalogGateway();
+      try {
+        await sync.synchronize(gateway);
+        await sync.queueMutation({
+          'operation_id': pid(71),
+          'action': 'edit',
+          'method_id': pid(10),
+          'expected_version': 1,
+          'label': 'Pending name',
+          'enabled': true,
+          'sort_order': 0,
+        });
+        gateway.rejectMutation = true;
+        gateway.state = snapshot(revision: 2);
+        (gateway.state['receipts'] as List).single['status'] = 'void';
+        await expectLater(sync.synchronize(gateway), throwsStateError);
+        expect((await sync.receipts()).single['status'], 'void');
+        expect(await sync.pendingCount(), 1);
+        await sync.discardPendingEdits();
+        expect(await sync.pendingCount(), 0);
+        expect((await sync.receipts()).single['status'], 'void');
+      } finally {
+        await db.close();
+      }
+    },
+  );
+
   test(
     'authoritative IDs/defaults and unknown historical label survive offline restart',
     () async {
