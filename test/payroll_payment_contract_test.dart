@@ -196,7 +196,7 @@ void main() {
         methodLabelSnapshot: 'Company Check',
         checkProofAttachmentId: '/tmp/picked.jpg',
         checkProofSizeBytes: 60,
-        checkProofSha256: 'a' * 64,
+        checkProofSha256: 'a'.padRight(64, 'a'),
       ).validateForSubmission(methodCheck);
       expect(problems, contains(PayrollDraftProblem.checkProofNotDurable));
     });
@@ -209,7 +209,7 @@ void main() {
           checkProofAttachmentId: 'private-attachment-id',
           checkProofDurablyStored: true,
           checkProofSizeBytes: 125000,
-          checkProofSha256: 'F' * 64,
+          checkProofSha256: 'F'.padRight(64, 'F'),
         ).validateForSubmission(methodCheck),
         isEmpty,
       );
@@ -276,7 +276,7 @@ void main() {
         checkProofAttachmentId: 'proof',
         checkProofDurablyStored: true,
         checkProofSizeBytes: 1024,
-        checkProofSha256: '0' * 64,
+        checkProofSha256: '0'.padRight(64, '0'),
       );
       expect(p.methodLabelSnapshot, 'Check');
       expect(methodCheck.label, 'Company Check');
