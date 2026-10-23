@@ -196,9 +196,11 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
         _message = 'Saved locally as a draft. No payment was made.';
       });
       await _load();
-      if (mounted) setState(() {
-        _message = 'Saved locally as a draft. No payment was made.';
-      });
+      if (mounted) {
+        setState(() {
+          _message = 'Saved locally as a draft. No payment was made.';
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _message = 'Draft not saved: $error');
     } finally {
