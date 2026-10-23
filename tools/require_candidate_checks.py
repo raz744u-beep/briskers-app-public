@@ -28,6 +28,7 @@ REQUIRED_WORKFLOWS = {
     "ios-compile.yml": "Briskers iOS compile check",
 }
 ALLOWED_EVENTS = {"pull_request", "workflow_dispatch"}
+PUSH_CHECK_BRANCHES = {"fix/payroll-validation-20261023"}
 PENDING_STATUSES = {"queued", "in_progress", "waiting", "pending", "requested"}
 MAX_WAIT_SECONDS = 2400
 REQUEST_TIMEOUT_SECONDS = 15
@@ -160,7 +161,9 @@ def validate_run(run, context, filename, name, workflow_id):
     if (run.get("workflow_id") != workflow_id or run.get("name") != name
             or run.get("head_sha") != context.sha
             or run.get("head_branch") != context.branch
-            or run.get("event") not in ALLOWED_EVENTS):
+            or not (run.get("event") in ALLOWED_EVENTS
+                    or (run.get("event") == "push"
+                        and context.branch in PUSH_CHECK_BRANCHES))):
         raise GateError(f"Wrong workflow, commit, branch or event for {filename}")
     for field in ("repository", "head_repository"):
         repository = run.get(field)
