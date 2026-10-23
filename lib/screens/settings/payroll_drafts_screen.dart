@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -9,6 +7,8 @@ import '../../core/payroll_payment_contract.dart';
 import '../../services/local_job_access_history.dart';
 import '../../services/local_payroll_check_proof_service.dart';
 import '../../services/local_payroll_draft_store.dart';
+import '../../services/local_payroll_method_store.dart';
+import 'payroll_methods_screen.dart';
 
 /// Owner-only, local-only preparation of payroll payments.
 /// NO financial transactions, payroll posting or server sync occurs here.
@@ -33,11 +33,13 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
   final _proofs = LocalPayrollCheckProofService();
   final _amount = TextEditingController();
   final _reference = TextEditingController();
-  final _rng = Random.secure();
+  final _catalog = LocalPayrollMethodStore();
+  List<PayrollPaymentMethod> _methods = [];
+  Map<String, String> _defaults = {};
 
   List<PayrollPaymentDraft> _saved = const [];
   String? _employeeId;
-  String _methodId = 'draft-cash';
+  String? _methodId;
   DateTime _paymentDate = DateTime.now();
   String? _operationId;
   PayrollPaymentDraft? _editing;
@@ -46,26 +48,38 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
   bool _loading = true;
   String? _message;
 
-  String? get _ownerId => LocalJobAccessHistory.currentUserId;
-  bool get _authorized => widget.isOwner && _ownerId != null;
+  final String? _ownerId = LocalJobAccessHistory.currentUserId;
+  bool get _authorized =>
+      widget.isOwner &&
+      _ownerId != null &&
+      LocalJobAccessHistory.currentUserId == _ownerId;
 
-  PayrollPaymentMethod _method(String id) {
-    final names = <String, (String, PayrollPaymentMethodKind)>{
-      'draft-cash': ('Cash', PayrollPaymentMethodKind.cash),
-      'draft-check': ('Check', PayrollPaymentMethodKind.check),
-      'draft-zelle': ('Zelle', PayrollPaymentMethodKind.zelle),
-      'draft-ach': ('ACH / Bank Transfer', PayrollPaymentMethodKind.ach),
-    };
-    final choice = names[id] ?? names['draft-cash']!;
-    return PayrollPaymentMethod(
-      id: id, businessId: widget.businessId,
-      label: choice.$1, kind: choice.$2,
-      enabled: true, sortOrder: 0, version: 1,
+  PayrollPaymentMethod? get _selectedMethod =>
+      PayrollPaymentMethodChoice.resolve(
+        businessId: widget.businessId,
+        methods: _methods,
+        paymentOverrideId: _methodId,
+      );
+
+  Future<void> _configureMethods() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PayrollMethodsScreen(
+          businessId: widget.businessId,
+          isOwner: widget.isOwner,
+          employees: widget.employees,
+        ),
+      ),
     );
+    if (mounted) await _load();
   }
 
   String get _weekStart {
-    final day = DateTime(_paymentDate.year, _paymentDate.month, _paymentDate.day);
+    final day = DateTime(
+      _paymentDate.year,
+      _paymentDate.month,
+      _paymentDate.day,
+    );
     final start = day.subtract(Duration(days: day.weekday - DateTime.monday));
     return DateFormat('yyyy-MM-dd').format(start);
   }
@@ -92,32 +106,54 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
 
   Future<void> _load() async {
     if (!_authorized) {
-      if (mounted) setState(() { _loading = false; _message = 'Owner sign-in required.'; });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _message = 'Owner sign-in required.';
+        });
+      }
       return;
     }
     try {
       final rows = await _drafts.load(
-        isOwner: true, businessId: widget.businessId, ownerUserId: _ownerId!,
+        isOwner: true,
+        businessId: widget.businessId,
+        ownerUserId: _ownerId!,
       );
-      if (!mounted) return;
+      final methods = await _catalog.load(
+        isOwner: widget.isOwner,
+        businessId: widget.businessId,
+        ownerUserId: _ownerId,
+      );
+      final defaults = await _catalog.defaults(
+        isOwner: widget.isOwner,
+        businessId: widget.businessId,
+        ownerUserId: _ownerId,
+      );
+      if (!mounted || !_authorized) return;
       setState(() {
+        _methods = methods;
+        _defaults = defaults;
         _saved = rows;
         _loading = false;
         _message = null;
       });
     } catch (error) {
-      if (mounted) setState(() { _loading = false; _message = error.toString(); });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _message = error.toString();
+        });
+      }
     }
   }
 
   void _startNew() {
-    final now = DateTime.now().toUtc().microsecondsSinceEpoch;
-    final suffix = _rng.nextInt(1 << 32).toRadixString(16);
     setState(() {
       _editing = null;
-      _operationId = 'local-payroll-$now-$suffix';
+      _operationId = LocalPayrollMethodStore.newIdentity();
       _employeeId = null;
-      _methodId = 'draft-cash';
+      _methodId = null;
       _paymentDate = DateTime.now();
       _selectedCheck = null;
       _amount.clear();
@@ -141,31 +177,49 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
   }
 
   PayrollPaymentDraft? _draftFromForm() {
+    final method = _selectedMethod;
     final id = _employeeId;
     final op = _operationId;
     final raw = _amount.text.trim();
     final value = double.tryParse(raw);
-    if (id == null || id.isEmpty || op == null || op.isEmpty ||
-        value == null || !value.isFinite || value <= 0 ||
+    if (method == null ||
+        id == null ||
+        id.isEmpty ||
+        !widget.employees.any((e) => e['id']?.toString() == id) ||
+        op == null ||
+        op.isEmpty ||
+        value == null ||
+        !value.isFinite ||
+        value <= 0 ||
         !RegExp(r'^\d{1,8}(?:\.\d{1,2})?$').hasMatch(raw)) {
-      setState(() => _message = 'Choose an employee and enter a valid amount.');
+      setState(
+        () => _message =
+            'Choose an employee, an enabled method and a valid amount.',
+      );
       return null;
     }
     final cents = (value * 100).round();
     final previous = _editing;
-    final retainProof = previous != null &&
-        previous.methodId == _methodId && _selectedCheck == null;
+    final retainProof =
+        previous != null &&
+        previous.methodId == _methodId &&
+        _selectedCheck == null;
     return PayrollPaymentDraft(
       businessId: widget.businessId,
       employeeId: id,
       operationId: op,
-      methodId: _methodId,
-      methodLabelSnapshot: _method(_methodId).label,
+      methodId: method.id,
+      methodLabelSnapshot: previous?.methodId == method.id
+          ? previous!.methodLabelSnapshot
+          : method.label,
       amountCents: cents,
       paymentDate: _paymentDate,
       payrollWeekKey: _weekStart,
+      sourceAccountId: previous?.sourceAccountId,
       reference: _reference.text.trim().isEmpty ? null : _reference.text.trim(),
-      checkProofAttachmentId: retainProof ? previous.checkProofAttachmentId : null,
+      checkProofAttachmentId: retainProof
+          ? previous.checkProofAttachmentId
+          : null,
       checkProofDurablyStored: retainProof && previous.checkProofDurablyStored,
       checkProofSizeBytes: retainProof ? previous.checkProofSizeBytes : null,
       checkProofSha256: retainProof ? previous.checkProofSha256 : null,
@@ -176,17 +230,22 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     if (!_authorized || _busy) return;
     final draft = _draftFromForm();
     if (draft == null) return;
-    setState(() { _busy = true; _message = null; });
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
     try {
-      if (_methodId == 'draft-check' && _selectedCheck != null) {
+      if (_selectedMethod?.requiresCheckPhoto == true &&
+          _selectedCheck != null) {
         await _proofs.stageForDraft(
-          isOwner: true, ownerUserId: _ownerId!, draft: draft,
-          method: _method(_methodId), selectedPhoto: _selectedCheck!,
+          isOwner: true,
+          ownerUserId: _ownerId!,
+          draft: draft,
+          method: _selectedMethod!,
+          selectedPhoto: _selectedCheck!,
         );
       } else {
-        await _drafts.save(
-          isOwner: true, ownerUserId: _ownerId!, draft: draft,
-        );
+        await _drafts.save(isOwner: true, ownerUserId: _ownerId!, draft: draft);
       }
       if (!mounted) return;
       setState(() {
@@ -214,10 +273,13 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       if (!mounted || chosen == null) return;
       setState(() {
         _selectedCheck = chosen;
-        _message = 'Photo selected. Save draft to keep it securely on this device.';
+        _message =
+            'Photo selected. Save draft to keep it securely on this device.';
       });
     } catch (error) {
-      if (mounted) setState(() => _message = 'Photo could not be selected: $error');
+      if (mounted) {
+        setState(() => _message = 'Photo could not be selected: $error');
+      }
     }
   }
 
@@ -227,21 +289,29 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Discard unpaid draft?'),
-        content: const Text('This only discards the local draft. No posted payment or accounting record is touched.'),
+        content: const Text(
+          'This only discards the local draft. No posted payment or accounting record is touched.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true),
-              child: const Text('Discard draft')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Discard draft'),
+          ),
         ],
       ),
     );
-    if (accepted != true || !mounted) return;
+    if (accepted != true || !mounted || !_authorized) return;
     setState(() => _busy = true);
     try {
       await _drafts.discard(
-        isOwner: true, businessId: widget.businessId,
-        ownerUserId: _ownerId!, operationId: draft.operationId,
+        isOwner: true,
+        businessId: widget.businessId,
+        ownerUserId: _ownerId!,
+        operationId: draft.operationId,
       );
       await _load();
     } catch (error) {
@@ -256,7 +326,8 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     final staff = widget.employees
         .where((e) => e['id']?.toString().isNotEmpty == true)
         .toList();
-    final employeeKnown = _employeeId == null ||
+    final employeeKnown =
+        _employeeId == null ||
         staff.any((e) => e['id']?.toString() == _employeeId);
     return Scaffold(
       appBar: AppBar(title: const Text('Payroll Drafts')),
@@ -270,20 +341,30 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                 const Card(
                   child: Padding(
                     padding: EdgeInsets.all(12),
-                    child: Row(children: [
-                      Icon(Icons.lock_outline),
-                      SizedBox(width: 10),
-                      Expanded(child: Text(
-                        'Draft only — NOT PAID. Nothing here creates an expense, sends a payment or syncs payroll.',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      )),
-                    ]),
+                    child: Row(
+                      children: [
+                        Icon(Icons.lock_outline),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Draft only — NOT PAID. Nothing here creates an expense, sends a payment or syncs payroll.',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                if (_message != null) Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text(_message!),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _configureMethods,
+                  icon: const Icon(Icons.tune),
+                  label: const Text('Payment methods & employee defaults'),
                 ),
+                if (_message != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(_message!),
+                  ),
                 if (_operationId == null)
                   FilledButton.icon(
                     onPressed: _busy ? null : _startNew,
@@ -292,69 +373,115 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                   )
                 else ...[
                   const SizedBox(height: 8),
-                  Text('Prepare unpaid draft', style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    'Prepare unpaid draft',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     key: ValueKey('employee-$_employeeId'),
                     initialValue: employeeKnown ? _employeeId : null,
                     decoration: const InputDecoration(
-                      labelText: 'Employee', border: OutlineInputBorder(),
+                      labelText: 'Employee',
+                      border: OutlineInputBorder(),
                     ),
-                    items: staff.map((e) => DropdownMenuItem<String>(
-                      value: e['id'].toString(),
-                      child: Text(e['name']?.toString() ?? 'Employee'),
-                    )).toList(),
-                    onChanged: _busy ? null : (v) => setState(() => _employeeId = v),
+                    items: staff
+                        .map(
+                          (e) => DropdownMenuItem<String>(
+                            value: e['id'].toString(),
+                            child: Text(e['name']?.toString() ?? 'Employee'),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: _busy
+                        ? null
+                        : (v) => setState(() {
+                            _employeeId = v;
+                            _methodId = _defaults[v];
+                            _selectedCheck = null;
+                          }),
                   ),
-                  if (!employeeKnown) const Padding(
-                    padding: EdgeInsets.only(top: 5),
-                    child: Text('This employee is not in the loaded roster. Saving is disabled.'),
-                  ),
+                  if (!employeeKnown)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 5),
+                      child: Text(
+                        'This employee is not in the loaded roster. Saving is disabled.',
+                      ),
+                    ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     key: ValueKey('method-$_methodId'),
-                    initialValue: _methodId,
+                    initialValue: _selectedMethod?.id,
+                    isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'Payment method (draft choice)',
                       border: OutlineInputBorder(),
                     ),
-                    items: const [
-                      DropdownMenuItem(value: 'draft-cash', child: Text('Cash')),
-                      DropdownMenuItem(value: 'draft-check', child: Text('Check')),
-                      DropdownMenuItem(value: 'draft-zelle', child: Text('Zelle')),
-                      DropdownMenuItem(value: 'draft-ach', child: Text('ACH / Bank Transfer')),
-                    ],
-                    onChanged: _busy ? null : (v) {
-                      if (v != null) setState(() { _methodId = v; _selectedCheck = null; });
-                    },
+                    items: _methods
+                        .where((m) => m.enabled)
+                        .map(
+                          (m) => DropdownMenuItem(
+                            value: m.id,
+                            child: Text(m.label),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: _busy
+                        ? null
+                        : (v) {
+                            if (v != null) {
+                              setState(() {
+                                _methodId = v;
+                                _selectedCheck = null;
+                              });
+                            }
+                          },
                   ),
+                  if (_selectedMethod == null)
+                    const Text(
+                      'Choose a method. Unavailable or older draft choices are never inferred.',
+                    ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: _amount,
                     enabled: !_busy,
                     decoration: const InputDecoration(
-                      labelText: 'Amount (USD)', prefixText: '\$ ',
+                      labelText: 'Amount (USD)',
+                      prefixText: '\$ ',
                       border: OutlineInputBorder(),
                     ),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
-                    onPressed: _busy ? null : () async {
-                      final chosen = await showDatePicker(
-                        context: context,
-                        initialDate: _paymentDate,
-                        firstDate: DateTime(2015),
-                        lastDate: DateTime(2100),
-                      );
-                      if (chosen != null && mounted) setState(() => _paymentDate = chosen);
-                    },
+                    onPressed: _busy
+                        ? null
+                        : () async {
+                            final chosen = await showDatePicker(
+                              context: context,
+                              initialDate: _paymentDate,
+                              firstDate: DateTime(2015),
+                              lastDate: DateTime(2100),
+                            );
+                            if (chosen != null && mounted) {
+                              setState(() => _paymentDate = chosen);
+                            }
+                          },
                     icon: const Icon(Icons.calendar_month_outlined),
-                    label: Text('Payment date: ${DateFormat('MMM d, yyyy').format(_paymentDate)}'),
+                    label: Text(
+                      'Payment date: ${DateFormat('MMM d, yyyy').format(_paymentDate)}',
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text('Payroll week starts $_weekStart'),
+                  const Text(
+                    'Category: Payroll. Source cash/bank account must be verified separately before posting becomes available.',
+                  ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: _reference,
@@ -364,25 +491,37 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                       border: OutlineInputBorder(),
                     ),
                   ),
-                  if (_methodId == 'draft-check') ...[
+                  if (_selectedMethod?.requiresCheckPhoto == true) ...[
                     const SizedBox(height: 12),
-                    const Text('Check photo is required before future payment posting.'),
-                    Wrap(spacing: 8, children: [
-                      OutlinedButton.icon(
-                        onPressed: _busy ? null : () => _choosePhoto(ImageSource.camera),
-                        icon: const Icon(Icons.photo_camera_outlined),
-                        label: const Text('Take photo'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _busy ? null : () => _choosePhoto(ImageSource.gallery),
-                        icon: const Icon(Icons.photo_library_outlined),
-                        label: const Text('Choose photo'),
-                      ),
-                    ]),
+                    const Text(
+                      'Check photo is required before future payment posting.',
+                    ),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () => _choosePhoto(ImageSource.camera),
+                          icon: const Icon(Icons.photo_camera_outlined),
+                          label: const Text('Take photo'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () => _choosePhoto(ImageSource.gallery),
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: const Text('Choose photo'),
+                        ),
+                      ],
+                    ),
                     if (_selectedCheck != null)
                       Text('Selected: ${_selectedCheck!.name}'),
-                    if (_selectedCheck == null && _editing?.checkProofDurablyStored == true)
-                      const Text('Existing saved proof retained if the method is unchanged.'),
+                    if (_selectedCheck == null &&
+                        _editing?.checkProofDurablyStored == true)
+                      const Text(
+                        'Existing saved proof retained if the method is unchanged.',
+                      ),
                   ],
                   const SizedBox(height: 14),
                   FilledButton(
@@ -390,12 +529,21 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                     child: const Text('Save local draft — NOT PAID'),
                   ),
                   TextButton(
-                    onPressed: _busy ? null : () => setState(() { _operationId = null; _editing = null; _selectedCheck = null; }),
+                    onPressed: _busy
+                        ? null
+                        : () => setState(() {
+                            _operationId = null;
+                            _editing = null;
+                            _selectedCheck = null;
+                          }),
                     child: const Text('Cancel editing'),
                   ),
                 ],
                 const Divider(height: 36),
-                Text('Saved local drafts', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'Saved local drafts',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 if (_saved.isEmpty)
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 14),
@@ -406,20 +554,25 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                     child: ListTile(
                       leading: const Icon(Icons.edit_note_outlined),
                       title: Text(_employeeName(d.employeeId)),
-                      subtitle: Text('${d.methodLabelSnapshot} · ${DateFormat('MMM d, yyyy').format(d.paymentDate.toLocal())}\nNOT PAID · Local only'),
+                      subtitle: Text(
+                        '${d.methodLabelSnapshot.trim().isEmpty ? 'Unknown / Not recorded' : d.methodLabelSnapshot} · ${DateFormat('MMM d, yyyy').format(d.paymentDate.toLocal())}\nNOT PAID · Local only',
+                      ),
                       isThreeLine: true,
-                      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                        IconButton(
-                          tooltip: 'Edit unpaid draft',
-                          onPressed: _busy ? null : () => _openDraft(d),
-                          icon: const Icon(Icons.edit_outlined),
-                        ),
-                        IconButton(
-                          tooltip: 'Discard unpaid draft',
-                          onPressed: _busy ? null : () => _discard(d),
-                          icon: const Icon(Icons.delete_outline),
-                        ),
-                      ]),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'Edit unpaid draft',
+                            onPressed: _busy ? null : () => _openDraft(d),
+                            icon: const Icon(Icons.edit_outlined),
+                          ),
+                          IconButton(
+                            tooltip: 'Discard unpaid draft',
+                            onPressed: _busy ? null : () => _discard(d),
+                            icon: const Icon(Icons.delete_outline),
+                          ),
+                        ],
+                      ),
                       onTap: _busy ? null : () => _openDraft(d),
                     ),
                   ),

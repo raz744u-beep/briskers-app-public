@@ -20,7 +20,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 CANDIDATE_BRANCH = "release/offline-first-stability-post-b2373-20261021"
-CANDIDATE_BRANCHES = {CANDIDATE_BRANCH, "fix/post-b2382-ux-polish-20261021"}
+CANDIDATE_BRANCHES = {CANDIDATE_BRANCH, "fix/post-b2382-ux-polish-20261021",
+                      "fix/payroll-validation-20261023"}
 BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
 REQUIRED_WORKFLOWS = {
     "diagnostics.yml": "Briskers Diagnostics",

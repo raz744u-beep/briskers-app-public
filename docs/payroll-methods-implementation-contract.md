@@ -1,9 +1,62 @@
 # Payroll methods — issue #297
 
-Status: specification complete; payment UI/sync not implemented on this branch.
-This correction branch has employee settings and manual financial transactions,
-but no payroll payment entity, task payroll workflow, or payroll proof upload
-contract. Do not treat a local settings preference as a completed payroll system.
+Status: Owner-only local draft preparation and local method configuration are
+implemented; server payroll registration/posting/sync remain unavailable.
+Settings → Employees → Payroll Drafts → Payment methods & employee defaults
+supports add, rename, disable, reorder, durable UUID identities, and per-employee
+defaults with a per-draft override. Local configuration is isolated by shop and
+Owner. These UUIDs are not proof of server registration and are never submitted.
+Older provisional draft methods require an explicit new choice; no automatic
+mapping by name. Renames leave saved draft label snapshots unchanged. Imported
+payments are untouched; unknown historical methods must not be inferred.
+
+No financial outbox, actual payment, upload or payroll expense is enabled. Local
+source account IDs are preserved when editing, but account selection/validation
+and verified Payroll category resolution still require the backend contract.
+Check photos remain app-private device copies, not remotely verified attachments.
+The screen says NOT PAID. This is not completion of #297.
+
+## Remaining backend gate
+
+A read-only function inventory on October 23 found the customer payment RPC but
+no payroll/proof RPC in the app schemas. Before implementing a posting adapter,
+review a private backend contract for method registration/reconciliation, stable
+operation UUIDs, employee membership, eligible source accounts, Payroll category,
+Owner/authorized-office permissions, proof ownership/checksum/private storage,
+and atomic idempotent ledger posting. Validate against an isolated current schema
+with synthetic fixtures: concurrency, lost responses, restart, cross-device
+replay, permission denial and exactly one expense per operation. No guessed RPC
+or raw client ledger insert is an acceptable fallback. Local UUIDs need explicit
+server acceptance or a durable ID mapping before any submission can be enabled.
+Backend deployment and any historical repair require separate approval.
+
+## Correction batch acceptance gates
+
+- #292 compact Jobs filter: client correction; Owner visual acceptance pending.
+- #293 Customers category: 24 local synthetic PostgreSQL assertions pass. Patch
+  and guarded repair remain review-only; current-schema trigger/concurrency and
+  fee-report integration validation, deployment and real repair are not done.
+- #294 canonical mechanic display: client correction; Owner acceptance pending.
+- #295 consolidated local Service History: client correction; offline/reconnect
+  and cross-device Owner acceptance pending.
+- #296 compact saved-data indication and Estimate tabs: client correction;
+  Owner visual/navigation acceptance pending.
+- #297 local draft/configuration only; backend, financial outbox/posting, secure
+  upload, authorized-office/mechanic views and Owner acceptance remain open.
+
+Passing code/CI or producing an APK does not close these six issues. Signed
+regular candidate preparation does not authorize installation or deployment.
+
+## Phase 2 (#305) reconciliation — deferred
+
+After all six corrections and Owner acceptance: invoice-first optional Main
+Mechanic; durable labor-line Tasks; separate editable billed hours and mechanic
+estimates; read-only summed Job estimates; preserved completed tasks on recheck;
+Work Completed history with nickname/actual hours and universal offline search;
+no standalone Work Performed log. Profitability stays Owner-only and excludes
+company-only processing fees/interest. Define behavior for *uncustomized* Task
+estimates when billed hours change before implementation. No Tasks code is part
+of this continuation and neither existing device app is modified.
 
 ## Data and entry behavior
 
