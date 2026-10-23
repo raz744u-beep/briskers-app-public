@@ -147,7 +147,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     final value = double.tryParse(raw);
     if (id == null || id.isEmpty || op == null || op.isEmpty ||
         value == null || !value.isFinite || value <= 0 ||
-        !RegExp(r'^\d{1,8}(?:\.\d{1,2})?).hasMatch(raw)) {
+        !RegExp(r'^\d{1,8}(?:\.\d{1,2})?$').hasMatch(raw)) {
       setState(() => _message = 'Choose an employee and enter a valid amount.');
       return null;
     }
