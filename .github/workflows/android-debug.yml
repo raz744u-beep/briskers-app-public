@@ -763,6 +763,8 @@ jobs:
             "$APKSIGNER" verify --verbose --print-certs "$APK"
             printf '%s\n' "$BADGING" | head -1
           } > "${APK%.apk}.verification.txt"
+          echo "APK SHA-256 (build provenance):"
+          sha256sum "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

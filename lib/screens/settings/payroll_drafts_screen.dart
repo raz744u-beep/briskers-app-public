@@ -4,7 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/payroll_payment_contract.dart';
-import '../../services/local_job_access_history.dart';
+import '../../services/payroll_owner_session.dart';
 import '../../services/local_payroll_check_proof_service.dart';
 import '../../services/local_payroll_draft_store.dart';
 import '../../services/local_payroll_method_store.dart';
@@ -18,22 +18,33 @@ class PayrollDraftsScreen extends StatefulWidget {
     required this.businessId,
     required this.isOwner,
     required this.employees,
+    this.ownerSession,
+    this.draftStore,
+    this.methodStore,
+    this.proofService,
   });
 
   final String businessId;
   final bool isOwner;
   final List<Map<String, dynamic>> employees;
+  final PayrollOwnerSession? ownerSession;
+  final LocalPayrollDraftStore? draftStore;
+  final LocalPayrollMethodStore? methodStore;
+  final LocalPayrollCheckProofService? proofService;
 
   @override
   State<PayrollDraftsScreen> createState() => _PayrollDraftsScreenState();
 }
 
 class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
-  final _drafts = LocalPayrollDraftStore();
-  final _proofs = LocalPayrollCheckProofService();
+  late final LocalPayrollDraftStore _drafts;
+  late final LocalPayrollCheckProofService _proofs;
+  late final PayrollOwnerSession _session;
+  Route<dynamic>? _dialog;
+  bool _proofIntact = false;
   final _amount = TextEditingController();
   final _reference = TextEditingController();
-  final _catalog = LocalPayrollMethodStore();
+  late final LocalPayrollMethodStore _catalog;
   List<PayrollPaymentMethod> _methods = [];
   Map<String, String> _defaults = {};
 
@@ -48,11 +59,40 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
   bool _loading = true;
   String? _message;
 
-  final String? _ownerId = LocalJobAccessHistory.currentUserId;
+  String? get _ownerId => _session.ownerUserId;
   bool get _authorized =>
-      widget.isOwner &&
-      _ownerId != null &&
-      LocalJobAccessHistory.currentUserId == _ownerId;
+      _session.allows(businessId: widget.businessId, isOwner: widget.isOwner);
+
+  void _invalidate() {
+    final dialog = _dialog;
+    _dialog = null;
+    if (dialog?.navigator != null) dialog!.navigator!.removeRoute(dialog);
+    if (!mounted) return;
+    setState(() {
+      _saved = [];
+      _methods = [];
+      _defaults = {};
+      _employeeId = null;
+      _methodId = null;
+      _operationId = null;
+      _editing = null;
+      _selectedCheck = null;
+      _proofIntact = false;
+      _amount.clear();
+      _reference.clear();
+      _busy = false;
+      _loading = false;
+      _message = 'Owner session changed. Reopen payroll after signing in.';
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant PayrollDraftsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId || !widget.isOwner) {
+      _session.invalidate();
+    }
+  }
 
   PayrollPaymentMethod? get _selectedMethod =>
       PayrollPaymentMethodChoice.resolve(
@@ -62,6 +102,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       );
 
   Future<void> _configureMethods() async {
+    if (!_authorized || _busy) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => PayrollMethodsScreen(
@@ -94,11 +135,24 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
   @override
   void initState() {
     super.initState();
+    _drafts = widget.draftStore ?? LocalPayrollDraftStore();
+    _catalog = widget.methodStore ?? LocalPayrollMethodStore();
+    _proofs =
+        widget.proofService ?? LocalPayrollCheckProofService(drafts: _drafts);
+    _session =
+        widget.ownerSession ??
+        PayrollOwnerSession(
+          businessId: widget.businessId,
+          isOwner: widget.isOwner,
+        );
+    _session.addListener(_invalidate);
     _load();
   }
 
   @override
   void dispose() {
+    _session.removeListener(_invalidate);
+    if (widget.ownerSession == null) _session.dispose();
     _amount.dispose();
     _reference.dispose();
     super.dispose();
@@ -106,7 +160,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
 
   Future<void> _load() async {
     if (!_authorized) {
-      if (mounted) {
+      if (mounted && _authorized) {
         setState(() {
           _loading = false;
           _message = 'Owner sign-in required.';
@@ -120,15 +174,17 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
         businessId: widget.businessId,
         ownerUserId: _ownerId!,
       );
+      if (!mounted || !_authorized) return;
       final methods = await _catalog.load(
         isOwner: widget.isOwner,
         businessId: widget.businessId,
-        ownerUserId: _ownerId,
+        ownerUserId: _ownerId!,
       );
+      if (!mounted || !_authorized) return;
       final defaults = await _catalog.defaults(
         isOwner: widget.isOwner,
         businessId: widget.businessId,
-        ownerUserId: _ownerId,
+        ownerUserId: _ownerId!,
       );
       if (!mounted || !_authorized) return;
       setState(() {
@@ -139,7 +195,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
         _message = null;
       });
     } catch (error) {
-      if (mounted) {
+      if (mounted && _authorized) {
         setState(() {
           _loading = false;
           _message = error.toString();
@@ -149,8 +205,10 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
   }
 
   void _startNew() {
+    if (!_authorized || _busy) return;
     setState(() {
       _editing = null;
+      _proofIntact = false;
       _operationId = LocalPayrollMethodStore.newIdentity();
       _employeeId = null;
       _methodId = null;
@@ -162,8 +220,23 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     });
   }
 
-  void _openDraft(PayrollPaymentDraft draft) {
+  Future<void> _openDraft(PayrollPaymentDraft draft) async {
+    if (!_authorized || _busy) return;
+    setState(() => _busy = true);
+    var intact = false;
+    try {
+      intact = await _proofs.isProofIntact(
+        isOwner: widget.isOwner,
+        ownerUserId: _ownerId!,
+        draft: draft,
+      );
+    } catch (_) {
+      /* Unreadable proof must not be presented as valid. */
+    }
+    if (!mounted || !_authorized) return;
     setState(() {
+      _busy = false;
+      _proofIntact = intact;
       _editing = draft;
       _operationId = draft.operationId;
       _employeeId = draft.employeeId;
@@ -200,10 +273,24 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     }
     final cents = (value * 100).round();
     final previous = _editing;
+    final reference = _reference.text.trim().isEmpty
+        ? null
+        : _reference.text.trim();
     final retainProof =
         previous != null &&
-        previous.methodId == _methodId &&
-        _selectedCheck == null;
+        _proofIntact &&
+        _selectedCheck == null &&
+        previous.proofMatchesTerms(
+          businessId: widget.businessId,
+          employeeId: id,
+          operationId: op,
+          methodId: method.id,
+          amountCents: cents,
+          paymentDate: _paymentDate,
+          payrollWeekKey: _weekStart,
+          sourceAccountId: previous.sourceAccountId,
+          reference: reference,
+        );
     return PayrollPaymentDraft(
       businessId: widget.businessId,
       employeeId: id,
@@ -216,7 +303,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
       paymentDate: _paymentDate,
       payrollWeekKey: _weekStart,
       sourceAccountId: previous?.sourceAccountId,
-      reference: _reference.text.trim().isEmpty ? null : _reference.text.trim(),
+      reference: reference,
       checkProofAttachmentId: retainProof
           ? previous.checkProofAttachmentId
           : null,
@@ -228,13 +315,22 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
 
   Future<void> _saveDraft() async {
     if (!_authorized || _busy) return;
-    final draft = _draftFromForm();
-    if (draft == null) return;
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
+      final editing = _editing;
+      if (editing != null && _selectedCheck == null) {
+        _proofIntact = await _proofs.isProofIntact(
+          isOwner: widget.isOwner,
+          ownerUserId: _ownerId!,
+          draft: editing,
+        );
+      }
+      if (!mounted || !_authorized) return;
+      final draft = _draftFromForm();
+      if (draft == null) return;
       if (_selectedMethod?.requiresCheckPhoto == true &&
           _selectedCheck != null) {
         await _proofs.stageForDraft(
@@ -243,11 +339,17 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
           draft: draft,
           method: _selectedMethod!,
           selectedPhoto: _selectedCheck!,
+          isContextCurrent: () => mounted && _authorized,
         );
       } else {
-        await _drafts.save(isOwner: true, ownerUserId: _ownerId!, draft: draft);
+        await _drafts.save(
+          isOwner: true,
+          ownerUserId: _ownerId!,
+          draft: draft,
+          isContextCurrent: () => mounted && _authorized,
+        );
       }
-      if (!mounted) return;
+      if (!mounted || !_authorized) return;
       setState(() {
         _editing = null;
         _operationId = null;
@@ -255,7 +357,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
         _message = 'Saved locally as a draft. No payment was made.';
       });
       await _load();
-      if (mounted) {
+      if (mounted && _authorized) {
         setState(() {
           _message = 'Saved locally as a draft. No payment was made.';
         });
@@ -268,16 +370,17 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
   }
 
   Future<void> _choosePhoto(ImageSource source) async {
+    if (!_authorized || _busy) return;
     try {
       final chosen = await ImagePicker().pickImage(source: source);
-      if (!mounted || chosen == null) return;
+      if (!mounted || !_authorized || chosen == null) return;
       setState(() {
         _selectedCheck = chosen;
         _message =
             'Photo selected. Save draft to keep it securely on this device.';
       });
     } catch (error) {
-      if (mounted) {
+      if (mounted && _authorized) {
         setState(() => _message = 'Photo could not be selected: $error');
       }
     }
@@ -287,23 +390,27 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
     if (!_authorized || _busy) return;
     final accepted = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Discard unpaid draft?'),
-        content: const Text(
-          'This only discards the local draft. No posted payment or accounting record is touched.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+      builder: (context) {
+        _dialog = ModalRoute.of(context);
+        return AlertDialog(
+          title: const Text('Discard unpaid draft?'),
+          content: const Text(
+            'This only discards the local draft. No posted payment or accounting record is touched.',
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Discard draft'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Discard draft'),
+            ),
+          ],
+        );
+      },
     );
+    _dialog = null;
     if (accepted != true || !mounted || !_authorized) return;
     setState(() => _busy = true);
     try {
@@ -312,6 +419,7 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
         businessId: widget.businessId,
         ownerUserId: _ownerId!,
         operationId: draft.operationId,
+        isContextCurrent: () => mounted && _authorized,
       );
       await _load();
     } catch (error) {
@@ -519,8 +627,10 @@ class _PayrollDraftsScreenState extends State<PayrollDraftsScreen> {
                       Text('Selected: ${_selectedCheck!.name}'),
                     if (_selectedCheck == null &&
                         _editing?.checkProofDurablyStored == true)
-                      const Text(
-                        'Existing saved proof retained if the method is unchanged.',
+                      Text(
+                        _proofIntact
+                            ? 'Saved photo verified. Changing payment details requires choosing the photo again.'
+                            : 'Saved photo is unavailable or damaged. Choose a readable photo again.',
                       ),
                   ],
                   const SizedBox(height: 14),

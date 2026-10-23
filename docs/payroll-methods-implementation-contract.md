@@ -10,11 +10,40 @@ Older provisional draft methods require an explicit new choice; no automatic
 mapping by name. Renames leave saved draft label snapshots unchanged. Imported
 payments are untouched; unknown historical methods must not be inferred.
 
-No financial outbox, actual payment, upload or payroll expense is enabled. Local
+An isolated durable outbox engine now freezes an operation and proof manifest
+in one SQLite transaction. It rejects changed payloads and draft edits/discard
+after enqueue; restart/lost-response retries reuse the stored server method
+mapping and operation. It requires an explicitly reviewed gateway capability,
+and only an authoritative matching receipt marks the queue posted. The app has
+no active gateway or enqueue/post UI: this is tested integration groundwork.
+No actual payment, upload or payroll expense is enabled. Local
 source account IDs are preserved when editing, but account selection/validation
 and verified Payroll category resolution still require the backend contract.
 Check photos remain app-private device copies, not remotely verified attachments.
 The screen says NOT PAID. This is not completion of #297.
+
+Owner route identity and shop are captured at entry. Auth changes revoke that
+route permanently, clear sensitive state and dismiss confirmation dialogs; late
+loads/photo results cannot repopulate it. Every write uses the captured actor,
+with context rechecks after awaits. These guards supplement server authorization.
+
+Check proof is decoded and checksum-verified on reopening/saving. Header-only or
+truncated images cannot qualify. Changing employee, operation, method, amount,
+calendar date, payroll week, account or reference invalidates reuse. The Owner
+must choose/reconfirm the photo for the changed terms. JPEG/PNG/WebP decoding is
+supported locally within size/pixel limits; HEIC fails closed pending a verified
+cross-platform conversion path. No unsupported bytes are marked verified.
+
+### Proof retention and cleanup policy
+
+No automatic deletion is enabled. A future cleanup transaction must collect all
+references from drafts, frozen operations, proof queues and acknowledged server
+records, including pending/submitted records. Preserve any referenced file and
+all unknown states. Only unreferenced versions of explicitly discarded unpaid
+drafts may be proposed for deletion after a grace period, with a per-operation
+filesystem lock shared with staging and a final reference check. Server proofs
+remain immutable; retention/deletion requires a separate reviewed policy. Draft
+discard currently removes the draft row and deliberately retains private bytes.
 
 ## Remaining backend gate
 
@@ -108,3 +137,8 @@ A required unavailable server capability must fail closed with a saved draft.
    payroll amounts/dates/employee identities. Exercise tenant/role isolation.
 
 Do not enable payroll posting based solely on client-side validation.
+
+The prepared v1 transport has a source-level closed deployment gate. It cannot
+be enabled by a server response or setting and is not attached to a submit
+action. Private server/Storage verifier proposals are tested separately and
+require backend approval and integration validation before activation.

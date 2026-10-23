@@ -108,6 +108,35 @@ class PayrollPaymentDraft {
   final int? checkProofSizeBytes;
   final String? checkProofSha256;
 
+  /// A saved Check photo only describes these exact payment terms. A method
+  /// rename is display-only; changes to the payee or payment require a new photo
+  /// selection/reconfirmation. The caller must also verify the actual bytes.
+  bool proofMatchesTerms({
+    required String businessId,
+    required String employeeId,
+    required String operationId,
+    required String methodId,
+    required int amountCents,
+    required DateTime paymentDate,
+    required String payrollWeekKey,
+    required String? sourceAccountId,
+    required String? reference,
+  }) {
+    final oldDate = this.paymentDate.toLocal();
+    final newDate = paymentDate.toLocal();
+    return this.businessId == businessId &&
+        this.employeeId == employeeId &&
+        this.operationId == operationId &&
+        this.methodId == methodId &&
+        this.amountCents == amountCents &&
+        this.payrollWeekKey == payrollWeekKey &&
+        this.sourceAccountId == sourceAccountId &&
+        this.reference == reference &&
+        oldDate.year == newDate.year &&
+        oldDate.month == newDate.month &&
+        oldDate.day == newDate.day;
+  }
+
   List<PayrollDraftProblem> validateForSubmission(
     PayrollPaymentMethod? method,
   ) {
@@ -116,7 +145,9 @@ class PayrollPaymentDraft {
         (method != null && method.businessId != businessId)) {
       problems.add(PayrollDraftProblem.wrongShop);
     }
-    if (method == null || !method.enabled || method.id != methodId ||
+    if (method == null ||
+        !method.enabled ||
+        method.id != methodId ||
         methodLabelSnapshot.trim().isEmpty) {
       problems.add(PayrollDraftProblem.paymentMethodUnavailable);
     }
