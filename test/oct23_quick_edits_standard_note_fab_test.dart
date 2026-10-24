@@ -7,8 +7,8 @@ void main() {
     final source =
         File('lib/screens/jobs/standard_note_editor_sheet.dart').readAsStringSync();
     expect(source, contains('MediaQuery.viewInsetsOf(context).bottom'));
-    expect(source, contains('maintainBottomViewPadding: true'));
-    expect(source, contains('minimum: const EdgeInsets.only(bottom: 8)'));
+    expect(source, contains('maintainBottomViewPadding: false'));
+    expect(source, contains('minimum: EdgeInsets.only(bottom: keyboardOpen ? 0 : 8)'));
     final footer = source.indexOf('standard-note-submit');
     expect(source.lastIndexOf('SafeArea(', footer), greaterThan(0));
   });
@@ -52,4 +52,30 @@ void main() {
           reason: path);
     }
   });
+  test('Auto Jobs keeps initial list render separate from network refresh', () {
+    final source = File('lib/screens/jobs_screen.dart').readAsStringSync();
+    expect(source, contains('_jobsRemoteRefreshRunning'));
+    expect(source, contains('await readSavedJobs(online: !refreshRemote && _onlineReady)'));
+    expect(source, contains('unawaited(() async {'));
+  });
+
+  test('New Estimate form does not prefetch customers before first paint', () {
+    final source =
+        File('lib/screens/jobs/blank_invoice_setup_screen.dart').readAsStringSync();
+    final init = source.substring(
+      source.indexOf('void initState()'),
+      source.indexOf('void dispose()'),
+    );
+    expect(init, contains('_loading = false;'));
+    expect(init, isNot(contains('_loadCustomers();')));
+    expect(source, contains('const Duration(milliseconds: 350)'));
+  });
+
+  test('Expenses restores verified complete-period totals during refresh', () {
+    final source = File('lib/screens/expenses_screen.dart').readAsStringSync();
+    expect(source, contains('VerifiedExpenseTotalsCache().load(scope)'));
+    expect(source, contains('Refreshing previously verified totals'));
+    expect(source, contains('ExpensesPeriodTotals.calculate('));
+  });
+
 }
