@@ -135,6 +135,36 @@ class _JobsScreenState extends State<JobsScreen>
       widget.roleCode == 'manager' ||
       widget.roleCode == 'office';
 
+  // Serializes best-effort background replay so rapid consecutive local edits
+  // cannot start overlapping flushes of the same pending outbox entries.
+  bool _quickEditSyncRunning = false;
+  bool _quickEditSyncRequested = false;
+
+  void _scheduleQuickEditSync() {
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    _quickEditSyncRequested = true;
+    if (_quickEditSyncRunning) return;
+    _quickEditSyncRunning = true;
+    final businessId = widget.businessId;
+    unawaited(() async {
+      try {
+        while (_quickEditSyncRequested &&
+            !BriskersConnectionModeController.instance.forceOffline) {
+          _quickEditSyncRequested = false;
+          try {
+            await _offlineJobAdmin.flush(businessId);
+          } catch (_) {
+            // Leave the outbox entry pending for ordinary sync retry.
+            return;
+          }
+        }
+      } finally {
+        _quickEditSyncRunning = false;
+      }
+    }());
+  }
+
+
   @override
   void initState() {
     super.initState();
@@ -489,17 +519,16 @@ class _JobsScreenState extends State<JobsScreen>
 
     setState(() => _busyJobId = job['id']?.toString());
     try {
-      List<Map<String, dynamic>> employees;
-      if (_onlineReady) {
+      // The previously saved employee list is the first source of truth
+      // for opening the picker. Never block the first tap on a network call.
+      var employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
+      if (employees.isEmpty &&
+          !BriskersConnectionModeController.instance.forceOffline) {
         try {
-          employees = await _offlineJobAdmin.refreshEmployees(
-            widget.businessId,
-          );
+          employees = await _offlineJobAdmin.refreshEmployees(widget.businessId);
         } catch (_) {
-          employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
+          // Retain offline-only behavior when the network is unavailable.
         }
-      } else {
-        employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
       }
 
       if (!mounted) return;
@@ -576,16 +605,11 @@ class _JobsScreenState extends State<JobsScreen>
         position: selectedEmployee?['position_name']?.toString(),
       );
 
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {
-          // The local change remains queued for the next successful sync.
-        }
-      }
-
-      await _load();
+      // Publish the durable local change immediately. A slow server response
+      // must not keep the pencil editor blocked or delay the updated card.
+      await _load(refreshRemote: false);
       widget.onJobsChanged?.call();
+      _scheduleQuickEditSync();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -667,15 +691,9 @@ class _JobsScreenState extends State<JobsScreen>
         job['id'].toString(),
         value,
       );
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {
-          // The local change remains queued for the next successful sync.
-        }
-      }
-      await _load();
+      await _load(refreshRemote: false);
       widget.onJobsChanged?.call();
+      _scheduleQuickEditSync();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
