@@ -46,7 +46,7 @@ class ExpensesScreen extends StatefulWidget {
 }
 
 class _ExpensesScreenState extends State<ExpensesScreen>
-    with ModuleModalState<ExpensesScreen> {
+    with ModuleModalState<ExpensesScreen>, WidgetsBindingObserver {
   @override
   Color get modalAccent => BriskersColors.expenses;
   static const _api = BriskersApi();
@@ -128,6 +128,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   void initState() {
     super.initState();
     _scrollController.addListener(_handleScroll);
+    WidgetsBinding.instance.addObserver(this);
     _load();
     _refreshPhotoCounts();
     if (_owner && Platform.isAndroid) {
@@ -184,7 +185,18 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    // Returning from background may follow a successful app-wide sync.
+    // Refresh the scope automatically without clearing the visible list.
+    // Force Offline is handled by _load and never invokes remote requests.
+    unawaited(_load(showLoading: false, forceTotals: true));
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchDebounce?.cancel();
     _photoCountTimer?.cancel();
     _scrollController.dispose();
@@ -631,6 +643,24 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _periodCalculating = true;
       _periodError = null;
     });
+    // Restore the last *complete, exact-scope* snapshot before awaiting an
+    // expensive network calculation. A cold start must not forget a verified
+    // value merely because its first online request times out.
+    try {
+      final saved = await const VerifiedExpenseTotalsCache().load(scope);
+      if (saved != null && mounted && epoch == _periodEpoch &&
+          _pendingPeriodScope == scope && widget.businessId == businessId &&
+          _showFinancialSummary) {
+        setState(() {
+          _periodTotals = saved.totals;
+          _lastPeriodScope = scope;
+          _lastPeriodAt = saved.at;
+          _periodError = 'Last verified totals · updating';
+        });
+      }
+    } catch (_) {
+      // Failure to read cache must not prevent a fresh server calculation.
+    }
     bool current() =>
         mounted && epoch == _periodEpoch &&
         _pendingPeriodScope == scope &&
@@ -674,9 +704,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         _pendingPeriodScope = null;
         // A previously verified same-scope total is retained only if we
         // explicitly label it as historical, never silently as current.
-        if (!sameScope) _periodTotals = null;
+        if (_lastPeriodScope != scope) _periodTotals = null;
         _periodCalculating = false;
-        _periodError = sameScope
+        _periodError = _periodTotals != null && _lastPeriodScope == scope
             ? 'Showing last verified totals; refresh failed.'
             : 'Complete totals are unavailable. Refresh to retry.';
       });
