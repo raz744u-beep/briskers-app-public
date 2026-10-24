@@ -116,6 +116,19 @@ class CandidateGateTests(unittest.TestCase):
         self.assertEqual(len(self.messages), 2)
         self.assertTrue(all(SHA in message for message in self.messages))
 
+    def test_payroll_push_checks_require_exact_identity_and_success(self):
+        context = gate.Context(CONTEXT.repository, CONTEXT.repository_id,
+                               "fix/payroll-validation-20261023", SHA)
+        run = run_fixture("diagnostics.yml", event="push", head_branch=context.branch)
+        self.assertTrue(gate.validate_run(run, context, "diagnostics.yml",
+                                         "Briskers Diagnostics", 10))
+        for changes in [{"head_sha": OTHER_SHA}, {"head_branch": "main"},
+                        {"conclusion": "failure"}, {"repository": {"id": 999}},
+                        {"workflow_id": 99}, {"event": "pull_request_target"}]:
+            with self.subTest(changes=changes), self.assertRaises(gate.GateError):
+                gate.validate_run({**run, **changes}, context, "diagnostics.yml",
+                                  "Briskers Diagnostics", 10)
+
     def test_workflow_dispatch_is_allowed(self):
         self.api.runs["ios-compile.yml"][0]["event"] = "workflow_dispatch"
         self.wait()

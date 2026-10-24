@@ -26,6 +26,7 @@ import '../../services/local_job_repository.dart';
 import '../../services/local_job_access_history.dart';
 import '../../services/job_performance_metrics.dart';
 import '../../services/job_profitability_summary.dart';
+import '../../services/owner_job_profitability_cache.dart';
 import '../../widgets/job_profitability_summary_view.dart';
 import '../../widgets/work_performed_editor_sheet.dart';
 import '../../services/invoice_labor_work_summary.dart';
@@ -91,6 +92,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
   Map<String, dynamic>? _job;
   Map<String, dynamic>? _profitability;
+  DateTime? _profitabilityVerifiedAt;
+  bool _profitabilityFromCache = false;
+  final OwnerJobProfitabilityCache _profitabilityCache = const OwnerJobProfitabilityCache();
   Map<String, dynamic>? _preInspection;
   List<Map<String, dynamic>> _employees = const [];
   List<Map<String, dynamic>> _statuses = const [];
@@ -134,6 +138,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       _contentBlocked = true;
       _job = null;
       _profitability = null;
+      _profitabilityVerifiedAt = null;
+      _profitabilityFromCache = false;
       _profitabilityError = null;
       _preInspection = null;
       _employees = const [];
@@ -339,6 +345,11 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final forceOffline =
         BriskersConnectionModeController.instance.forceOffline;
 
+    if (!forceOnline && _owner) {
+      // Read the last permission-scoped verified snapshot without blocking Job.
+      unawaited(_loadCachedProfitability(epoch));
+    }
+
     if (!forceOnline) {
       try {
       final snapshot = await _localJobs.jobDetail(
@@ -468,7 +479,11 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             widget.businessId,
             widget.jobId,
           );
+          if (JobProfitabilitySummary.fromRpc(profitability) != null) {
+            _saveVerifiedProfitability(profitability);
+          }
         } catch (_) {
+          // Keep the last verified snapshot; never invent missing costs.
           profitability = null;
         }
       }
@@ -648,7 +663,13 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       if (!_currentLoad(epoch)) return;
       setState(() {
         _job = job;
-        _profitability = profitability;
+        if (profitability != null &&
+            JobProfitabilitySummary.fromRpc(profitability) != null) {
+          _profitability = profitability;
+          _profitabilityFromCache = false;
+          _profitabilityVerifiedAt = DateTime.now();
+          _profitabilityError = null;
+        }
         _preInspection = preInspection;
         _employees = employees;
         _statuses = statuses;
@@ -3959,16 +3980,20 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              _profitabilityError == null
-                  ? 'Profitability could not be loaded.'
-                  : 'Profitability could not be loaded.\n\n$_profitabilityError',
+              BriskersConnectionModeController.instance.forceOffline
+                  ? 'No previously verified profitability is saved for this job on this device. Connect once to load accurate totals.'
+                  : (_profitabilityError == null
+                      ? 'Profitability is not available yet.'
+                      : 'Profitability could not be loaded.\n\n$_profitabilityError'),
             ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _reloadProfitability,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Try again'),
-            ),
+            if (!BriskersConnectionModeController.instance.forceOffline) ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _reloadProfitability,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try again'),
+              ),
+            ],
           ],
         ),
       );
@@ -3995,6 +4020,18 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (_profitabilityFromCache && _profitabilityVerifiedAt != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Last verified ${DateFormat('MMM d, yyyy h:mm a').format(_profitabilityVerifiedAt!)} — saved snapshot, not live. Detailed expenses require online access.',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.deepOrange,
+                  ),
+                ),
+              ),
             JobProfitabilitySummaryView(
               summary: summary,
               formatMoney: _money,
@@ -4790,23 +4827,66 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
   }
 
+  void _saveVerifiedProfitability(Map<String, dynamic> data) {
+    if (!_owner || JobProfitabilitySummary.fromRpc(data) == null) return;
+    final userId = LocalJobAccessHistory.currentUserId;
+    if (userId == null) return;
+    unawaited(_profitabilityCache.save(
+      widget.businessId, userId, widget.jobId, data,
+    ));
+  }
+
+  Future<void> _loadCachedProfitability(int epoch) async {
+    if (!_owner) return;
+    final userId = LocalJobAccessHistory.currentUserId;
+    if (userId == null) return;
+    try {
+      final saved = await _profitabilityCache.load(
+        widget.businessId, userId, widget.jobId,
+      );
+      if (!_currentLoad(epoch) || saved == null || _profitability != null) {
+        return;
+      }
+      setState(() {
+        _profitability = saved.data;
+        _profitabilityFromCache = true;
+        _profitabilityVerifiedAt = saved.at;
+        _profitabilityError = null;
+      });
+      _modalRefresh?.call();
+    } catch (_) {
+      // No verified snapshot must not block the Job screen.
+    }
+  }
+
   Future<void> _reloadProfitability() async {
     if (!_owner) return;
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      // A blocked network request is not a useful Retry in Force Offline.
+      await _loadCachedProfitability(_loadEpoch);
+      return;
+    }
     try {
       final data = await _api.jobProfitability(
         widget.businessId,
         widget.jobId,
       );
       if (!mounted) return;
+      final valid = JobProfitabilitySummary.fromRpc(data) != null;
       setState(() {
-        _profitability = data;
-        _profitabilityError = null;
+        if (valid) {
+          _profitability = data;
+          _profitabilityFromCache = false;
+          _profitabilityVerifiedAt = DateTime.now();
+        }
+        _profitabilityError = valid ? null : 'Accounting totals are incomplete.';
       });
+      if (valid) _saveVerifiedProfitability(data);
       _modalRefresh?.call();
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _profitabilityError = error.toString();
+        if (_profitability == null) _profitabilityError = error.toString();
       });
       _modalRefresh?.call();
     }

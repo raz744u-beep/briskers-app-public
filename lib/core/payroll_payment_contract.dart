@@ -55,12 +55,33 @@ class PayrollPaymentMethodChoice {
   }
 }
 
+/// A partial allocation of one payout to an existing earned labor row.
+/// Any unallocated remainder remains an advance/extra amount, not invented labor.
+class PayrollLaborAllocation {
+  const PayrollLaborAllocation({
+    required this.laborId,
+    required this.amountCents,
+  });
+  final String laborId;
+  final int amountCents;
+  Map<String, dynamic> toJson() => {
+    'labor_id': laborId,
+    'amount_cents': amountCents,
+  };
+  static PayrollLaborAllocation fromJson(Map<String, dynamic> value) =>
+      PayrollLaborAllocation(
+        laborId: value['labor_id'] as String,
+        amountCents: value['amount_cents'] as int,
+      );
+}
+
 enum PayrollDraftProblem {
   wrongShop,
   paymentMethodUnavailable,
   missingEmployee,
   missingOperationId,
   invalidAmount,
+  invalidLaborAllocation,
   missingPayrollWeek,
   checkProofNotDurable,
   checkProofInvalid,
@@ -80,6 +101,7 @@ class PayrollPaymentDraft {
     required this.amountCents,
     required this.paymentDate,
     required this.payrollWeekKey,
+    this.laborAllocations = const [],
     this.sourceAccountId,
     this.reference,
     this.checkProofAttachmentId,
@@ -96,6 +118,7 @@ class PayrollPaymentDraft {
   final int amountCents;
   final DateTime paymentDate;
   final String payrollWeekKey;
+  final List<PayrollLaborAllocation> laborAllocations;
 
   /// A bank/cash account is NOT a payment method or an expense category.
   final String? sourceAccountId;
@@ -108,6 +131,42 @@ class PayrollPaymentDraft {
   final int? checkProofSizeBytes;
   final String? checkProofSha256;
 
+  /// A saved Check photo only describes these exact payment terms. A method
+  /// rename is display-only; changes to the payee or payment require a new photo
+  /// selection/reconfirmation. The caller must also verify the actual bytes.
+  bool proofMatchesTerms({
+    required String businessId,
+    required String employeeId,
+    required String operationId,
+    required String methodId,
+    required int amountCents,
+    required DateTime paymentDate,
+    required String payrollWeekKey,
+    required String? sourceAccountId,
+    required String? reference,
+    List<PayrollLaborAllocation> laborAllocations = const [],
+  }) {
+    final oldDate = this.paymentDate.toLocal();
+    final newDate = paymentDate.toLocal();
+    return this.businessId == businessId &&
+        this.employeeId == employeeId &&
+        this.operationId == operationId &&
+        this.methodId == methodId &&
+        this.amountCents == amountCents &&
+        this.payrollWeekKey == payrollWeekKey &&
+        this.sourceAccountId == sourceAccountId &&
+        this.reference == reference &&
+        this.laborAllocations.length == laborAllocations.length &&
+        this.laborAllocations.every(
+          (a) => laborAllocations.any(
+            (b) => a.laborId == b.laborId && a.amountCents == b.amountCents,
+          ),
+        ) &&
+        oldDate.year == newDate.year &&
+        oldDate.month == newDate.month &&
+        oldDate.day == newDate.day;
+  }
+
   List<PayrollDraftProblem> validateForSubmission(
     PayrollPaymentMethod? method,
   ) {
@@ -116,7 +175,9 @@ class PayrollPaymentDraft {
         (method != null && method.businessId != businessId)) {
       problems.add(PayrollDraftProblem.wrongShop);
     }
-    if (method == null || !method.enabled || method.id != methodId ||
+    if (method == null ||
+        !method.enabled ||
+        method.id != methodId ||
         methodLabelSnapshot.trim().isEmpty) {
       problems.add(PayrollDraftProblem.paymentMethodUnavailable);
     }
@@ -128,6 +189,19 @@ class PayrollPaymentDraft {
     }
     if (amountCents <= 0) {
       problems.add(PayrollDraftProblem.invalidAmount);
+    }
+    final laborIds = <String>{};
+    if (laborAllocations.any(
+          (a) =>
+              a.amountCents <= 0 ||
+              !RegExp(
+                r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+              ).hasMatch(a.laborId) ||
+              !laborIds.add(a.laborId),
+        ) ||
+        laborAllocations.fold<int>(0, (n, a) => n + a.amountCents) >
+            amountCents) {
+      problems.add(PayrollDraftProblem.invalidLaborAllocation);
     }
     if (payrollWeekKey.trim().isEmpty) {
       problems.add(PayrollDraftProblem.missingPayrollWeek);
