@@ -1635,6 +1635,16 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                   title: tr('expensesIncome'), logoHeight: 40),
             )
           : null,
+      floatingActionButton: MediaQuery.viewInsetsOf(context).bottom == 0
+          ? FloatingActionButton.extended(
+              heroTag: 'expenses-quick-create',
+              onPressed: _importing ? null : _showAddMenu,
+              backgroundColor: BriskersColors.expenses,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New', style: TextStyle(fontWeight: FontWeight.w800)),
+            )
+          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -2009,16 +2019,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                           ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      IconButton.filled(
-                        tooltip: 'Add transaction',
-                        style: IconButton.styleFrom(
-                          backgroundColor: BriskersColors.expenses,
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: _importing ? null : _showAddMenu,
-                        icon: const Icon(Icons.add),
-                      ),
+
                     ],
                   ),
                   if (_searchController.text.trim().isNotEmpty)
