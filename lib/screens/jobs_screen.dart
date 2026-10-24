@@ -127,6 +127,7 @@ class _JobsScreenState extends State<JobsScreen>
   String? _error;
   String? _busyJobId;
   bool _onlineReady = false;
+  bool _jobsRemoteRefreshRunning = false;
   bool _showingLocal = false;
   bool _refreshFailed = false;
 
@@ -423,42 +424,48 @@ class _JobsScreenState extends State<JobsScreen>
     if (!mounted || !visibility.isCurrent(generation)) return;
     if (mode.forceOffline || !refreshRemote) return;
 
-    try {
-      final onlineStatuses = await _api.jobStatuses(businessId);
-      if (!mounted || !visibility.isCurrent(generation)) return;
-      await _localJobs.replaceJobStatuses(businessId, onlineStatuses);
-      if (_canManage) {
-        try {
-          await _offlineJobAdmin.flush(businessId);
-        } catch (_) {
-          // Queued edits remain local and retry when connectivity returns.
+    // Give the local list and navigation frame priority in Auto mode.
+    // Server work is serialized and must never delay the first usable page.
+    if (_jobsRemoteRefreshRunning) return;
+    _jobsRemoteRefreshRunning = true;
+    unawaited(() async {
+      try {
+        final onlineStatuses = await _api.jobStatuses(businessId);
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        await _localJobs.replaceJobStatuses(businessId, onlineStatuses);
+        if (_canManage) {
+          // Independent best-effort refreshes, not sequential page blockers.
+          unawaited(_offlineJobAdmin.refreshEmployees(businessId).then(
+            (_) {}, onError: (Object _) {},
+          ));
+          try {
+            await _offlineJobAdmin.flush(businessId);
+          } catch (_) {
+            // Keep pending changes in their durable queue.
+          }
         }
-        try {
-          await _offlineJobAdmin.refreshEmployees(businessId);
-        } catch (_) {
-          // Keep the last employee choices for offline assignment.
-        }
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        await _jobSync.pull(businessId);
+        unawaited(_documentSync.refreshBestEffort(businessId));
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        await readSavedJobs(online: true);
+      } catch (error) {
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        setState(() {
+          _onlineReady = false;
+          _refreshFailed = true;
+          _showingLocal = localAvailable && !mode.forceOnline;
+          if (_showingLocal) {
+            _error = null;
+          } else {
+            _rows = const [];
+            _error = error.toString();
+          }
+        });
+      } finally {
+        _jobsRemoteRefreshRunning = false;
       }
-      if (!mounted || !visibility.isCurrent(generation)) return;
-      // Incremental sync populates the same SQLite query in every mode.
-      await _jobSync.pull(businessId);
-      unawaited(_documentSync.refreshBestEffort(businessId));
-      if (!mounted || !visibility.isCurrent(generation)) return;
-      await readSavedJobs(online: true);
-    } catch (error) {
-      if (!mounted || !visibility.isCurrent(generation)) return;
-      setState(() {
-        _onlineReady = false;
-        _refreshFailed = true;
-        _showingLocal = localAvailable && !mode.forceOnline;
-        if (_showingLocal) {
-          _error = null;
-        } else {
-          _rows = const [];
-          _error = error.toString();
-        }
-      });
-    }
+    }());
   }
 
   void _searchChanged() {
