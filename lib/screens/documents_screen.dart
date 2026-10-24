@@ -468,15 +468,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
     final forceOffline = BriskersConnectionModeController.instance.forceOffline;
 
-    if (!estimate && !forceOnline && _invoiceStyles.isEmpty) {
-      try {
-        final cachedStyles = await _localInvoiceStyles.load(businessId);
-        if (mounted && epoch == _loadEpoch && cachedStyles.isNotEmpty) {
-          setState(() => _invoiceStyles = cachedStyles);
-        }
-      } catch (_) {}
-    }
-
     // Warm online refreshes never replace richer API rows with index-only
     // placeholders. Offline entries must read the index to pick up edits made
     // in another module, since there is no server refresh in that mode.
@@ -484,6 +475,16 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       localShown = await _loadLocalRows(
         epoch, businessId, kind, estimate: estimate,
       );
+    }
+
+    // Status colors are cosmetic and must not block the first offline-first
+    // document list frame, including in Auto mode after a cold start.
+    if (!estimate && !forceOnline && _invoiceStyles.isEmpty) {
+      unawaited(_localInvoiceStyles.load(businessId).then((styles) {
+        if (mounted && epoch == _loadEpoch && styles.isNotEmpty) {
+          setState(() => _invoiceStyles = styles);
+        }
+      }).catchError((Object _) {}));
     }
 
     if (!mounted || epoch != _loadEpoch) return;
