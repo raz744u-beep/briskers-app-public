@@ -246,9 +246,15 @@ class _StandardNoteEditorSheetState extends State<StandardNoteEditorSheet> {
                 ),
               ),
               const Divider(height: 1),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 10, 18, 14),
-                child: Row(
+              SafeArea(
+                top: false,
+                left: false,
+                right: false,
+                maintainBottomViewPadding: true,
+                minimum: const EdgeInsets.only(bottom: 8),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 14),
+                  child: Row(
                   children: [
                     Expanded(
                       child: OutlinedButton(
@@ -280,6 +286,7 @@ class _StandardNoteEditorSheetState extends State<StandardNoteEditorSheet> {
                       ),
                     ),
                   ],
+                  ),
                 ),
               ),
             ],
