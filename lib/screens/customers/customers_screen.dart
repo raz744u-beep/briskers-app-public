@@ -103,7 +103,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
             final total = await _localCustomers.customerTotal(widget.businessId);
             final bootstrapped = await _localCustomers.hasBootstrap(widget.businessId);
             if (!current()) return;
-            if (bootstrapped || rows.isNotEmpty || total > 0) {
+            if (!_onlineReady && (bootstrapped || rows.isNotEmpty || total > 0)) {
               localAvailable = true;
               setState(() {
                 _totalCustomers = total;
@@ -309,7 +309,9 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   ),
                 ),
               Text(
-                '${tr('total')} $_totalCustomers',
+                _rows == null && _totalCustomers == 0
+                    ? '${tr('total')} …'
+                    : '${tr('total')} $_totalCustomers',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
