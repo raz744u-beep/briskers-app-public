@@ -19,6 +19,29 @@ void main() {
     expect(await const VerifiedExpenseTotalsCache().load('shop|office|September'), isNull);
     expect(await const VerifiedExpenseTotalsCache().load('shop|owner|October'), isNull);
   });
+  test('same-scope verified totals survive refresh failure without being overwritten', () async {
+    const scope = 'shop|owner|2026-10-01|2026-10-24|all';
+    final verifiedAt = DateTime.now().subtract(const Duration(minutes: 20));
+    const known = ExpensesPeriodTotals(
+      income: 1250.50, expenses: 300.25,
+      transactions: 9, feesUnverified: false,
+    );
+    const cache = VerifiedExpenseTotalsCache();
+    await cache.save(scope, known, verifiedAt);
+    await expectLater(
+      ExpensesPeriodTotals.calculate(
+        readPage: (_, _) async => throw StateError('Network timeout'),
+      ),
+      throwsStateError,
+    );
+    final restored = await const VerifiedExpenseTotalsCache().load(scope);
+    expect(restored, isNotNull);
+    expect(restored!.totals.income, 1250.50);
+    expect(restored.totals.expenses, 300.25);
+    expect(restored.at.toUtc(), verifiedAt.toUtc());
+    expect(await cache.load('shop|owner|2026-10-02|2026-10-24|all'), isNull);
+  });
+
   test('an interrupted complete-total scan cannot save a partial figure', () async {
     var calls = 0;
     await expectLater(ExpensesPeriodTotals.calculate(pageSize: 1, readPage: (_, _) async {
