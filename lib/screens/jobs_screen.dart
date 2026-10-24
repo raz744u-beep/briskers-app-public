@@ -987,8 +987,10 @@ class _JobsScreenState extends State<JobsScreen>
   Widget build(BuildContext context) {
     final visible = _visibleRows;
 
-    return Column(
+    return Stack(
       children: [
+        Column(
+          children: [
         Material(
           color: Theme.of(context).scaffoldBackgroundColor,
           elevation: 1,
@@ -1211,17 +1213,7 @@ class _JobsScreenState extends State<JobsScreen>
                         },
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    if (_canManage)
-                      IconButton.filled(
-                        tooltip: 'New Job',
-                        style: IconButton.styleFrom(
-                          backgroundColor: BriskersColors.jobs,
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: _createNewJob,
-                        icon: const Icon(Icons.add),
-                      ),
+
                   ],
                 ),
               ],
@@ -1364,6 +1356,21 @@ class _JobsScreenState extends State<JobsScreen>
             ),
           ),
         ),
+      ],
+        ),
+        if (_canManage && MediaQuery.viewInsetsOf(context).bottom == 0)
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FloatingActionButton.extended(
+              heroTag: 'jobs_screen-quick-create',
+              onPressed: _createNewJob,
+              backgroundColor: BriskersColors.jobs,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New', style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ),
       ],
     );
   }
