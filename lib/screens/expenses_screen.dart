@@ -617,6 +617,25 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       return;
     }
     if (_pendingPeriodScope == scope) return;
+    // Restore a previously verified complete-period result on first entry.
+    // Never calculate financial totals from the visible transaction page.
+    if (_lastPeriodScope != scope || _periodTotals == null) {
+      try {
+        final saved = await const VerifiedExpenseTotalsCache().load(scope);
+        if (!mounted || businessId != widget.businessId ||
+            BriskersConnectionModeController.instance.forceOffline) return;
+        if (saved != null) {
+          setState(() {
+            _periodTotals = saved.totals;
+            _lastPeriodScope = scope;
+            _lastPeriodAt = saved.at;
+          });
+        }
+      } catch (_) {
+        // An unavailable cache does not block the authoritative refresh.
+      }
+    }
+    if (_pendingPeriodScope == scope) return;
     final sameScope = _lastPeriodScope == scope && _periodTotals != null;
     final fresh = sameScope && _lastPeriodAt != null &&
         DateTime.now().difference(_lastPeriodAt!) <
