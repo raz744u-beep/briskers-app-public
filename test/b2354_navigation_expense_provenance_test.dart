@@ -4,16 +4,15 @@ import 'package:briskers_app/services/local_financial_cache.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Create estimate/invoice appears beside Search, not over dock', () {
+  test('Create estimate/invoice has one accessible floating New action', () {
     final src = File('lib/screens/documents_screen.dart').readAsStringSync();
-    expect(src, contains("tooltip: _estimate ? 'New Estimate' : 'New Invoice'"));
     expect(src, contains("key: const ValueKey('persistent-document-search')"));
-    final search = src.indexOf("key: const ValueKey('persistent-document-search')");
-    final action = src.indexOf("tooltip: _estimate ? 'New Estimate' : 'New Invoice'");
-    expect(action, greaterThan(search));
-    expect(action - search, lessThan(1250));
-    expect(src, isNot(contains("label: Text(_estimate ? 'New Estimate' : 'New Invoice')")));
+    expect(src, contains('FloatingActionButton.extended('));
+    expect(src, contains("heroTag: _estimate ? 'estimates-quick-create' : 'invoices-quick-create'"));
+    expect(src, contains('onPressed: _estimate ? _createStandaloneEstimate : _createBlankInvoice'));
     expect(src, contains('bottomNavigationBar: widget.customerId != null &&'));
+    expect(src, isNot(contains("tooltip: _estimate ? 'New Estimate' : 'New Invoice'")));
+    expect(src, contains('MediaQuery.viewInsetsOf(context).bottom == 0'));
   });
 
   test('Ordinary Customers dock is immediate, new badge selects review inbox', () {

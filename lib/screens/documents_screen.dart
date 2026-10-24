@@ -1709,10 +1709,21 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                   ],
                 ))
           : null,
+      floatingActionButton: (widget.isOwner || widget.canManageExpenses) &&
+              MediaQuery.viewInsetsOf(context).bottom == 0
+          ? FloatingActionButton.extended(
+              heroTag: _estimate ? 'estimates-quick-create' : 'invoices-quick-create',
+              onPressed: _estimate ? _createStandaloneEstimate : _createBlankInvoice,
+              backgroundColor: accent,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New', style: TextStyle(fontWeight: FontWeight.w800)),
+            )
+          : null,
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView.builder(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 84),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 104),
           itemCount: visible.length + 1,
           itemBuilder: (context, index) {
             if (index > 0) return _documentCard(visible[index - 1]);
@@ -1889,21 +1900,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
                     onChanged: (_) => setState(() {}),
                   ),
                 ),
-                const SizedBox(width: 8),
-                if (widget.isOwner || widget.canManageExpenses)
-                  IconButton.filled(
-                    tooltip: _estimate ? 'New Estimate' : 'New Invoice',
-                    style: IconButton.styleFrom(
-                      backgroundColor: _estimate
-                          ? BriskersColors.estimates
-                          : BriskersColors.invoices,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: _estimate
-                        ? _createStandaloneEstimate
-                        : _createBlankInvoice,
-                    icon: const Icon(Icons.add),
-                  ),
+
               ],
             ),
             if (_error != null)

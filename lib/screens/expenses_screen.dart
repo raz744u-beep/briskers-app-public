@@ -617,6 +617,27 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       return;
     }
     if (_pendingPeriodScope == scope) return;
+    // Restore a previously verified complete-period result on first entry.
+    // Never calculate financial totals from the visible transaction page.
+    if (_lastPeriodScope != scope || _periodTotals == null) {
+      try {
+        final saved = await const VerifiedExpenseTotalsCache().load(scope);
+        if (!mounted || businessId != widget.businessId ||
+            BriskersConnectionModeController.instance.forceOffline) {
+          return;
+        }
+        if (saved != null) {
+          setState(() {
+            _periodTotals = saved.totals;
+            _lastPeriodScope = scope;
+            _lastPeriodAt = saved.at;
+          });
+        }
+      } catch (_) {
+        // An unavailable cache does not block the authoritative refresh.
+      }
+    }
+    if (_pendingPeriodScope == scope) return;
     final sameScope = _lastPeriodScope == scope && _periodTotals != null;
     final fresh = sameScope && _lastPeriodAt != null &&
         DateTime.now().difference(_lastPeriodAt!) <
@@ -1635,6 +1656,16 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                   title: tr('expensesIncome'), logoHeight: 40),
             )
           : null,
+      floatingActionButton: MediaQuery.viewInsetsOf(context).bottom == 0
+          ? FloatingActionButton.extended(
+              heroTag: 'expenses-quick-create',
+              onPressed: _importing || _loading ? null : _showAddMenu,
+              backgroundColor: BriskersColors.expenses,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New', style: TextStyle(fontWeight: FontWeight.w800)),
+            )
+          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -2009,16 +2040,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                           ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      IconButton.filled(
-                        tooltip: 'Add transaction',
-                        style: IconButton.styleFrom(
-                          backgroundColor: BriskersColors.expenses,
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: _importing ? null : _showAddMenu,
-                        icon: const Icon(Icons.add),
-                      ),
+
                     ],
                   ),
                   if (_searchController.text.trim().isNotEmpty)

@@ -855,6 +855,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     _counterpartyFocusNode.unfocus();
     final value = await showDatePicker(
       context: context,
+      builder: (pickerContext, child) => Theme(
+        data: moduleModalTheme(
+          Theme.of(pickerContext),
+          _direction == 'income'
+              ? BriskersColors.invoices
+              : BriskersColors.expenses,
+        ),
+        child: child!,
+      ),
       initialDate: _date,
       firstDate: DateTime(2000),
       lastDate: DateTime.now().add(const Duration(days: 3650)),
@@ -865,6 +874,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
   Future<void> _pickNextDate() async {
     final value = await showDatePicker(
       context: context,
+      builder: (pickerContext, child) => Theme(
+        data: moduleModalTheme(
+          Theme.of(pickerContext),
+          _direction == 'income'
+              ? BriskersColors.invoices
+              : BriskersColors.expenses,
+        ),
+        child: child!,
+      ),
       initialDate: _nextDate,
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 3650)),
@@ -875,6 +893,15 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
   Future<void> _pickEndDate() async {
     final value = await showDatePicker(
       context: context,
+      builder: (pickerContext, child) => Theme(
+        data: moduleModalTheme(
+          Theme.of(pickerContext),
+          _direction == 'income'
+              ? BriskersColors.invoices
+              : BriskersColors.expenses,
+        ),
+        child: child!,
+      ),
       initialDate: _endDate ?? _nextDate.add(const Duration(days: 365)),
       firstDate: _nextDate,
       lastDate: DateTime.now().add(const Duration(days: 7300)),

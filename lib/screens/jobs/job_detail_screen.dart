@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 import '../../services/owner_invoice_auto_close_service.dart';
 import 'package:intl/intl.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/briskers_colors.dart';
@@ -40,6 +41,7 @@ import '../../services/offline_job_admin_service.dart';
 import '../../services/offline_work_findings_service.dart';
 import '../../services/work_finding_merge.dart';
 import '../../services/vehicle_finding_actions_service.dart';
+import '../../services/finding_job_choice_policy.dart';
 import '../../widgets/vehicle_findings.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
@@ -2616,10 +2618,178 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       widget.businessId, finding, widget.jobId));
   }
 
+  // Resolve is a historical repair record, not an implicit assignment to
+  // whichever Job happened to be open when the button was tapped.
+  Future<String?> _chooseFindingResolutionJob(
+    Map<String, dynamic> finding,
+  ) async {
+    final job = _job;
+    if (job == null || !mounted) return null;
+    final vehicleId = job['vehicle_id']?.toString() ?? '';
+    final customerId = job['customer_id']?.toString() ?? '';
+    if (vehicleId.isEmpty || customerId.isEmpty) return null;
+
+    final foundVehicleId =
+        (finding['vehicle_id'] ?? finding['_vehicle_id'])?.toString() ?? '';
+    if (foundVehicleId.isNotEmpty && foundVehicleId != vehicleId) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('This finding belongs to a different vehicle.'),
+      ));
+      return null;
+    }
+
+    final rows = await localDatabase.customSelect(
+      'SELECT id,job_number,title,status,vehicle_id FROM local_jobs '
+      'WHERE business_id=? AND customer_id=? AND vehicle_id=?',
+      variables: [
+        Variable<String>(widget.businessId),
+        Variable<String>(customerId),
+        Variable<String>(vehicleId),
+      ],
+    ).get();
+    final eligible = <String, Map<String, dynamic>>{
+      for (final row in rows)
+        if ((row.data['id']?.toString() ?? '').isNotEmpty)
+          row.data['id'].toString(): Map<String, dynamic>.from(row.data),
+    };
+    // Keep the currently viewed Job usable if the local list hasn't hydrated.
+    eligible[widget.jobId] = {
+      ...job, 'id': widget.jobId,
+      'vehicle_id': vehicleId, 'customer_id': customerId,
+    };
+    if (!BriskersConnectionModeController.instance.forceOffline) {
+      try {
+        final remote = await _api.customerServiceHistory(
+          widget.businessId, customerId);
+        for (final row in remote) {
+          final id = row['id']?.toString() ?? '';
+          if (id.isNotEmpty && row['vehicle_id']?.toString() == vehicleId) {
+            eligible[id] = row;
+          }
+        }
+      } catch (_) {
+        // Existing local Jobs remain available if the network is down.
+      }
+    }
+    final active = <Map<String, dynamic>>[];
+    final historical = <Map<String, dynamic>>[];
+    for (final candidate in eligible.values) {
+      final id = candidate['id']?.toString() ?? '';
+      if (id.isEmpty ||
+          await LocalJobQuarantine.isJobBlocked(
+            localDatabase, widget.businessId, id,
+          ) ||
+          await LocalJobRetirement.isJobBlocked(
+            localDatabase, widget.businessId, id,
+          )) {
+        continue;
+      }
+      switch (findingJobChoice(candidate['status'], resolving: true)) {
+        case FindingJobChoice.active:
+          active.add(candidate);
+        case FindingJobChoice.completedHistory:
+          historical.add(candidate);
+        case FindingJobChoice.unavailable:
+          break;
+      }
+    }
+    if (!mounted) return null;
+    if (active.isEmpty && historical.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('No eligible repair Jobs found for this vehicle.'),
+      ));
+      return null;
+    }
+    Widget jobOption(
+      BuildContext sheetContext,
+      Map<String, dynamic> candidate,
+      bool isCompleted,
+    ) {
+      final id = candidate['id'].toString();
+      final number = candidate['job_number']?.toString() ?? '';
+      final label = number.isEmpty ? 'Job' : 'Job $number';
+      return ListTile(
+        leading: Icon(isCompleted ? Icons.history : Icons.work_outline),
+        title: Text(label),
+        subtitle: Text(isCompleted
+            ? 'Completed · Historical repair'
+            : 'Active repair'),
+        onTap: () async {
+          final confirmed = await showDialog<bool>(
+            context: sheetContext,
+            builder: (dialogContext) => AlertDialog(
+              title: const Text('Confirm resolving repair'),
+              content: Text(
+                'Did the work on $label actually repair this finding? '
+                'This records the repair history without reopening that '
+                'Job or changing any invoice, payment, or payroll.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('Confirm repair'),
+                ),
+              ],
+            ),
+          );
+          if (confirmed == true && sheetContext.mounted) {
+            Navigator.pop(sheetContext, id);
+          }
+        },
+      );
+    }
+
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: 0.64,
+          child: ListView(children: [
+            const ListTile(
+              title: Text('Which Job repaired this finding?',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+              subtitle: Text(
+                'Choose the actual repair, including completed Jobs. '
+                'This does not modify a historical invoice.',
+              ),
+            ),
+            if (active.isNotEmpty) ...[
+              const ListTile(title: Text('Active Jobs')),
+              for (final candidate in active)
+                jobOption(sheetContext, candidate, false),
+            ],
+            if (historical.isNotEmpty) ...[
+              const Divider(),
+              const ListTile(title: Text('Completed Jobs — repair history')),
+              for (final candidate in historical)
+                jobOption(sheetContext, candidate, true),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
+
   Future<void> _resolveFinding(Map<String, dynamic> finding) async {
     if (!_canQuickAdmin && !_canManage) return;
+    if ((finding['_finding_action_error']?.toString() ?? '').isNotEmpty ||
+        finding['sync_state'] == 'conflict') {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('A prior finding change needs sync verification. '
+          'Review Settings > Local database & sync; no duplicate action was sent.'),
+      ));
+      return;
+    }
+    final repairJobId = await _chooseFindingResolutionJob(finding);
+    if (repairJobId == null || !mounted) return;
     await _changeFindingLocally(() => _findingActions.resolve(
-      widget.businessId, finding, widget.jobId));
+      widget.businessId, finding, repairJobId));
   }
 
   Future<void> _reopenFinding(Map<String, dynamic> finding) async {
@@ -5587,7 +5757,14 @@ class _JobDrawerSurface extends StatelessWidget {
     return Card(
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
-      color: color.withValues(alpha: 0.045),
+      color: Theme.of(context).colorScheme.surface,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: color.withValues(alpha: 0.28),
+        ),
+      ),
       child: child,
     );
   }

@@ -47,26 +47,33 @@ void main() {
     expect(diagnostics, contains("a.sync_state <> 'pending_delete'"));
   });
 
-  test('main list pages keep Add action beside search and invoice close', () async {
+  test('main list pages use one extended New action with existing handlers', () async {
     final jobs = await File('lib/screens/jobs_screen.dart').readAsString();
     final documents = await File('lib/screens/documents_screen.dart').readAsString();
     final expenses = await File('lib/screens/expenses_screen.dart').readAsString();
-    expect(jobs, contains("tooltip: 'New Job'"));
+    for (final src in [jobs, documents, expenses]) {
+      expect(src, contains('FloatingActionButton.extended('));
+      expect(src, contains("label: const Text('New'"));
+      expect(src, contains('MediaQuery.viewInsetsOf(context).bottom == 0'));
+    }
     expect(jobs, contains('onPressed: _createNewJob'));
-    expect(documents, contains("tooltip: _estimate ? 'New Estimate' : 'New Invoice'"));
+    expect(documents, contains('onPressed: _estimate ? _createStandaloneEstimate : _createBlankInvoice'));
     expect(documents, contains('onPressed: _showCloseInvoices'));
-    expect(expenses, contains("tooltip: 'Add transaction'"));
-    expect(expenses, contains('onPressed: _importing ? null : _showAddMenu'));
+    expect(expenses, contains('onPressed: _importing || _loading ? null : _showAddMenu'));
     expect(expenses, isNot(contains('_importing || _showingLocal ? null : _showAddMenu')));
+    expect(jobs, isNot(contains("tooltip: 'New Job'")));
   });
 
-  test('customer Add tap and appointment Add work while offline', () async {
+  test('customer and appointment New actions still work offline', () async {
     final customers = await File('lib/screens/customers/customers_screen.dart').readAsString();
     final appointments = await File('lib/screens/appointments_screen.dart').readAsString();
     expect(customers, contains('if (!_canManageCustomers) return;'));
     expect(customers, isNot(contains('if (!_onlineReady) return;')));
-    expect(appointments, contains("tooltip: 'Add appointment'"));
+    expect(customers, contains('if (_canManageCustomers && MediaQuery.viewInsetsOf(context).bottom == 0)'));
+    expect(customers, contains('onPressed: _add'));
+    expect(appointments, contains('if (_canManage && MediaQuery.viewInsetsOf(context).bottom == 0)'));
     expect(appointments, contains('onPressed: _addAppointment'));
+    expect(appointments, contains('FloatingActionButton.extended('));
   });
 
   test('invoice customer autocomplete replaces duplicated dropdown', () async {
@@ -82,7 +89,7 @@ void main() {
     expect(expenses, contains('child: SearchBar('));
     expect(expenses, contains('WidgetStatePropertyAll<double>(3)'));
     expect(expenses, contains('WidgetStatePropertyAll<Color>('));
-    expect(expenses, contains("tooltip: 'Add transaction'"));
+    expect(expenses, contains("heroTag: 'expenses-quick-create'"));
   });
 
   test('offline New Job routes to durable create queue', () async {

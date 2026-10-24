@@ -4459,7 +4459,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     controller.dispose();
     if (save != true || body.isEmpty) return;
 
-    await _run(() async {
+    await _runInvoiceFindingMutation(() async {
       final findingId = await _api.createInvoiceFinding(
         widget.businessId,
         widget.documentId,
@@ -4477,6 +4477,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         );
       }
     });
+  }
+
+  // Unlike a regular invoice edit, changing a finding must not reload
+  // payment, amount, item or Notes state or race the closing bottom sheet.
+  Future<bool> _runInvoiceFindingMutation(
+      Future<void> Function() action) async {
+    if (_busy) return false;
+    setState(() { _busy = true; _error = null; });
+    try {
+      await action();
+      await _refreshInvoiceFindingsBanner();
+      return true;
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+      return false;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   // Refresh just the invoice's findings banner after the sheet closes.
@@ -4630,7 +4648,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
     if (!mounted) return;
 
-    await showModalBottomSheet<void>(
+    final requestedAction = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -4654,10 +4672,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     ),
                     IconButton(
                       tooltip: 'Add finding',
-                      onPressed: () {
-                        Navigator.pop(sheetContext);
-                        _addInvoiceFinding();
-                      },
+                      onPressed: () => Navigator.pop(sheetContext, 'add'),
                       icon: const Icon(Icons.add_circle_outline),
                     ),
                   ],
@@ -4683,14 +4698,10 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                   '';
 
                           return ListTile(
-                            onTap: () async {
-                              Navigator.pop(sheetContext);
-                              await _manageFindingFromInvoice(finding);
-                            },
-                            onLongPress: () async {
-                              Navigator.pop(sheetContext);
-                              await _manageFindingFromInvoice(finding);
-                            },
+                            onTap: () => Navigator.pop(
+                              sheetContext, 'manage:${finding['id']}'),
+                            onLongPress: () => Navigator.pop(
+                              sheetContext, 'manage:${finding['id']}'),
                             leading: const Icon(
                               Icons.warning_amber_rounded,
                               color: Colors.deepOrange,
@@ -4706,15 +4717,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                       : 'Open finding',
                             ),
                             trailing: TextButton(
-                              onPressed: () async {
-                                Navigator.pop(sheetContext);
-                                await _run(() =>
-                                    _api.resolveVehicleFindingByInvoice(
-                                      widget.businessId,
-                                      finding['id'].toString(),
-                                      widget.documentId,
-                                    ));
-                              },
+                              onPressed: () => Navigator.pop(
+                                sheetContext, 'resolve:${finding['id']}'),
                               child: const Text('Resolve'),
                             ),
                           );
@@ -4726,6 +4730,25 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         ),
       ),
     );
+    // Await the requested mutation before refreshing: the previous sheet
+    // popped immediately and raced its own add/resolve/edit callback.
+    if (!mounted) return;
+    if (requestedAction == 'add') {
+      await _addInvoiceFinding();
+    } else if (requestedAction != null &&
+        requestedAction.startsWith('manage:')) {
+      final id = requestedAction.substring('manage:'.length);
+      final found = findings.where((f) => f['id']?.toString() == id).firstOrNull;
+      if (found != null) await _manageFindingFromInvoice(found);
+    } else if (requestedAction != null &&
+        requestedAction.startsWith('resolve:')) {
+      final id = requestedAction.substring('resolve:'.length);
+      if (findings.any((f) => f['id']?.toString() == id)) {
+        await _runInvoiceFindingMutation(() =>
+            _api.resolveVehicleFindingByInvoice(
+              widget.businessId, id, widget.documentId));
+      }
+    }
     if (mounted) await _refreshInvoiceFindingsBanner();
   }
 

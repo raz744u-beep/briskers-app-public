@@ -271,8 +271,10 @@ class _CustomersScreenState extends State<CustomersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Stack(
       children: [
+        Column(
+          children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
           child: Row(
@@ -316,23 +318,32 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   controller: _search,
                   hintText: tr('searchCustomers'),
                   leading: const Icon(Icons.search),
-                  onChanged: _onSearchChanged,
+                  trailing: [
+                    if (_search.text.isNotEmpty)
+                      IconButton(
+                        tooltip: 'Clear customer search',
+                        icon: const Icon(Icons.close),
+                        onPressed: () {
+                          _searchDebounce?.cancel();
+                          ++_loadRequest;
+                          ++_searchRequest; // invalidate any stale search
+                          _search.clear();
+                          setState(() {});
+                          _runSearch();
+                        },
+                      ),
+                  ],
+                  onChanged: (value) {
+                    setState(() {});
+                    _onSearchChanged(value);
+                  },
                   onSubmitted: (_) {
                     _searchDebounce?.cancel();
                     _runSearch();
                   },
                 ),
               ),
-              const SizedBox(width: 8),
-              IconButton.filled(
-                style: IconButton.styleFrom(
-                  backgroundColor: BriskersColors.actionBlue,
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: _canManageCustomers ? _add : null,
-                tooltip: tr('addCustomer'),
-                icon: const Icon(Icons.person_add),
-              ),
+
             ],
           ),
         ),
@@ -350,6 +361,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 96),
                     itemCount: _rows!.length,
                     itemBuilder: (context, index) {
                       final customer = _rows![index];
@@ -402,6 +414,21 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   ),
                 ),
         ),
+      ],
+        ),
+        if (_canManageCustomers && MediaQuery.viewInsetsOf(context).bottom == 0)
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FloatingActionButton.extended(
+              heroTag: 'customers_screen-quick-create',
+              onPressed: _add,
+              backgroundColor: BriskersColors.actionBlue,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New', style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ),
       ],
     );
   }
