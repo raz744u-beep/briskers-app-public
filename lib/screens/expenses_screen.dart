@@ -1638,7 +1638,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       floatingActionButton: MediaQuery.viewInsetsOf(context).bottom == 0
           ? FloatingActionButton.extended(
               heroTag: 'expenses-quick-create',
-              onPressed: _importing ? null : _showAddMenu,
+              onPressed: _importing || _loading ? null : _showAddMenu,
               backgroundColor: BriskersColors.expenses,
               foregroundColor: Colors.white,
               icon: const Icon(Icons.add),
