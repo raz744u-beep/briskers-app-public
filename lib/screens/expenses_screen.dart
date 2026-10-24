@@ -623,7 +623,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       try {
         final saved = await const VerifiedExpenseTotalsCache().load(scope);
         if (!mounted || businessId != widget.businessId ||
-            BriskersConnectionModeController.instance.forceOffline) return;
+            BriskersConnectionModeController.instance.forceOffline) {
+          return;
+        }
         if (saved != null) {
           setState(() {
             _periodTotals = saved.totals;
