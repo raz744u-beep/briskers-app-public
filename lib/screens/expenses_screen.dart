@@ -46,7 +46,7 @@ class ExpensesScreen extends StatefulWidget {
 }
 
 class _ExpensesScreenState extends State<ExpensesScreen>
-    with ModuleModalState<ExpensesScreen> {
+    with ModuleModalState<ExpensesScreen>, WidgetsBindingObserver {
   @override
   Color get modalAccent => BriskersColors.expenses;
   static const _api = BriskersApi();
@@ -128,6 +128,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   void initState() {
     super.initState();
     _scrollController.addListener(_handleScroll);
+    WidgetsBinding.instance.addObserver(this);
     _load();
     _refreshPhotoCounts();
     if (_owner && Platform.isAndroid) {
@@ -184,7 +185,18 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    // Returning from background may follow a successful app-wide sync.
+    // Refresh the scope automatically without clearing the visible list.
+    // Force Offline is handled by _load and never invokes remote requests.
+    unawaited(_load(showLoading: false, forceTotals: true));
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchDebounce?.cancel();
     _photoCountTimer?.cancel();
     _scrollController.dispose();
