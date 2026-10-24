@@ -499,22 +499,18 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     }
 
     try {
-      final results = await Future.wait<dynamic>([
-        _api.documents(businessId, kind: kind),
-        if (!estimate)
-          _api.invoiceStatusStyles(businessId)
-        else
-          Future.value(const <Map<String, dynamic>>[]),
-      ]);
+      // The document payload is authoritative. Optional invoice colors must
+      // not delay or fail the list when that independent endpoint is slow.
+      final fetched = await _api.documents(businessId, kind: kind);
 
       if (!mounted || epoch != _loadEpoch) return;
       final blocked = await (widget.blockedDocumentIds?.call(businessId) ??
           LocalJobRetirement.blockedDocumentIds(localDatabase, businessId));
-      final rows = List<Map<String, dynamic>>.from(results[0] as List)
+      final rows = List<Map<String, dynamic>>.from(fetched)
           .where((row) => !blocked.contains('${row['id'] ?? ''}'))
           .toList();
       if (!mounted || epoch != _loadEpoch) return;
-      final styles = List<Map<String, dynamic>>.from(results[1] as List);
+      final styles = _invoiceStyles;
 
       // Preserve first paint and scroll position when the remote response
       // contains no changes, including financial fields absent in the index.
@@ -553,6 +549,18 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       }
       if (!mounted || epoch != _loadEpoch) return;
       if (!estimate) {
+        unawaited(_api.invoiceStatusStyles(businessId).then((fetchedStyles) async {
+          if (!mounted || epoch != _loadEpoch) return;
+          if (!documentListDataEquals(_invoiceStyles, fetchedStyles)) {
+            setState(() => _invoiceStyles = fetchedStyles);
+          }
+          _styleCache[businessId] = fetchedStyles;
+          try {
+            await _localInvoiceStyles.save(businessId, fetchedStyles);
+          } catch (_) {
+            // Status styles are nonessential to document availability.
+          }
+        }).catchError((Object _) {}));
         _styleCache[businessId] = styles;
         if (!documentListDataEquals(_savedStyles, styles)) {
           try {
