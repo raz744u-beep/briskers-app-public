@@ -736,28 +736,27 @@ class _JobsScreenState extends State<JobsScreen>
         iconKey: selectedStatus['icon_key']?.toString(),
       );
 
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {
-          // The status change remains queued for the next successful sync.
-        }
-      }
-
+      // Paint the durable local status immediately. The pending outbox is
+      // synchronized independently; the status picker does not wait for HTTP.
+      await _load(refreshRemote: false);
+      _scheduleQuickEditSync();
       if (statusCode == 'completed' && widget.roleCode == 'owner' &&
           !BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await OwnerInvoiceAutoCloseService().closeEligible(
-            businessId: widget.businessId,
-            jobId: job['id'].toString(),
-            isOwner: true,
-          );
-        } catch (_) {
-          // A failed close does not undo job completion or payment history.
-          // The owner may review the invoice later.
-        }
+        // Do not close the invoice before the queued completion reaches
+        // the server. Failed replay leaves existing invoice data unchanged.
+        unawaited(() async {
+          try {
+            await _offlineJobAdmin.flush(widget.businessId);
+            await OwnerInvoiceAutoCloseService().closeEligible(
+              businessId: widget.businessId,
+              jobId: job['id'].toString(),
+              isOwner: true,
+            );
+          } catch (_) {
+            // Queued changes remain durable and can be retried later.
+          }
+        }());
       }
-      await _load();
       widget.onJobsChanged?.call();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
