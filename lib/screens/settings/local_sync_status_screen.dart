@@ -157,6 +157,30 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         variables: [Variable<String>(widget.businessId)],
       ).get();
 
+      // Paint the local counts and sync history before performing expensive
+      // per-outbox-record relationship checks (which can involve 120+ rows).
+      // Those checks are diagnostic only and must not hold the entire screen
+      // on a spinner.
+      if (!mounted) return;
+      setState(() {
+        _counts = counts;
+        _syncStates = stateRows.map((row) => <String, dynamic>{
+          'scope': row.read<String>('scope'),
+          'cursor': row.readNullable<int>('last_server_cursor'),
+          'last_pull_at': row.data['last_pull_at'],
+          'last_push_at': row.data['last_push_at'],
+          'last_error': row.readNullable<String>('last_error'),
+          'bootstrapped': row.read<int>('bootstrapped') == 1,
+        }).toList();
+        _outbox = outboxRows.map((row) => <String, dynamic>{
+          'entity_type': row.read<String>('entity_type'),
+          'state': row.read<String>('state'),
+          'count': row.read<int>('count'),
+          'last_error': row.readNullable<String>('last_error'),
+        }).toList();
+        _loading = false;
+      });
+
       // Read-only owner-facing inspection: never mutate or retry a queued
       // operation from the diagnostic panel. Keep raw IDs for safe cleanup.
       final detailsRows = await localDatabase.customSelect(
