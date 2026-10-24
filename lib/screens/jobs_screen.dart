@@ -739,7 +739,6 @@ class _JobsScreenState extends State<JobsScreen>
       // Paint the durable local status immediately. The pending outbox is
       // synchronized independently; the status picker does not wait for HTTP.
       await _load(refreshRemote: false);
-      _scheduleQuickEditSync();
       if (statusCode == 'completed' && widget.roleCode == 'owner' &&
           !BriskersConnectionModeController.instance.forceOffline) {
         // Do not close the invoice before the queued completion reaches
@@ -756,6 +755,8 @@ class _JobsScreenState extends State<JobsScreen>
             // Queued changes remain durable and can be retried later.
           }
         }());
+      } else {
+        _scheduleQuickEditSync();
       }
       widget.onJobsChanged?.call();
     } catch (error) {
