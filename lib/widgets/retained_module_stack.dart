@@ -13,7 +13,9 @@ class RetainedModuleStack extends StatefulWidget {
     required this.index,
     required this.itemCount,
     required this.itemBuilder,
-    this.retainedIndices = const {1, 3, 4, 5, 6},
+    // Jobs (index 2) must also survive dock switches. Re-mounting it discarded
+    // already visible rows and brought back the full-page startup spinner.
+    this.retainedIndices = const {1, 2, 3, 4, 5, 6},
   });
 
   final int index;
