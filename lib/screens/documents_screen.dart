@@ -684,6 +684,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: row['id'].toString(),
+          initialDocumentSummary: Map<String, dynamic>.from(row),
           isOwner: widget.isOwner,
           canManageExpenses: widget.canManageExpenses,
           initialAction: initialAction == 'payment' ? null : initialAction,
