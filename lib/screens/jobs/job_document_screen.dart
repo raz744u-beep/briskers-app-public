@@ -7419,7 +7419,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                       ? Icons.description_outlined : Icons.receipt_long_outlined),
                   title: Text([
                     _estimate ? 'Estimate' : 'Invoice',
-                    widget.initialDocumentSummary!['document_number']
+                    (widget.initialDocumentSummary!['document_number'] ??
+                        widget.initialDocumentSummary!['number'])
                         ?.toString() ?? '',
                   ].where((s) => s.isNotEmpty).join(' #'),
                     style: const TextStyle(fontWeight: FontWeight.w700)),
