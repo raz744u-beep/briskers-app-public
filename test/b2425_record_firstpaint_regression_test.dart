@@ -53,6 +53,38 @@ void main() {
         isNot(contains('onPressed: _canManageCustomers ? _add : null')));
   });
 
+  test('Appointments, Documents and Expenses retain the approved New action', () {
+    const paths = <String>[
+      'lib/screens/appointments_screen.dart',
+      'lib/screens/documents_screen.dart',
+      'lib/screens/expenses_screen.dart',
+    ];
+    for (final path in paths) {
+      final source = File(path).readAsStringSync();
+      expect(source, contains('FloatingActionButton.extended('), reason: path);
+      expect(source, contains('shape: RoundedRectangleBorder('), reason: path);
+      expect(source, contains('borderRadius: BorderRadius.circular(14)'),
+          reason: path);
+      expect(source, contains('MediaQuery.viewInsetsOf(context).bottom == 0'),
+          reason: path);
+      expect(source, contains("label: const Text('New'"), reason: path);
+    }
+    final appointments =
+        File('lib/screens/appointments_screen.dart').readAsStringSync();
+    expect(appointments, contains('backgroundColor: BriskersColors.appointments'));
+    expect(appointments, isNot(contains("tooltip: 'Add appointment',\\n                      style: IconButton.styleFrom(")));
+
+    final documents =
+        File('lib/screens/documents_screen.dart').readAsStringSync();
+    expect(documents, contains('backgroundColor: accent'));
+    expect(documents, isNot(contains('IconButton.filled(\\n                    tooltip: _estimate')));
+
+    final expenses =
+        File('lib/screens/expenses_screen.dart').readAsStringSync();
+    expect(expenses, contains('backgroundColor: BriskersColors.expenses'));
+    expect(expenses, isNot(contains("tooltip: 'Add transaction',\\n                        style: IconButton.styleFrom(")));
+  });
+
   test('Auto customer Findings paints cache before network and photos', () {
     final source = File(
       'lib/screens/customers/customer_vehicle_findings_section.dart',
