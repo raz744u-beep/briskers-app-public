@@ -1109,6 +1109,130 @@ class LocalJobTasksLabStore {
     });
   }
 
+  /// Replace this employee's selected task hours for one TEST payroll week.
+  /// Draft selections are editable; approved/paid payroll is immutable.
+  /// All validation and replacement occur in one local transaction.
+  Future<int> saveTestWeeklyTaskSelection({
+    required String businessId,
+    required String employeeId,
+    required DateTime weekStart,
+    required List<({
+      String jobId, String documentId, String lineId,
+      int minutes, int eligibleMinutes,
+    })> selections,
+  }) async {
+    await ensureTables(db);
+    if (businessId.trim().isEmpty || employeeId.trim().isEmpty ||
+        weekStart.weekday != DateTime.monday ||
+        weekStart.hour != 0 || weekStart.minute != 0 ||
+        weekStart.second != 0 || weekStart.millisecond != 0 ||
+        weekStart.microsecond != 0) {
+      throw ArgumentError('Invalid payroll week or employee');
+    }
+    final week = '${weekStart.year.toString().padLeft(4, '0')}-'
+        '${weekStart.month.toString().padLeft(2, '0')}-'
+        '${weekStart.day.toString().padLeft(2, '0')}';
+    return db.transaction(() async {
+      final approval = await db.customSelect(
+        'SELECT state FROM local_lab_weekly_payroll_approvals '
+        'WHERE business_id=? AND employee_id=? AND week_start=?',
+        variables: [Variable<String>(businessId),
+          Variable<String>(employeeId), Variable<String>(week)],
+      ).getSingleOrNull();
+      if (approval != null && approval.read<String>('state') != 'draft') {
+        throw StateError('Payroll is approved or paid. '
+          'A separate owner correction is required.');
+      }
+      final seen = <String>{};
+      var totalMinutes = 0;
+      for (final selection in selections) {
+        final id = '${selection.jobId}|'
+            '${selection.documentId}|${selection.lineId}';
+        if (!seen.add(id) || selection.jobId.trim().isEmpty ||
+            selection.documentId.trim().isEmpty ||
+            selection.lineId.trim().isEmpty ||
+            selection.minutes <= 0 ||
+            selection.eligibleMinutes < selection.minutes) {
+          throw ArgumentError('Invalid or repeated selected task');
+        }
+        final task = await db.customSelect(
+          'SELECT employee_id, payroll_hours FROM local_job_tasks_lab '
+          'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+          variables: [Variable<String>(businessId),
+            Variable<String>(selection.jobId),
+            Variable<String>(selection.documentId),
+            Variable<String>(selection.lineId)],
+        ).getSingleOrNull();
+        if (task == null) throw StateError('Selected task no longer exists');
+        final allocations = await db.customSelect(
+          'SELECT employee_id, hours FROM local_task_allocations_lab '
+          'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+          variables: [Variable<String>(businessId),
+            Variable<String>(selection.jobId),
+            Variable<String>(selection.documentId),
+            Variable<String>(selection.lineId)],
+        ).get();
+        final eligibleHours = allocations.isNotEmpty
+          ? allocations.where((allocation) =>
+              allocation.read<String>('employee_id') == employeeId)
+              .fold<double>(0, (sum, allocation) =>
+                sum + allocation.read<double>('hours'))
+          : task.read<String?>('employee_id') == employeeId
+            ? task.read<double?>('payroll_hours') ?? 0 : 0.0;
+        final eligibleMinutes = (eligibleHours * 60).round();
+        if (selection.eligibleMinutes != eligibleMinutes) {
+          throw StateError('Mechanic allocation changed. Refresh payroll.');
+        }
+        final prior = await db.customSelect(
+          'SELECT COALESCE(SUM(paid_minutes), 0) AS minutes '
+          'FROM local_lab_payroll_task_credits '
+          'WHERE business_id=? AND employee_id=? AND job_id=? '
+          'AND document_id=? AND line_id=? AND week_start<>?',
+          variables: [Variable<String>(businessId),
+            Variable<String>(employeeId), Variable<String>(selection.jobId),
+            Variable<String>(selection.documentId),
+            Variable<String>(selection.lineId), Variable<String>(week)],
+        ).getSingle();
+        if (prior.read<int>('minutes') + selection.minutes >
+            eligibleMinutes) {
+          throw StateError('Selected hours exceed uncredited task hours');
+        }
+        totalMinutes += selection.minutes;
+      }
+      await db.customStatement(
+        'DELETE FROM local_lab_payroll_task_credits '
+        'WHERE business_id=? AND employee_id=? AND week_start=?',
+        [businessId, employeeId, week],
+      );
+      for (final selection in selections) {
+        await db.customStatement(
+          'INSERT INTO local_lab_payroll_task_credits '
+          '(business_id, employee_id, job_id, document_id, line_id, '
+          'week_start, paid_minutes, recorded_at) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [businessId, employeeId, selection.jobId, selection.documentId,
+            selection.lineId, week, selection.minutes,
+            DateTime.now().millisecondsSinceEpoch],
+        );
+      }
+      if (approval != null) {
+        if (totalMinutes == 0) {
+          await db.customStatement(
+            "DELETE FROM local_lab_weekly_payroll_approvals "
+            "WHERE business_id=? AND employee_id=? AND week_start=? "
+            "AND state='draft'", [businessId, employeeId, week]);
+        } else {
+          await db.customStatement(
+            'UPDATE local_lab_weekly_payroll_approvals '
+            'SET selected_minutes=? WHERE business_id=? AND employee_id=? '
+            "AND week_start=? AND state='draft'",
+            [totalMinutes, businessId, employeeId, week]);
+        }
+      }
+      return totalMinutes;
+    });
+  }
+
   Future<List<Map<String, dynamic>>> testTaskHourCredits(
       String businessId) async {
     await ensureTables(db);
