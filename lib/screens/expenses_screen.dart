@@ -2108,7 +2108,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                   const SizedBox(height: 12),
                   if (receiptsUnverified)
                     Padding(
-                      padding: EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(8),
                       child: Text(
                         unverifiedCount == null
                   ? 'Some income receipts lack verified invoice/payment evidence. Gross amounts remain shown; processing-fee adjustments are not assumed.'
