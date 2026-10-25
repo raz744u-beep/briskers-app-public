@@ -5,6 +5,60 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('paid payroll cannot be replayed after offline database restart', () async {
+    final directory = await Directory.systemTemp.createTemp('briskers-paid-test-');
+    final file = File('${directory.path}/paid.sqlite');
+    const shop = 'synthetic-offline-paid';
+    const employee = 'lab-chris';
+    const week = '2026-10-19';
+    try {
+      final first = BriskersLocalDatabase(NativeDatabase(file));
+      try {
+        final store = LocalJobTasksLabStore(first);
+        await LocalJobTasksLabStore.ensureTables(first);
+        final job = await store.createSyntheticJobWithTask(
+          businessId: shop, customerId: 'test-customer',
+          vehicleId: 'test-car', description: 'Synthetic repair',
+          hours: 2, employeeId: employee);
+        final task = (await store.allTasks(shop)).single;
+        await store.creditTestTaskHours(
+          businessId: shop, employeeId: employee, jobId: job,
+          documentId: task['document_id'].toString(),
+          lineId: task['line_id'].toString(),
+          weekStart: DateTime(2026, 10, 19),
+          minutes: 120, totalEligibleMinutes: 120);
+        await store.saveTestWeeklyPayrollDraft(
+          businessId: shop, employeeId: employee,
+          weekStart: week, selectedMinutes: 120);
+        expect(await store.approveTestWeeklyPayroll(
+          businessId: shop, employeeId: employee,
+          weekStart: week, approvedBy: 'lab-owner'), isTrue);
+        expect(await store.finalizeTestWeeklyPayrollPayment(
+          businessId: shop, employeeId: employee,
+          weekStart: week, cents: 8000, method: 'ach',
+          paidAt: DateTime(2026, 10, 25), note: 'offline test'), isTrue);
+      } finally {
+        await first.close();
+      }
+      final reopened = BriskersLocalDatabase(NativeDatabase(file));
+      try {
+        final store = LocalJobTasksLabStore(reopened);
+        final approvals = await store.testWeeklyPayrollApprovals(shop);
+        expect(approvals.single['state'], 'paid');
+        expect((await store.payrollTestPayments(shop)).length, 1);
+        expect(await store.finalizeTestWeeklyPayrollPayment(
+          businessId: shop, employeeId: employee,
+          weekStart: week, cents: 8000, method: 'ach',
+          paidAt: DateTime(2026, 10, 25), note: 'replay'), isFalse);
+        expect((await store.payrollTestPayments(shop)).length, 1);
+      } finally {
+        await reopened.close();
+      }
+    } finally {
+      await directory.delete(recursive: true);
+    }
+  });
+
   test('approved TEST payroll survives database close and reopen', () async {
     final directory = await Directory.systemTemp.createTemp('briskers-payroll-test-');
     final file = File('${directory.path}/offline.sqlite');
