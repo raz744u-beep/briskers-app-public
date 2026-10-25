@@ -67,6 +67,16 @@ class _CustomerVehicleFindingsSectionState
   String? _error;
   String get _findingCacheSection => widget.cacheScopeKey ?? 'findings';
 
+  // Flutter parents often rebuild their vehicle list with a new List object.
+  // Compare stable vehicle identities, not List identity, to avoid restarting
+  // Findings loads (and reappearing spinners) on every unrelated rebuild.
+  String _vehicleIds(List<dynamic> vehicles) {
+    final ids = vehicles.whereType<Map>()
+        .map((row) => row['id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty).toList()..sort();
+    return ids.join('|');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -131,7 +141,7 @@ class _CustomerVehicleFindingsSectionState
     if (oldWidget.businessId != widget.businessId ||
         oldWidget.customerId != widget.customerId ||
         oldWidget.cacheScopeKey != widget.cacheScopeKey ||
-        oldWidget.vehicles != widget.vehicles) {
+        _vehicleIds(oldWidget.vehicles) != _vehicleIds(widget.vehicles)) {
       _findingsFuture = _allFindings();
     }
   }
