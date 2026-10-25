@@ -2210,6 +2210,37 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     }
   }
 
+  Future<void> _markTestPayrollPaid(Map<String, dynamic> approval) async {
+    if (approval['state'] != 'approved') return;
+    final ok = await showDialog<bool>(context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Finalize TEST payroll status?'),
+        content: const Text('This changes only the isolated payroll status '
+          'to Paid. It does NOT send money or create a financial payment.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Mark Paid · TEST')),
+        ],
+      ));
+    if (ok != true || !mounted) return;
+    try {
+      final changed = await store.markTestWeeklyPayrollPaid(
+        businessId: BriskersLabFixture.businessId,
+        employeeId: approval['employee_id'].toString(),
+        weekStart: approval['week_start'].toString(),
+      );
+      if (!changed) throw StateError('Already paid or not approved');
+      await _refresh();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')));
+      }
+    }
+  }
+
   Widget _payrollPage() {
     // Rates and disbursements are LOCAL TEST values, never live payroll.
     return ListView(
@@ -2314,6 +2345,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               subtitle: Text('Week ${approval['week_start']} · '
                 '${(approval['selected_minutes'] as int) / 60} hrs · '
                 'approved by ${approval['approved_by'] ?? '—'}'),
+              trailing: approval['state'] == 'approved'
+                ? IconButton(
+                    tooltip: 'Mark Paid · TEST only',
+                    onPressed: () => _markTestPayrollPaid(approval),
+                    icon: const Icon(Icons.verified_outlined),
+                  ) : null,
             ),
         ],
         if (testTaskCredits.isNotEmpty) ...[
