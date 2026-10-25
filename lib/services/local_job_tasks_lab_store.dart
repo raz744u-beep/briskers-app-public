@@ -921,14 +921,28 @@ class LocalJobTasksLabStore {
         selectedMinutes <= 0) {
       throw ArgumentError('Invalid test payroll draft');
     }
-    await db.customStatement(
-      'INSERT INTO local_lab_weekly_payroll_approvals '
-      '(business_id, employee_id, week_start, selected_minutes) '
-      'VALUES (?, ?, ?, ?) ON CONFLICT(business_id, employee_id, week_start) '
-      'DO UPDATE SET selected_minutes=excluded.selected_minutes '
-      "WHERE local_lab_weekly_payroll_approvals.state='draft'",
-      [businessId, employeeId, weekStart, selectedMinutes],
-    );
+    await db.transaction(() async {
+      // Caller-supplied time must agree with the durable selected task credits.
+      // Otherwise an old screen or an offline retry could approve phantom hours.
+      final row = await db.customSelect(
+        'SELECT COALESCE(SUM(paid_minutes), 0) AS minutes '
+        'FROM local_lab_payroll_task_credits '
+        'WHERE business_id=? AND employee_id=? AND week_start=?',
+        variables: [Variable<String>(businessId),
+          Variable<String>(employeeId), Variable<String>(weekStart)],
+      ).getSingle();
+      if (row.read<int>('minutes') != selectedMinutes) {
+        throw StateError('Weekly task credits changed; review before approval');
+      }
+      await db.customStatement(
+        'INSERT INTO local_lab_weekly_payroll_approvals '
+        '(business_id, employee_id, week_start, selected_minutes) '
+        'VALUES (?, ?, ?, ?) ON CONFLICT(business_id, employee_id, week_start) '
+        'DO UPDATE SET selected_minutes=excluded.selected_minutes '
+        "WHERE local_lab_weekly_payroll_approvals.state='draft'",
+        [businessId, employeeId, weekStart, selectedMinutes],
+      );
+    });
   }
 
   Future<bool> approveTestWeeklyPayroll({
