@@ -87,7 +87,7 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
                 .map((row) => Map<String, dynamic>.from(row)).toList()
             : <Map<String, dynamic>>[];
         if (!current()) return;
-        hadLocal = true;
+        hadLocal = cached is List || hadLocal;
         setState(() {
           _notes = notes;
           _canDeleteRecords = false;
