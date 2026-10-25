@@ -20,7 +20,9 @@ const offlineMediaMirrorTaskName = 'briskers.offline.media.prefetch';
 void expenseIqPhotoCallbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     if (task != expenseIqBackgroundTaskName &&
-        task != offlineMediaMirrorTaskName) return true;
+        task != offlineMediaMirrorTaskName) {
+      return true;
+    }
     final businessId = inputData?['businessId']?.toString() ?? '';
     if (businessId.isEmpty) return true;
     try {
@@ -89,8 +91,10 @@ class ExpenseIqBackgroundScheduler {
   /// requested periodic interval, not an SLA or a foreground sync trigger.
   static Future<void> scheduleOfflineMediaMirror(String businessId) async {
     if (!Platform.isAndroid || businessId.isEmpty ||
-        BriskersConnectionModeController.instance.forceOffline) return;
-    const constraints = Constraints(
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
+    final constraints = Constraints(
       networkType: NetworkType.unmetered,
       requiresCharging: true,
     );
