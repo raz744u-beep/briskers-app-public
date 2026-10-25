@@ -29,6 +29,7 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
     this.canManage = false,
     this.canDelete = false,
     this.initiallyExpanded = false,
+    this.cacheScopeKey,
   });
 
   final String businessId;
@@ -37,6 +38,9 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
   final bool canManage;
   final bool canDelete;
   final bool initiallyExpanded;
+  // Invoice entry uses a vehicle-scoped snapshot so it cannot overwrite
+  // the Customer Overview's multi-vehicle cached Findings.
+  final String? cacheScopeKey;
 
   @override
   State<CustomerVehicleFindingsSection> createState() =>
@@ -61,6 +65,17 @@ class _CustomerVehicleFindingsSectionState
   bool _expanded = false;
   bool _busy = false;
   String? _error;
+  String get _findingCacheSection => widget.cacheScopeKey ?? 'findings';
+
+  // Flutter parents often rebuild their vehicle list with a new List object.
+  // Compare stable vehicle identities, not List identity, to avoid restarting
+  // Findings loads (and reappearing spinners) on every unrelated rebuild.
+  String _vehicleIds(List<dynamic> vehicles) {
+    final ids = vehicles.whereType<Map>()
+        .map((row) => row['id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty).toList()..sort();
+    return ids.join('|');
+  }
 
   @override
   void initState() {
@@ -125,7 +140,8 @@ class _CustomerVehicleFindingsSectionState
     }
     if (oldWidget.businessId != widget.businessId ||
         oldWidget.customerId != widget.customerId ||
-        oldWidget.vehicles != widget.vehicles) {
+        oldWidget.cacheScopeKey != widget.cacheScopeKey ||
+        _vehicleIds(oldWidget.vehicles) != _vehicleIds(widget.vehicles)) {
       _findingsFuture = _allFindings();
     }
   }
@@ -148,7 +164,8 @@ class _CustomerVehicleFindingsSectionState
     final businessId = widget.businessId;
     final customerId = widget.customerId;
     Future<List<Map<String, dynamic>>> cachedFindings() async {
-      final cached = await _cache.load(businessId, customerId, 'findings');
+      final cached = await _cache.load(
+        businessId, customerId, _findingCacheSection);
       final rows = cached is List
           ? cached
                 .whereType<Map>()
@@ -175,14 +192,23 @@ class _CustomerVehicleFindingsSectionState
           ),
         );
       }
-      final cachedVisible = await visibility.filterFindings(rows, cached: true);
+      final vehicleIds = widget.vehicles.whereType<Map>()
+          .map((v) => v['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty).toSet();
+      final scopedRows = rows.where((row) {
+        final vehicle = row['_vehicle_id']?.toString() ??
+            row['vehicle_id']?.toString() ?? '';
+        return vehicleIds.contains(vehicle);
+      }).toList();
+      final cachedVisible = await visibility.filterFindings(
+          scopedRows, cached: true);
       final localVisible = await visibility.filterFindings(local);
       final visible = await _findingActions.project(
         businessId,
         mergeWorkFindings(cachedVisible, localVisible),
       );
       if (!visibility.isCurrent(generation)) return [];
-      await _cache.save(businessId, customerId, 'findings',
+      await _cache.save(businessId, customerId, _findingCacheSection,
         JobSummaryVisibility.stampSnapshot(visible, await visibility.captureSnapshotGeneration()));
       return visibility.isCurrent(generation) ? visible : [];
     }
@@ -191,6 +217,7 @@ class _CustomerVehicleFindingsSectionState
       return cachedFindings();
     }
 
+    Future<List<Map<String, dynamic>>> loadRemote() async {
     final all = <Map<String, dynamic>>[];
     try {
       final snapshotGeneration = await visibility.captureSnapshotGeneration();
@@ -229,32 +256,61 @@ class _CustomerVehicleFindingsSectionState
       await _cache.save(
         businessId,
         customerId,
-        'findings',
+        _findingCacheSection,
         JobSummaryVisibility.stampSnapshot(visible, snapshotGeneration),
       );
-      final pending = <Future<dynamic>>[];
-      for (final finding in visible) {
-        if (!visibility.isCurrent(generation)) return [];
-        final attachments = List<dynamic>.from(
-          finding['attachments'] ?? const [],
-        ).whereType<Map>().map((raw) => Map<String, dynamic>.from(raw));
-        for (final attachment in attachments) {
-          final bucket = attachment['bucket']?.toString() ?? 'briskers-private';
-          final key = attachment['key']?.toString() ?? '';
-          if (key.isEmpty) continue;
-          pending.add(_attachmentCache.getOrDownload(bucket, key));
-          if (pending.length >= 4) {
-            await Future.wait(pending);
-            pending.clear();
+      // Image downloads must never delay the findings list. Each file is
+      // stored in the persistent attachment cache when it becomes available.
+      unawaited(() async {
+        final pending = <Future<dynamic>>[];
+        try {
+          for (final finding in visible) {
+            if (!visibility.isCurrent(generation)) return;
+            final attachments = List<dynamic>.from(
+              finding['attachments'] ?? const [],
+            ).whereType<Map>().map((raw) => Map<String, dynamic>.from(raw));
+            for (final attachment in attachments) {
+              final bucket =
+                  attachment['bucket']?.toString() ?? 'briskers-private';
+              final key = attachment['key']?.toString() ?? '';
+              if (key.isEmpty) continue;
+              pending.add(_attachmentCache.getOrDownload(bucket, key));
+              if (pending.length >= 4) {
+                await Future.wait(pending);
+                pending.clear();
+              }
+            }
           }
+          if (pending.isNotEmpty) await Future.wait(pending);
+        } catch (_) {
+          // A photo download error cannot interrupt record navigation.
         }
-      }
-      if (pending.isNotEmpty) await Future.wait(pending);
+      }());
       return visibility.isCurrent(generation) ? visible : [];
     } catch (_) {
       if (!visibility.isCurrent(generation)) return [];
       return cachedFindings();
     }
+    }
+
+    // Force Online explicitly requests the server; regular Auto mode must
+    // paint the permission-scoped local snapshot first instead of waiting
+    // through serial per-vehicle RPCs or attachment downloads.
+    if (BriskersConnectionModeController.instance.forceOnline) {
+      return loadRemote();
+    }
+    final local = await cachedFindings();
+    if (visibility.isCurrent(generation)) {
+      unawaited(() async {
+        final remote = await loadRemote();
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        setState(() {
+          _findingsFuture =
+              Future<List<Map<String, dynamic>>>.value(remote);
+        });
+      }());
+    }
+    return local;
   }
 
   String _vehicleLabel(Map<String, dynamic> vehicle) => <String>[

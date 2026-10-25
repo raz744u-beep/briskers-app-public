@@ -1129,8 +1129,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       );
     }
 
-    return Column(
+    return Stack(
       children: [
+        Column(
+          children: [
         Material(
           color: Theme.of(context).scaffoldBackgroundColor,
           elevation: 1,
@@ -1256,17 +1258,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       _loadLocal(reportError: true);
                     },
                   )),
-                  const SizedBox(width: 8),
-                  if (_canManage)
-                    IconButton.filled(
-                      tooltip: 'Add appointment',
-                      style: IconButton.styleFrom(
-                        backgroundColor: BriskersColors.actionBlue,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: _addAppointment,
-                      icon: const Icon(Icons.add),
-                    ),
+
                 ]),
 
               ],
@@ -1277,7 +1269,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
           child: RefreshIndicator(
             onRefresh: _load,
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 84),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 100),
               children: [
                 if (widget.roleCode == 'owner' && _hasOrphanMock)
                   Card(
@@ -1488,6 +1480,26 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
             ),
           ),
         ),
+      ],
+        ),
+        if (_canManage && MediaQuery.viewInsetsOf(context).bottom == 0)
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FloatingActionButton.extended(
+              heroTag: 'appointments_screen-quick-create',
+              tooltip: 'Add appointment',
+              onPressed: _addAppointment,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              backgroundColor: BriskersColors.appointments,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ),
       ],
     );
   }

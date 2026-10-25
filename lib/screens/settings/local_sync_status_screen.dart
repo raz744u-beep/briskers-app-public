@@ -26,6 +26,7 @@ import '../../services/local_tax_settings_cache.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
 import '../../services/offline_work_findings_service.dart';
+import '../../services/offline_attachment_mirror_service.dart';
 
 class LocalSyncStatusScreen extends StatefulWidget {
   const LocalSyncStatusScreen({
@@ -84,6 +85,9 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   List<Map<String, dynamic>> _syncStates = const [];
   List<Map<String, dynamic>> _outbox = const [];
   List<Map<String, dynamic>> _pendingDetails = const [];
+  final OfflineAttachmentMirrorService _mediaMirror =
+      OfflineAttachmentMirrorService();
+  late Future<OfflineAttachmentInventory> _mediaInventory;
 
   @override
   void initState() {
@@ -105,6 +109,8 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       setState(() {
         _loading = true;
         _error = null;
+        // This read-only disk check is independent from database sync.
+        _mediaInventory = _mediaMirror.inventory(widget.businessId);
       });
     }
 
@@ -839,6 +845,43 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                     Icons.search,
                     tr('preInspections'),
                     _counts['inspections'] ?? 0,
+                  ),
+                  FutureBuilder<OfflineAttachmentInventory>(
+                    future: _mediaInventory,
+                    builder: (context, snapshot) {
+                      final available = snapshot.data?.available;
+                      final known = snapshot.data?.known;
+                      final missing = snapshot.data?.missing;
+                      return Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.photo_library_outlined),
+                          title: const Text('Offline photo copies'),
+                          subtitle: Text(
+                            snapshot.hasError
+                                ? 'Photo inventory unavailable — refresh to retry'
+                                : known == null
+                                    ? 'Checking files already saved on this device…'
+                                    : '$available of $known known photos stored locally '
+                                        '• $missing missing. '
+                                        'Only synced photo references are counted; '
+                                        'the full historical total may be higher.',
+                          ),
+                          trailing: snapshot.connectionState ==
+                                  ConnectionState.done
+                              ? Icon(snapshot.hasError
+                                  ? Icons.warning_amber_outlined
+                                  : missing == 0
+                                      ? Icons.check_circle_outline
+                                      : Icons.cloud_download_outlined)
+                              : const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2),
+                                ),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 10),
                   Text(

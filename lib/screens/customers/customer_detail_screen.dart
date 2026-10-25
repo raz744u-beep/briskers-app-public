@@ -47,6 +47,7 @@ class CustomerDetailScreen extends StatefulWidget {
     required this.businessId,
     required this.customerId,
     required this.roleCode,
+    this.initialCustomerSummary,
     this.onReviewed,
     this.sharedBottomNavigationBar,
   });
@@ -54,6 +55,8 @@ class CustomerDetailScreen extends StatefulWidget {
   final String businessId;
   final String customerId;
   final String roleCode;
+  // Permission-scoped selected row for a read-only first-frame preview.
+  final Map<String, dynamic>? initialCustomerSummary;
   final VoidCallback? onReviewed;
   final Widget? sharedBottomNavigationBar;
 
@@ -205,6 +208,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         builder: (_) => JobDocumentScreen(
           businessId: widget.businessId,
           documentId: id,
+          initialDocumentSummary: Map<String, dynamic>.from(item),
           isOwner: widget.roleCode == 'owner',
           roleCode: widget.roleCode)));
       await _refreshEditedCustomerDocument(id);
@@ -1287,8 +1291,9 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final customer = Map<String, dynamic>.from(
-      _data?['customer'] ?? const {},
+      _data?['customer'] ?? widget.initialCustomerSummary ?? const {},
     );
+    if (_data == null) customer['name'] ??= customer['display_name'];
     final vehicles = List<dynamic>.from(
       _data?['vehicles'] ?? const [],
     );
@@ -1351,11 +1356,46 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
               child: const Icon(Icons.add),
             ),
       body: _data == null
-          ? Center(
-              child: _error == null
-                  ? const CircularProgressIndicator()
-                  : Text(_error!),
-            )
+          ? widget.initialCustomerSummary == null
+              ? Center(
+                  child: _error == null
+                      ? const CircularProgressIndicator()
+                      : Text(_error!),
+                )
+              : ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    // Preview is read-only; permission-sensitive full detail
+                    // and financial actions await the validated local record.
+                    Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.person_outline,
+                            color: BriskersColors.customers),
+                        title: Text('${customer['name'] ?? 'Customer'}',
+                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                        subtitle: Text([
+                          if ((customer['phone']?.toString() ?? '').isNotEmpty)
+                            formatUsPhone(customer['phone'].toString()),
+                          if ((customer['email']?.toString() ?? '').isNotEmpty)
+                            customer['email'].toString(),
+                        ].join(' • ')),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (_error != null)
+                      Text(_error!,
+                          style: TextStyle(
+                              color: Theme.of(context).colorScheme.error))
+                    else
+                      const ListTile(
+                        leading: SizedBox(
+                          width: 18, height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        title: Text('Opening saved customer details…'),
+                      ),
+                  ],
+                )
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(

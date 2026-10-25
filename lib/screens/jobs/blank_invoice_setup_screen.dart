@@ -68,7 +68,9 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
       }
       _loading = false;
     } else {
-      _loadCustomers();
+      // Customer matches are only shown once a query is entered. Do not
+      // load thousands of names before displaying the New Estimate form.
+      _loading = false;
     }
   }
 

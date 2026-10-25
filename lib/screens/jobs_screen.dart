@@ -127,6 +127,7 @@ class _JobsScreenState extends State<JobsScreen>
   String? _error;
   String? _busyJobId;
   bool _onlineReady = false;
+  bool _jobsRemoteRefreshRunning = false;
   bool _showingLocal = false;
   bool _refreshFailed = false;
 
@@ -134,6 +135,36 @@ class _JobsScreenState extends State<JobsScreen>
       widget.roleCode == 'owner' ||
       widget.roleCode == 'manager' ||
       widget.roleCode == 'office';
+
+  // Serializes best-effort background replay so rapid consecutive local edits
+  // cannot start overlapping flushes of the same pending outbox entries.
+  bool _quickEditSyncRunning = false;
+  bool _quickEditSyncRequested = false;
+
+  void _scheduleQuickEditSync() {
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    _quickEditSyncRequested = true;
+    if (_quickEditSyncRunning) return;
+    _quickEditSyncRunning = true;
+    final businessId = widget.businessId;
+    unawaited(() async {
+      try {
+        while (_quickEditSyncRequested &&
+            !BriskersConnectionModeController.instance.forceOffline) {
+          _quickEditSyncRequested = false;
+          try {
+            await _offlineJobAdmin.flush(businessId);
+          } catch (_) {
+            // Leave the outbox entry pending for ordinary sync retry.
+            return;
+          }
+        }
+      } finally {
+        _quickEditSyncRunning = false;
+      }
+    }());
+  }
+
 
   @override
   void initState() {
@@ -396,45 +427,47 @@ class _JobsScreenState extends State<JobsScreen>
     if (!mounted || !visibility.isCurrent(generation)) return;
     if (mode.forceOffline || !refreshRemote) return;
 
-    try {
-      final onlineStatuses = await _api.jobStatuses(businessId);
-      if (!mounted || !visibility.isCurrent(generation)) return;
-      await _localJobs.replaceJobStatuses(businessId, onlineStatuses);
-      if (_canManage) {
-        try {
-          await _offlineJobAdmin.flush(businessId);
-        } catch (_) {
-          // Queued edits remain local and retry when connectivity returns.
+    // Do not hold the Jobs list/navigation on remote statuses or replay.
+    // Retain the already-painted local rows during a failed background pull.
+    if (_jobsRemoteRefreshRunning) return;
+    _jobsRemoteRefreshRunning = true;
+    unawaited(() async {
+      try {
+        final onlineStatuses = await _api.jobStatuses(businessId);
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        await _localJobs.replaceJobStatuses(businessId, onlineStatuses);
+        if (_canManage) {
+          unawaited(_offlineJobAdmin.refreshEmployees(businessId)
+              .then((_) {}, onError: (Object _) {}));
+          try {
+            await _offlineJobAdmin.flush(businessId);
+          } catch (_) {
+            // Durable pending work retries later.
+          }
         }
-        try {
-          await _offlineJobAdmin.refreshEmployees(businessId);
-        } catch (_) {
-          // Keep the last employee choices for offline assignment.
-        }
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        await _jobSync.pull(businessId);
+        unawaited(_documentSync.refreshBestEffort(businessId));
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        await readSavedJobs(online: true);
+      } catch (error) {
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        setState(() {
+          _onlineReady = false;
+          _refreshFailed = true;
+          _showingLocal = localAvailable && !mode.forceOnline;
+          if (_showingLocal || (_rows?.isNotEmpty ?? false)) {
+            _showingLocal = true;
+            _error = null;
+          } else {
+            _rows ??= const [];
+            _error = error.toString();
+          }
+        });
+      } finally {
+        _jobsRemoteRefreshRunning = false;
       }
-      if (!mounted || !visibility.isCurrent(generation)) return;
-      // Incremental sync populates the same SQLite query in every mode.
-      await _jobSync.pull(businessId);
-      unawaited(_documentSync.refreshBestEffort(businessId));
-      if (!mounted || !visibility.isCurrent(generation)) return;
-      await readSavedJobs(online: true);
-    } catch (error) {
-      if (!mounted || !visibility.isCurrent(generation)) return;
-      setState(() {
-        _onlineReady = false;
-        _refreshFailed = true;
-        _showingLocal = localAvailable && !mode.forceOnline;
-        if (_showingLocal || (_rows?.isNotEmpty ?? false)) {
-          // Never remove an existing local list because an online request
-          // failed or its DNS lookup timed out.
-          _showingLocal = true;
-          _error = null;
-        } else {
-          _rows ??= const [];
-          _error = error.toString();
-        }
-      });
-    }
+    }());
   }
 
   void _searchChanged() {
@@ -495,17 +528,16 @@ class _JobsScreenState extends State<JobsScreen>
 
     setState(() => _busyJobId = job['id']?.toString());
     try {
-      List<Map<String, dynamic>> employees;
-      if (_onlineReady) {
+      // The previously saved employee list is the first source of truth
+      // for opening the picker. Never block the first tap on a network call.
+      var employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
+      if (employees.isEmpty &&
+          !BriskersConnectionModeController.instance.forceOffline) {
         try {
-          employees = await _offlineJobAdmin.refreshEmployees(
-            widget.businessId,
-          );
+          employees = await _offlineJobAdmin.refreshEmployees(widget.businessId);
         } catch (_) {
-          employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
+          // Retain offline-only behavior when the network is unavailable.
         }
-      } else {
-        employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
       }
 
       if (!mounted) return;
@@ -582,16 +614,11 @@ class _JobsScreenState extends State<JobsScreen>
         position: selectedEmployee?['position_name']?.toString(),
       );
 
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {
-          // The local change remains queued for the next successful sync.
-        }
-      }
-
-      await _load();
+      // Publish the durable local change immediately. A slow server response
+      // must not keep the pencil editor blocked or delay the updated card.
+      await _load(refreshRemote: false);
       widget.onJobsChanged?.call();
+      _scheduleQuickEditSync();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -673,15 +700,9 @@ class _JobsScreenState extends State<JobsScreen>
         job['id'].toString(),
         value,
       );
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {
-          // The local change remains queued for the next successful sync.
-        }
-      }
-      await _load();
+      await _load(refreshRemote: false);
       widget.onJobsChanged?.call();
+      _scheduleQuickEditSync();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -717,28 +738,28 @@ class _JobsScreenState extends State<JobsScreen>
         iconKey: selectedStatus['icon_key']?.toString(),
       );
 
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {
-          // The status change remains queued for the next successful sync.
-        }
-      }
-
+      // Paint the durable local status immediately. The pending outbox is
+      // synchronized independently; the status picker does not wait for HTTP.
+      await _load(refreshRemote: false);
       if (statusCode == 'completed' && widget.roleCode == 'owner' &&
           !BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await OwnerInvoiceAutoCloseService().closeEligible(
-            businessId: widget.businessId,
-            jobId: job['id'].toString(),
-            isOwner: true,
-          );
-        } catch (_) {
-          // A failed close does not undo job completion or payment history.
-          // The owner may review the invoice later.
-        }
+        // Do not close the invoice before the queued completion reaches
+        // the server. Failed replay leaves existing invoice data unchanged.
+        unawaited(() async {
+          try {
+            await _offlineJobAdmin.flush(widget.businessId);
+            await OwnerInvoiceAutoCloseService().closeEligible(
+              businessId: widget.businessId,
+              jobId: job['id'].toString(),
+              isOwner: true,
+            );
+          } catch (_) {
+            // Queued changes remain durable and can be retried later.
+          }
+        }());
+      } else {
+        _scheduleQuickEditSync();
       }
-      await _load();
       widget.onJobsChanged?.call();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -975,8 +996,10 @@ class _JobsScreenState extends State<JobsScreen>
   Widget build(BuildContext context) {
     final visible = _visibleRows;
 
-    return Column(
+    return Stack(
       children: [
+        Column(
+          children: [
         Material(
           color: Theme.of(context).scaffoldBackgroundColor,
           elevation: 1,
@@ -1154,7 +1177,7 @@ class _JobsScreenState extends State<JobsScreen>
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const Spacer(),
                     if (_rows != null)
                       Text(
                         '${tr('total')} $_totalCount',
@@ -1199,17 +1222,7 @@ class _JobsScreenState extends State<JobsScreen>
                         },
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    if (_canManage)
-                      IconButton.filled(
-                        tooltip: 'New Job',
-                        style: IconButton.styleFrom(
-                          backgroundColor: BriskersColors.jobs,
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: _createNewJob,
-                        icon: const Icon(Icons.add),
-                      ),
+
                   ],
                 ),
               ],
@@ -1222,7 +1235,7 @@ class _JobsScreenState extends State<JobsScreen>
             child: ListView(
               key: PageStorageKey('jobs-list:$_storageId'),
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 80),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 100),
               children: [
                 if (_showingLocal &&
                     (BriskersConnectionModeController.instance.forceOffline ||
@@ -1352,6 +1365,26 @@ class _JobsScreenState extends State<JobsScreen>
             ),
           ),
         ),
+      ],
+        ),
+        if (_canManage && MediaQuery.viewInsetsOf(context).bottom == 0)
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FloatingActionButton.extended(
+              heroTag: 'jobs_screen-quick-create',
+              tooltip: 'New Job',
+              onPressed: _createNewJob,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              backgroundColor: BriskersColors.jobs,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ),
       ],
     );
   }

@@ -79,7 +79,7 @@ class _StandardNoteEditorSheetState extends State<StandardNoteEditorSheet> {
       curve: Curves.easeOut,
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: FractionallySizedBox(
-        heightFactor: keyboardOpen ? 0.94 : 0.76,
+        heightFactor: keyboardOpen ? 0.86 : 0.76,
         child: Material(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
@@ -246,9 +246,15 @@ class _StandardNoteEditorSheetState extends State<StandardNoteEditorSheet> {
                 ),
               ),
               const Divider(height: 1),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 10, 18, 14),
-                child: Row(
+              SafeArea(
+                top: false,
+                left: false,
+                right: false,
+                maintainBottomViewPadding: false,
+                minimum: EdgeInsets.only(bottom: keyboardOpen ? 0 : 8),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 14),
+                  child: Row(
                   children: [
                     Expanded(
                       child: OutlinedButton(
@@ -280,6 +286,7 @@ class _StandardNoteEditorSheetState extends State<StandardNoteEditorSheet> {
                       ),
                     ),
                   ],
+                  ),
                 ),
               ),
             ],
