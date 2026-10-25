@@ -2213,8 +2213,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Future<void> _markTestPayrollPaid(Map<String, dynamic> approval) async {
     if (approval['state'] != 'approved') return;
     final amount = TextEditingController();
+    final proof = TextEditingController();
     var method = 'cash';
-    final payment = await showDialog<({int cents, String method})>(
+    final payment = await showDialog<({int cents, String method, String proof})>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, update) => AlertDialog(
@@ -2231,9 +2232,15 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 DropdownMenuItem(value: 'cash', child: Text('Cash')),
                 DropdownMenuItem(value: 'zelle', child: Text('Zelle')),
                 DropdownMenuItem(value: 'ach', child: Text('ACH')),
+                DropdownMenuItem(value: 'check', child: Text('Check')),
               ],
               onChanged: (value) => update(() => method = value ?? 'cash'),
             ),
+            if (method == 'check')
+              TextField(controller: proof,
+                decoration: const InputDecoration(
+                  labelText: 'Check proof reference · TEST',
+                  helperText: 'Reference only, not a captured photo')),
           ]),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogContext),
@@ -2242,14 +2249,17 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               final dollars = double.tryParse(amount.text.trim());
               if (dollars == null || !dollars.isFinite ||
                   dollars <= 0 || dollars > 1000000) return;
+              if (method == 'check' && proof.text.trim().isEmpty) return;
               Navigator.pop(dialogContext,
-                (cents: (dollars * 100).round(), method: method));
+                (cents: (dollars * 100).round(), method: method,
+                 proof: proof.text.trim()));
             }, child: const Text('Record TEST payment')),
           ],
         ),
       ),
     );
     amount.dispose();
+    proof.dispose();
     if (payment == null || !mounted) return;
     try {
       final changed = await store.finalizeTestWeeklyPayrollPayment(
@@ -2258,6 +2268,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         weekStart: approval['week_start'].toString(),
         cents: payment.cents, method: payment.method,
         paidAt: DateTime.now(), note: 'Approved TEST weekly payroll',
+        checkProofReference: payment.proof.isEmpty ? null : payment.proof,
       );
       if (!changed) throw StateError('Already paid or not approved');
       await _refresh();
