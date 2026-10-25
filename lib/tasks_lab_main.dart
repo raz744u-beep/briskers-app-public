@@ -2248,8 +2248,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             FilledButton(onPressed: () {
               final dollars = double.tryParse(amount.text.trim());
               if (dollars == null || !dollars.isFinite ||
-                  dollars <= 0 || dollars > 1000000) return;
-              if (method == 'check' && proof.text.trim().isEmpty) return;
+                  dollars <= 0 || dollars > 1000000) { return; }
+              if (method == 'check' && proof.text.trim().isEmpty) { return; }
               Navigator.pop(dialogContext,
                 (cents: (dollars * 100).round(), method: method,
                  proof: proof.text.trim()));
