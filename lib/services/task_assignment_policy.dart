@@ -105,7 +105,7 @@ class TaskJobChooser {
     final ids = <String>{};
     for (final job in jobs) {
       if (!job.isOpen || job.customerId != customerId ||
-          job.vehicleId != vehicleId) continue;
+          job.vehicleId != vehicleId) { continue; }
       if (job.jobId.trim().isEmpty || !ids.add(job.jobId)) {
         throw StateError('Duplicate or invalid open job identity');
       }
