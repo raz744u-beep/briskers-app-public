@@ -514,6 +514,7 @@ class _JobsScreenState extends State<JobsScreen>
           businessId: widget.businessId,
           jobId: job['id'].toString(),
           roleCode: widget.roleCode,
+          initialJobSummary: Map<String, dynamic>.from(job),
           initialAction: initialAction,
           bottomNavigationBar: widget.jobDetailBottomNavigationBar,
         ),
