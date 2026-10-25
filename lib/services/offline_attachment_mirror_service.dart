@@ -30,16 +30,10 @@ class OfflineAttachmentMirrorService {
 
   static const _cursorPrefix = 'briskers_media_prefetch_cursor_';
 
-  Future<OfflineAttachmentMirrorResult> prefetchBatch(
-    String businessId, {
-    int batchSize = 24,
-  }) async {
-    if (businessId.isEmpty || batchSize <= 0 ||
-        BriskersConnectionModeController.instance.forceOffline) {
-      return const OfflineAttachmentMirrorResult(
-        examined: 0, downloaded: 0, missing: 0, total: 0);
-    }
-
+  // Read-only catalog: the 'total' is only media whose *metadata* this
+  // device knows. Never call that all of the shop's historical attachments.
+  Future<List<OfflineMediaReference>> knownReferences(String businessId) async {
+    if (businessId.isEmpty) return const [];
     // Only synchronized, server-backed keys are eligible. Local-only camera
     // files are never copied, evicted, rewritten or marked synced here.
     const keys = '''
@@ -93,6 +87,43 @@ class OfflineAttachmentMirrorService {
     final ordered = known.values.toList()
       ..sort((a, b) =>
           '${a.bucket}::${a.key}'.compareTo('${b.bucket}::${b.key}'));
+    return ordered;
+  }
+
+  Future<OfflineAttachmentInventory> inventory(String businessId) async {
+    final refs = await knownReferences(businessId);
+    var locallyAvailable = 0;
+    for (final ref in refs) {
+      if (ref.localPath.isNotEmpty) {
+        final file = File(ref.localPath);
+        if (await file.exists() && await file.length() > 0) {
+          locallyAvailable++;
+          continue;
+        }
+      }
+      if (await _cache.existing(ref.bucket, ref.key) != null) {
+        locallyAvailable++;
+      }
+    }
+    return OfflineAttachmentInventory(
+      known: refs.length,
+      available: locallyAvailable,
+    );
+  }
+
+
+
+  Future<OfflineAttachmentMirrorResult> prefetchBatch(
+    String businessId, {
+    int batchSize = 24,
+  }) async {
+    if (businessId.isEmpty || batchSize <= 0 ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return const OfflineAttachmentMirrorResult(
+        examined: 0, downloaded: 0, missing: 0, total: 0);
+    }
+
+    final ordered = await knownReferences(businessId);
     final total = ordered.length;
     if (total == 0) {
       return const OfflineAttachmentMirrorResult(
@@ -141,4 +172,14 @@ class OfflineAttachmentMirrorResult {
   });
 
   final int examined, downloaded, missing, total;
+}
+
+class OfflineAttachmentInventory {
+  const OfflineAttachmentInventory({
+    required this.known,
+    required this.available,
+  });
+
+  final int known, available;
+  int get missing => known - available;
 }
