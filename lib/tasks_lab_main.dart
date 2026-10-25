@@ -1,4 +1,8 @@
 import 'dart:async';
+import 'dart:io';
+
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -2217,7 +2221,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Future<void> _markTestPayrollPaid(Map<String, dynamic> approval) async {
     if (approval['state'] != 'approved') return;
     final amount = TextEditingController();
-    final proof = TextEditingController();
+    String? proofPhotoPath;
     var method = 'cash';
     final payment = await showDialog<({int cents, String method, String proof})>(
       context: context,
@@ -2241,10 +2245,26 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               onChanged: (value) => update(() => method = value ?? 'cash'),
             ),
             if (method == 'check')
-              TextField(controller: proof,
-                decoration: const InputDecoration(
-                  labelText: 'Check proof reference · TEST',
-                  helperText: 'Reference only, not a captured photo')),
+              Column(mainAxisSize: MainAxisSize.min, children: [
+                Text(proofPhotoPath == null
+                  ? 'Check photo required' : 'Check photo captured · TEST'),
+                TextButton.icon(
+                  onPressed: () async {
+                    final shot = await ImagePicker().pickImage(
+                      source: ImageSource.camera, imageQuality: 100);
+                    if (shot == null) return;
+                    final directory = await getApplicationSupportDirectory();
+                    final folder = Directory('${directory.path}/tasks_lab_check_proofs');
+                    await folder.create(recursive: true);
+                    final filename = 'check_${DateTime.now().microsecondsSinceEpoch}.jpg';
+                    final saved = await File(shot.path)
+                      .copy('${folder.path}/$filename');
+                    update(() => proofPhotoPath = saved.path);
+                  },
+                  icon: const Icon(Icons.photo_camera),
+                  label: const Text('Photograph check'),
+                ),
+              ]),
           ]),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogContext),
@@ -2253,17 +2273,16 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               final dollars = double.tryParse(amount.text.trim());
               if (dollars == null || !dollars.isFinite ||
                   dollars <= 0 || dollars > 1000000) { return; }
-              if (method == 'check' && proof.text.trim().isEmpty) { return; }
+              if (method == 'check' && proofPhotoPath == null) { return; }
               Navigator.pop(dialogContext,
                 (cents: (dollars * 100).round(), method: method,
-                 proof: proof.text.trim()));
+                 proof: proofPhotoPath ?? ''));
             }, child: const Text('Record TEST payment')),
           ],
         ),
       ),
     );
     amount.dispose();
-    proof.dispose();
     if (payment == null || !mounted) return;
     try {
       final changed = await store.finalizeTestWeeklyPayrollPayment(
