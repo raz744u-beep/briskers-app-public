@@ -967,6 +967,45 @@ class LocalJobTasksLabStore {
     return changed == 1;
   }
 
+  /// Atomic simulated disbursement linked to one approved payroll week.
+  /// Inserts the test payment and moves Approved -> Paid together. A retry
+  /// cannot create a second payment because only Approved may transition.
+  Future<bool> finalizeTestWeeklyPayrollPayment({
+    required String businessId, required String employeeId,
+    required String weekStart, required int cents,
+    required String method, required DateTime paidAt,
+    required String note,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, employeeId].any((v) => v.trim().isEmpty) ||
+        cents <= 0 || cents > 100000000 ||
+        !const {'cash', 'check', 'zelle', 'ach', 'card', 'other'}
+            .contains(method)) {
+      throw ArgumentError('Invalid test payroll payment');
+    }
+    return db.transaction(() async {
+      final changed = await db.customUpdate(
+        'UPDATE local_lab_weekly_payroll_approvals SET state=? '
+        'WHERE business_id=? AND employee_id=? AND week_start=? '
+        "AND state='approved' AND approved_by IS NOT NULL",
+        variables: [const Variable<String>('paid'),
+          Variable<String>(businessId), Variable<String>(employeeId),
+          Variable<String>(weekStart)],
+        updates: {},
+      );
+      if (changed != 1) return false;
+      await db.customStatement(
+        'INSERT INTO local_lab_payroll_disbursements '
+        '(business_id, employee_id, cents, kind, method, note, '
+        'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [businessId, employeeId, cents, 'pay', method,
+          'Week $weekStart · $note', paidAt.millisecondsSinceEpoch,
+          DateTime.now().millisecondsSinceEpoch],
+      );
+      return true;
+    });
+  }
+
   Future<List<Map<String, dynamic>>> testWeeklyPayrollApprovals(
       String businessId) async {
     await ensureTables(db);
