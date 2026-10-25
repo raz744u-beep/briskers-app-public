@@ -70,6 +70,11 @@ void main() {
 
     expect(main, contains('store.payrollTestPayments('));
     expect(main, contains('store.recordLabPayrollPayment('));
+    expect(main, contains('weekly-select-all'));
+    expect(main, contains('CheckboxListTile('));
+    expect(main, contains('Hours to credit this week'));
+    expect(main, contains('Save weekly hours · TEST'));
+    expect(main, contains('Week of $weekText'));
     expect(main, contains('earnedPayrollPreviewHours'));
 
     expect(main, contains('Mark all active tasks Done'));
