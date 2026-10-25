@@ -156,6 +156,7 @@ class JobDocumentScreen extends StatefulWidget {
     required this.businessId,
     required this.documentId,
     required this.isOwner,
+    this.initialDocumentSummary,
     this.roleCode,
     this.canManageExpenses = false,
     this.initialAction,
@@ -166,6 +167,9 @@ class JobDocumentScreen extends StatefulWidget {
   final String businessId;
   final String documentId;
   final bool isOwner;
+  // Only the already authorized selected list row; no financial actions
+  // are enabled until locally saved detail and pending edits are projected.
+  final Map<String, dynamic>? initialDocumentSummary;
   final String? roleCode;
   final bool canManageExpenses;
   final String? initialAction;
@@ -7404,7 +7408,34 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
           foregroundColor: Colors.white,
           title: const Text('Document'),
         ),
-        body: const Center(child: CircularProgressIndicator()),
+        body: widget.initialDocumentSummary == null
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Card(child: ListTile(
+                  leading: Icon(_estimate
+                      ? Icons.description_outlined : Icons.receipt_long_outlined),
+                  title: Text([
+                    _estimate ? 'Estimate' : 'Invoice',
+                    widget.initialDocumentSummary!['document_number']
+                        ?.toString() ?? '',
+                  ].where((s) => s.isNotEmpty).join(' #'),
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                  subtitle: Text([
+                    widget.initialDocumentSummary!['customer_name']
+                        ?.toString() ?? '',
+                    widget.initialDocumentSummary!['vehicle']
+                        ?.toString() ?? '',
+                  ].where((s) => s.isNotEmpty).join(' • ')),
+                )),
+                const ListTile(
+                  leading: SizedBox(width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+                  title: Text('Opening saved document details…'),
+                ),
+              ],
+            ),
       );
     }
 
