@@ -937,6 +937,17 @@ class LocalJobTasksLabStore {
     return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
   }
 
+  /// All jobs in the isolated task store, including newly created test jobs.
+  Future<List<Map<String, dynamic>>> allTasks(String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT * FROM local_job_tasks_lab WHERE business_id=? '
+      'AND source_missing=0 ORDER BY updated_at DESC',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
+
   /// Update source description, but preserve edited text, assigned employee,
   /// hours, completion time and status. Invoice deletion is non-destructive.
   Future<void> reconcileDocument({
