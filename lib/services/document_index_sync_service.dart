@@ -47,7 +47,27 @@ class DocumentIndexSyncService {
   final LocalDocumentDetailCache _detailCache;
   final BriskersLocalDatabase _database;
 
+  // A full first-time document hydration can involve thousands of details.
+  // Several screens can request it during the same navigation burst. Share
+  // one in-flight transfer instead of competing for network and SQLite.
+  static final Expando<Map<String, Future<void>>> _activePulls = Expando();
+
   Future<void> pull(String businessId) async {
+    final active = _activePulls[_database] ??= {};
+    final pending = active[businessId];
+    if (pending != null) return pending;
+    final work = _pullUnshared(businessId);
+    active[businessId] = work;
+    try {
+      await work;
+    } finally {
+      if (identical(active[businessId], work)) {
+        active.remove(businessId);
+      }
+    }
+  }
+
+  Future<void> _pullUnshared(String businessId) async {
     await _retirement.pullTombstones(businessId);
     final results = await Future.wait<dynamic>([
       _api.documents(businessId, kind: 'estimate'),
