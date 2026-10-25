@@ -1667,7 +1667,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             FilledButton(onPressed: () async {
               final value = double.tryParse(hours.text.trim());
               if (description.text.trim().isEmpty || value == null ||
-                  !value.isFinite || value < 0) return;
+                  !value.isFinite || value < 0) { return; }
               try {
                 await store.addRecheckTask(
                   businessId: BriskersLabFixture.businessId,
@@ -1677,8 +1677,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 );
                 if (context.mounted) Navigator.pop(context, true);
               } catch (error) {
-                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('$error')));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('$error')));
+                }
               }
             }, child: const Text('Create task')),
           ],
