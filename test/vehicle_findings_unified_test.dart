@@ -580,6 +580,17 @@ void main() {
       await actions.addToJob(business, finding('fixture-f1'), job);
       await actions.flush(business);
       await actions.flush(business);
+      // Multiple immediate Auto sync attempts must not re-poll uncertain
+      // already-sent operations or remove their saved local work.
+      final before = await db.customSelect(
+        "SELECT attempt_count FROM sync_outbox WHERE entity_type='finding_action'",
+      ).getSingle();
+      expect(before.read<int>('attempt_count'), greaterThanOrEqualTo(2));
+      await actions.flush(business);
+      final after = await db.customSelect(
+        "SELECT attempt_count FROM sync_outbox WHERE entity_type='finding_action'",
+      ).getSingle();
+      expect(after.read<int>('attempt_count'), before.read<int>('attempt_count'));
       expect(api.addCalls, 1);
       expect(
         await db
