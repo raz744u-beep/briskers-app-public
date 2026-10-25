@@ -2638,6 +2638,18 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       if (employeeId == null)
         const ListTile(title: Text('Choose an employee to view their work')),
       if (employeeId != null) ...[
+        ListTile(
+          title: const Text('Independent shop tasks',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+          subtitle: const Text('Not billed to a customer')),
+        ...shopTasks.where((task) =>
+          task['employee_id']?.toString() == employeeId).map((task) =>
+          ListTile(
+            leading: const Icon(Icons.build_outlined),
+            title: Text(task['description'].toString()),
+            subtitle: Text('${task['estimated_minutes']} min · '
+              '${task['status']} · shop work'),
+          )),
         Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
           child: FilledButton.icon(onPressed: () =>
             _createTestTask(employeeId: employeeId),
