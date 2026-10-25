@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/services/test_payroll_approval.dart';
 
 void main() {
-  final monday = DateTime(2026, 10, 19).add(const Duration(days: 1));
+  final monday = DateTime(2026, 10, 19);
   test('approval is explicit and retains approver', () {
     final draft = TestPayrollApproval(
       state: TestPayrollApprovalState.draft, employeeId: 'chris',
