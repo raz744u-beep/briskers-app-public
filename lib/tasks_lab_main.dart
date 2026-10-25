@@ -353,6 +353,40 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     return "${_employeeName(task['employee_id']?.toString())} · ${task['payroll_hours'] ?? '—'} hrs";
   }
 
+  Future<void> _editTestBilledLaborHours(Map<String, dynamic> task) async {
+    final current = (task['billed_hours_override'] as num?)?.toDouble() ??
+      (task['source_invoice_hours'] as num?)?.toDouble() ?? 0;
+    final controller = TextEditingController(text: current.toString());
+    final value = await showDialog<double>(context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit customer-billed labor hours · TEST'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('This edits invoice Qty only. Mechanic payroll '
+            'allocations will not change.'),
+          TextField(controller: controller, autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Customer hours')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () {
+            final hours = double.tryParse(controller.text.trim());
+            if (hours == null || !hours.isFinite || hours < 0) { return; }
+            Navigator.pop(dialogContext, hours);
+          }, child: const Text('Save Qty')),
+        ],
+      ));
+    controller.dispose();
+    if (value == null || !mounted) return;
+    await store.saveTestBilledLaborHours(
+      businessId: BriskersLabFixture.businessId,
+      jobId: task['job_id'].toString(),
+      documentId: task['document_id'].toString(),
+      lineId: task['line_id'].toString(), hours: value);
+    await _refresh();
+  }
+
   Future<void> _editInvoiceLabor(Map<String, dynamic> task) async {
     if (_firstCompletion(task) != null) return;
     final existing = allocationsByLine[_allocationKey(task)] ?? [];
@@ -381,11 +415,24 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   DropdownMenuItem(value: e['id']!,
                     child: Text(_employeeName(e['id']))),
             ],
-            onChanged: (v) => update(() => set(v ?? '')),
+            onChanged: (v) => update(() {
+              set(v ?? '');
+              if (label == 'Mechanic 1' && (v ?? '').isEmpty &&
+                  second.isNotEmpty) {
+                first = second;
+                hoursA.text = hoursB.text;
+                second = '';
+                hoursB.clear();
+              }
+              if (label.startsWith('Mechanic 2') && (v ?? '').isEmpty) {
+                hoursB.clear();
+              }
+            }),
           );
         return Padding(
           padding: EdgeInsets.fromLTRB(16, 12, 16,
-            MediaQuery.viewInsetsOf(sheet).bottom + 16),
+            MediaQuery.viewInsetsOf(sheet).bottom +
+              MediaQuery.viewPaddingOf(sheet).bottom + 42),
           child: SingleChildScrollView(child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2733,7 +2780,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
 
   Widget _testInvoiceLaborRow(Map<String, dynamic> task) {
     final locked = _firstCompletion(task) != null;
-    final book = (task['source_invoice_hours'] as num?)?.toDouble();
+    final book = (task['billed_hours_override'] as num?)?.toDouble() ??
+      (task['source_invoice_hours'] as num?)?.toDouble();
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 11),
       decoration: const BoxDecoration(
@@ -2786,11 +2834,17 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 style: const TextStyle(
                   fontSize: 13.5, height: 1.25,
                   color: Color(0xFF405064)))),
-              SizedBox(width: 58, child: Text(
-                book == null ? '—' : book.toStringAsFixed(1),
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 15.5, color: Color(0xFF182239)))),
+              SizedBox(width: 58, child: InkWell(
+                onTap: () => _editTestBilledLaborHours(task),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(book == null ? '—' : book.toStringAsFixed(1),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 15.5,
+                      color: Color(0xFF182239))),
+                  const Icon(Icons.edit_outlined, size: 13,
+                    color: BriskersColors.invoices),
+                ]),
+              )),
               const SizedBox(width: 92, child: Text('—',
                 textAlign: TextAlign.right,
                 style: TextStyle(
@@ -2891,8 +2945,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             child: Text(
               'Financial amounts are intentionally redacted (—), not zero. '
               'Tap the small pencil beside a labor item to edit ONLY the '
-              'test mechanic hours and assignments. The invoice Qty '
-              'stays at billed book time. No live invoice is changed.',
+              'test mechanic hours and assignments. Tap Qty to edit '
+              'customer-billed hours separately. No live invoice is changed.',
               style: TextStyle(fontSize: 12,
                 color: Color(0xFF667085))),
           ),
