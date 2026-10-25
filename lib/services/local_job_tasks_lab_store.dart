@@ -19,6 +19,20 @@ class LocalJobTasksLabStore {
         PRIMARY KEY (business_id, job_id, document_id, line_id)
       )
     ''');
+    // Synthetic customer-related jobs created within the isolated Tasks lab.
+    // Never inserts into real local_jobs or production documents.
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_tasks_lab_jobs (
+        business_id TEXT NOT NULL,
+        job_id TEXT NOT NULL,
+        customer_id TEXT NOT NULL,
+        vehicle_id TEXT NOT NULL,
+        description TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (business_id, job_id)
+      )
+    ''');
     // Truly independent shop tasks: no customer, vehicle, job or invoice ID.
     await db.customStatement('''
       CREATE TABLE IF NOT EXISTS local_shop_tasks_lab (
@@ -690,6 +704,40 @@ class LocalJobTasksLabStore {
 
   /// Add an extra recheck task without changing the source invoice or billing.
   /// Assigned payroll hours are separate from customer billing.
+
+  Future<String> createSyntheticJob({
+    required String businessId,
+    required String customerId,
+    required String vehicleId,
+    required String description,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, customerId, vehicleId, description]
+        .any((value) => value.trim().isEmpty)) {
+      throw ArgumentError('Synthetic job needs customer, vehicle and description');
+    }
+    // SQLite allocates a unique local key; no customer invoice is generated.
+    final createdAt = DateTime.now().microsecondsSinceEpoch;
+    final jobId = 'lab-task-job-$createdAt';
+    await db.customStatement(
+      'INSERT INTO local_tasks_lab_jobs '
+      '(business_id, job_id, customer_id, vehicle_id, description, created_at) '
+      'VALUES (?, ?, ?, ?, ?, ?)',
+      [businessId, jobId, customerId, vehicleId, description.trim(),
+        DateTime.now().millisecondsSinceEpoch],
+    );
+    return jobId;
+  }
+
+  Future<List<Map<String, dynamic>>> syntheticJobs(String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT job_id, customer_id, vehicle_id, description, status '
+      'FROM local_tasks_lab_jobs WHERE business_id=? ORDER BY created_at DESC',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
 
   Future<void> addShopTask({required String businessId,
     required String description, String? employeeId,
