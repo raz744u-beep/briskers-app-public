@@ -8,6 +8,7 @@ import 'widgets/briskers_module_dock.dart';
 
 import 'local/local_database_provider.dart';
 import 'services/local_job_tasks_lab_store.dart';
+import 'services/task_assignment_policy.dart';
 import 'tasks_lab/fixture.dart';
 
 void main() {
@@ -1637,6 +1638,19 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final description = TextEditingController();
     final hours = TextEditingController(text: '0.5');
     var mechanic = employeeId ?? '';
+    // The isolated fixture only contains one customer job. Still apply the
+    // exact customer/vehicle open-job policy rather than implicitly attaching
+    // tasks to any job or creating an invoice.
+    final eligibleJobs = TaskJobChooser.eligible(
+      customerId: 'lab-customer-richard',
+      vehicleId: BriskersLabFixture.vehicles[selectedVehicle]['id']!,
+      jobs: const [OpenJobChoice(
+        jobId: BriskersLabFixture.jobId,
+        customerId: 'lab-customer-richard',
+        vehicleId: 'lab-equus', isOpen: true,
+      )],
+    );
+    final selectedJobId = eligibleJobs.isEmpty ? null : eligibleJobs.first.jobId;
     final added = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -1645,8 +1659,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           content: SingleChildScrollView(child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('This isolated test copy has one synthetic open job. '
-                'The task will be linked to that job without creating an invoice.'),
+              Text(selectedJobId == null
+                ? 'No open job for this test vehicle. Switch to Equus; '
+                  'new-job creation is not yet supported in this fixture.'
+                : 'Existing open job: J-24 · Equus. '
+                  'No invoice will be created.'),
               const SizedBox(height: 10),
               TextField(controller: description, decoration:
                 const InputDecoration(labelText: 'Task description')),
@@ -1671,6 +1688,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               final value = double.tryParse(hours.text.trim());
               if (description.text.trim().isEmpty || value == null ||
                   !value.isFinite || value < 0) { return; }
+              if (selectedJobId == null) return;
               try {
                 await store.addRecheckTask(
                   businessId: BriskersLabFixture.businessId,
