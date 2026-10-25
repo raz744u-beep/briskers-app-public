@@ -147,7 +147,7 @@ void main() {
     expect(code, contains("_cache.load(businessId, customerId, 'notes')"));
     expect(code, contains('_notes = notes;'));
     expect(code, contains('_canDeleteRecords = false;'));
-    expect(code, contains('unawaited(_prefetchNotePhotos(notes));'));
+    expect(code, contains('unawaited(_prefetchNotePhotos(notes.take(8).toList()));'));
     expect(code.indexOf("_cache.load(businessId, customerId, 'notes')"),
         lessThan(code.indexOf('_api.customerNotes(businessId, customerId)')));
     expect(code, isNot(contains('await _prefetchNotePhotos(notes)')));
