@@ -10,8 +10,10 @@ void main() {
     expect(s, contains("upload_state = 'synced'"));
     expect(s, contains("business_id = ?"));
     expect(s, contains('LocalAttachmentCache'));
-    expect(s, contains('_cache.existing(bucket, key)'));
-    expect(s, contains('_cache.getOrDownload(bucket, key)'));
+    expect(s, contains('OfflineCachedAttachmentReferences'));
+    expect(s, contains('knownReferences(businessId)'));
+    expect(s, contains('_cache.existing(ref.bucket, ref.key)'));
+    expect(s, contains('_cache.getOrDownload(ref.bucket, ref.key)'));
     expect(s, contains('batchSize = 24'));
     expect(s, contains('forceOffline'));
     expect(s, contains('prefs.setInt(cursorKey'));
