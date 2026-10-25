@@ -11,6 +11,7 @@ import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
 import '../core/navigation_content_timing.dart';
 import '../services/customer_vehicle_sync_service.dart';
+import '../services/expenseiq_background_scheduler.dart';
 import '../services/customer_notification_service.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/appointment_sync_service.dart';
@@ -116,6 +117,14 @@ class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Schedule after the first frame: registration must never hold startup,
+    // list navigation, database edits, or initial record paint.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(ExpenseIqBackgroundScheduler
+          .scheduleOfflineMediaMirror(widget.businessId)
+          .catchError((Object _) {}));
+    });
     _retirementRetry = Timer.periodic(const Duration(seconds: 30), (_) {
       if (_foreground) unawaited(_syncRetirements());
     });
