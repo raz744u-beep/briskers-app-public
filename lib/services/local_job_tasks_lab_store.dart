@@ -43,6 +43,15 @@ class LocalJobTasksLabStore {
         PRIMARY KEY (business_id, employee_id, week_start)
       )
     ''');
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_lab_payroll_adjustments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+        week_start TEXT NOT NULL, kind TEXT NOT NULL,
+        signed_cents INTEGER NOT NULL, reason TEXT NOT NULL,
+        approved_by TEXT NOT NULL, created_at INTEGER NOT NULL
+      )
+    ''');
     // Truly independent shop tasks: no customer, vehicle, job or invoice ID.
     await db.customStatement('''
       CREATE TABLE IF NOT EXISTS local_shop_tasks_lab (
@@ -1082,6 +1091,45 @@ class LocalJobTasksLabStore {
       'SELECT employee_id, job_id, document_id, line_id, week_start, '
       'paid_minutes FROM local_lab_payroll_task_credits '
       'WHERE business_id=? ORDER BY week_start DESC',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
+
+  Future<void> recordTestPayrollAdjustment({
+    required String businessId, required String employeeId,
+    required String weekStart, required String kind,
+    required int signedCents, required String reason,
+    required String approvedBy,
+  }) async {
+    await ensureTables(db);
+    final week = DateTime.tryParse(weekStart);
+    if ([businessId, employeeId, reason, approvedBy]
+        .any((value) => value.trim().isEmpty) ||
+        week == null || week.weekday != DateTime.monday ||
+        weekStart != week.toIso8601String().substring(0, 10) ||
+        !const {'bonus', 'correction'}.contains(kind) ||
+        signedCents == 0 || signedCents.abs() > 100000000 ||
+        (kind == 'bonus' && signedCents < 0)) {
+      throw ArgumentError('Invalid payroll adjustment');
+    }
+    await db.customStatement(
+      'INSERT INTO local_lab_payroll_adjustments '
+      '(business_id, employee_id, week_start, kind, signed_cents, '
+      'reason, approved_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [businessId, employeeId, weekStart, kind, signedCents,
+        reason.trim(), approvedBy.trim(),
+        DateTime.now().millisecondsSinceEpoch],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> testPayrollAdjustments(
+      String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT employee_id, week_start, kind, signed_cents, reason, approved_by '
+      'FROM local_lab_payroll_adjustments WHERE business_id=? '
+      'ORDER BY id DESC',
       variables: [Variable<String>(businessId)],
     ).get();
     return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
