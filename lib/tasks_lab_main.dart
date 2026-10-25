@@ -2115,96 +2115,245 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   Future<void> _creditTestPayrollHours(String employeeId) async {
-    final credits = await store.testTaskHourCredits(BriskersLabFixture.businessId);
+    final credits = await store.testTaskHourCredits(
+      BriskersLabFixture.businessId);
     if (!mounted) return;
-    final choices = <({Map<String, dynamic> task, int eligible, int remaining})>[];
-    for (final task in allJobTasks) {
-      final allocations = allocationsByLine[_allocationKey(task)] ?? [];
-      final matching = allocations.where((allocation) =>
-        allocation['employee_id']?.toString() == employeeId).toList();
-      final fallback = matching.isEmpty && allocations.isEmpty &&
-          task['employee_id']?.toString() == employeeId;
-      final hrs = matching.isNotEmpty
+    final now = DateTime.now();
+    var selectedWeek = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: now.weekday - 1));
+    final selectedKeys = <String>{};
+    final hourInputs = <String, String>{};
+
+    List<({
+      Map<String, dynamic> task,
+      int eligible, int available, int current,
+    })> choicesForWeek(DateTime week) {
+      final weekText = DateFormat('yyyy-MM-dd').format(week);
+      final choices = <({
+        Map<String, dynamic> task,
+        int eligible, int available, int current,
+      })>[];
+      for (final task in allJobTasks) {
+        final allocations = allocationsByLine[_allocationKey(task)] ?? [];
+        final matching = allocations.where((allocation) =>
+          allocation['employee_id']?.toString() == employeeId).toList();
+        final fallback = matching.isEmpty && allocations.isEmpty &&
+            task['employee_id']?.toString() == employeeId;
+        final hours = matching.isNotEmpty
           ? (matching.first['hours'] as num).toDouble()
           : fallback ? ((task['payroll_hours'] as num?)?.toDouble() ?? 0) : 0.0;
-      final eligible = (hrs * 60).round();
-      final prior = credits.where((record) =>
-        record['employee_id'] == employeeId &&
-        record['job_id'] == task['job_id'] &&
-        record['document_id'] == task['document_id'] &&
-        record['line_id'] == task['line_id']).fold<int>(0,
-          (sum, record) => sum + (record['paid_minutes'] as int));
-      if (eligible > prior) {
-        choices.add((task: task, eligible: eligible, remaining: eligible - prior));
+        final eligible = (hours * 60).round();
+        if (eligible <= 0) continue;
+        final taskCredits = credits.where((credit) =>
+          credit['employee_id'] == employeeId &&
+          credit['job_id'] == task['job_id'] &&
+          credit['document_id'] == task['document_id'] &&
+          credit['line_id'] == task['line_id']);
+        final priorOther = taskCredits.where((credit) =>
+          credit['week_start'] != weekText).fold<int>(0,
+            (sum, credit) => sum + (credit['paid_minutes'] as int));
+        final current = taskCredits.where((credit) =>
+          credit['week_start'] == weekText).fold<int>(0,
+            (sum, credit) => sum + (credit['paid_minutes'] as int));
+        final available = eligible - priorOther;
+        if (available > 0) {
+          choices.add((task: task, eligible: eligible,
+            available: available, current: current));
+        }
+      }
+      return choices;
+    }
+
+    var choices = choicesForWeek(selectedWeek);
+    void resetSelection() {
+      selectedKeys.clear();
+      hourInputs.clear();
+      for (final choice in choices) {
+        final key = _allocationKey(choice.task);
+        if (choice.current > 0) selectedKeys.add(key);
+        final minutes = choice.current > 0
+          ? choice.current : choice.available;
+        hourInputs[key] = (minutes / 60).toStringAsFixed(2);
       }
     }
-    if (choices.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('No unpaid task hours in test jobs.')));
-      return;
-    }
-    final chosen = await showDialog<int>(context: context,
-      builder: (context) => SimpleDialog(
-        title: Text('Credit task hours · ${_employeeName(employeeId)}'),
-        children: [for (var i = 0; i < choices.length; i++)
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(context, i),
-            child: Text('${_description(choices[i].task)} · '
-                '${(choices[i].remaining / 60).toStringAsFixed(2)} hrs available'),
-          )],
-      ));
-    if (chosen == null || !mounted) return;
-    final item = choices[chosen];
-    // The Owner may credit only part of the unpaid time this week and carry
-    // the rest forward. Minutes avoid floating-point double-credit errors.
-    final minutesInput = TextEditingController(
-      text: (item.remaining / 60).toStringAsFixed(2));
-    final requested = await showDialog<int>(context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Credit hours this week · TEST'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('${(item.remaining / 60).toStringAsFixed(2)} hours available'),
-          TextField(controller: minutesInput,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Hours to credit')),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel')),
-          FilledButton(onPressed: () {
-            final hours = double.tryParse(minutesInput.text.trim());
+    resetSelection();
+    final result = await showDialog<({
+      DateTime week,
+      List<({
+        String jobId, String documentId, String lineId,
+        int minutes, int eligibleMinutes,
+      })> selections,
+    })>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, update) {
+          final weekText = DateFormat('MMM d, yyyy').format(selectedWeek);
+          final locked = testPayrollApprovals.any((approval) =>
+            approval['employee_id'] == employeeId &&
+            approval['week_start'] ==
+                DateFormat('yyyy-MM-dd').format(selectedWeek) &&
+            approval['state'] != 'draft');
+          var selectedMinutes = 0;
+          var valid = true;
+          final selections = <({
+            String jobId, String documentId, String lineId,
+            int minutes, int eligibleMinutes,
+          })>[];
+          for (final choice in choices) {
+            final key = _allocationKey(choice.task);
+            if (!selectedKeys.contains(key)) continue;
+            final hours = double.tryParse((hourInputs[key] ?? '').trim());
             final minutes = hours == null || !hours.isFinite
               ? 0 : (hours * 60).round();
-            if (minutes < 1 || minutes > item.remaining) return;
-            Navigator.pop(dialogContext, minutes);
-          }, child: const Text('Credit TEST hours')),
-        ],
-      ));
-    minutesInput.dispose();
-    if (requested == null || !mounted) return;
-    final now = DateTime.now();
-    final monday = DateTime(now.year, now.month, now.day)
-        .subtract(Duration(days: now.weekday - 1));
+            if (minutes < 1 || minutes > choice.available) {
+              valid = false;
+              continue;
+            }
+            selectedMinutes += minutes;
+            selections.add((
+              jobId: choice.task['job_id'].toString(),
+              documentId: choice.task['document_id'].toString(),
+              lineId: choice.task['line_id'].toString(),
+              minutes: minutes,
+              eligibleMinutes: choice.eligible,
+            ));
+          }
+          return AlertDialog(
+            title: Text('Weekly task hours · ${_employeeName(employeeId)}'),
+            content: SizedBox(
+              width: 460,
+              height: MediaQuery.sizeOf(dialogContext).height * 0.55,
+              child: ListView(children: [
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final day = await showDatePicker(
+                      context: dialogContext,
+                      initialDate: selectedWeek,
+                      firstDate: DateTime(2020), lastDate: DateTime(2100));
+                    if (day == null) return;
+                    update(() {
+                      selectedWeek = DateTime(day.year, day.month, day.day)
+                        .subtract(Duration(days: day.weekday - 1));
+                      choices = choicesForWeek(selectedWeek);
+                      resetSelection();
+                    });
+                  },
+                  icon: const Icon(Icons.calendar_month_outlined),
+                  label: Text('Week of $weekText'),
+                ),
+                if (locked)
+                  const Text('This week is Approved or Paid and cannot be '
+                    'edited. Choose another week or make an audited correction.',
+                    style: TextStyle(color: Colors.deepOrange)),
+                if (choices.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text('No task hours available to select '
+                      'for this week.'),
+                  ),
+                if (choices.isNotEmpty)
+                  CheckboxListTile(
+                    key: const ValueKey('weekly-select-all'),
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Select all'),
+                    subtitle: Text('${selectedKeys.length} of '
+                      '${choices.length} tasks selected'),
+                    value: selectedKeys.length == choices.length,
+                    onChanged: locked ? null : (checked) => update(() {
+                      selectedKeys.clear();
+                      if (checked == true) {
+                        selectedKeys.addAll(choices.map(
+                          (choice) => _allocationKey(choice.task)));
+                      }
+                    }),
+                  ),
+                for (final choice in choices) ...[
+                  CheckboxListTile(
+                    key: ValueKey('weekly-select-${_allocationKey(choice.task)}'),
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(_description(choice.task),
+                      style: const TextStyle(fontSize: 14)),
+                    subtitle: Text(
+                      '${choice.task['job_id']} · '
+                      '${(choice.available / 60).toStringAsFixed(2)} hrs '
+                      'available · ${(choice.current / 60).toStringAsFixed(2)} '
+                      'hrs saved for this week',
+                      style: const TextStyle(fontSize: 12)),
+                    value: selectedKeys.contains(_allocationKey(choice.task)),
+                    onChanged: locked ? null : (checked) => update(() {
+                      final key = _allocationKey(choice.task);
+                      if (checked == true) {
+                        selectedKeys.add(key);
+                      } else {
+                        selectedKeys.remove(key);
+                      }
+                    }),
+                  ),
+                  if (selectedKeys.contains(_allocationKey(choice.task)))
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(40, 0, 8, 12),
+                      child: TextFormField(
+                        key: ValueKey('weekly-hours-${DateFormat('yyyy-MM-dd').format(selectedWeek)}-${_allocationKey(choice.task)}'),
+                        initialValue: hourInputs[_allocationKey(choice.task)],
+                        enabled: !locked,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true),
+                        decoration: const InputDecoration(
+                          labelText: 'Hours to credit this week',
+                          border: OutlineInputBorder(),
+                          helperText: 'Remaining hours carry forward'),
+                        onChanged: (value) => update(() {
+                          hourInputs[_allocationKey(choice.task)] = value;
+                        }),
+                      ),
+                    ),
+                ],
+                const SizedBox(height: 6),
+                Text('Selected this week: '
+                  '${(selectedMinutes / 60).toStringAsFixed(2)} hrs',
+                  style: const TextStyle(fontWeight: FontWeight.w800)),
+                if (!valid)
+                  const Text('Enter positive hours not exceeding the '
+                    'available amount for each selected task.',
+                    style: TextStyle(color: Colors.deepOrange)),
+                const Text('Saving this selection does not pay anyone. '
+                  'You can revise it until weekly payroll is approved.',
+                  style: TextStyle(fontSize: 12)),
+              ]),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel')),
+              FilledButton(
+                onPressed: locked || !valid ? null : () =>
+                  Navigator.pop(dialogContext,
+                    (week: selectedWeek, selections: selections)),
+                child: const Text('Save weekly hours · TEST')),
+            ],
+          );
+        },
+      ),
+    );
+    if (result == null || !mounted) return;
     try {
-      await store.creditTestTaskHours(
+      final saved = await store.saveTestWeeklyTaskSelection(
         businessId: BriskersLabFixture.businessId,
         employeeId: employeeId,
-        jobId: item.task['job_id'].toString(),
-        documentId: item.task['document_id'].toString(),
-        lineId: item.task['line_id'].toString(),
-        weekStart: monday,
-        minutes: requested,
-        totalEligibleMinutes: item.eligible,
-      );
+        weekStart: result.week,
+        selections: result.selections);
       await _refresh();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('TEST task hours credited. No real payment made.')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Saved ${(saved / 60).toStringAsFixed(2)} '
+            'TEST hours for week of '
+            '${DateFormat('MMM d').format(result.week)}. '
+            'No payment recorded.')));
       }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$error')));
+          SnackBar(content: Text('Hours not saved: $error')));
       }
     }
   }
