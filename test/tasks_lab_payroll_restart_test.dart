@@ -14,7 +14,7 @@ void main() {
       final firstDb = BriskersLocalDatabase(NativeDatabase(file));
       try {
         final store = LocalJobTasksLabStore(firstDb);
-        await store.ensureTables(firstDb);
+        await LocalJobTasksLabStore.ensureTables(firstDb);
         await store.recordTestPayrollAdjustment(
           businessId: shop, employeeId: worker,
           weekStart: '2026-10-19', kind: 'bonus',
