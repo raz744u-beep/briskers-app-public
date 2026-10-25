@@ -1386,6 +1386,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     builder: (_) => ExpenseDetailScreen(
                       businessId: widget.businessId,
                       transactionId: id,
+                      // Existing visible transaction is safe as read-only preview.
+                      cachedDetail: Map<String, dynamic>.from(item),
                     ),
                   ));
                   if (mounted) {
@@ -1556,9 +1558,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                       builder: (_) => ExpenseDetailScreen(
                                         businessId: widget.businessId,
                                         transactionId: id,
-                                        cachedDetail: offline
-                                            ? Map<String, dynamic>.from(expense)
-                                            : null,
+                                        cachedDetail: Map<String, dynamic>.from(expense),
                                       ),
                                     ),
                                   );
