@@ -348,41 +348,38 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   Future<void> _prefetchReceiptDetails(
     List<Map<String, dynamic>> snapshot,
   ) async {
+    // A large imported history may have thousands of receipts. Do not start
+    // hundreds of photo downloads every time the user opens Expenses.
+    // Download a small number of missing detail *metadata* in foreground;
+    // charging/Wi-Fi WorkManager separately mirrors their photo files.
     final rows = snapshot.where((row) {
       final count = int.tryParse(row['receipt_count']?.toString() ?? '') ?? 0;
-      return count > 0 && (row['id']?.toString() ?? '').isNotEmpty;
-    }).toList();
+      return count > 0 &&
+          (row['id']?.toString() ?? '').isNotEmpty &&
+          !row['id'].toString().startsWith('local-') &&
+          row['sync_state'] != 'pending' &&
+          row['sync_state'] != 'conflict';
+    }).take(8).toList();
 
-    for (var index = 0; index < rows.length; index += 3) {
-      final batch = rows.skip(index).take(3).map((row) async {
-        final id = row['id'].toString();
-        try {
-          final detail = await _api.transactionDetail(widget.businessId, id);
-          await _localFinancial.saveTransactionDetail(
-            widget.businessId,
-            id,
-            detail,
-          );
-          final attachments =
-              List<dynamic>.from(detail['attachments'] ?? const [])
-                  .whereType<Map>()
-                  .map((raw) {
-                    return Map<String, dynamic>.from(raw);
-                  })
-                  .toList();
-
-          for (final attachment in attachments) {
-            final bucket =
-                attachment['bucket']?.toString() ?? 'briskers-private';
-            final key = attachment['key']?.toString() ?? '';
-            if (key.isEmpty) continue;
-            await _attachmentCache.getOrDownload(bucket, key);
-          }
-        } catch (_) {
-          // Keep the transaction list usable if an individual receipt fails.
+    for (final row in rows) {
+      final id = row['id'].toString();
+      try {
+        if (await _localFinancial.loadTransactionDetail(
+            widget.businessId, id) != null) {
+          continue;
         }
-      });
-      await Future.wait(batch);
+        final detail = await _api.transactionDetail(widget.businessId, id);
+        if (detail['id']?.toString() != id) continue;
+        // Recheck before writing so a locally edited expense detail cannot be
+        // replaced by the outcome of an older in-flight download.
+        if (await _localFinancial.loadTransactionDetail(
+            widget.businessId, id) == null) {
+          await _localFinancial.saveTransactionDetail(
+              widget.businessId, id, detail);
+        }
+      } catch (_) {
+        // Saved transactions stay usable if metadata prefetch fails.
+      }
     }
   }
 
