@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/module_modal_theme.dart';
 import '../../core/connection_mode.dart';
 import '../../core/supabase_config.dart';
 import '../../services/briskers_api.dart';
@@ -428,7 +429,9 @@ class _AccountDialogState extends State<_AccountDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    return Theme(
+      data: moduleModalTheme(Theme.of(context), BriskersColors.expenses),
+      child: AlertDialog(
       title: Text(widget.account == null ? 'Add account' : 'Edit account'),
       content: SingleChildScrollView(
         child: Column(
@@ -506,6 +509,7 @@ class _AccountDialogState extends State<_AccountDialog> {
           child: Text(saving ? 'Saving...' : 'Save'),
         ),
       ],
+      ),
     );
   }
 }
@@ -1464,6 +1468,14 @@ class _QuickDialogState extends State<_QuickDialog> {
     setState(() => vendorId = selected == '__none__' ? null : selected);
   }
 
+  String _titleCaseShortcut(String value) {
+    return value.trim().replaceAll(RegExp(r'\s+'), ' ').split(' ').map(
+      (word) => word.isEmpty
+          ? word
+          : '${word[0].toUpperCase()}${word.substring(1)}',
+    ).join(' ');
+  }
+
   Future<void> _save() async {
     if (name.text.trim().isEmpty || accountId == null || categoryId == null) {
       setState(() => error = 'Name, account and category are required.');
@@ -1477,7 +1489,7 @@ class _QuickDialogState extends State<_QuickDialog> {
       await _api.saveQuickTransaction(
         widget.businessId,
         templateId: widget.template?['id']?.toString(),
-        name: name.text.trim(),
+        name: _titleCaseShortcut(name.text),
         direction: direction,
         vendorId: vendorId,
         accountId: accountId!,
@@ -1500,8 +1512,11 @@ class _QuickDialogState extends State<_QuickDialog> {
   @override
   Widget build(BuildContext context) {
     final accent = direction == 'expense' ? Colors.red.shade700 : Colors.green.shade700;
-    return AlertDialog(
-      backgroundColor: Theme.of(context).colorScheme.surface,
+    return Theme(
+      data: moduleModalTheme(Theme.of(context), accent),
+      child: AlertDialog(
+      backgroundColor: Theme.of(context).brightness == Brightness.dark
+          ? const Color(0xFF202124) : Colors.white,
       insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       title: Text(
         widget.template == null ? 'Add quick transaction' : 'Edit quick transaction',
@@ -1626,6 +1641,7 @@ class _QuickDialogState extends State<_QuickDialog> {
           child: Text(saving ? 'Saving...' : 'Save'),
         ),
       ],
+      ),
     );
   }
 }
