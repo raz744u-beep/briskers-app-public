@@ -2446,6 +2446,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               );
               final employeeApprovals = testPayrollApprovals.where(
                 (approval) => approval['employee_id'] == id).toList();
+              final employeeCredits = testTaskCredits.where(
+                (credit) => credit['employee_id'] == id).toList();
               return Card(
                 margin: const EdgeInsets.fromLTRB(10, 4, 10, 5),
                 child: Padding(
@@ -2483,6 +2485,25 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         '${(creditedMinutes / 60).toStringAsFixed(2)} hrs '
                         '${selectedCents == null ? '' : '· ${_labMoney(selectedCents)}'}',
                         style: const TextStyle(fontSize: 12.5)),
+                      if (employeeCredits.isNotEmpty)
+                        for (final credit in employeeCredits)
+                          Builder(builder: (_) {
+                            final matchingTask = allJobTasks.where((task) =>
+                              task['job_id'] == credit['job_id'] &&
+                              task['document_id'] == credit['document_id'] &&
+                              task['line_id'] == credit['line_id']);
+                            final description = matchingTask.isEmpty
+                              ? 'Task ${credit['line_id']}'
+                              : _description(matchingTask.first);
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 3, left: 8),
+                              child: Text('${credit['job_id']} · $description · '
+                                '${((credit['paid_minutes'] as int) / 60).toStringAsFixed(2)} hrs '
+                                '· week ${credit['week_start']}',
+                                style: const TextStyle(fontSize: 12,
+                                  color: Color(0xFF405064))),
+                            );
+                          }),
                       Text('Bonuses and corrections: ${_labMoney(adjustmentCents)}',
                         style: const TextStyle(fontSize: 12.5)),
                       Text('Recorded payments and advances: ${_labMoney(paidCents)}',
@@ -2518,6 +2539,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                                     ' · ${((approval['selected_minutes'] as int) / 60).toStringAsFixed(2)} hrs',
                                     style: const TextStyle(fontSize: 12.5,
                                       fontWeight: FontWeight.w700)),
+                                  if (approval['state'] == 'approved')
+                                    TextButton.icon(
+                                      onPressed: () => _markTestPayrollPaid(approval),
+                                      icon: const Icon(Icons.payments_outlined),
+                                      label: const Text('Record approved TEST payroll'),
+                                    ),
                                   if (linked.isNotEmpty)
                                     for (final payment in linked)
                                       Text('Recorded ${_labMoney(payment['cents'] as int)} '
