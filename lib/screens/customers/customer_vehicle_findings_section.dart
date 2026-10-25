@@ -29,6 +29,7 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
     this.canManage = false,
     this.canDelete = false,
     this.initiallyExpanded = false,
+    this.cacheScopeKey,
   });
 
   final String businessId;
@@ -37,6 +38,9 @@ class CustomerVehicleFindingsSection extends StatefulWidget {
   final bool canManage;
   final bool canDelete;
   final bool initiallyExpanded;
+  // Invoice entry uses a vehicle-scoped snapshot so it cannot overwrite
+  // the Customer Overview's multi-vehicle cached Findings.
+  final String? cacheScopeKey;
 
   @override
   State<CustomerVehicleFindingsSection> createState() =>
@@ -61,6 +65,7 @@ class _CustomerVehicleFindingsSectionState
   bool _expanded = false;
   bool _busy = false;
   String? _error;
+  String get _findingCacheSection => widget.cacheScopeKey ?? 'findings';
 
   @override
   void initState() {
@@ -125,6 +130,7 @@ class _CustomerVehicleFindingsSectionState
     }
     if (oldWidget.businessId != widget.businessId ||
         oldWidget.customerId != widget.customerId ||
+        oldWidget.cacheScopeKey != widget.cacheScopeKey ||
         oldWidget.vehicles != widget.vehicles) {
       _findingsFuture = _allFindings();
     }
@@ -148,7 +154,8 @@ class _CustomerVehicleFindingsSectionState
     final businessId = widget.businessId;
     final customerId = widget.customerId;
     Future<List<Map<String, dynamic>>> cachedFindings() async {
-      final cached = await _cache.load(businessId, customerId, 'findings');
+      final cached = await _cache.load(
+        businessId, customerId, _findingCacheSection);
       final rows = cached is List
           ? cached
                 .whereType<Map>()
@@ -175,14 +182,23 @@ class _CustomerVehicleFindingsSectionState
           ),
         );
       }
-      final cachedVisible = await visibility.filterFindings(rows, cached: true);
+      final vehicleIds = widget.vehicles.whereType<Map>()
+          .map((v) => v['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty).toSet();
+      final scopedRows = rows.where((row) {
+        final vehicle = row['_vehicle_id']?.toString() ??
+            row['vehicle_id']?.toString() ?? '';
+        return vehicleIds.contains(vehicle);
+      }).toList();
+      final cachedVisible = await visibility.filterFindings(
+          scopedRows, cached: true);
       final localVisible = await visibility.filterFindings(local);
       final visible = await _findingActions.project(
         businessId,
         mergeWorkFindings(cachedVisible, localVisible),
       );
       if (!visibility.isCurrent(generation)) return [];
-      await _cache.save(businessId, customerId, 'findings',
+      await _cache.save(businessId, customerId, _findingCacheSection,
         JobSummaryVisibility.stampSnapshot(visible, await visibility.captureSnapshotGeneration()));
       return visibility.isCurrent(generation) ? visible : [];
     }
@@ -230,7 +246,7 @@ class _CustomerVehicleFindingsSectionState
       await _cache.save(
         businessId,
         customerId,
-        'findings',
+        _findingCacheSection,
         JobSummaryVisibility.stampSnapshot(visible, snapshotGeneration),
       );
       // Image downloads must never delay the findings list. Each file is
