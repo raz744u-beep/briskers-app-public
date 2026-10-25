@@ -2154,6 +2154,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 (payment) => payment['employee_id'] == id).toList();
               final paidCents = payments.fold<int>(0,
                 (sum, payment) => sum + (payment['cents'] as int));
+              final creditedMinutes = testTaskCredits.where(
+                (credit) => credit['employee_id'] == id).fold<int>(0,
+                  (sum, credit) => sum + (credit['paid_minutes'] as int));
               final owing = (earnedCents ?? 0) - paidCents;
               return Card(
                 margin: const EdgeInsets.fromLTRB(10, 4, 10, 5),
@@ -2184,6 +2187,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                           label: const Text('Rate'),
                         ),
                       ]),
+                      Text('Task hours credited: ${(creditedMinutes / 60).toStringAsFixed(2)} hrs '
+                        '(weekly TEST ledger; not cash paid)',
+                        style: const TextStyle(fontSize: 12.5)),
                       Text('Recorded test payments: ${_labMoney(paidCents)}',
                         style: const TextStyle(fontSize: 12.5)),
                       if (rate != null)
