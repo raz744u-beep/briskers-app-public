@@ -2181,6 +2181,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       await store.saveTestWeeklyPayrollDraft(
         businessId: BriskersLabFixture.businessId,
         employeeId: employeeId, weekStart: week, selectedMinutes: selected);
+      if (!mounted) return;
       final confirmed = await showDialog<bool>(context: context,
         builder: (dialogContext) => AlertDialog(
           title: const Text('Approve weekly TEST payroll?'),
