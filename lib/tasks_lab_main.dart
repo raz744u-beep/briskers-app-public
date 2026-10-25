@@ -58,6 +58,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   List<Map<String, dynamic>> testPayrollPayments = const [];
   List<Map<String, dynamic>> testTaskCredits = const [];
   List<Map<String, dynamic>> testPayrollApprovals = const [];
+  List<Map<String, dynamic>> testPayrollAdjustments = const [];
   List<Map<String, dynamic>> earnedCorrections = const [];
   int invoiceTestTab = 0;
   int page = 0;
@@ -125,6 +126,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final payments = await store.payrollTestPayments(BriskersLabFixture.businessId);
     final credits = await store.testTaskHourCredits(BriskersLabFixture.businessId);
     final approvals = await store.testWeeklyPayrollApprovals(BriskersLabFixture.businessId);
+    final adjustments = await store.testPayrollAdjustments(BriskersLabFixture.businessId);
     final corrections = await store.earnedHourCorrections(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final earnedHours = await store.earnedHoursPreview(
@@ -151,6 +153,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       testPayrollPayments = payments;
       testTaskCredits = credits;
       testPayrollApprovals = approvals;
+      testPayrollAdjustments = adjustments;
       earnedCorrections = corrections;
       allocationsByLine = {for (var i = 0; i < allRows.length; i++)
         _allocationKey(allRows[i]): allocations[i]};
@@ -2280,6 +2283,66 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     }
   }
 
+  Future<void> _addTestPayrollAdjustment(String employeeId) async {
+    final amount = TextEditingController();
+    final reason = TextEditingController();
+    var kind = 'bonus';
+    final saved = await showDialog<bool>(context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, update) => AlertDialog(
+          title: const Text('Payroll adjustment · TEST'),
+          content: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min, children: [
+              DropdownButtonFormField<String>(
+                initialValue: kind,
+                items: const [
+                  DropdownMenuItem(value: 'bonus', child: Text('Bonus')),
+                  DropdownMenuItem(value: 'correction', child: Text('Correction')),
+                ],
+                onChanged: (value) => update(() => kind = value ?? 'bonus')),
+              TextField(controller: amount,
+                keyboardType: const TextInputType.numberWithOptions(
+                  signed: true, decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Amount in dollars (+ or -)')),
+              TextField(controller: reason,
+                decoration: const InputDecoration(labelText: 'Reason')),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () async {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite) { return; }
+              final cents = (dollars * 100).round();
+              final now = DateTime.now();
+              final monday = DateTime(now.year, now.month, now.day)
+                  .subtract(Duration(days: now.weekday - 1));
+              try {
+                await store.recordTestPayrollAdjustment(
+                  businessId: BriskersLabFixture.businessId,
+                  employeeId: employeeId,
+                  weekStart: DateFormat('yyyy-MM-dd').format(monday),
+                  kind: kind, signedCents: cents,
+                  reason: reason.text, approvedBy: 'lab-owner');
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext, true);
+                }
+              } catch (error) {
+                if (dialogContext.mounted) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    SnackBar(content: Text('$error')));
+                }
+              }
+            }, child: const Text('Save TEST adjustment')),
+          ],
+        )));
+    amount.dispose();
+    reason.dispose();
+    if (saved == true) await _refresh();
+  }
+
   Widget _payrollPage() {
     // Rates and disbursements are LOCAL TEST values, never live payroll.
     return ListView(
@@ -2359,6 +2422,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         label: const Text('Credit task hours · TEST'),
                       ),
                       OutlinedButton.icon(
+                        onPressed: () => _addTestPayrollAdjustment(id),
+                        icon: const Icon(Icons.tune),
+                        label: const Text('Bonus / correction · TEST'),
+                      ),
+                      OutlinedButton.icon(
                         onPressed: () => _approveTestPayroll(id),
                         icon: const Icon(Icons.verified_user_outlined),
                         label: const Text('Review / approve weekly TEST payroll'),
@@ -2373,6 +2441,18 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 ),
               );
             }),
+        if (testPayrollAdjustments.isNotEmpty) ...[
+          const Padding(padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
+            child: Text('Audited adjustments · TEST',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
+          for (final adjustment in testPayrollAdjustments)
+            ListTile(
+              title: Text('${_employeeName(adjustment['employee_id']?.toString())} '
+                '· ${_labMoney(adjustment['signed_cents'] as int)}'),
+              subtitle: Text('${adjustment['kind']} · ${adjustment['reason']} '
+                '· ${adjustment['week_start']}'),
+            ),
+        ],
         if (testPayrollApprovals.isNotEmpty) ...[
           const Padding(padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
             child: Text('Weekly payroll approvals · TEST',
