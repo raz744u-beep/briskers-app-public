@@ -4364,7 +4364,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
     if (localOnly ||
         BriskersConnectionModeController.instance.forceOffline ||
-        !mounted || token != _findingsRefreshToken) return;
+        !mounted || token != _findingsRefreshToken) {
+      return;
+    }
     try {
       final active = await _api.vehicleFindings(
           widget.businessId, vehicleId, includeResolved: false);
