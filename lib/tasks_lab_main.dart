@@ -2638,10 +2638,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       if (employeeId == null)
         const ListTile(title: Text('Choose an employee to view their work')),
       if (employeeId != null) ...[
-        ListTile(
-          title: const Text('Independent shop tasks',
+        const ListTile(
+          title: Text('Independent shop tasks',
             style: TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: const Text('Not billed to a customer')),
+          subtitle: Text('Not billed to a customer')),
         ...shopTasks.where((task) =>
           task['employee_id']?.toString() == employeeId).map((task) =>
           ListTile(
