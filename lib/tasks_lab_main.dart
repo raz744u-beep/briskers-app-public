@@ -43,6 +43,8 @@ class TasksLabHome extends StatefulWidget {
 class _TasksLabHomeState extends State<TasksLabHome> {
   final LocalJobTasksLabStore store = LocalJobTasksLabStore(localDatabase);
   List<Map<String, dynamic>> tasks = const [];
+  List<Map<String, dynamic>> allJobTasks = const [];
+  List<Map<String, dynamic>> testCreatedJobs = const [];
   List<Map<String, dynamic>> shopTasks = const [];
   Map<String, String> nicknames = const {};
   Map<String, String> fullNames = const {};
@@ -109,6 +111,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       BriskersLabFixture.businessId, BriskersLabFixture.jobId,
     );
     final independent = await store.shopTasks(BriskersLabFixture.businessId);
+    final allRows = await store.allTasks(BriskersLabFixture.businessId);
+    final newJobs = await store.syntheticJobs(BriskersLabFixture.businessId);
     final aliases = await store.nicknames(BriskersLabFixture.businessId);
     final names = await store.fullNames(BriskersLabFixture.businessId);
     final allocations = await Future.wait(rows.map((task) => store.allocations(
@@ -132,6 +136,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (!mounted) return;
     setState(() {
       tasks = rows;
+      allJobTasks = allRows;
+      testCreatedJobs = newJobs;
       shopTasks = independent;
       nicknames = aliases;
       fullNames = names;
@@ -1792,6 +1798,19 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               '${task['estimated_minutes']} min · ${task['status']}'),
           ),
       ],
+      if (testCreatedJobs.isNotEmpty) ...[
+        _sectionHeader('New test jobs & tasks',
+          subtitle: 'Synthetic local jobs only · no real invoices'),
+        for (final job in testCreatedJobs) ...[
+          ListTile(title: Text(job['description'].toString()),
+            subtitle: Text('Job ${job['job_id']} · ${job['status']}')),
+          for (final task in allJobTasks.where((task) =>
+              task['job_id'] == job['job_id']))
+            ListTile(title: Text(_description(task)),
+              subtitle: Text('${_employeeName(task['employee_id']?.toString())} · '
+                '${task['payroll_hours']} hrs · ${task['status']}')),
+        ],
+      ],
       _sectionHeader('Job tasks & completed work',
           subtitle: 'One entry per task · Original work stays preserved'),
         Padding(
@@ -2666,7 +2685,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   // allocations. Nothing here posts payroll or touches production data.
   Widget _employeeWorkPage() {
     final employeeId = selectedEmployeeWorkId;
-    final assigned = tasks.where((task) {
+    final assigned = allJobTasks.where((task) {
       final allocations = allocationsByLine[task['line_id'].toString()] ?? [];
       return allocations.any((allocation) =>
           allocation['employee_id']?.toString() == employeeId) ||
