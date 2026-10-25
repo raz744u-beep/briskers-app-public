@@ -2359,10 +2359,30 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   Future<void> _approveTestPayroll(String employeeId) async {
-    final now = DateTime.now();
-    final monday = DateTime(now.year, now.month, now.day)
-        .subtract(Duration(days: now.weekday - 1));
-    final week = DateFormat('yyyy-MM-dd').format(monday);
+    final availableWeeks = testTaskCredits.where((credit) =>
+      credit['employee_id'] == employeeId &&
+      !testPayrollApprovals.any((approval) =>
+        approval['employee_id'] == employeeId &&
+        approval['week_start'] == credit['week_start'] &&
+        approval['state'] != 'draft'))
+      .map((credit) => credit['week_start'].toString()).toSet().toList()
+        ..sort((a, b) => b.compareTo(a));
+    if (availableWeeks.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Select weekly task hours before approval.')));
+      return;
+    }
+    final week = availableWeeks.length == 1
+      ? availableWeeks.single
+      : await showDialog<String>(context: context,
+          builder: (dialogContext) => SimpleDialog(
+            title: const Text('Choose payroll week to approve'),
+            children: [for (final candidate in availableWeeks)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialogContext, candidate),
+                child: Text('Week of $candidate'))],
+          ));
+    if (week == null || !mounted) return;
     final selected = testTaskCredits.where((credit) =>
       credit['employee_id'] == employeeId &&
       credit['week_start'] == week).fold<int>(0,
