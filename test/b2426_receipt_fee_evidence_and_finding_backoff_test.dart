@@ -12,7 +12,7 @@ void main() {
   test('Complete period separates posted income from unverified fee evidence',
       () async {
     final result = await ExpensesPeriodTotals.calculate(
-      readPage: (_, __) async => [
+      readPage: (offset, limit) async => [
         {
           'id': 'verified-income', 'direction': 'income', 'amount': 103.00,
           'reporting_status': 'verified', 'reporting_amount': 100.00,
