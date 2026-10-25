@@ -60,6 +60,11 @@ void main() {
 
     expect(main, contains('_addRecheckWork'));
     expect(main, contains('Record TEST payment / advance'));
+    expect(main, contains('ImagePicker().pickImage('));
+    expect(main, contains('ImageSource.camera'));
+    expect(main, contains('tasks_lab_check_proofs'));
+    expect(main, contains('proofPhotoPath == null'));
+
     expect(main, contains('store.payrollTestPayments('));
     expect(main, contains('store.recordLabPayrollPayment('));
     expect(main, contains('earnedPayrollPreviewHours'));
