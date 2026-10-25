@@ -51,6 +51,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Map<String, double> earnedPayrollPreviewHours = {};
   Map<String, int> testHourlyRates = {};
   List<Map<String, dynamic>> testPayrollPayments = const [];
+  List<Map<String, dynamic>> testTaskCredits = const [];
   List<Map<String, dynamic>> earnedCorrections = const [];
   int invoiceTestTab = 0;
   int page = 0;
@@ -113,6 +114,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       lineId: task['line_id'].toString())));
     final rates = await store.payrollRates(BriskersLabFixture.businessId);
     final payments = await store.payrollTestPayments(BriskersLabFixture.businessId);
+    final credits = await store.testTaskHourCredits(BriskersLabFixture.businessId);
     final corrections = await store.earnedHourCorrections(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final earnedHours = await store.earnedHoursPreview(
@@ -134,6 +136,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       earnedPayrollPreviewHours = earnedHours;
       testHourlyRates = rates;
       testPayrollPayments = payments;
+      testTaskCredits = credits;
       earnedCorrections = corrections;
       allocationsByLine = {for (var i = 0; i < rows.length; i++)
         rows[i]['line_id'].toString(): allocations[i]};
@@ -1995,6 +1998,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         minutes: item.remaining,
         totalEligibleMinutes: item.eligible,
       );
+      await _refresh();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('TEST task hours credited. No real payment made.')));
@@ -2089,6 +2093,21 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 ),
               );
             }),
+        if (testTaskCredits.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
+            child: Text('Weekly task-hour credits · TEST',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
+          for (final credit in testTaskCredits)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.task_alt, color: BriskersColors.jobs),
+              title: Text('${_employeeName(credit['employee_id']?.toString())} · '
+                '${((credit['paid_minutes'] as int) / 60).toStringAsFixed(2)} hours'),
+              subtitle: Text('Week of ${credit['week_start']} · '
+                'Task ${credit['line_id']} · simulated only'),
+            ),
+        ],
         if (testPayrollPayments.isNotEmpty) ...[
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
@@ -2112,8 +2131,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         const Padding(
           padding: EdgeInsets.all(16),
           child: Text('This test ledger cannot pay mechanics, issue checks, '
-            'or update actual shop expenses. Weekly paid-task selection '
-            'and production payroll approval are not connected.',
+            'or update actual shop expenses. Task-hour credits are '
+            'test-only; real payroll approval and posting are not connected.',
             style: TextStyle(fontSize: 12,
               color: Color(0xFF64748B))),
         ),
