@@ -55,72 +55,84 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
     super.dispose();
   }
 
+  int _loadEpoch = 0;
+
+  @override
+  void didUpdateWidget(covariant CustomerNotesSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.customerId != widget.customerId) {
+      _notes = const [];
+      _loading = true;
+      _canDeleteRecords = false;
+      unawaited(_load());
+    }
+  }
+
   Future<void> _load() async {
-    final offline = BriskersConnectionModeController.instance.forceOffline;
-    if (offline) {
-      final cached = await _cache.load(
-        widget.businessId,
-        widget.customerId,
-        'notes',
-      );
-      final notes = cached is List
-          ? cached
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList()
-          : <Map<String, dynamic>>[];
-      if (!mounted) return;
-      setState(() {
-        _notes = notes;
-        _canDeleteRecords = false;
-        _loading = false;
-        _error = null;
-      });
+    final generation = ++_loadEpoch;
+    final businessId = widget.businessId;
+    final customerId = widget.customerId;
+    bool current() => mounted && generation == _loadEpoch &&
+        businessId == widget.businessId && customerId == widget.customerId;
+
+    var hadLocal = _notes.isNotEmpty;
+    // Customer Notes always open from saved device data first, even in Auto.
+    // Server permissions are checked independently before any deletion.
+    if (!BriskersConnectionModeController.instance.forceOnline) {
+      try {
+        final cached = await _cache.load(businessId, customerId, 'notes');
+        final notes = cached is List
+            ? cached.whereType<Map>()
+                .map((row) => Map<String, dynamic>.from(row)).toList()
+            : <Map<String, dynamic>>[];
+        if (!current()) return;
+        hadLocal = true;
+        setState(() {
+          _notes = notes;
+          _canDeleteRecords = false;
+          _loading = false;
+          _error = null;
+        });
+      } catch (_) {
+        // Retain prior visible data; server refresh can still retry.
+      }
+    }
+
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (current()) {
+        setState(() {
+          _canDeleteRecords = false;
+          _loading = false;
+        });
+      }
       return;
     }
 
     try {
       final results = await Future.wait<dynamic>([
-        _api.customerNotes(
-          widget.businessId,
-          widget.customerId,
-        ),
-        _api.myPermissions(widget.businessId),
+        _api.customerNotes(businessId, customerId),
+        _api.myPermissions(businessId),
       ]);
+      if (!current()) return;
       final notes = List<Map<String, dynamic>>.from(results[0] as List);
       final permissions = List<String>.from(results[1] as List);
-      await _cache.save(
-        widget.businessId,
-        widget.customerId,
-        'notes',
-        notes,
-      );
-      await _prefetchNotePhotos(notes);
-      if (!mounted) return;
+      await _cache.save(businessId, customerId, 'notes', notes);
+      if (!current()) return;
       setState(() {
         _notes = notes;
         _canDeleteRecords = permissions.contains('records.delete');
         _loading = false;
         _error = null;
       });
+      // Prefetch photos after publishing note text and its saved attachments.
+      unawaited(_prefetchNotePhotos(notes));
     } catch (error) {
-      final cached = await _cache.load(
-        widget.businessId,
-        widget.customerId,
-        'notes',
-      );
-      final notes = cached is List
-          ? cached
-              .whereType<Map>()
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList()
-          : <Map<String, dynamic>>[];
-      if (!mounted) return;
+      if (!current()) return;
       setState(() {
-        _notes = notes;
-        _canDeleteRecords = false;
         _loading = false;
-        _error = notes.isEmpty ? error.toString() : null;
+        _canDeleteRecords = false;
+        if (!hadLocal && _notes.isEmpty) _error = error.toString();
       });
     }
   }
