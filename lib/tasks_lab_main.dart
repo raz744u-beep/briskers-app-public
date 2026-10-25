@@ -1630,6 +1630,66 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (added == true) await _refresh();
   }
 
+  Future<void> _createTestTask({String? employeeId}) async {
+    final description = TextEditingController();
+    final hours = TextEditingController(text: '0.5');
+    var mechanic = employeeId ?? '';
+    final added = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('New task · TEST'),
+          content: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('This isolated test copy has one synthetic open job. '
+                'The task will be linked to that job without creating an invoice.'),
+              const SizedBox(height: 10),
+              TextField(controller: description, decoration:
+                const InputDecoration(labelText: 'Task description')),
+              TextField(controller: hours, keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Mechanic hours')),
+              DropdownButtonFormField<String>(
+                initialValue: mechanic,
+                decoration: const InputDecoration(labelText: 'Mechanic'),
+                items: [const DropdownMenuItem(value: '',
+                  child: Text('Unassigned')),
+                  for (final e in BriskersLabFixture.employees)
+                    DropdownMenuItem(value: e['id']!,
+                      child: Text(_employeeName(e['id']!)))],
+                onChanged: (value) => update(() => mechanic = value ?? ''),
+              ),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () async {
+              final value = double.tryParse(hours.text.trim());
+              if (description.text.trim().isEmpty || value == null ||
+                  !value.isFinite || value < 0) return;
+              try {
+                await store.addRecheckTask(
+                  businessId: BriskersLabFixture.businessId,
+                  jobId: BriskersLabFixture.jobId,
+                  description: description.text.trim(), hours: value,
+                  employeeId: mechanic.isEmpty ? null : mechanic,
+                );
+                if (context.mounted) Navigator.pop(context, true);
+              } catch (error) {
+                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('$error')));
+              }
+            }, child: const Text('Create task')),
+          ],
+        ),
+      ),
+    );
+    description.dispose();
+    hours.dispose();
+    if (added == true) await _refresh();
+  }
+
   Widget _taskList() {
     final original = tasks.where((task) =>
       task['source_missing'] != 1 &&
@@ -1643,7 +1703,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: [
-        _sectionHeader('Job tasks & completed work',
+        Padding(padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        child: FilledButton.icon(onPressed: _createTestTask,
+          icon: const Icon(Icons.add), label: const Text('New task · TEST'))),
+      _sectionHeader('Job tasks & completed work',
           subtitle: 'One entry per task · Original work stays preserved'),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -2410,6 +2473,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       if (employeeId == null)
         const ListTile(title: Text('Choose an employee to view their work')),
       if (employeeId != null) ...[
+        Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+          child: FilledButton.icon(onPressed: () =>
+            _createTestTask(employeeId: employeeId),
+            icon: const Icon(Icons.add), label: const Text('New task'))),
         Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
           child: OutlinedButton.icon(
             onPressed: _assignExistingTaskFromEmployee,
