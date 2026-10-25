@@ -191,13 +191,20 @@ class _CustomersScreenState extends State<CustomersScreen> {
   }
 
   void _onSearchChanged(String _) {
-    // A late network result must never replace a newer typed search.
+    // Invalidate stale local/server results immediately, even while the
+    // debounce runs. Clearing the field restores the local list at once.
     ++_loadRequest;
+    ++_searchRequest;
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(
-      const Duration(milliseconds: 250),
-      _runSearch,
-    );
+    if (_search.text.isEmpty) {
+      unawaited(_runSearch());
+    } else {
+      _searchDebounce = Timer(
+        const Duration(milliseconds: 250),
+        _runSearch,
+      );
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _runSearch() async {
@@ -333,6 +340,16 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   controller: _search,
                   hintText: tr('searchCustomers'),
                   leading: const Icon(Icons.search),
+                  trailing: _search.text.isEmpty ? null : [
+                    IconButton(
+                      tooltip: 'Clear customer search',
+                      icon: const Icon(Icons.close),
+                      onPressed: () {
+                        _search.clear();
+                        _onSearchChanged('');
+                      },
+                    ),
+                  ],
                   onChanged: _onSearchChanged,
                   onSubmitted: (_) {
                     _searchDebounce?.cancel();
