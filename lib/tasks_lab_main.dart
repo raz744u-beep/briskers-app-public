@@ -1941,6 +1941,70 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (saved == true) await _refresh();
   }
 
+  Future<void> _creditTestPayrollHours(String employeeId) async {
+    final credits = await store.testTaskHourCredits(BriskersLabFixture.businessId);
+    if (!mounted) return;
+    final choices = <({Map<String, dynamic> task, int eligible, int remaining})>[];
+    for (final task in tasks) {
+      final allocations = allocationsByLine[task['line_id'].toString()] ?? [];
+      final matching = allocations.where((allocation) =>
+        allocation['employee_id']?.toString() == employeeId).toList();
+      final fallback = matching.isEmpty && allocations.isEmpty &&
+          task['employee_id']?.toString() == employeeId;
+      final hrs = matching.isNotEmpty
+          ? (matching.first['hours'] as num).toDouble()
+          : fallback ? ((task['payroll_hours'] as num?)?.toDouble() ?? 0) : 0.0;
+      final eligible = (hrs * 60).round();
+      final prior = credits.where((record) =>
+        record['employee_id'] == employeeId &&
+        record['document_id'] == task['document_id'] &&
+        record['line_id'] == task['line_id']).fold<int>(0,
+          (sum, record) => sum + (record['paid_minutes'] as int));
+      if (eligible > prior) {
+        choices.add((task: task, eligible: eligible, remaining: eligible - prior));
+      }
+    }
+    if (choices.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('No unpaid task hours in this test job.')));
+      return;
+    }
+    final chosen = await showDialog<int>(context: context,
+      builder: (context) => SimpleDialog(
+        title: Text('Credit task hours · ${_employeeName(employeeId)}'),
+        children: [for (var i = 0; i < choices.length; i++)
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, i),
+            child: Text('${_description(choices[i].task)} · '
+                '${(choices[i].remaining / 60).toStringAsFixed(2)} hrs available'),
+          )],
+      ));
+    if (chosen == null || !mounted) return;
+    final item = choices[chosen];
+    final now = DateTime.now();
+    final monday = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: now.weekday - 1));
+    try {
+      await store.creditTestTaskHours(
+        businessId: BriskersLabFixture.businessId,
+        employeeId: employeeId,
+        jobId: BriskersLabFixture.jobId,
+        documentId: item.task['document_id'].toString(),
+        lineId: item.task['line_id'].toString(),
+        weekStart: monday,
+        minutes: item.remaining,
+        totalEligibleMinutes: item.eligible,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('TEST task hours credited. No real payment made.')));
+      }
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$error')));
+    }
+  }
+
   Widget _payrollPage() {
     // Rates and disbursements are LOCAL TEST values, never live payroll.
     return ListView(
@@ -2008,6 +2072,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                               ? BriskersColors.jobs
                               : const Color(0xFF546E7A))),
                       const SizedBox(height: 6),
+                      OutlinedButton.icon(
+                        onPressed: () => _creditTestPayrollHours(id),
+                        icon: const Icon(Icons.task_alt),
+                        label: const Text('Credit task hours · TEST'),
+                      ),
                       OutlinedButton.icon(
                         onPressed: () => _recordTestPayrollPayment(id),
                         icon: const Icon(Icons.payments_outlined),
