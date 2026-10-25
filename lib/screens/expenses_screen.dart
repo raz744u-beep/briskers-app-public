@@ -189,7 +189,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     // Returning from background may follow a successful app-wide sync.
     // Refresh the scope automatically without clearing the visible list.
     // Force Offline is handled by _load and never invokes remote requests.
-    unawaited(_load(showLoading: false, forceTotals: true));
+    unawaited(_load(showLoading: false));
   }
 
   @override
@@ -230,6 +230,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   DateTime _dateOnly(DateTime value) =>
       DateTime(value.year, value.month, value.day);
 
+  // Avoid overflowing dates when a month has fewer days than today.
+  DateTime _monthsAgoClamped(DateTime today, int months) {
+    final first = DateTime(today.year, today.month - months, 1);
+    final lastDay = DateTime(first.year, first.month + 1, 0).day;
+    return DateTime(first.year, first.month,
+        today.day <= lastDay ? today.day : lastDay);
+  }
+
   DateTime? get _rangeStartDate {
     if (_searchController.text.trim().isNotEmpty) return null;
     final today = _dateOnly(DateTime.now());
@@ -240,8 +248,16 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         return today.subtract(const Duration(days: 59));
       case '90d':
         return today.subtract(const Duration(days: 89));
+      case 'thisMonth':
+        return DateTime(today.year, today.month, 1);
+      case 'lastMonth':
+        return DateTime(today.year, today.month - 1, 1);
+      case '3m':
+        return _monthsAgoClamped(today, 3);
+      case 'ytd':
+        return DateTime(today.year, 1, 1);
       case '6m':
-        return DateTime(today.year, today.month - 6, today.day);
+        return _monthsAgoClamped(today, 6);
       case '1y':
         return DateTime(today.year - 1, today.month, today.day);
       case 'custom':
@@ -256,6 +272,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     if (_searchController.text.trim().isNotEmpty) return null;
     if (_dateRange == 'all') return null;
     if (_dateRange == 'custom') return _customEndDate;
+    if (_dateRange == 'lastMonth') {
+      final today = _dateOnly(DateTime.now());
+      return DateTime(today.year, today.month, 0);
+    }
     return _dateOnly(DateTime.now());
   }
 
@@ -267,6 +287,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         return '60 days';
       case '90d':
         return '90 days';
+      case 'thisMonth':
+        return 'this month';
+      case 'lastMonth':
+        return 'last month';
+      case '3m':
+        return 'last 3 months';
+      case 'ytd':
+        return 'year to date';
       case '6m':
         return '6 months';
       case '1y':
@@ -627,7 +655,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final sameScope = _lastPeriodScope == scope && _periodTotals != null;
     final fresh = sameScope && _lastPeriodAt != null &&
         DateTime.now().difference(_lastPeriodAt!) <
-            const Duration(seconds: 45);
+            const Duration(minutes: 5);
     if (fresh && !force) return;
     final epoch = ++_periodEpoch;
     _pendingPeriodScope = scope;
@@ -961,7 +989,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
               ('30d', 'Last 30 days'),
               ('60d', 'Last 60 days'),
               ('90d', 'Last 90 days'),
+              ('thisMonth', 'This Month'),
+              ('lastMonth', 'Last Month'),
+              ('3m', 'Last 3 Months'),
               ('6m', 'Last 6 months'),
+              ('ytd', 'Year to Date'),
               ('1y', 'Last 1 year'),
               ('custom', 'Custom date range'),
               ('all', 'All history'),
