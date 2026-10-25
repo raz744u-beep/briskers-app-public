@@ -2345,6 +2345,38 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     );
   }
 
+  Future<void> _assignExistingTaskFromEmployee() async {
+    final employeeId = selectedEmployeeWorkId;
+    if (employeeId == null) return;
+    final available = tasks.where((task) =>
+      _firstCompletion(task) == null && task['status'] != 'done').toList();
+    if (available.isEmpty) return;
+    final picked = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Choose task for ${_employeeName(employeeId)}'),
+        content: SizedBox(width: 370, child: ListView(
+          shrinkWrap: true,
+          children: [for (final task in available)
+            ListTile(
+              title: Text(_description(task)),
+              subtitle: const Text('Existing test job · edit mechanic allocation'),
+              onTap: () => Navigator.pop(dialogContext, task),
+            ),
+          ],
+        )),
+        actions: [TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Cancel'),
+        )],
+      ),
+    );
+    if (picked == null || !mounted) return;
+    // Use the existing split-mechanic editor. It enforces the same allocation
+    // rules and persistence as invoice-labor assignment in the test lab.
+    await _editInvoiceLabor(picked);
+  }
+
   // Isolated, read-only employee work queue using existing per-labor
   // allocations. Nothing here posts payroll or touches production data.
   Widget _employeeWorkPage() {
@@ -2378,6 +2410,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       if (employeeId == null)
         const ListTile(title: Text('Choose an employee to view their work')),
       if (employeeId != null) ...[
+        Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+          child: OutlinedButton.icon(
+            onPressed: _assignExistingTaskFromEmployee,
+            icon: const Icon(Icons.assignment_add),
+            label: const Text('Assign existing task'),
+          )),
         ListTile(title: Text('Current · ${active.length}',
           style: const TextStyle(fontWeight: FontWeight.w800)),
           subtitle: const Text('Assigned tasks on the test job')),
