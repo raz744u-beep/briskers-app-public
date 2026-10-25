@@ -45,7 +45,11 @@ void main() {
         final store = LocalJobTasksLabStore(reopened);
         final approvals = await store.testWeeklyPayrollApprovals(shop);
         expect(approvals.single['state'], 'paid');
-        expect((await store.payrollTestPayments(shop)).length, 1);
+        final payments = await store.payrollTestPayments(shop);
+        expect(payments.length, 1);
+        expect(payments.single['approval_week_start'], week);
+        expect(payments.single['cents'], 8000);
+        expect(payments.single['method'], 'ach');
         expect(await store.finalizeTestWeeklyPayrollPayment(
           businessId: shop, employeeId: employee,
           weekStart: week, cents: 8000, method: 'ach',
