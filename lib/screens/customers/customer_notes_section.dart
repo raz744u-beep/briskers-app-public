@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -9,6 +10,7 @@ import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
 import '../../services/local_attachment_cache.dart';
+import '../../widgets/local_first_attachment_image.dart';
 import '../../services/offline_customer_detail_write_service.dart';
 
 class CustomerNotesSection extends StatefulWidget {
@@ -955,17 +957,6 @@ class _EditableAttachmentThumbnail extends StatefulWidget {
 
 class _EditableAttachmentThumbnailState
     extends State<_EditableAttachmentThumbnail> {
-  late final Future<String> _url;
-
-  @override
-  void initState() {
-    super.initState();
-    _url = widget.api.signedAttachmentUrl(
-      widget.attachment['bucket'].toString(),
-      widget.attachment['key'].toString(),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return SizedBox(
@@ -977,31 +968,10 @@ class _EditableAttachmentThumbnailState
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
-                child: FutureBuilder<String>(
-                  future: _url,
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) {
-                      return const SizedBox(
-                        width: 96,
-                        height: 96,
-                        child: Center(child: CircularProgressIndicator()),
-                      );
-                    }
-                    return Image.network(
-                      snapshot.data!,
-                      width: 96,
-                      height: 96,
-                      fit: BoxFit.cover,
-                      cacheWidth: 240,
-                      errorBuilder: (_, _, _) => const SizedBox(
-                        width: 96,
-                        height: 96,
-                        child: Center(
-                          child: Icon(Icons.broken_image_outlined),
-                        ),
-                      ),
-                    );
-                  },
+                child: LocalFirstAttachmentImage(
+                  attachment: widget.attachment,
+                  width: 96,
+                  height: 96,
                 ),
               ),
               if (widget.onRemove != null)
@@ -1257,24 +1227,12 @@ class _NoteImage extends StatefulWidget {
 }
 
 class _NoteImageState extends State<_NoteImage> {
-  static const _api = BriskersApi();
-  late final Future<String> _url;
-
-  @override
-  void initState() {
-    super.initState();
-    _url = _api.signedAttachmentUrl(
-      widget.attachment['bucket'].toString(),
-      widget.attachment['key'].toString(),
-    );
-  }
-
-  Future<void> _openViewer(String url) async {
+  Future<void> _openViewer(File file) async {
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => _CustomerNoteImageViewer(
-          imageUrl: url,
+          imageFile: file,
           title: widget.attachment['filename']?.toString() ?? 'Picture',
         ),
       ),
@@ -1283,83 +1241,46 @@ class _NoteImageState extends State<_NoteImage> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<String>(
-      future: _url,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const SizedBox(
-            width: 92,
-            height: 92,
-            child: Center(child: CircularProgressIndicator()),
-          );
-        }
-        if (!snapshot.hasData) {
-          return const SizedBox(
-            width: 92,
-            height: 92,
-            child: Center(child: Icon(Icons.broken_image_outlined)),
-          );
-        }
-
-        final url = snapshot.data!;
-        return Tooltip(
-          message: 'Tap to view picture',
-          child: InkWell(
-            borderRadius: BorderRadius.circular(10),
-            onTap: () => _openViewer(url),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Stack(
-                children: [
-                  Image.network(
-                    url,
-                    fit: BoxFit.cover,
-                    width: 92,
-                    height: 92,
-                    cacheWidth: 240,
-                    errorBuilder: (_, _, _) => const SizedBox(
-                      width: 92,
-                      height: 92,
-                      child: Center(
-                        child: Icon(Icons.broken_image_outlined),
-                      ),
-                    ),
-                  ),
-                  const Positioned(
-                    right: 5,
-                    bottom: 5,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: Color(0x99000000),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Padding(
-                        padding: EdgeInsets.all(4),
-                        child: Icon(
-                          Icons.zoom_in,
-                          size: 17,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+    return Tooltip(
+      message: 'Tap to view picture',
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Stack(
+          children: [
+            LocalFirstAttachmentImage(
+              attachment: widget.attachment,
+              width: 92,
+              height: 92,
+              onOpen: _openViewer,
+            ),
+            const Positioned(
+              right: 5,
+              bottom: 5,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Color(0x99000000),
+                  shape: BoxShape.circle,
+                ),
+                child: Padding(
+                  padding: EdgeInsets.all(4),
+                  child: Icon(Icons.zoom_in, size: 17, color: Colors.white),
+                ),
               ),
             ),
-          ),
-        );
-      },
+          ],
+        ),
+      ),
     );
   }
 }
 
 class _CustomerNoteImageViewer extends StatelessWidget {
   const _CustomerNoteImageViewer({
-    required this.imageUrl,
+    required this.imageFile,
     required this.title,
   });
 
-  final String imageUrl;
+  final File imageFile;
   final String title;
 
   @override
@@ -1379,8 +1300,8 @@ class _CustomerNoteImageViewer extends StatelessWidget {
         child: InteractiveViewer(
           minScale: 0.8,
           maxScale: 5,
-          child: Image.network(
-            imageUrl,
+          child: Image.file(
+            imageFile,
             fit: BoxFit.contain,
             errorBuilder: (_, _, _) => const Center(
               child: Icon(
