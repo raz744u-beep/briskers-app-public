@@ -76,3 +76,41 @@ class TaskAssignmentPolicy {
     required bool explicitlyAssigned,
   }) => explicitlyAssigned ? existingMechanicId : mainMechanicId;
 }
+
+class OpenJobChoice {
+  const OpenJobChoice({
+    required this.jobId,
+    required this.customerId,
+    required this.vehicleId,
+    required this.isOpen,
+  });
+
+  final String jobId;
+  final String customerId;
+  final String vehicleId;
+  final bool isOpen;
+}
+
+/// Return only open jobs for the exact customer AND vehicle. A task creator
+/// must still explicitly choose one or request a new job. No silent linking.
+class TaskJobChooser {
+  const TaskJobChooser._();
+
+  static List<OpenJobChoice> eligible({
+    required String customerId,
+    required String vehicleId,
+    required Iterable<OpenJobChoice> jobs,
+  }) {
+    final result = <OpenJobChoice>[];
+    final ids = <String>{};
+    for (final job in jobs) {
+      if (!job.isOpen || job.customerId != customerId ||
+          job.vehicleId != vehicleId) continue;
+      if (job.jobId.trim().isEmpty || !ids.add(job.jobId)) {
+        throw StateError('Duplicate or invalid open job identity');
+      }
+      result.add(job);
+    }
+    return result;
+  }
+}
