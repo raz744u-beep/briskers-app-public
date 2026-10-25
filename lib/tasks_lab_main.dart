@@ -1954,6 +1954,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   DropdownMenuItem(value: 'cash', child: Text('Cash')),
                   DropdownMenuItem(value: 'check', child: Text('Check')),
                   DropdownMenuItem(value: 'zelle', child: Text('Zelle')),
+                  DropdownMenuItem(value: 'ach', child: Text('ACH / Bank transfer')),
                   DropdownMenuItem(value: 'card', child: Text('Card')),
                   DropdownMenuItem(value: 'other', child: Text('Other')),
                 ],
