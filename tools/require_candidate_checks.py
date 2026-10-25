@@ -20,6 +20,10 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 CANDIDATE_BRANCH = "lab/richard-isolated-vertical-b2327-20261020"
+ALLOWED_CANDIDATE_BRANCHES = frozenset({
+    CANDIDATE_BRANCH,
+    "feature/tasks-payroll-complete-test-20261024",
+})
 BUILD_WORKFLOW = ".github/workflows/android-tasks-test.yml"
 REQUIRED_WORKFLOWS = {
     "diagnostics.yml": "Briskers Diagnostics",
@@ -56,11 +60,13 @@ def context_from_environment(env, checkout_sha):
         raise GateError("Invalid GitHub repository")
     if not re.fullmatch(r"[0-9a-f]{40}", sha) or checkout_sha != sha:
         raise GateError("Checkout HEAD must equal the exact GITHUB_SHA")
-    if env.get("GITHUB_REF") != f"refs/heads/{CANDIDATE_BRANCH}":
+    ref = env.get("GITHUB_REF", "")
+    branch = ref.removeprefix("refs/heads/")
+    if ref != f"refs/heads/{branch}" or branch not in ALLOWED_CANDIDATE_BRANCHES:
         raise GateError("This gate is restricted to the isolated candidate branch")
     if env.get("GITHUB_EVENT_NAME") not in {"push", "workflow_dispatch"}:
         raise GateError("Unexpected Android workflow event")
-    workflow_ref = f"{repository}/{BUILD_WORKFLOW}@refs/heads/{CANDIDATE_BRANCH}"
+    workflow_ref = f"{repository}/{BUILD_WORKFLOW}@refs/heads/{branch}"
     if env.get("GITHUB_WORKFLOW_REF") != workflow_ref:
         raise GateError("Unexpected Android workflow identity/ref")
     if env.get("GITHUB_WORKFLOW_SHA") != sha:
@@ -70,7 +76,7 @@ def context_from_environment(env, checkout_sha):
     except ValueError as error:
         raise GateError("Invalid GitHub repository ID") from error
     positive_integer(repository_id, "repository ID")
-    return Context(repository, repository_id, CANDIDATE_BRANCH, sha)
+    return Context(repository, repository_id, branch, sha)
 
 
 class NoRedirects(HTTPRedirectHandler):
