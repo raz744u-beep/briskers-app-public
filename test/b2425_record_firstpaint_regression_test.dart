@@ -112,6 +112,8 @@ void main() {
     expect(shared, contains("widget.cacheScopeKey ?? 'findings'"));
     expect(shared, contains('final scopedRows = rows.where((row)'));
     expect(shared, contains('vehicleIds.contains(vehicle)'));
+    expect(shared, contains('_vehicleIds(oldWidget.vehicles) != _vehicleIds(widget.vehicles)'));
+    expect(shared, isNot(contains('oldWidget.vehicles != widget.vehicles')));
     expect(shared, contains('_findingThumbnail('));
     expect(shared, contains('_showPhotoGallery('));
     expect(shared, contains('final local = await cachedFindings();'));
