@@ -85,6 +85,25 @@ void main() {
     expect(expenses, isNot(contains("tooltip: 'Add transaction',\\n                        style: IconButton.styleFrom(")));
   });
 
+  test('Finding Resolve explicitly selects the actual Job, including history', () {
+    final source = File('lib/screens/jobs/job_detail_screen.dart')
+        .readAsStringSync();
+    final begin = source.indexOf('Future<String?> _chooseFindingResolutionJob(');
+    final end = source.indexOf('Future<void> _reopenFinding(', begin);
+    expect(begin, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(begin));
+    final code = source.substring(begin, end);
+    expect(code, contains('customer_id=? AND vehicle_id=?'));
+    expect(code, contains('FindingJobChoice.completedHistory'));
+    expect(code, contains('LocalJobRetirement.isJobBlocked'));
+    expect(code, contains('LocalJobQuarantine.isJobBlocked'));
+    expect(code, contains('Confirm repair'));
+    expect(code, contains('repairJobId'));
+    expect(code, contains('_chooseFindingResolutionJob(finding)'));
+    expect(code, isNot(contains(
+      'widget.businessId, finding, widget.jobId));')));
+  });
+
   test('Invoice Findings reuses customer photo-capable local-first UI', () {
     final invoice =
         File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
