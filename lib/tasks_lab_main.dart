@@ -1676,7 +1676,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     labelText: 'Select open job'),
                   items: [for (final job in eligibleJobs)
                     DropdownMenuItem(value: job.jobId,
-                      child: Text('J-24 · Equus (TEST)'))],
+                      child: const Text('J-24 · Equus (TEST)'))],
                   onChanged: (value) => update(() => selectedJobId = value)),
               OutlinedButton.icon(
                 onPressed: () => update(() => createNewJob = true),
@@ -1717,7 +1717,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               try {
                 await store.addRecheckTask(
                   businessId: BriskersLabFixture.businessId,
-                  jobId: selectedJobId,
+                  jobId: selectedJobId!,
                   description: description.text.trim(), hours: value,
                   employeeId: mechanic.isEmpty ? null : mechanic,
                 );
