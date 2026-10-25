@@ -1992,7 +1992,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final amount = TextEditingController();
     final notes = TextEditingController();
     final checkProof = TextEditingController();
-    String kind = 'pay';
+    const kind = 'advance';
     String method = 'cash';
     DateTime paidAt = DateTime.now();
     final saved = await showModalBottomSheet<bool>(
@@ -2001,12 +2001,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       builder: (sheet) => StatefulBuilder(
         builder: (sheet, update) => Padding(
           padding: EdgeInsets.fromLTRB(16, 12, 16,
-            MediaQuery.viewInsetsOf(sheet).bottom + 20),
+            MediaQuery.viewInsetsOf(sheet).bottom +
+              MediaQuery.viewPaddingOf(sheet).bottom + 42),
           child: SingleChildScrollView(child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Record TEST payment · ${_employeeName(employeeId)}',
+              Text('Record TEST advance · ${_employeeName(employeeId)}',
                 style: const TextStyle(fontSize: 19,
                   fontWeight: FontWeight.w800)),
               const SizedBox(height: 6),
@@ -2023,18 +2024,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   labelText: 'Amount paid',
                   border: OutlineInputBorder())),
               const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: kind,
-                decoration: const InputDecoration(
-                  labelText: 'Payment type',
-                  border: OutlineInputBorder()),
-                items: const [
-                  DropdownMenuItem(value: 'pay',
-                    child: Text('Partial / full payment')),
-                  DropdownMenuItem(value: 'advance',
-                    child: Text('Advance / unfinished work')),
-                ],
-                onChanged: (v) => update(() => kind = v ?? 'pay')),
+              const Text('Advance only. To pay approved weekly work, '
+                'use its Approved weekly payroll record.'),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: method,
@@ -2110,7 +2101,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   }
                 },
                 icon: const Icon(Icons.save_outlined),
-                label: const Text('Save TEST payment'),
+                label: const Text('Save TEST advance'),
               ),
             ],
           )),
@@ -2428,10 +2419,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           if (employee['role'] != 'secretary')
             Builder(builder: (_) {
               final id = employee['id']!;
-              final hours = earnedPayrollPreviewHours[id] ?? 0;
+              final completedHours = earnedPayrollPreviewHours[id] ?? 0;
               final rate = testHourlyRates[id];
-              final earnedCents = rate == null
-                ? null : (hours * rate).round();
+              final completedEarnedCents = rate == null
+                ? null : (completedHours * rate).round();
               final payments = testPayrollPayments.where(
                 (payment) => payment['employee_id'] == id).toList();
               final paidCents = payments.fold<int>(0,
@@ -2443,11 +2434,18 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 (adjustment) => adjustment['employee_id'] == id)
                   .fold<int>(0, (sum, adjustment) =>
                     sum + (adjustment['signed_cents'] as int));
+              // Selected task credits are the weekly payroll basis.
+              // Completed work is displayed separately; it is not added a
+              // second time to selected credits.
+              final selectedCents = rate == null
+                ? null : (creditedMinutes * rate / 60).round();
               final owing = TestPayrollBalance.remainingCents(
-                earnedCents: earnedCents ?? 0,
+                earnedCents: selectedCents ?? 0,
                 adjustmentCents: adjustmentCents,
                 paidCents: paidCents,
               );
+              final employeeApprovals = testPayrollApprovals.where(
+                (approval) => approval['employee_id'] == id).toList();
               return Card(
                 margin: const EdgeInsets.fromLTRB(10, 4, 10, 5),
                 child: Padding(
@@ -2459,7 +2457,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         Expanded(child: Text(_employeeName(id),
                           style: const TextStyle(
                             fontSize: 17, fontWeight: FontWeight.w700))),
-                        Text('${hours.toStringAsFixed(1)} hrs',
+                        Text('${(creditedMinutes / 60).toStringAsFixed(2)} hrs selected',
                           style: const TextStyle(fontSize: 22,
                             fontWeight: FontWeight.w800,
                             color: BriskersColors.jobs)),
@@ -2469,7 +2467,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         Expanded(child: Text(rate == null
                           ? 'Test rate not set'
                           : 'Rate ${_labMoney(rate)}/hr · '
-                            'Earned ${_labMoney(earnedCents!)}',
+                            'Selected ${_labMoney(selectedCents!)}',
                           style: const TextStyle(fontSize: 12.5))),
                         TextButton.icon(
                           onPressed: () => _setTestPayrollRate(id),
@@ -2477,21 +2475,80 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                           label: const Text('Rate'),
                         ),
                       ]),
-                      Text('Task hours credited: ${(creditedMinutes / 60).toStringAsFixed(2)} hrs '
-                        '(weekly TEST ledger; not cash paid)',
+                      Text('Completed work: ${completedHours.toStringAsFixed(2)} hrs'
+                        '${completedEarnedCents == null ? '' : ' · ${_labMoney(completedEarnedCents)}'}'
+                        ' (not added twice to selected payroll)',
+                        style: const TextStyle(fontSize: 12.5)),
+                      Text('Payroll-selected task hours: '
+                        '${(creditedMinutes / 60).toStringAsFixed(2)} hrs '
+                        '${selectedCents == null ? '' : '· ${_labMoney(selectedCents)}'}',
                         style: const TextStyle(fontSize: 12.5)),
                       Text('Bonuses and corrections: ${_labMoney(adjustmentCents)}',
                         style: const TextStyle(fontSize: 12.5)),
-                      Text('Recorded test payments: ${_labMoney(paidCents)}',
+                      Text('Recorded payments and advances: ${_labMoney(paidCents)}',
                         style: const TextStyle(fontSize: 12.5)),
                       if (rate != null)
                         Text(owing >= 0
-                          ? 'Remaining to pay: ${_labMoney(owing)}'
-                          : 'Advance / credit: ${_labMoney(-owing)}',
+                          ? 'Selected payroll balance: ${_labMoney(owing)}'
+                          : 'Advance / credit against selection: ${_labMoney(-owing)}',
                           style: TextStyle(fontWeight: FontWeight.w800,
                             color: owing > 0
                               ? BriskersColors.jobs
                               : const Color(0xFF546E7A))),
+                      if (employeeApprovals.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        const Text('Weekly payroll records',
+                          style: TextStyle(fontSize: 13.5,
+                            fontWeight: FontWeight.w800)),
+                        for (final approval in employeeApprovals) ...[
+                          Builder(builder: (_) {
+                            final linked = payments.where((payment) =>
+                              payment['approval_week_start'] ==
+                                approval['week_start']).toList();
+                            final linkedCents = linked.fold<int>(0,
+                              (sum, payment) =>
+                                sum + (payment['cents'] as int));
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Week ${approval['week_start']} · '
+                                    '${approval['state'].toString().toUpperCase()}'
+                                    ' · ${((approval['selected_minutes'] as int) / 60).toStringAsFixed(2)} hrs',
+                                    style: const TextStyle(fontSize: 12.5,
+                                      fontWeight: FontWeight.w700)),
+                                  if (linked.isNotEmpty)
+                                    for (final payment in linked)
+                                      Text('Recorded ${_labMoney(payment['cents'] as int)} '
+                                        '· ${payment['method']} · '
+                                        '${DateFormat('MMM d, yyyy').format(
+                                          DateTime.fromMillisecondsSinceEpoch(
+                                            payment['paid_at'] as int))}',
+                                        style: const TextStyle(fontSize: 12.5)),
+                                  if (approval['state'] == 'paid' &&
+                                      linked.isEmpty)
+                                    const Text(
+                                      'REVIEW: Marked Paid, but no linked payment '
+                                      'was found. Do not pay again until reconciled.',
+                                      style: TextStyle(fontSize: 12.5,
+                                        color: Colors.deepOrange)),
+                                  if (approval['state'] == 'paid' &&
+                                      linked.isNotEmpty && rate != null &&
+                                      linkedCents <
+                                        ((approval['selected_minutes'] as int) *
+                                            rate / 60).round())
+                                    const Text(
+                                      'REVIEW: Paid amount is below selected hours '
+                                      'at the current rate.',
+                                      style: TextStyle(fontSize: 12.5,
+                                        color: Colors.deepOrange)),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                      ],
                       const SizedBox(height: 6),
                       OutlinedButton.icon(
                         onPressed: () => _creditTestPayrollHours(id),
@@ -2511,7 +2568,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                       OutlinedButton.icon(
                         onPressed: () => _recordTestPayrollPayment(id),
                         icon: const Icon(Icons.payments_outlined),
-                        label: const Text('Record TEST payment / advance'),
+                        label: const Text('Record TEST advance'),
                       ),
                     ],
                   ),
