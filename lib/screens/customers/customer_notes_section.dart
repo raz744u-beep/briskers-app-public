@@ -9,6 +9,7 @@ import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
+import '../../services/customer_note_cache_merge.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../widgets/local_first_attachment_image.dart';
 import '../../services/offline_customer_detail_write_service.dart';
@@ -117,8 +118,19 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
         _api.myPermissions(businessId),
       ]);
       if (!current()) return;
-      final notes = List<Map<String, dynamic>>.from(results[0] as List);
+      final remoteNotes =
+          List<Map<String, dynamic>>.from(results[0] as List);
       final permissions = List<String>.from(results[1] as List);
+      // Re-read the local notes at commit time: an offline edit or photo
+      // upload may have happened while the remote request was in-flight.
+      final localSnapshot = await _cache.load(businessId, customerId, 'notes');
+      final localNotes = localSnapshot is List
+          ? localSnapshot.whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row)).toList()
+          : <Map<String, dynamic>>[];
+      final notes = mergeCustomerNotesPreservingPending(
+          remoteNotes, localNotes);
+      if (!current()) return;
       await _cache.save(businessId, customerId, 'notes', notes);
       if (!current()) return;
       setState(() {
