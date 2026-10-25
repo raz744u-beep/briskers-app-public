@@ -909,11 +909,22 @@ void main() {
         ),
       );
       expect(find.text('Open 1 • In Job 1 • Resolved 1'), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('vehicle-finding-fixture-f1')),
-        findsOneWidget,
-      );
+      // Multiple active findings are compact by default. Expand each row
+      // deliberately before expecting the photo and editing controls.
+      final first = find.byKey(const ValueKey('finding-collapsed-fixture-f1'));
+      final second = find.byKey(const ValueKey('finding-collapsed-fixture-f2'));
+      expect(first, findsOneWidget);
+      expect(second, findsOneWidget);
+      expect(find.byKey(const ValueKey('vehicle-finding-fixture-f1')),
+          findsNothing);
+      await tester.tap(first);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('vehicle-finding-fixture-f1')),
+          findsOneWidget);
       expect(find.text('Add to Job'), findsOneWidget);
+      await tester.ensureVisible(second);
+      await tester.tap(second);
+      await tester.pumpAndSettle();
       expect(find.text('Include in Invoice Notes'), findsNWidgets(2));
       expect(find.text('Resolve'), findsNWidgets(2));
     },
