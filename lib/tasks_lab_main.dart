@@ -2000,8 +2000,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           content: Text('TEST task hours credited. No real payment made.')));
       }
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$error')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')));
+      }
     }
   }
 
