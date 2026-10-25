@@ -115,9 +115,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final newJobs = await store.syntheticJobs(BriskersLabFixture.businessId);
     final aliases = await store.nicknames(BriskersLabFixture.businessId);
     final names = await store.fullNames(BriskersLabFixture.businessId);
-    final allocations = await Future.wait(rows.map((task) => store.allocations(
+    final allocations = await Future.wait(allRows.map((task) => store.allocations(
       businessId: BriskersLabFixture.businessId,
-      jobId: BriskersLabFixture.jobId,
+      jobId: task['job_id'].toString(),
       documentId: task['document_id'].toString(),
       lineId: task['line_id'].toString())));
     final rates = await store.payrollRates(BriskersLabFixture.businessId);
@@ -149,11 +149,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       testPayrollPayments = payments;
       testTaskCredits = credits;
       earnedCorrections = corrections;
-      allocationsByLine = {for (var i = 0; i < rows.length; i++)
-        rows[i]['line_id'].toString(): allocations[i]};
+      allocationsByLine = {for (var i = 0; i < allRows.length; i++)
+        _allocationKey(allRows[i]): allocations[i]};
       loading = false;
     });
   }
+
+  String _allocationKey(Map<String, dynamic> task) =>
+      '${task['job_id']}|${task['document_id']}|${task['line_id']}';
 
   String _employeeName(String? id) {
     if (id == null || id.isEmpty) return 'Unassigned';
@@ -328,7 +331,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   String _laborAssignment(Map<String, dynamic> task) {
-    final allocations = allocationsByLine[task['line_id'].toString()] ?? [];
+    final allocations = allocationsByLine[_allocationKey(task)] ?? [];
     if (allocations.isNotEmpty) {
       return allocations.map((a) => "${_employeeName(a['employee_id'].toString())}: ${a['hours']} hrs").join(' · ');
     }
@@ -341,7 +344,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
 
   Future<void> _editInvoiceLabor(Map<String, dynamic> task) async {
     if (_firstCompletion(task) != null) return;
-    final existing = allocationsByLine[task['line_id'].toString()] ?? [];
+    final existing = allocationsByLine[_allocationKey(task)] ?? [];
     final notOnInvoice = task['document_id'] ==
       LocalJobTasksLabStore.recheckDocumentId;
     String first = existing.isNotEmpty ? existing.first['employee_id'].toString()
@@ -571,7 +574,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final splits = completed != null
       ? (completed['payroll_allocations'] as List?)
           ?.whereType<Map<String, dynamic>>().toList() ?? []
-      : allocationsByLine[task['line_id'].toString()] ?? [];
+      : allocationsByLine[_allocationKey(task)] ?? [];
     if (splits.isNotEmpty) {
       final mechanics = splits.map((row) =>
         _employeeName(row['employee_id']?.toString())).join(' + ');
@@ -609,7 +612,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final corrections = _taskCorrections(task);
     final splitCount = record != null
       ? (record['payroll_allocations'] as List?)?.length ?? 0
-      : allocationsByLine[task['line_id'].toString()]?.length ?? 0;
+      : allocationsByLine[_allocationKey(task)]?.length ?? 0;
     return Card(
       margin: const EdgeInsets.fromLTRB(10, 2, 10, 2),
       elevation: 0,
@@ -2067,7 +2070,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (!mounted) return;
     final choices = <({Map<String, dynamic> task, int eligible, int remaining})>[];
     for (final task in allJobTasks) {
-      final allocations = allocationsByLine[task['line_id'].toString()] ?? [];
+      final allocations = allocationsByLine[_allocationKey(task)] ?? [];
       final matching = allocations.where((allocation) =>
         allocation['employee_id']?.toString() == employeeId).toList();
       final fallback = matching.isEmpty && allocations.isEmpty &&
@@ -2461,7 +2464,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           '${hours.toStringAsFixed(1)}h';
       }).join(' · ');
     }
-    final rows = allocationsByLine[task['line_id'].toString()] ?? const [];
+    final rows = allocationsByLine[_allocationKey(task)] ?? const [];
     if (rows.isNotEmpty) {
       return rows.map((a) {
         final hours = (a['hours'] as num?)?.toDouble() ?? 0;
@@ -2689,7 +2692,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Widget _employeeWorkPage() {
     final employeeId = selectedEmployeeWorkId;
     final assigned = allJobTasks.where((task) {
-      final allocations = allocationsByLine[task['line_id'].toString()] ?? [];
+      final allocations = allocationsByLine[_allocationKey(task)] ?? [];
       return allocations.any((allocation) =>
           allocation['employee_id']?.toString() == employeeId) ||
           (allocations.isEmpty &&
