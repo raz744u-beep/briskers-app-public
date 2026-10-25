@@ -57,6 +57,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   int? expandedMenu;
   double menuAnchorX = 180;
   int selectedVehicle = 0;
+  String? selectedEmployeeWorkId;
   bool jobDetailsOpen = false;
   bool loading = true;
   String? error;
@@ -2355,8 +2356,63 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     );
   }
 
+  // Isolated, read-only employee work queue using existing per-labor
+  // allocations. Nothing here posts payroll or touches production data.
+  Widget _employeeWorkPage() {
+    final employeeId = selectedEmployeeWorkId;
+    final assigned = tasks.where((task) {
+      final allocations = allocationsByLine[task['line_id'].toString()] ?? [];
+      return allocations.any((allocation) =>
+          allocation['employee_id']?.toString() == employeeId) ||
+          (allocations.isEmpty &&
+           task['employee_id']?.toString() == employeeId);
+    }).toList();
+    final active = assigned.where((task) =>
+        _firstCompletion(task) == null && task['status'] != 'done').toList();
+    final completed = assigned.where((task) =>
+        _firstCompletion(task) != null || task['status'] == 'done').toList();
+    return ListView(padding: const EdgeInsets.only(bottom: 24), children: [
+      _sectionHeader('Employee work · TEST',
+        subtitle: 'Local assignments only · No real payroll'),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: DropdownButtonFormField<String>(
+          value: employeeId,
+          decoration: const InputDecoration(
+            labelText: 'Employee', border: OutlineInputBorder()),
+          items: [for (final e in BriskersLabFixture.employees)
+            DropdownMenuItem(value: e['id']!,
+              child: Text(_employeeName(e['id']!)))],
+          onChanged: (id) => setState(() => selectedEmployeeWorkId = id),
+        ),
+      ),
+      if (employeeId == null)
+        const ListTile(title: Text('Choose an employee to view their work')),
+      if (employeeId != null) ...[
+        ListTile(title: Text('Current · ${active.length}',
+          style: const TextStyle(fontWeight: FontWeight.w800)),
+          subtitle: const Text('Assigned tasks on the test job')),
+        if (active.isEmpty)
+          const ListTile(title: Text('No current assignments')),
+        ...active.map(_taskCard),
+        ListTile(title: Text('Completed · ${completed.length}',
+          style: const TextStyle(fontWeight: FontWeight.w800))),
+        if (completed.isEmpty)
+          const ListTile(title: Text('No completed assignments')),
+        ...completed.map(_taskCard),
+      ],
+    ]);
+  }
+
   Widget _morePage() => ListView(children: [
     _sectionHeader('More', subtitle: 'Tasks TEST features'),
+    ListTile(
+      leading: const Icon(Icons.assignment_ind_outlined,
+        color: BriskersColors.jobs),
+      title: const Text('Employee work · current tasks'),
+      onTap: () => _navigate(12),
+      trailing: const Icon(Icons.chevron_right),
+    ),
     ListTile(
       leading: const Icon(Icons.account_balance_wallet_outlined,
         color: BriskersColors.invoices),
@@ -2403,6 +2459,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       case 9: return _readOnlyModule('Schedule',
         'Appointments were not included in this test copy.',
         Icons.calendar_month_outlined, BriskersColors.appointments);
+      case 12: return _employeeWorkPage();
       case 10: return _readOnlyModule('Expenses',
         'No expenses or payments have been copied.',
         Icons.payments_outlined, BriskersColors.expenses);
