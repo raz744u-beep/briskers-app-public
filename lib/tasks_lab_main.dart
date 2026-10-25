@@ -16,6 +16,7 @@ import 'services/task_assignment_policy.dart';
 import 'services/test_payroll_payment_policy.dart';
 import 'services/test_payroll_balance.dart';
 import 'tasks_lab/fixture.dart';
+import 'tasks_lab/weekly_hours_text_field.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -2292,16 +2293,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   if (selectedKeys.contains(_allocationKey(choice.task)))
                     Padding(
                       padding: const EdgeInsets.fromLTRB(40, 0, 8, 12),
-                      child: TextFormField(
+                      child: WeeklyHoursTextField(
                         key: ValueKey('weekly-hours-${DateFormat('yyyy-MM-dd').format(selectedWeek)}-${_allocationKey(choice.task)}'),
-                        initialValue: hourInputs[_allocationKey(choice.task)],
+                        initialHours: hourInputs[_allocationKey(choice.task)] ?? '',
                         enabled: !locked,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true),
-                        decoration: const InputDecoration(
-                          labelText: 'Hours to credit this week',
-                          border: OutlineInputBorder(),
-                          helperText: 'Remaining hours carry forward'),
                         onChanged: (value) => update(() {
                           hourInputs[_allocationKey(choice.task)] = value;
                         }),
