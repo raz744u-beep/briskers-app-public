@@ -42,6 +42,7 @@ class TasksLabHome extends StatefulWidget {
 class _TasksLabHomeState extends State<TasksLabHome> {
   final LocalJobTasksLabStore store = LocalJobTasksLabStore(localDatabase);
   List<Map<String, dynamic>> tasks = const [];
+  List<Map<String, dynamic>> shopTasks = const [];
   Map<String, String> nicknames = const {};
   Map<String, String> fullNames = const {};
   String? leadMechanicId;
@@ -106,6 +107,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final rows = await store.list(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId,
     );
+    final independent = await store.shopTasks(BriskersLabFixture.businessId);
     final aliases = await store.nicknames(BriskersLabFixture.businessId);
     final names = await store.fullNames(BriskersLabFixture.businessId);
     final allocations = await Future.wait(rows.map((task) => store.allocations(
@@ -129,6 +131,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (!mounted) return;
     setState(() {
       tasks = rows;
+      shopTasks = independent;
       nicknames = aliases;
       fullNames = names;
       leadMechanicId = lead;
@@ -1652,6 +1655,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     );
     String? selectedJobId;
     var createNewJob = eligibleJobs.isEmpty;
+    var shopInternal = false;
     final added = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -1662,6 +1666,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             children: [
               const Text('Choose an existing open job or request a new job. '
                 'No customer invoice is created by assigning a task.'),
+              OutlinedButton.icon(
+                onPressed: () => update(() => shopInternal = !shopInternal),
+                icon: Icon(shopInternal ? Icons.check_box : Icons.check_box_outline_blank),
+                label: const Text('Independent shop task (no customer/job)')),
+              if (!shopInternal) ...[
+
               if (eligibleJobs.isNotEmpty)
                 OutlinedButton.icon(
                   onPressed: () => update(() => createNewJob = false),
@@ -1688,6 +1698,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 const Text('New-job creation is not available in this '
                   'isolated fixture yet. No job or invoice will be '
                   'created until that path is implemented.'),
+              ],
               const SizedBox(height: 10),
               TextField(controller: description, decoration:
                 const InputDecoration(labelText: 'Task description')),
@@ -1708,19 +1719,28 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancel')),
-            FilledButton(onPressed: (createNewJob || selectedJobId == null)
+            FilledButton(onPressed: (!shopInternal &&
+              (createNewJob || selectedJobId == null))
               ? null : () async {
               final value = double.tryParse(hours.text.trim());
               if (description.text.trim().isEmpty || value == null ||
                   !value.isFinite || value < 0) { return; }
-              if (createNewJob || selectedJobId == null) return;
+              if (!shopInternal && (createNewJob || selectedJobId == null)) return;
               try {
-                await store.addRecheckTask(
+                if (shopInternal) {
+                  await store.addShopTask(
+                    businessId: BriskersLabFixture.businessId,
+                    description: description.text.trim(),
+                    employeeId: mechanic.isEmpty ? null : mechanic,
+                    estimatedMinutes: (value * 60).round());
+                } else {
+                  await store.addRecheckTask(
                   businessId: BriskersLabFixture.businessId,
                   jobId: selectedJobId!,
                   description: description.text.trim(), hours: value,
                   employeeId: mechanic.isEmpty ? null : mechanic,
-                );
+                  );
+                }
                 if (context.mounted) Navigator.pop(context, true);
               } catch (error) {
                 if (context.mounted) {
@@ -1754,6 +1774,16 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         Padding(padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
         child: FilledButton.icon(onPressed: _createTestTask,
           icon: const Icon(Icons.add), label: const Text('New task · TEST'))),
+      if (shopTasks.isNotEmpty) ...[
+        _sectionHeader('Independent shop tasks',
+          subtitle: 'Not linked to customers, jobs or invoices'),
+        for (final task in shopTasks)
+          ListTile(
+            title: Text(task['description'].toString()),
+            subtitle: Text('${_employeeName(task['employee_id']?.toString())} · '
+              '${task['estimated_minutes']} min · ${task['status']}'),
+          ),
+      ],
       _sectionHeader('Job tasks & completed work',
           subtitle: 'One entry per task · Original work stays preserved'),
         Padding(
