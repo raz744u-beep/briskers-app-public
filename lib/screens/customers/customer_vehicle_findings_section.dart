@@ -208,8 +208,19 @@ class _CustomerVehicleFindingsSectionState
         mergeWorkFindings(cachedVisible, localVisible),
       );
       if (!visibility.isCurrent(generation)) return [];
-      await _cache.save(businessId, customerId, _findingCacheSection,
-        JobSummaryVisibility.stampSnapshot(visible, await visibility.captureSnapshotGeneration()));
+      // Writing the photo-rich cache must not delay displaying the already
+      // permission-filtered local findings. Stamp the quarantine generation
+      // and fence the asynchronous write against later account changes.
+      unawaited(() async {
+        try {
+          final snapshot = await visibility.captureSnapshotGeneration();
+          if (!mounted || !visibility.isCurrent(generation)) return;
+          await _cache.save(businessId, customerId, _findingCacheSection,
+            JobSummaryVisibility.stampSnapshot(visible, snapshot));
+        } catch (_) {
+          // The displayed local read remains valid if cache persistence fails.
+        }
+      }());
       return visibility.isCurrent(generation) ? visible : [];
     }
 
