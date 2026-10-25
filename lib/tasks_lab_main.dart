@@ -1663,10 +1663,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               const Text('Choose an existing open job or request a new job. '
                 'No customer invoice is created by assigning a task.'),
               if (eligibleJobs.isNotEmpty)
-                RadioListTile<bool>(
-                  value: false, groupValue: createNewJob,
-                  title: const Text('Existing open job'),
-                  onChanged: (_) => update(() => createNewJob = false)),
+                OutlinedButton.icon(
+                  onPressed: () => update(() => createNewJob = false),
+                  icon: Icon(createNewJob
+                    ? Icons.radio_button_unchecked
+                    : Icons.radio_button_checked),
+                  label: const Text('Existing open job')),
               if (!createNewJob && eligibleJobs.isNotEmpty)
                 DropdownButtonFormField<String>(
                   initialValue: selectedJobId,
@@ -1676,10 +1678,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     DropdownMenuItem(value: job.jobId,
                       child: Text('J-24 · Equus (TEST)'))],
                   onChanged: (value) => update(() => selectedJobId = value)),
-              RadioListTile<bool>(
-                value: true, groupValue: createNewJob,
-                title: const Text('Create new job'),
-                onChanged: (_) => update(() => createNewJob = true)),
+              OutlinedButton.icon(
+                onPressed: () => update(() => createNewJob = true),
+                icon: Icon(createNewJob
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked),
+                label: const Text('Create new job')),
               if (createNewJob)
                 const Text('New-job creation is not available in this '
                   'isolated fixture yet. No job or invoice will be '
