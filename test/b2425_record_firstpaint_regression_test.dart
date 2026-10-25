@@ -138,6 +138,21 @@ void main() {
     expect(shared, contains('final local = await cachedFindings();'));
   });
 
+  test('Customer Notes paints cached text before remote permission and images', () {
+    final notes = File('lib/screens/customers/customer_notes_section.dart')
+        .readAsStringSync();
+    final begin = notes.indexOf('Future<void> _load() async {');
+    final end = notes.indexOf('Future<void> _prefetchNotePhotos(', begin);
+    final code = notes.substring(begin, end);
+    expect(code, contains("_cache.load(businessId, customerId, 'notes')"));
+    expect(code, contains('_notes = notes;'));
+    expect(code, contains('_canDeleteRecords = false;'));
+    expect(code, contains('unawaited(_prefetchNotePhotos(notes));'));
+    expect(code.indexOf("_cache.load(businessId, customerId, 'notes')"),
+        lessThan(code.indexOf('_api.customerNotes(businessId, customerId)')));
+    expect(code, isNot(contains('await _prefetchNotePhotos(notes)')));
+  });
+
   test('Customer tap supplies already-visible scoped row preview', () {
     final list = File('lib/screens/customers/customers_screen.dart')
         .readAsStringSync();
