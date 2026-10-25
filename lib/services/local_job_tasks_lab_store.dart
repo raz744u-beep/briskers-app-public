@@ -1000,27 +1000,6 @@ class LocalJobTasksLabStore {
 
   /// Explicit test-only transition. One approved weekly selection can be
   /// marked paid once; a second attempt changes zero rows.
-  Future<bool> markTestWeeklyPayrollPaid({
-    required String businessId,
-    required String employeeId,
-    required String weekStart,
-  }) async {
-    await ensureTables(db);
-    final changed = await db.customUpdate(
-      'UPDATE local_lab_weekly_payroll_approvals SET state=? '
-      'WHERE business_id=? AND employee_id=? AND week_start=? '
-      "AND state='approved' AND approved_by IS NOT NULL",
-      variables: [
-        const Variable<String>('paid'),
-        Variable<String>(businessId),
-        Variable<String>(employeeId),
-        Variable<String>(weekStart),
-      ],
-      updates: {},
-    );
-    return changed == 1;
-  }
-
   /// Atomic simulated disbursement linked to one approved payroll week.
   /// Inserts the test payment and moves Approved -> Paid together. A retry
   /// cannot create a second payment because only Approved may transition.
