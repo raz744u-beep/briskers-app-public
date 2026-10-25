@@ -975,6 +975,7 @@ class LocalJobTasksLabStore {
     required String weekStart, required int cents,
     required String method, required DateTime paidAt,
     required String note,
+    String? checkProofReference,
   }) async {
     await ensureTables(db);
     if ([businessId, employeeId].any((v) => v.trim().isEmpty) ||
@@ -982,6 +983,9 @@ class LocalJobTasksLabStore {
         !const {'cash', 'check', 'zelle', 'ach', 'card', 'other'}
             .contains(method)) {
       throw ArgumentError('Invalid test payroll payment');
+    }
+    if (method == 'check' && (checkProofReference?.trim().isEmpty ?? true)) {
+      throw StateError('Test check proof reference required');
     }
     return db.transaction(() async {
       final changed = await db.customUpdate(
@@ -999,7 +1003,7 @@ class LocalJobTasksLabStore {
         '(business_id, employee_id, cents, kind, method, note, '
         'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [businessId, employeeId, cents, 'pay', method,
-          'Week $weekStart · $note', paidAt.millisecondsSinceEpoch,
+          'Week $weekStart · $note${checkProofReference == null ? '' : ' · Check proof: $checkProofReference'}', paidAt.millisecondsSinceEpoch,
           DateTime.now().millisecondsSinceEpoch],
       );
       return true;
