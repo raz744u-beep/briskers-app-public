@@ -2212,24 +2212,52 @@ class _TasksLabHomeState extends State<TasksLabHome> {
 
   Future<void> _markTestPayrollPaid(Map<String, dynamic> approval) async {
     if (approval['state'] != 'approved') return;
-    final ok = await showDialog<bool>(context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Finalize TEST payroll status?'),
-        content: const Text('This changes only the isolated payroll status '
-          'to Paid. It does NOT send money or create a financial payment.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Mark Paid · TEST')),
-        ],
-      ));
-    if (ok != true || !mounted) return;
+    final amount = TextEditingController();
+    var method = 'cash';
+    final payment = await showDialog<({int cents, String method})>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, update) => AlertDialog(
+          title: const Text('Record approved TEST payroll payment'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('SIMULATION ONLY. No actual money or shop expenses '
+              'will be posted.'),
+            TextField(controller: amount,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Amount paid')),
+            DropdownButtonFormField<String>(
+              initialValue: method,
+              items: const [
+                DropdownMenuItem(value: 'cash', child: Text('Cash')),
+                DropdownMenuItem(value: 'zelle', child: Text('Zelle')),
+                DropdownMenuItem(value: 'ach', child: Text('ACH')),
+              ],
+              onChanged: (value) => update(() => method = value ?? 'cash'),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) return;
+              Navigator.pop(dialogContext,
+                (cents: (dollars * 100).round(), method: method));
+            }, child: const Text('Record TEST payment')),
+          ],
+        ),
+      ),
+    );
+    amount.dispose();
+    if (payment == null || !mounted) return;
     try {
-      final changed = await store.markTestWeeklyPayrollPaid(
+      final changed = await store.finalizeTestWeeklyPayrollPayment(
         businessId: BriskersLabFixture.businessId,
         employeeId: approval['employee_id'].toString(),
         weekStart: approval['week_start'].toString(),
+        cents: payment.cents, method: payment.method,
+        paidAt: DateTime.now(), note: 'Approved TEST weekly payroll',
       );
       if (!changed) throw StateError('Already paid or not approved');
       await _refresh();
