@@ -9,6 +9,7 @@ import 'widgets/briskers_module_dock.dart';
 import 'local/local_database_provider.dart';
 import 'services/local_job_tasks_lab_store.dart';
 import 'services/task_assignment_policy.dart';
+import 'services/test_payroll_payment_policy.dart';
 import 'tasks_lab/fixture.dart';
 
 void main() {
@@ -1901,6 +1902,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Future<void> _recordTestPayrollPayment(String employeeId) async {
     final amount = TextEditingController();
     final notes = TextEditingController();
+    final checkProof = TextEditingController();
     String kind = 'pay';
     String method = 'cash';
     DateTime paidAt = DateTime.now();
@@ -1973,6 +1975,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 label: Text('Payment date: '
                   "${DateFormat('MMM d, yyyy').format(paidAt)}"),
               ),
+              if (method == 'check') ...[
+                const SizedBox(height: 9),
+                TextField(controller: checkProof,
+                  decoration: const InputDecoration(
+                    labelText: 'Check photo proof reference (TEST)',
+                    helperText: 'Reference only; photo capture is not implemented',
+                    border: OutlineInputBorder())),
+              ],
               const SizedBox(height: 9),
               TextField(
                 controller: notes,
@@ -1990,6 +2000,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     return;
                   }
                   try {
+                    TestPayrollPaymentPolicy.validate(
+                      cents: (dollars * 100).round(),
+                      method: method, kind: kind,
+                      checkProofReference: checkProof.text,
+                    );
                     await store.recordLabPayrollPayment(
                       businessId: BriskersLabFixture.businessId,
                       employeeId: employeeId,
@@ -2015,6 +2030,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     );
     amount.dispose();
     notes.dispose();
+    checkProof.dispose();
     if (saved == true) await _refresh();
   }
 
