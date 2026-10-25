@@ -85,6 +85,59 @@ void main() {
     expect(expenses, isNot(contains("tooltip: 'Add transaction',\\n                        style: IconButton.styleFrom(")));
   });
 
+  test('Invoice Findings reuses customer photo-capable local-first UI', () {
+    final invoice =
+        File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
+    final entry = invoice.indexOf('Future<void> _showInvoiceFindings()');
+    final next = invoice.indexOf('Future<void> _emailPdf()', entry);
+    expect(entry, greaterThanOrEqualTo(0));
+    expect(next, greaterThan(entry));
+    final code = invoice.substring(entry, next);
+    expect(invoice,
+        contains("import '../customers/customer_vehicle_findings_section.dart';"));
+    expect(code, contains('CustomerVehicleFindingsSection('));
+    expect(code, contains('initiallyExpanded: true'));
+    expect(code, contains('canDelete: widget.isOwner'));
+    expect(code, contains('canManageCustomerActions(_navigationRoleCode)'));
+    expect(code, isNot(contains('await _api.vehicleFindings(')),
+      reason: 'Opening Invoice Findings should not wait for Supabase.');
+    expect(code, isNot(contains('ListTile(\n                            onTap:')),
+      reason: 'The stripped-down invoice-only list must not return.');
+
+    final shared = File(
+      'lib/screens/customers/customer_vehicle_findings_section.dart',
+    ).readAsStringSync();
+    expect(shared, contains('VehicleFindings('));
+    expect(shared, contains('_findingThumbnail('));
+    expect(shared, contains('_showPhotoGallery('));
+    expect(shared, contains('final local = await cachedFindings();'));
+  });
+
+  test('Customer tap supplies already-visible scoped row preview', () {
+    final list = File('lib/screens/customers/customers_screen.dart')
+        .readAsStringSync();
+    final detail = File('lib/screens/customers/customer_detail_screen.dart')
+        .readAsStringSync();
+    expect(list, contains('initialCustomerSummary: Map<String, dynamic>.from(customer)'));
+    expect(detail, contains('final Map<String, dynamic>? initialCustomerSummary'));
+    expect(detail, contains("customer['name'] ??= customer['display_name']"));
+    expect(detail, contains('Opening saved customer details'));
+    expect(detail, contains('floatingActionButton: _data == null'));
+  });
+
+  test('Job and Invoice expense rows pass read-only previews on tap', () {
+    final job = File('lib/screens/jobs/job_detail_screen.dart').readAsStringSync();
+    final invoice =
+        File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
+    expect(job, contains('cachedDetail: cached,'));
+    expect(invoice, contains('cachedDetail: Map<String, dynamic>.from(item)'));
+    expect(invoice, contains('cachedDetail: Map<String, dynamic>.from(expense)'));
+    final detail = File('lib/screens/expenses/expense_detail_screen.dart')
+        .readAsStringSync();
+    expect(detail, contains("..['editable'] = false"));
+    expect(detail, contains("..['deletable'] = false"));
+  });
+
   test('Auto customer Findings paints cache before network and photos', () {
     final source = File(
       'lib/screens/customers/customer_vehicle_findings_section.dart',
