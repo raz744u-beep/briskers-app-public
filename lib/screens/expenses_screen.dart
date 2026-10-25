@@ -1680,7 +1680,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     );
     final visible = allVisible.take(_visibleCount).toList();
     final moreReceiptPages = allVisible.length > _visibleCount;
-    final feesUnverified = _periodTotals?.feesUnverified == true;
+    final receiptsUnverified = _periodTotals?.feesUnverified == true;
+    final unverifiedCount = _periodTotals?.unverifiedIncomeReceipts;
 
     return Scaffold(
       appBar: widget.showAppBar
@@ -2105,11 +2106,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                     ),
                   ],
                   const SizedBox(height: 12),
-                  if (feesUnverified)
+                  if (receiptsUnverified)
                     const Padding(
                       padding: EdgeInsets.all(8),
                       child: Text(
-                        'Processor fees are unverified for some receipts. Gross amounts remain shown for those rows; sync invoice details and refresh before relying on this income total.',
+                        unverifiedCount == null
+                  ? 'Some income receipts lack verified invoice/payment evidence. Gross amounts remain shown; processing-fee adjustments are not assumed.'
+                  : '$unverifiedCount income receipt${unverifiedCount == 1 ? '' : 's'} need${unverifiedCount == 1 ? 's' : ''} verification. Gross amounts remain shown for those rows; no processing fee is assumed.',
                       ),
                     ),
                   if (visible.isEmpty)
