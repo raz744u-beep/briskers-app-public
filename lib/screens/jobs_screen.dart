@@ -499,6 +499,7 @@ class _JobsScreenState extends State<JobsScreen>
         builder: (_) => JobDocumentScreen(
           businessId: widget.businessId,
           documentId: id,
+          initialDocumentSummary: Map<String, dynamic>.from(document),
           roleCode: widget.roleCode,
           isOwner: widget.roleCode == 'owner',
           canManageExpenses: <String>{
