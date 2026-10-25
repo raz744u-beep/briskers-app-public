@@ -332,7 +332,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     try {
       final documents = await _localDocumentsForJob();
       if (!_currentLoad(epoch) || !_showingLocal || _onlineReady ||
-          !_canSeeFinancial) return;
+          !_canSeeFinancial) {
+        return;
+      }
       setState(() => _documents = documents);
       _modalRefresh?.call();
     } catch (_) {
