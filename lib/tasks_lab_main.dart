@@ -2066,7 +2066,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final credits = await store.testTaskHourCredits(BriskersLabFixture.businessId);
     if (!mounted) return;
     final choices = <({Map<String, dynamic> task, int eligible, int remaining})>[];
-    for (final task in tasks) {
+    for (final task in allJobTasks) {
       final allocations = allocationsByLine[task['line_id'].toString()] ?? [];
       final matching = allocations.where((allocation) =>
         allocation['employee_id']?.toString() == employeeId).toList();
@@ -2078,6 +2078,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       final eligible = (hrs * 60).round();
       final prior = credits.where((record) =>
         record['employee_id'] == employeeId &&
+        record['job_id'] == task['job_id'] &&
         record['document_id'] == task['document_id'] &&
         record['line_id'] == task['line_id']).fold<int>(0,
           (sum, record) => sum + (record['paid_minutes'] as int));
@@ -2087,7 +2088,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     }
     if (choices.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('No unpaid task hours in this test job.')));
+        content: Text('No unpaid task hours in test jobs.')));
       return;
     }
     final chosen = await showDialog<int>(context: context,
@@ -2136,7 +2137,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       await store.creditTestTaskHours(
         businessId: BriskersLabFixture.businessId,
         employeeId: employeeId,
-        jobId: BriskersLabFixture.jobId,
+        jobId: item.task['job_id'].toString(),
         documentId: item.task['document_id'].toString(),
         lineId: item.task['line_id'].toString(),
         weekStart: monday,
