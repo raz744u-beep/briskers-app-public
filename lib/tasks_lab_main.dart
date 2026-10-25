@@ -1650,7 +1650,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         vehicleId: 'lab-equus', isOpen: true,
       )],
     );
-    final selectedJobId = eligibleJobs.isEmpty ? null : eligibleJobs.first.jobId;
+    String? selectedJobId;
+    var createNewJob = eligibleJobs.isEmpty;
     final added = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -1659,11 +1660,30 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           content: SingleChildScrollView(child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(selectedJobId == null
-                ? 'No open job for this test vehicle. Switch to Equus; '
-                  'new-job creation is not yet supported in this fixture.'
-                : 'Existing open job: J-24 · Equus. '
-                  'No invoice will be created.'),
+              const Text('Choose an existing open job or request a new job. '
+                'No customer invoice is created by assigning a task.'),
+              if (eligibleJobs.isNotEmpty)
+                RadioListTile<bool>(
+                  value: false, groupValue: createNewJob,
+                  title: const Text('Existing open job'),
+                  onChanged: (_) => update(() => createNewJob = false)),
+              if (!createNewJob && eligibleJobs.isNotEmpty)
+                DropdownButtonFormField<String>(
+                  initialValue: selectedJobId,
+                  decoration: const InputDecoration(
+                    labelText: 'Select open job'),
+                  items: [for (final job in eligibleJobs)
+                    DropdownMenuItem(value: job.jobId,
+                      child: Text('J-24 · Equus (TEST)'))],
+                  onChanged: (value) => update(() => selectedJobId = value)),
+              RadioListTile<bool>(
+                value: true, groupValue: createNewJob,
+                title: const Text('Create new job'),
+                onChanged: (_) => update(() => createNewJob = true)),
+              if (createNewJob)
+                const Text('New-job creation is not available in this '
+                  'isolated fixture yet. No job or invoice will be '
+                  'created until that path is implemented.'),
               const SizedBox(height: 10),
               TextField(controller: description, decoration:
                 const InputDecoration(labelText: 'Task description')),
@@ -1684,15 +1704,16 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancel')),
-            FilledButton(onPressed: () async {
+            FilledButton(onPressed: (createNewJob || selectedJobId == null)
+              ? null : () async {
               final value = double.tryParse(hours.text.trim());
               if (description.text.trim().isEmpty || value == null ||
                   !value.isFinite || value < 0) { return; }
-              if (selectedJobId == null) return;
+              if (createNewJob || selectedJobId == null) return;
               try {
                 await store.addRecheckTask(
                   businessId: BriskersLabFixture.businessId,
-                  jobId: BriskersLabFixture.jobId,
+                  jobId: selectedJobId,
                   description: description.text.trim(), hours: value,
                   employeeId: mechanic.isEmpty ? null : mechanic,
                 );
