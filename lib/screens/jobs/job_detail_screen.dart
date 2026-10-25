@@ -2641,10 +2641,14 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     Map<String, dynamic> finding,
   ) async {
     final job = _job;
-    if (job == null || !mounted) return null;
+    if (job == null || !mounted) {
+      return null;
+    }
     final vehicleId = job['vehicle_id']?.toString() ?? '';
     final customerId = job['customer_id']?.toString() ?? '';
-    if (vehicleId.isEmpty || customerId.isEmpty) return null;
+    if (vehicleId.isEmpty || customerId.isEmpty) {
+      return null;
+    }
 
     final foundVehicleId =
         (finding['vehicle_id'] ?? finding['_vehicle_id'])?.toString() ?? '';
@@ -2710,7 +2714,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           break;
       }
     }
-    if (!mounted) return null;
+    if (!mounted) {
+      return null;
+    }
     if (active.isEmpty && historical.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('No eligible repair Jobs found for this vehicle.'),
@@ -2804,7 +2810,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       return;
     }
     final repairJobId = await _chooseFindingResolutionJob(finding);
-    if (repairJobId == null || !mounted) return;
+    if (repairJobId == null || !mounted) {
+      return;
+    }
     await _changeFindingLocally(() => _findingActions.resolve(
       widget.businessId, finding, repairJobId));
   }
