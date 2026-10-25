@@ -103,12 +103,22 @@ class VehicleFindings extends StatelessWidget {
     final id = finding['id']?.toString() ?? '';
     final status = statusLabel(finding);
     final description = finding['body']?.toString().trim() ?? '';
+    final attachments = (finding['attachments'] as List? ?? const []);
+    final pendingPhoto = attachments.whereType<Map>()
+        .any((photo) => photo['upload_state'] == 'pending');
+    final syncWarning = finding['sync_state'] == 'conflict'
+        ? 'Sync conflict'
+        : (finding['_finding_action_error']?.toString() ?? '').isNotEmpty
+            ? 'Needs verification · saved locally'
+            : finding['sync_state'] == 'pending' || pendingPhoto
+                ? 'Saved locally · waiting to sync'
+                : '';
     return ExpansionTile(
       key: ValueKey('finding-collapsed-$id'),
       initiallyExpanded: false,
       title: Text(description.isEmpty ? 'Vehicle finding' : description,
         maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(status),
+      subtitle: Text(syncWarning.isEmpty ? status : '$status • $syncWarning'),
       leading: Icon(status == 'Resolved' ? Icons.check_circle_outline
           : status == 'In Job' ? Icons.handyman_outlined
           : Icons.warning_amber_rounded),
