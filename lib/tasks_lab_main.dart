@@ -10,6 +10,7 @@ import 'local/local_database_provider.dart';
 import 'services/local_job_tasks_lab_store.dart';
 import 'services/task_assignment_policy.dart';
 import 'services/test_payroll_payment_policy.dart';
+import 'services/test_payroll_balance.dart';
 import 'tasks_lab/fixture.dart';
 
 void main() {
@@ -2376,7 +2377,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 (adjustment) => adjustment['employee_id'] == id)
                   .fold<int>(0, (sum, adjustment) =>
                     sum + (adjustment['signed_cents'] as int));
-              final owing = (earnedCents ?? 0) + adjustmentCents - paidCents;
+              final owing = TestPayrollBalance.remainingCents(
+                earnedCents: earnedCents ?? 0,
+                adjustmentCents: adjustmentCents,
+                paidCents: paidCents,
+              );
               return Card(
                 margin: const EdgeInsets.fromLTRB(10, 4, 10, 5),
                 child: Padding(
