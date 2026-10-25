@@ -57,6 +57,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Map<String, int> testHourlyRates = {};
   List<Map<String, dynamic>> testPayrollPayments = const [];
   List<Map<String, dynamic>> testTaskCredits = const [];
+  List<Map<String, dynamic>> testPayrollApprovals = const [];
   List<Map<String, dynamic>> earnedCorrections = const [];
   int invoiceTestTab = 0;
   int page = 0;
@@ -123,6 +124,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final rates = await store.payrollRates(BriskersLabFixture.businessId);
     final payments = await store.payrollTestPayments(BriskersLabFixture.businessId);
     final credits = await store.testTaskHourCredits(BriskersLabFixture.businessId);
+    final approvals = await store.testWeeklyPayrollApprovals(BriskersLabFixture.businessId);
     final corrections = await store.earnedHourCorrections(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final earnedHours = await store.earnedHoursPreview(
@@ -148,6 +150,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       testHourlyRates = rates;
       testPayrollPayments = payments;
       testTaskCredits = credits;
+      testPayrollApprovals = approvals;
       earnedCorrections = corrections;
       allocationsByLine = {for (var i = 0; i < allRows.length; i++)
         _allocationKey(allRows[i]): allocations[i]};
@@ -2160,6 +2163,52 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     }
   }
 
+  Future<void> _approveTestPayroll(String employeeId) async {
+    final now = DateTime.now();
+    final monday = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: now.weekday - 1));
+    final week = DateFormat('yyyy-MM-dd').format(monday);
+    final selected = testTaskCredits.where((credit) =>
+      credit['employee_id'] == employeeId &&
+      credit['week_start'] == week).fold<int>(0,
+        (sum, credit) => sum + (credit['paid_minutes'] as int));
+    if (selected <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('First select task hours for this week.')));
+      return;
+    }
+    try {
+      await store.saveTestWeeklyPayrollDraft(
+        businessId: BriskersLabFixture.businessId,
+        employeeId: employeeId, weekStart: week, selectedMinutes: selected);
+      final confirmed = await showDialog<bool>(context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Approve weekly TEST payroll?'),
+          content: Text('${_employeeName(employeeId)} · ${(selected / 60).toStringAsFixed(2)} hours. '
+            'This does not send any money.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Keep draft')),
+            FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Approve TEST')),
+          ],
+        ));
+      if (confirmed == true) {
+        final ok = await store.approveTestWeeklyPayroll(
+          businessId: BriskersLabFixture.businessId,
+          employeeId: employeeId, weekStart: week,
+          approvedBy: 'lab-owner');
+        if (!ok) throw StateError('Payroll draft was already approved');
+      }
+      await _refresh();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')));
+      }
+    }
+  }
+
   Widget _payrollPage() {
     // Rates and disbursements are LOCAL TEST values, never live payroll.
     return ListView(
@@ -2239,6 +2288,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         label: const Text('Credit task hours · TEST'),
                       ),
                       OutlinedButton.icon(
+                        onPressed: () => _approveTestPayroll(id),
+                        icon: const Icon(Icons.verified_user_outlined),
+                        label: const Text('Review / approve weekly TEST payroll'),
+                      ),
+                      OutlinedButton.icon(
                         onPressed: () => _recordTestPayrollPayment(id),
                         icon: const Icon(Icons.payments_outlined),
                         label: const Text('Record TEST payment / advance'),
@@ -2248,6 +2302,19 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 ),
               );
             }),
+        if (testPayrollApprovals.isNotEmpty) ...[
+          const Padding(padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
+            child: Text('Weekly payroll approvals · TEST',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
+          for (final approval in testPayrollApprovals)
+            ListTile(
+              title: Text('${_employeeName(approval['employee_id']?.toString())} · '
+                '${approval['state']}'),
+              subtitle: Text('Week ${approval['week_start']} · '
+                '${(approval['selected_minutes'] as int) / 60} hrs · '
+                'approved by ${approval['approved_by'] ?? '—'}'),
+            ),
+        ],
         if (testTaskCredits.isNotEmpty) ...[
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
