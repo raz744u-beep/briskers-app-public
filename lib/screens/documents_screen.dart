@@ -156,7 +156,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   List<Map<String, dynamic>>? _serverRows;
   List<Map<String, dynamic>>? _indexRows;
   List<Map<String, dynamic>>? _savedRows;
-  List<Map<String, dynamic>>? _savedStyles;
   List<Map<String, dynamic>>? _orderedSource;
   List<Map<String, dynamic>> _orderedRows = const [];
   bool? _orderedEstimate;
@@ -365,7 +364,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       _serverRows = null;
       _indexRows = null;
       _savedRows = null;
-      _savedStyles = null;
       _receiptTotals = const {};
       _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
       _futureDatedOnly = false;
@@ -558,9 +556,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           _styleCache[businessId] = fetchedStyles;
           try {
             await _localInvoiceStyles.save(businessId, fetchedStyles);
-            if (mounted && epoch == _loadEpoch && widget.businessId == businessId) {
-              _savedStyles = fetchedStyles;
-            }
           } catch (_) {
             // Status styles are nonessential to document availability.
           }
