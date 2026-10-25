@@ -13,12 +13,21 @@ class LocalJobTasksLabStore {
         document_id TEXT NOT NULL, line_id TEXT NOT NULL,
         source_description TEXT NOT NULL, custom_description TEXT,
         employee_id TEXT, payroll_hours REAL, source_invoice_hours REAL,
+        billed_hours_override REAL,
         status TEXT NOT NULL DEFAULT 'planned',
         completed_at INTEGER, source_missing INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (business_id, job_id, document_id, line_id)
       )
     ''');
+    // Upgrade older installed test databases in place.
+    final taskColumns = await db.customSelect(
+      'PRAGMA table_info(local_job_tasks_lab)').get();
+    if (!taskColumns.any((row) => row.read<String>('name') ==
+        'billed_hours_override')) {
+      await db.customStatement(
+        'ALTER TABLE local_job_tasks_lab ADD COLUMN billed_hours_override REAL');
+    }
     // Synthetic customer-related jobs created within the isolated Tasks lab.
     // Never inserts into real local_jobs or production documents.
     await db.customStatement('''
@@ -1337,6 +1346,31 @@ class LocalJobTasksLabStore {
 
   /// One authoritative allocation per invoice labor line, shared by invoice,
   /// task editor and payroll preview. Never modifies invoice price or quantity.
+  /// TEST-only customer-billed labor quantity override. Kept separate from
+  /// mechanics' allocated/payroll hours and the sanitized fixture input.
+  Future<void> saveTestBilledLaborHours({
+    required String businessId, required String jobId,
+    required String documentId, required String lineId,
+    required double hours,
+  }) async {
+    await ensureTables(db);
+    if (!hours.isFinite || hours < 0 ||
+        [businessId, jobId, documentId, lineId]
+            .any((value) => value.trim().isEmpty)) {
+      throw ArgumentError('Invalid invoice labor quantity');
+    }
+    final changed = await db.customUpdate(
+      'UPDATE local_job_tasks_lab SET billed_hours_override=?, updated_at=? '
+      'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+      variables: [Variable<double>(hours),
+        Variable<int>(DateTime.now().millisecondsSinceEpoch),
+        Variable<String>(businessId), Variable<String>(jobId),
+        Variable<String>(documentId), Variable<String>(lineId)],
+      updates: {},
+    );
+    if (changed != 1) throw StateError('Invoice labor task not found');
+  }
+
   Future<void> saveAllocations({
     required String businessId, required String jobId,
     required String documentId, required String lineId,
