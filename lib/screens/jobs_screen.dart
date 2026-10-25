@@ -975,8 +975,10 @@ class _JobsScreenState extends State<JobsScreen>
   Widget build(BuildContext context) {
     final visible = _visibleRows;
 
-    return Column(
+    return Stack(
       children: [
+        Column(
+          children: [
         Material(
           color: Theme.of(context).scaffoldBackgroundColor,
           elevation: 1,
@@ -1199,17 +1201,7 @@ class _JobsScreenState extends State<JobsScreen>
                         },
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    if (_canManage)
-                      IconButton.filled(
-                        tooltip: 'New Job',
-                        style: IconButton.styleFrom(
-                          backgroundColor: BriskersColors.jobs,
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: _createNewJob,
-                        icon: const Icon(Icons.add),
-                      ),
+
                   ],
                 ),
               ],
@@ -1222,7 +1214,7 @@ class _JobsScreenState extends State<JobsScreen>
             child: ListView(
               key: PageStorageKey('jobs-list:$_storageId'),
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 80),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 100),
               children: [
                 if (_showingLocal &&
                     (BriskersConnectionModeController.instance.forceOffline ||
@@ -1352,6 +1344,26 @@ class _JobsScreenState extends State<JobsScreen>
             ),
           ),
         ),
+      ],
+        ),
+        if (_canManage && MediaQuery.viewInsetsOf(context).bottom == 0)
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FloatingActionButton.extended(
+              heroTag: 'jobs_screen-quick-create',
+              tooltip: 'New Job',
+              onPressed: _createNewJob,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              backgroundColor: BriskersColors.jobs,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('New',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ),
       ],
     );
   }
