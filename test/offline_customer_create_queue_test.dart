@@ -136,7 +136,9 @@ void main() {
 
   test('Customers screen does not disable Add solely because offline', () async {
     final screen = await File('lib/screens/customers/customers_screen.dart').readAsString();
-    expect(screen, contains('onPressed: _canManageCustomers ? _add : null'));
+    expect(screen, contains('if (_canManageCustomers && MediaQuery.viewInsetsOf(context).bottom == 0)'));
+    expect(screen, contains('onPressed: _add,'));
+    expect(screen, contains('FloatingActionButton.extended('));
     expect(screen, isNot(contains('onPressed: _onlineReady && _canManageCustomers ? _add : null')));
   });
 }
