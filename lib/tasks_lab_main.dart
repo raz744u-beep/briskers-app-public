@@ -2258,7 +2258,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
 
   Future<void> _markTestPayrollPaid(Map<String, dynamic> approval) async {
     if (approval['state'] != 'approved') return;
-    final amount = TextEditingController();
+    final employeeId = approval['employee_id'].toString();
+    final rate = testHourlyRates[employeeId];
+    final selectedMinutes = approval['selected_minutes'] as int;
+    final expectedCents = rate == null
+      ? null : (selectedMinutes * rate / 60).round();
+    final amount = TextEditingController(
+      text: expectedCents == null ? '' : (expectedCents / 100).toStringAsFixed(2));
     String? proofPhotoPath;
     var method = 'cash';
     final payment = await showDialog<({int cents, String method, String proof})>(
@@ -2269,6 +2275,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           content: Column(mainAxisSize: MainAxisSize.min, children: [
             const Text('SIMULATION ONLY. No actual money or shop expenses '
               'will be posted.'),
+            Text('${(selectedMinutes / 60).toStringAsFixed(2)} selected hours'
+              '${expectedCents == null ? '' : ' · ${_labMoney(expectedCents)} at current rate'}'
+              ' · week ${approval['week_start']}'),
+            const Text('Recording a payment marks this entire weekly '
+              'approval Paid. Do not use this for partial payments.'),
             TextField(controller: amount,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(labelText: 'Amount paid')),
@@ -2312,6 +2323,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               if (dollars == null || !dollars.isFinite ||
                   dollars <= 0 || dollars > 1000000) { return; }
               if (method == 'check' && proofPhotoPath == null) { return; }
+              if (expectedCents != null &&
+                  (dollars * 100).round() < expectedCents) {
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(content: Text(
+                    'This would leave weekly pay unpaid. '
+                    'The Paid action requires the full selected amount.')));
+                return;
+              }
               Navigator.pop(dialogContext,
                 (cents: (dollars * 100).round(), method: method,
                  proof: proofPhotoPath ?? ''));
@@ -2333,6 +2352,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       );
       if (!changed) throw StateError('Already paid or not approved');
       await _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('TEST payroll recorded: ${_labMoney(payment.cents)} '
+            'via ${payment.method}. See ${_employeeName(employeeId)} weekly record.')));
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
