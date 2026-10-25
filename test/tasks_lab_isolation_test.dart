@@ -59,7 +59,10 @@ void main() {
     expect(main, isNot(contains('Assigned hours cannot exceed')));
 
     expect(main, contains('_addRecheckWork'));
-    expect(main, contains('Record TEST payment / advance'));
+    expect(main, contains('Record TEST advance'));
+    expect(main, contains('Selected payroll balance:'));
+    expect(main, contains('Weekly payroll records'));
+    expect(main, contains('REVIEW: Marked Paid, but no linked payment'));
     expect(main, contains('ImagePicker().pickImage('));
     expect(main, contains('ImageSource.camera'));
     expect(main, contains('tasks_lab_check_proofs'));
