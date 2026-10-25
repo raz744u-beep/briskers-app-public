@@ -2366,7 +2366,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       Padding(
         padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         child: DropdownButtonFormField<String>(
-          value: employeeId,
+          initialValue: employeeId,
           decoration: const InputDecoration(
             labelText: 'Employee', border: OutlineInputBorder()),
           items: [for (final e in BriskersLabFixture.employees)
