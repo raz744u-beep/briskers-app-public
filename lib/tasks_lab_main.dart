@@ -1740,20 +1740,22 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     employeeId: mechanic.isEmpty ? null : mechanic,
                     estimatedMinutes: (value * 60).round());
                 } else {
-                  final destinationJobId = createNewJob
-                    ? await store.createSyntheticJob(
-                        businessId: BriskersLabFixture.businessId,
-                        customerId: 'lab-customer-richard',
-                        vehicleId: BriskersLabFixture.vehicles[selectedVehicle]['id']!,
-                        description: description.text.trim(),
-                      )
-                    : selectedJobId!;
-                  await store.addRecheckTask(
-                  businessId: BriskersLabFixture.businessId,
-                  jobId: destinationJobId,
-                  description: description.text.trim(), hours: value,
-                  employeeId: mechanic.isEmpty ? null : mechanic,
-                  );
+                  if (createNewJob) {
+                    await store.createSyntheticJobWithTask(
+                      businessId: BriskersLabFixture.businessId,
+                      customerId: 'lab-customer-richard',
+                      vehicleId: BriskersLabFixture.vehicles[selectedVehicle]['id']!,
+                      description: description.text.trim(), hours: value,
+                      employeeId: mechanic.isEmpty ? null : mechanic,
+                    );
+                  } else {
+                    await store.addRecheckTask(
+                      businessId: BriskersLabFixture.businessId,
+                      jobId: selectedJobId!,
+                      description: description.text.trim(), hours: value,
+                      employeeId: mechanic.isEmpty ? null : mechanic,
+                    );
+                  }
                 }
                 if (context.mounted) Navigator.pop(context, true);
               } catch (error) {
