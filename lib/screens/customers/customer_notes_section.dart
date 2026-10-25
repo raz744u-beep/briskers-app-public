@@ -128,7 +128,9 @@ class _CustomerNotesSectionState extends State<CustomerNotesSection> {
         _error = null;
       });
       // Prefetch photos after publishing note text and its saved attachments.
-      unawaited(_prefetchNotePhotos(notes));
+      // Prefetch only a few likely-visible images while this screen is open.
+      // The charging/Wi-Fi worker mirrors the full locally known photo list.
+      unawaited(_prefetchNotePhotos(notes.take(8).toList()));
     } catch (error) {
       if (!current()) return;
       setState(() {
