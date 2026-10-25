@@ -101,6 +101,17 @@ class LocalJobTasksLabStore {
       ON local_lab_payroll_disbursements (
         business_id, employee_id, paid_at)
     ''');
+    // Isolated weekly credited-time payment allocations. Never posts money.
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_lab_payroll_task_credits (
+        business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+        job_id TEXT NOT NULL, document_id TEXT NOT NULL,
+        line_id TEXT NOT NULL, week_start TEXT NOT NULL,
+        paid_minutes INTEGER NOT NULL, recorded_at INTEGER NOT NULL,
+        PRIMARY KEY (business_id, employee_id, job_id, document_id,
+          line_id, week_start)
+      )
+    ''');
     // One completion entry per task identity, regardless of rechecks.
     // Mechanic/payroll snapshots live in the existing immutable hours table.
     await db.customStatement('''
@@ -752,6 +763,71 @@ class LocalJobTasksLabStore {
         paidAt.millisecondsSinceEpoch,
         DateTime.now().millisecondsSinceEpoch],
     );
+  }
+
+  /// Weekly task-hour credit for the isolated test ledger. The caller must
+  /// supply the confirmed available balance for this mechanic/task. The DB
+  /// transaction also checks previously credited minutes to reject retries.
+  Future<void> creditTestTaskHours({
+    required String businessId,
+    required String employeeId,
+    required String jobId,
+    required String documentId,
+    required String lineId,
+    required DateTime weekStart,
+    required int minutes,
+    required int totalEligibleMinutes,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, employeeId, jobId, documentId, lineId]
+        .any((v) => v.trim().isEmpty) ||
+        minutes <= 0 || totalEligibleMinutes < minutes ||
+        weekStart.weekday != DateTime.monday ||
+        weekStart.hour != 0 || weekStart.minute != 0 ||
+        weekStart.second != 0 || weekStart.millisecond != 0 ||
+        weekStart.microsecond != 0) {
+      throw ArgumentError('Invalid task-hour credit');
+    }
+    final week = '${weekStart.year.toString().padLeft(4, '0')}-'
+        '${weekStart.month.toString().padLeft(2, '0')}-'
+        '${weekStart.day.toString().padLeft(2, '0')}';
+    await db.transaction(() async {
+      final rows = await db.customSelect(
+        'SELECT COALESCE(SUM(paid_minutes),0) AS total '
+        'FROM local_lab_payroll_task_credits '
+        'WHERE business_id=? AND employee_id=? AND job_id=? '
+        'AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(employeeId),
+          Variable<String>(jobId), Variable<String>(documentId),
+          Variable<String>(lineId)],
+      ).getSingle();
+      final credited = rows.read<int>('total');
+      if (credited + minutes > totalEligibleMinutes) {
+        throw StateError('Hours already paid or exceed task allocation');
+      }
+      // No upsert: identical retry in the same week fails rather than
+      // crediting the same hours twice.
+      await db.customStatement(
+        'INSERT INTO local_lab_payroll_task_credits '
+        '(business_id, employee_id, job_id, document_id, line_id, '
+        'week_start, paid_minutes, recorded_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [businessId, employeeId, jobId, documentId, lineId, week,
+          minutes, DateTime.now().millisecondsSinceEpoch],
+      );
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> testTaskHourCredits(
+      String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT employee_id, job_id, document_id, line_id, week_start, '
+      'paid_minutes FROM local_lab_payroll_task_credits '
+      'WHERE business_id=? ORDER BY week_start DESC',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
   }
 
   Future<List<Map<String, dynamic>>> payrollTestPayments(
