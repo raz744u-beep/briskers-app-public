@@ -126,4 +126,29 @@ void main() {
     expect(RegExp('maxHeight: 1920').allMatches(source).length, 4);
     expect(source, contains('InteractiveViewer('));
   });
+  test('Multiple findings collapse individually, with actions still scoped', () {
+    final findings = File('lib/widgets/vehicle_findings.dart').readAsStringSync();
+    expect(findings, contains('_maybeCollapsedRow(context, row,'));
+    expect(findings, contains('collapsed: open.length + inJob.length > 1'));
+    expect(findings, contains("ValueKey('finding-collapsed-"));
+    expect(findings, contains('initiallyExpanded: false'));
+    expect(findings, contains('children: [_row(context, finding)]'));
+    expect(findings, contains('onResolve(finding)'));
+  });
+
+  test('Expense cached image check finishes before Auto cloud fallback', () {
+    final receipt = File('lib/screens/expenses/expense_detail_screen.dart')
+        .readAsStringSync();
+    final start = receipt.indexOf('Widget _receiptThumbnail(');
+    final end = receipt.indexOf('Widget build(BuildContext context)', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final body = receipt.substring(start, end);
+    expect(body, contains('_localAttachment(attachment)'));
+    expect(body, contains('localSnapshot.connectionState != ConnectionState.done'));
+    expect(body.indexOf('localSnapshot.connectionState != ConnectionState.done'),
+        lessThan(body.indexOf('_attachmentUrl(attachment)')));
+    expect(body, contains('if (local != null)'));
+  });
+
 }
