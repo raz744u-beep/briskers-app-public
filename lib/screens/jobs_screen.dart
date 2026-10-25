@@ -128,6 +128,7 @@ class _JobsScreenState extends State<JobsScreen>
   String? _busyJobId;
   bool _onlineReady = false;
   bool _jobsRemoteRefreshRunning = false;
+  DateTime? _lastDockLocalRefreshAt;
   bool _showingLocal = false;
   bool _refreshFailed = false;
 
@@ -298,7 +299,16 @@ class _JobsScreenState extends State<JobsScreen>
         _visibleLimit = _pageSize;
         _rememberView();
       }
-      _load(refreshRemote: false);
+      // Jobs is retained between tab visits. Requery only occasionally, not
+      // on every fast dock switch while background sync is using SQLite.
+      final now = DateTime.now();
+      final recent = _lastDockLocalRefreshAt != null &&
+          now.difference(_lastDockLocalRefreshAt!) <
+              const Duration(seconds: 20);
+      if (_rows == null || !recent) {
+        _lastDockLocalRefreshAt = now;
+        unawaited(_load(refreshRemote: false));
+      }
     }
   }
 
