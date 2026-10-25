@@ -27,7 +27,29 @@ void main() {
 
   test('local note projections protect refresh, PDF and stale signatures', () {
     final source = File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
-    expect(source, contains('final memoProjected = await _pendingMemo.project('));
+    // Local reads can be parallel, but the final invoice projection order
+    // must remain Memo -> Finding Notes -> Pending Payments -> Pending Edits.
+    expect(source, contains('final parallel = await Future.wait<dynamic>(['));
+    expect(source, contains('_pendingMemo.project('));
+    expect(source, contains('_offlinePayments.pendingForInvoice('));
+    expect(source, contains('_offlinePayments.pendingEditsForInvoice('));
+    final projectionStart = source.indexOf(
+        'Future<Map<String, dynamic>> _withLocalPayments(');
+    final projectionEnd = source.indexOf(
+        'Set<String> get _queuedPaymentOperationIds', projectionStart);
+    expect(projectionStart, greaterThanOrEqualTo(0));
+    expect(projectionEnd, greaterThan(projectionStart));
+    final projection = source.substring(projectionStart, projectionEnd);
+    final memo = projection.indexOf('final memoProjected =');
+    final findings = projection.indexOf('projectInvoiceNotes(');
+    final payments = projection.indexOf(
+        'OfflineInvoicePaymentLedger.projectPendingPayments(');
+    final edits = projection.indexOf(
+        'OfflineInvoicePaymentLedger.projectPendingEdits(');
+    expect(memo, greaterThanOrEqualTo(0));
+    expect(findings, greaterThan(memo));
+    expect(payments, greaterThan(findings));
+    expect(edits, greaterThan(payments));
     expect(source, contains("_notesController.text = projected['memo']"));
     expect(source, contains("_notesController.text = datedCached['memo']"));
     final start = source.indexOf('Future<Map<String, dynamic>> _pendingMemoForPdf(');
