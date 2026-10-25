@@ -436,23 +436,24 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Future<Map<String, dynamic>> _withLocalPayments(
     Map<String, dynamic> detail,
   ) async {
-    final memoProjected = await _pendingMemo.project(
-      widget.businessId, widget.documentId, detail,
-    );
+    // Independent local projections/read queries can run together, reducing
+    // SQLite round trips during first-open. Apply the results in the original
+    // memo → findings → receipts → payment-edits order for exact accounting.
+    final parallel = await Future.wait<dynamic>([
+      _pendingMemo.project(widget.businessId, widget.documentId, detail),
+      _offlinePayments.pendingForInvoice(widget.businessId, widget.documentId),
+      _offlinePayments.pendingEditsForInvoice(
+          widget.businessId, widget.documentId),
+    ]);
+    final memoProjected = Map<String, dynamic>.from(parallel[0] as Map);
+    final queuedReceipts = parallel[1] as List<Map<String, dynamic>>;
+    final queuedEdits = parallel[2] as List<Map<String, dynamic>>;
     final findingsProjected = await VehicleFindingActionsService()
         .projectInvoiceNotes(widget.businessId, memoProjected);
     final withLocalReceipts = OfflineInvoicePaymentLedger.projectPendingPayments(
-      findingsProjected,
-      await _offlinePayments.pendingForInvoice(
-        widget.businessId, widget.documentId,
-      ),
-    );
+        findingsProjected, queuedReceipts);
     final projected = OfflineInvoicePaymentLedger.projectPendingEdits(
-      withLocalReceipts,
-      await _offlinePayments.pendingEditsForInvoice(
-        widget.businessId, widget.documentId,
-      ),
-    );
+        withLocalReceipts, queuedEdits);
     final jobId = projected['job_id']?.toString().trim() ?? '';
     final jobNumber = projected['job_number']?.toString().trim() ?? '';
     if (jobId.isNotEmpty &&
