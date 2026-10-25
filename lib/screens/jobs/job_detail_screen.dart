@@ -3731,7 +3731,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         builder: (_) => ExpenseDetailScreen(
           businessId: widget.businessId,
           transactionId: transactionId,
-          cachedDetail: _showingLocal ? cached : null,
+          // Safe as read-only preview in both Auto and Force Offline.
+          cachedDetail: cached,
           allowRecurring:
               widget.roleCode == 'owner' || widget.roleCode == 'manager',
           canDeleteTransaction: widget.roleCode == 'owner',
