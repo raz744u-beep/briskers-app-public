@@ -19,6 +19,15 @@ class LocalJobTasksLabStore {
         PRIMARY KEY (business_id, job_id, document_id, line_id)
       )
     ''');
+    // Truly independent shop tasks: no customer, vehicle, job or invoice ID.
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_shop_tasks_lab (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_id TEXT NOT NULL, description TEXT NOT NULL,
+        employee_id TEXT, estimated_minutes INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'planned', created_at INTEGER NOT NULL
+      )
+    ''');
     // Safe upgrade for the already-installed isolated test database.
     // Keep billed labor quantity separate from payroll allocation totals.
     final columns = await db.customSelect(
@@ -681,6 +690,34 @@ class LocalJobTasksLabStore {
 
   /// Add an extra recheck task without changing the source invoice or billing.
   /// Assigned payroll hours are separate from customer billing.
+
+  Future<void> addShopTask({required String businessId,
+    required String description, String? employeeId,
+    required int estimatedMinutes}) async {
+    await ensureTables(db);
+    if (businessId.trim().isEmpty || description.trim().isEmpty ||
+        estimatedMinutes < 0 || estimatedMinutes > 14400) {
+      throw ArgumentError('Invalid independent shop task');
+    }
+    await db.customStatement(
+      'INSERT INTO local_shop_tasks_lab '
+      '(business_id, description, employee_id, estimated_minutes, created_at) '
+      'VALUES (?, ?, ?, ?, ?)',
+      [businessId, description.trim(), employeeId,
+        estimatedMinutes, DateTime.now().millisecondsSinceEpoch],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> shopTasks(String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT id, description, employee_id, estimated_minutes, status '
+      'FROM local_shop_tasks_lab WHERE business_id=? ORDER BY id DESC',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
+
   Future<String> addRecheckTask({
     required String businessId, required String jobId,
     required String description, required double hours,
