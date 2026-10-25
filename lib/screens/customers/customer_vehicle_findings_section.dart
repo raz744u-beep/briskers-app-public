@@ -191,6 +191,7 @@ class _CustomerVehicleFindingsSectionState
       return cachedFindings();
     }
 
+    Future<List<Map<String, dynamic>>> loadRemote() async {
     final all = <Map<String, dynamic>>[];
     try {
       final snapshotGeneration = await visibility.captureSnapshotGeneration();
@@ -232,29 +233,58 @@ class _CustomerVehicleFindingsSectionState
         'findings',
         JobSummaryVisibility.stampSnapshot(visible, snapshotGeneration),
       );
-      final pending = <Future<dynamic>>[];
-      for (final finding in visible) {
-        if (!visibility.isCurrent(generation)) return [];
-        final attachments = List<dynamic>.from(
-          finding['attachments'] ?? const [],
-        ).whereType<Map>().map((raw) => Map<String, dynamic>.from(raw));
-        for (final attachment in attachments) {
-          final bucket = attachment['bucket']?.toString() ?? 'briskers-private';
-          final key = attachment['key']?.toString() ?? '';
-          if (key.isEmpty) continue;
-          pending.add(_attachmentCache.getOrDownload(bucket, key));
-          if (pending.length >= 4) {
-            await Future.wait(pending);
-            pending.clear();
+      // Image downloads must never delay the findings list. Each file is
+      // stored in the persistent attachment cache when it becomes available.
+      unawaited(() async {
+        final pending = <Future<dynamic>>[];
+        try {
+          for (final finding in visible) {
+            if (!visibility.isCurrent(generation)) return;
+            final attachments = List<dynamic>.from(
+              finding['attachments'] ?? const [],
+            ).whereType<Map>().map((raw) => Map<String, dynamic>.from(raw));
+            for (final attachment in attachments) {
+              final bucket =
+                  attachment['bucket']?.toString() ?? 'briskers-private';
+              final key = attachment['key']?.toString() ?? '';
+              if (key.isEmpty) continue;
+              pending.add(_attachmentCache.getOrDownload(bucket, key));
+              if (pending.length >= 4) {
+                await Future.wait(pending);
+                pending.clear();
+              }
+            }
           }
+          if (pending.isNotEmpty) await Future.wait(pending);
+        } catch (_) {
+          // A photo download error cannot interrupt record navigation.
         }
-      }
-      if (pending.isNotEmpty) await Future.wait(pending);
+      }());
       return visibility.isCurrent(generation) ? visible : [];
     } catch (_) {
       if (!visibility.isCurrent(generation)) return [];
       return cachedFindings();
     }
+    }
+
+    // Force Online explicitly requests the server; regular Auto mode must
+    // paint the permission-scoped local snapshot first instead of waiting
+    // through serial per-vehicle RPCs or attachment downloads.
+    if (BriskersConnectionModeController.instance.forceOnline) {
+      return loadRemote();
+    }
+    final local = await cachedFindings();
+    if (visibility.isCurrent(generation)) {
+      unawaited(() async {
+        final remote = await loadRemote();
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        setState(() {
+          _findingsFuture =
+              Future<List<Map<String, dynamic>>>.value(remote);
+        });
+      }());
+    }
+    return local;
   }
 
   String _vehicleLabel(Map<String, dynamic> vehicle) => <String>[
