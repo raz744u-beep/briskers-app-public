@@ -271,6 +271,9 @@ class _CustomersScreenState extends State<CustomersScreen> {
           businessId: widget.businessId,
           customerId: '${customer['id']}',
           roleCode: widget.roleCode,
+          // This row is already visible and permission-scoped on the list.
+          // It is only a read-only preview, never authoritative detail.
+          initialCustomerSummary: Map<String, dynamic>.from(customer),
           sharedBottomNavigationBar: widget.detailBottomNavigationBar,
           onReviewed: () => widget.onCustomerReviewed?.call(customer['id'].toString()),
         ),
