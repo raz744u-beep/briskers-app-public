@@ -2107,7 +2107,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                   ],
                   const SizedBox(height: 12),
                   if (receiptsUnverified)
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.all(8),
                       child: Text(
                         unverifiedCount == null
