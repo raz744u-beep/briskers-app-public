@@ -1696,9 +1696,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   : Icons.radio_button_unchecked),
                 label: const Text('Create new job')),
               if (createNewJob)
-                const Text('New-job creation is not available in this '
-                  'isolated fixture yet. No job or invoice will be '
-                  'created until that path is implemented.'),
+                const Text('A new isolated TEST job will be created for '
+                  'this sample customer and vehicle. No invoice is created.'),
               ],
               const SizedBox(height: 10),
               TextField(controller: description, decoration:
@@ -1721,12 +1720,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             TextButton(onPressed: () => Navigator.pop(context, false),
               child: const Text('Cancel')),
             FilledButton(onPressed: (!shopInternal &&
-              (createNewJob || selectedJobId == null))
+              !createNewJob && selectedJobId == null)
               ? null : () async {
               final value = double.tryParse(hours.text.trim());
               if (description.text.trim().isEmpty || value == null ||
                   !value.isFinite || value < 0) { return; }
-              if (!shopInternal && (createNewJob || selectedJobId == null)) { return; }
+              if (!shopInternal && !createNewJob && selectedJobId == null) { return; }
               try {
                 if (shopInternal) {
                   await store.addShopTask(
@@ -1735,9 +1734,17 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     employeeId: mechanic.isEmpty ? null : mechanic,
                     estimatedMinutes: (value * 60).round());
                 } else {
+                  final destinationJobId = createNewJob
+                    ? await store.createSyntheticJob(
+                        businessId: BriskersLabFixture.businessId,
+                        customerId: 'lab-customer-richard',
+                        vehicleId: BriskersLabFixture.vehicles[selectedVehicle]['id']!,
+                        description: description.text.trim(),
+                      )
+                    : selectedJobId!;
                   await store.addRecheckTask(
                   businessId: BriskersLabFixture.businessId,
-                  jobId: selectedJobId!,
+                  jobId: destinationJobId,
                   description: description.text.trim(), hours: value,
                   employeeId: mechanic.isEmpty ? null : mechanic,
                   );
