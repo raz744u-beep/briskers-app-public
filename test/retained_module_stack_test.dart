@@ -298,7 +298,7 @@ void main() {
         .readAsStringSync();
     final expenses = File('lib/screens/expenses_screen.dart')
         .readAsStringSync();
-    expect(stack, contains('retainedIndices = const {1, 3, 4, 5, 6}'));
+    expect(stack, contains('retainedIndices = const {1, 2, 3, 4, 5, 6}'));
     expect(expenses, contains('_serverConfirmedTransactionIds'));
     expect(expenses, contains('if (mounted && TickerMode.valuesOf(context).enabled)'));
     expect(expenses, contains('unawaited(_refreshPhotoCounts())'));

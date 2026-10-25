@@ -178,7 +178,13 @@ class LocalJobRepository {
       variables.add(Variable<String>(status));
     }
     final query = search?.trim().toLowerCase() ?? '';
-    if (RegExp(r'^[0-9]+$').hasMatch(query)) {
+    // Accept J35 and J-35 while preserving the exact job-number boundary.
+    // Bare numbers also continue to match numeric and MobileBiz IDs below.
+    if (RegExp(r'^j[ -]?[0-9]+$').hasMatch(query)) {
+      final digits = query.replaceFirst(RegExp(r'^j[ -]?'), '');
+      where.add('lower(j.job_number) = ?');
+      variables.add(Variable<String>('j-$digits'));
+    } else if (RegExp(r'^[0-9]+$').hasMatch(query)) {
       where.add('(j.job_number = ? OR j.job_number = ? OR j.job_number = ?)');
       variables.addAll([
         Variable<String>(query),

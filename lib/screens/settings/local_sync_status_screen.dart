@@ -242,6 +242,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
           'job_id': payload['job_id']?.toString() ??
               payload['provisional_job_id']?.toString() ?? '',
           'kind': payload['kind']?.toString() ?? '',
+          // Read-only evidence for a stalled finding_action. Neither value
+          // authorizes retry or acknowledgement of the saved mutation.
+          'finding_action': payload['action']?.toString() ?? '',
+          'finding_mutation_attempted': payload['_mutation_attempted'] == true,
           'error': row.readNullable<String>('last_error') ?? '',
         });
       }
@@ -962,6 +966,8 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                           'Record: ${operation['entity']}',
                           if ((operation['kind'] as String).isNotEmpty)
                             'Kind: ${operation['kind']}',
+                          if (operation['type'] == 'finding_action')
+                            'Finding action: ${operation['finding_action']} · previously attempted: ${operation['finding_mutation_attempted']}',
                           if ((operation['customer_id'] as String).isNotEmpty)
                             'Customer ID: ${operation['customer_id']}',
                           if ((operation['vehicle_id'] as String).isNotEmpty)

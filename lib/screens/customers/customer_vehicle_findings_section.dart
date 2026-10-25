@@ -208,8 +208,19 @@ class _CustomerVehicleFindingsSectionState
         mergeWorkFindings(cachedVisible, localVisible),
       );
       if (!visibility.isCurrent(generation)) return [];
-      await _cache.save(businessId, customerId, _findingCacheSection,
-        JobSummaryVisibility.stampSnapshot(visible, await visibility.captureSnapshotGeneration()));
+      // Writing the photo-rich cache must not delay displaying the already
+      // permission-filtered local findings. Stamp the quarantine generation
+      // and fence the asynchronous write against later account changes.
+      unawaited(() async {
+        try {
+          final snapshot = await visibility.captureSnapshotGeneration();
+          if (!mounted || !visibility.isCurrent(generation)) return;
+          await _cache.save(businessId, customerId, _findingCacheSection,
+            JobSummaryVisibility.stampSnapshot(visible, snapshot));
+        } catch (_) {
+          // The displayed local read remains valid if cache persistence fails.
+        }
+      }());
       return visibility.isCurrent(generation) ? visible : [];
     }
 
@@ -563,7 +574,7 @@ class _CustomerVehicleFindingsSectionState
                         child: OutlinedButton.icon(
                           onPressed: () async {
                             final picked = await _picker.pickMultiImage(
-                              imageQuality: 88,
+                              imageQuality: 100,
                               maxWidth: 1920,
                               maxHeight: 1920,
                             );
@@ -582,7 +593,7 @@ class _CustomerVehicleFindingsSectionState
                           onPressed: () async {
                             final photo = await _picker.pickImage(
                               source: ImageSource.camera,
-                              imageQuality: 88,
+                              imageQuality: 100,
                               maxWidth: 1920,
                               maxHeight: 1920,
                             );
@@ -902,7 +913,7 @@ class _CustomerVehicleFindingsSectionState
     if (source == 'gallery') {
       picked.addAll(
         await _picker.pickMultiImage(
-          imageQuality: 88,
+          imageQuality: 100,
           maxWidth: 1920,
           maxHeight: 1920,
         ),
@@ -910,7 +921,7 @@ class _CustomerVehicleFindingsSectionState
     } else {
       final photo = await _picker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 88,
+        imageQuality: 100,
         maxWidth: 1920,
         maxHeight: 1920,
       );

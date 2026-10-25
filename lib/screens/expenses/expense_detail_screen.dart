@@ -283,7 +283,8 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       setState(() {
         _detail = detail;
         _detailSource = 'server';
-        _attachmentFiles.clear();
+        // Keep in-flight and completed local-image lookups when metadata
+        // refreshes. The per-attachment key already changes for new files.
         _attachmentUrls.clear();
         _hasAuthoritativeDetail = true;
         _loading = false;
@@ -1305,6 +1306,21 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
           );
         }
 
+        // In Auto, wait for the local-file check to finish before considering
+        // a signed cloud URL. Starting both at once made cached thumbnails
+        // flicker for about a second on every record refresh.
+        if (localSnapshot.connectionState != ConnectionState.done) {
+          return Container(
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: BriskersColors.expenses.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.image_outlined),
+          );
+        }
         if (BriskersConnectionModeController.instance.forceOffline) {
           return Container(
             width: size,

@@ -89,7 +89,7 @@ void main() {
     final end = source.indexOf('Future<void> _hydrateFinancialHistory(', begin);
     final method = source.substring(begin, end);
     expect(method, contains('if (!_showFinancialSummary || !mounted) return;'));
-    expect(method, contains('const Duration(seconds: 45)'));
+    expect(method, contains('const Duration(minutes: 5)'));
     expect(method, contains('if (fresh && !force) return;'));
     expect(method, contains('if (_pendingPeriodScope == scope) return;'));
     expect(method, contains('if (!sameScope) _periodTotals = null;'));

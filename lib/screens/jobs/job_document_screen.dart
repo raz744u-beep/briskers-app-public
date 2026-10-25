@@ -12,6 +12,8 @@ import '../../widgets/estimate_merge_confirmation_dialog.dart';
 import '../../widgets/document_identity_app_bar.dart';
 import '../../widgets/stale_keyboard_inset_guard.dart';
 import '../../services/vehicle_finding_actions_service.dart';
+import '../../services/offline_work_findings_service.dart';
+import '../../services/job_summary_visibility.dart';
 import 'package:flutter/services.dart' show MethodChannel, MissingPluginException, PlatformException;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -249,6 +251,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   Map<String, dynamic> _submissionReadiness = const {};
   List<Map<String, dynamic>> _invoiceStyles = const [];
   List<Map<String, dynamic>> _openFindings = const [];
+  final OfflineWorkFindingsService _localFindingRecords =
+      OfflineWorkFindingsService();
   num _defaultTaxRate = 0;
   bool _taxSettingsCached = false;
   bool _loading = true;
@@ -595,6 +599,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         _loading = false;
         _error = null;
       });
+      // The invoice's warning is a vehicle-level read-only alert; unlike
+      // invoice notes it must be available even before Add to Job and offline.
+      unawaited(_refreshInvoiceFindingsBanner(localOnly: true));
       _scheduleInitialActionIfNeeded();
       return;
     }
@@ -633,6 +640,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             _loading = false;
             _error = null;
           });
+          unawaited(_refreshInvoiceFindingsBanner(localOnly: true));
           unawaited(const InvoicePerformanceMetrics().record(
             widget.businessId,
             documentId: widget.documentId,
@@ -732,8 +740,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         else
           Future.value(<String, dynamic>{}),
         if (invoice && vehicleId.isNotEmpty)
-          safe(_api.vehicleFindings(widget.businessId, vehicleId,
-              includeResolved: false), <Map<String, dynamic>>[])
+          safe<List<Map<String, dynamic>>?>(
+              _api.vehicleFindings(widget.businessId, vehicleId,
+                  includeResolved: false), null)
         else
           Future.value(<Map<String, dynamic>>[]),
         if (estimate)
@@ -763,10 +772,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       }
       final signatureStatus = Map<String, dynamic>.from(results[3] as Map);
       final submissionReadiness = Map<String, dynamic>.from(results[4] as Map);
-      final findings = (results[5] as List)
-          .map((value) => Map<String, dynamic>.from(value as Map)).toList();
+      // A failed optional findings request is unknown, NOT verified empty.
+      // Retain the vehicle's local-first warning when the RPC fails.
+      final findings = (results[5] as List?)
+          ?.map((value) => Map<String, dynamic>.from(value as Map)).toList();
       final openFindings = findings
-          .where((finding) => _findingNeedsInvoiceAttention(
+          ?.where((finding) => _findingNeedsInvoiceAttention(
               finding, detail: detail)).toList();
       final identifixMeta = Map<String, dynamic>.from(results[6] as Map);
       if (taxSettings.isNotEmpty) {
@@ -793,7 +804,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         _signatureStatus = signatureStatus;
         _submissionReadiness = submissionReadiness;
         _invoiceStyles = invoiceStyles;
-        _openFindings = openFindings;
+        if (openFindings != null) _openFindings = openFindings;
         if (taxSettings.isNotEmpty) {
           _defaultTaxRate =
               num.tryParse(taxSettings['sales_tax_rate']?.toString() ?? '') ??
@@ -4325,28 +4336,50 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   // paths operate on one canonical local-first finding projection.
   int _findingsRefreshToken = 0;
 
-  Future<void> _refreshInvoiceFindingsBanner() async {
-    final vehicleId = _detail?['vehicle_id']?.toString() ?? '';
+  Future<void> _refreshInvoiceFindingsBanner({bool localOnly = false}) async {
+    final detail = _detail;
+    final vehicleId = detail?['vehicle_id']?.toString() ?? '';
     if (!mounted || _estimate || vehicleId.isEmpty) return;
     final token = ++_findingsRefreshToken;
+    // Use the same vehicle-scoped local projection as Job/Customer Findings.
+    // Permission and quarantine checks must occur before any warning is shown.
+    final visibility = JobSummaryVisibility(
+      businessId: widget.businessId,
+      onQuarantine: (_) {},
+    );
+    try {
+      final local = await _localFindingRecords.loadLocalFindings(
+          widget.businessId, vehicleId);
+      final allowed = await visibility.filterFindings(local);
+      if (!mounted || token != _findingsRefreshToken) return;
+      setState(() {
+        _openFindings = allowed
+            .where((item) => _findingNeedsInvoiceAttention(item))
+            .toList();
+      });
+    } catch (_) {
+      // Never claim that an unavailable local check means zero open issues.
+    } finally {
+      visibility.dispose();
+    }
+    if (localOnly ||
+        BriskersConnectionModeController.instance.forceOffline ||
+        !mounted || token != _findingsRefreshToken) {
+      return;
+    }
     try {
       final active = await _api.vehicleFindings(
-        widget.businessId, vehicleId, includeResolved: false,
-      );
+          widget.businessId, vehicleId, includeResolved: false);
       if (!mounted || token != _findingsRefreshToken) return;
       setState(() {
         _openFindings = active
             .where((item) => _findingNeedsInvoiceAttention(item))
             .toList();
       });
-    } catch (error) {
-      if (!mounted || token != _findingsRefreshToken) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not refresh findings: $error')),
-      );
+    } catch (_) {
+      // Failed transport cannot silently remove a previously visible alert.
     }
   }
-
   Future<void> _showInvoiceFindings() async {
     if (_estimate || _detail == null || _busy) return;
     final vehicleId = _detail!['vehicle_id']?.toString() ?? '';

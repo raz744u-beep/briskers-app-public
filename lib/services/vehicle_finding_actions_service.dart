@@ -432,6 +432,17 @@ class VehicleFindingActionsService {
         return;
       }
       final id = row.read<int>('id');
+      // Keep the second read-only verification immediate after a lost reply.
+      // Once multiple checks disagree, back off repeat Auto polling safely.
+      final attempts = row.read<int>('attempt_count');
+      final lastAttempt = row.readNullable<int>('last_attempt_at');
+      if (payload['_mutation_attempted'] == true &&
+          attempts >= 2 && lastAttempt != null) {
+        final shift = attempts - 2 > 4 ? 4 : attempts - 2;
+        final delaySeconds = 60 * (1 << shift);
+        final nowSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        if (nowSeconds - lastAttempt < delaySeconds) return;
+      }
       try {
         await LocalJobQuarantine.assertReplayAllowed(
           _database,
@@ -450,7 +461,8 @@ class VehicleFindingActionsService {
         if (before == null || !_matchesActionResult(before, payload)) {
           if (payload['_mutation_attempted'] == true) {
             throw StateError(
-              'The earlier finding change is not yet verified. '
+              'The earlier finding change is not yet verified '
+              '(${_verificationIssue(before, payload)}). '
               'Its local copy is preserved; no duplicate change was sent.',
             );
           }
@@ -717,6 +729,23 @@ class VehicleFindingActionsService {
   // The server's resolve RPC writes resolved_job_id, NOT repair_job_id.
   // Compare authoritative server effects so that an acknowledged (or
   // previously applied with a lost reply) resolution is never resent.
+  // Read-only mismatch information for Owner sync history, without IDs.
+  static String _verificationIssue(
+    Map<String, dynamic>? server, Map<String, dynamic> payload,
+  ) {
+    if (server == null) return 'server finding not returned';
+    final action = payload['action']?.toString() ?? '';
+    if (action == 'resolve') {
+      if (server['status'] != 'resolved') return 'server is not resolved';
+      if (server['resolved_job_id']?.toString() !=
+          payload['job_id']?.toString()) {
+        return 'resolved Job differs';
+      }
+      if (server['resolved_at'] == null) return 'resolution date missing';
+    }
+    return 'server state differs from saved $action action';
+  }
+
   static bool _matchesActionResult(
     Map<String, dynamic> server,
     Map<String, dynamic> payload,
