@@ -9,6 +9,7 @@ import '../core/supabase_config.dart';
 import '../local/local_database_provider.dart';
 import '../core/connection_mode.dart';
 import 'offline_attachment_mirror_service.dart';
+import 'offline_receipt_metadata_sync_service.dart';
 import 'expenseiq_local_photo_sync.dart';
 
 const expenseIqBackgroundTaskName = 'briskers.expenseiq.photo.upload';
@@ -39,8 +40,11 @@ void expenseIqPhotoCallbackDispatcher() {
         return false;
       }
       if (task == offlineMediaMirrorTaskName) {
-        // Bounded media-only read/download, preferably when Wi-Fi + charging.
-        // Never performs a full database rebuild or touches pending uploads.
+        // Hydrate missing receipt metadata before selecting photo objects.
+        // Both steps use business-scoped, bounded read-only server requests;
+        // no payment/financial mutations or local pending edits are touched.
+        await OfflineReceiptMetadataSyncService()
+            .hydrateBatch(businessId);
         await OfflineAttachmentMirrorService().prefetchBatch(businessId);
         return true;
       }
