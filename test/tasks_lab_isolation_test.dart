@@ -72,7 +72,14 @@ void main() {
     expect(main, contains('store.recordLabPayrollPayment('));
     expect(main, contains('weekly-select-all'));
     expect(main, contains('CheckboxListTile('));
-    expect(main, contains('Hours to credit this week'));
+    // The field was extracted into a reusable widget so all existing
+    // hours are selected only when the owner taps inside the input.
+    expect(main, contains('WeeklyHoursTextField('));
+    final hoursWidget = File('lib/tasks_lab/weekly_hours_text_field.dart')
+        .readAsStringSync();
+    expect(hoursWidget, contains('Hours to credit this week'));
+    expect(hoursWidget, contains('onTap: () {'));
+    expect(hoursWidget, contains('baseOffset: 0'));
     expect(main, contains('Save weekly hours · TEST'));
     expect(main, contains(r'Week of $weekText'));
     expect(main, contains('earnedPayrollPreviewHours'));
