@@ -2413,7 +2413,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
           child: OutlinedButton.icon(
             onPressed: _assignExistingTaskFromEmployee,
-            icon: const Icon(Icons.assignment_add),
+            icon: const Icon(Icons.add_task),
             label: const Text('Assign existing task'),
           )),
         ListTile(title: Text('Current · ${active.length}',
