@@ -9,11 +9,14 @@ class ExpensesPeriodTotals {
     required this.expenses,
     required this.transactions,
     required this.feesUnverified,
+    this.unverifiedIncomeReceipts,
   });
 
   final double income;
   final double expenses;
   final int transactions;
+  // Unknown on older snapshots. Not every unverified receipt has a card fee.
+  final int? unverifiedIncomeReceipts;
   final bool feesUnverified;
 
   static double _money(Object? raw) {
@@ -82,7 +85,7 @@ class ExpensesPeriodTotals {
 
     var incomeCents = 0;
     var expenseCents = 0;
-    var unverified = false;
+    var unverifiedIncomeCount = 0;
     final rows = byIdentity.values.toList();
     // Reusing one fee-evidence snapshot across up to 1,000 transactions
     // avoids scanning the same local invoice cache for every small page.
@@ -105,7 +108,7 @@ class ExpensesPeriodTotals {
           final value = verified && row['reporting_amount'] != null
               ? row['reporting_amount'] : row['amount'];
           incomeCents += (_money(value) * 100).round();
-          if (!verified) unverified = true;
+          if (!verified) unverifiedIncomeCount++;
         } else if (direction == 'expense') {
           expenseCents += (_money(row['amount']) * 100).round();
         } else {
@@ -120,7 +123,8 @@ class ExpensesPeriodTotals {
       income: incomeCents / 100,
       expenses: expenseCents / 100,
       transactions: rows.length,
-      feesUnverified: unverified,
+      feesUnverified: unverifiedIncomeCount > 0,
+      unverifiedIncomeReceipts: unverifiedIncomeCount,
     );
   }
 }
