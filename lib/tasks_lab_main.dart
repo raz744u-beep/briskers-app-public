@@ -1725,7 +1725,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               final value = double.tryParse(hours.text.trim());
               if (description.text.trim().isEmpty || value == null ||
                   !value.isFinite || value < 0) { return; }
-              if (!shopInternal && (createNewJob || selectedJobId == null)) return;
+              if (!shopInternal && (createNewJob || selectedJobId == null)) { return; }
               try {
                 if (shopInternal) {
                   await store.addShopTask(
