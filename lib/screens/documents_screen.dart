@@ -554,24 +554,17 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           if (!documentListDataEquals(_invoiceStyles, fetchedStyles)) {
             setState(() => _invoiceStyles = fetchedStyles);
           }
+          if (!mounted || widget.businessId != businessId || widget.kind != kind || epoch != _loadEpoch) return;
           _styleCache[businessId] = fetchedStyles;
           try {
             await _localInvoiceStyles.save(businessId, fetchedStyles);
+            if (mounted && epoch == _loadEpoch && widget.businessId == businessId) {
+              _savedStyles = fetchedStyles;
+            }
           } catch (_) {
             // Status styles are nonessential to document availability.
           }
         }).catchError((Object _) {}));
-        _styleCache[businessId] = styles;
-        if (!documentListDataEquals(_savedStyles, styles)) {
-          try {
-            await _localInvoiceStyles.save(businessId, styles);
-            if (mounted && widget.businessId == businessId && widget.kind == kind) {
-              _savedStyles = styles;
-            }
-          } catch (_) {
-            // A cache failure must not hide a successfully refreshed list.
-          }
-        }
       }
     } catch (_) {
       if (!mounted || epoch != _loadEpoch) return;
