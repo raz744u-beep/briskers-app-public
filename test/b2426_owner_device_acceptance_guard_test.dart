@@ -109,7 +109,7 @@ void main() {
     expect(resume, contains('_load(showLoading: false)'));
     expect(resume, isNot(contains('forceTotals: true')));
     for (final preset in <String>['thisMonth', 'lastMonth', '3m', 'ytd']) {
-      expect(expenses, contains("case '\$preset':"));
+      expect(expenses, contains("case '$preset':"));
     }
     expect(expenses, contains('_monthsAgoClamped('));
     expect(expenses, contains('DateTime(today.year, today.month, 0)'));
