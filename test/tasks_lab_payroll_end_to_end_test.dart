@@ -45,6 +45,12 @@ void main() {
         businessId: shop, employeeId: mechanic,
         weekStart: '2026-10-19', approvedBy: 'test-owner',
       ), isFalse);
+      // Check payments must not finalize without photographic proof.
+      expect(() => store.finalizeTestWeeklyPayrollPayment(
+        businessId: shop, employeeId: mechanic,
+        weekStart: '2026-10-19', cents: 6000, method: 'check',
+        paidAt: DateTime(2026, 10, 25), note: 'missing proof',
+      ), throwsStateError);
       expect(await store.finalizeTestWeeklyPayrollPayment(
         businessId: shop, employeeId: mechanic,
         weekStart: '2026-10-19', cents: 6000, method: 'zelle',
