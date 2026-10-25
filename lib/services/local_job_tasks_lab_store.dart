@@ -33,6 +33,16 @@ class LocalJobTasksLabStore {
         PRIMARY KEY (business_id, job_id)
       )
     ''');
+    // Durable TEST-only payroll approvals. Never posts to production ledgers.
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_lab_weekly_payroll_approvals (
+        business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+        week_start TEXT NOT NULL, selected_minutes INTEGER NOT NULL,
+        state TEXT NOT NULL DEFAULT 'draft',
+        approved_by TEXT, approved_at INTEGER,
+        PRIMARY KEY (business_id, employee_id, week_start)
+      )
+    ''');
     // Truly independent shop tasks: no customer, vehicle, job or invoice ID.
     await db.customStatement('''
       CREATE TABLE IF NOT EXISTS local_shop_tasks_lab (
@@ -888,6 +898,520 @@ class LocalJobTasksLabStore {
         paidAt.millisecondsSinceEpoch,
         DateTime.now().millisecondsSinceEpoch],
     );
+  }
+
+  Future<void> saveTestWeeklyPayrollDraft({
+    required String businessId, required String employeeId,
+    required String weekStart, required int selectedMinutes,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, employeeId].any((v) => v.trim().isEmpty) ||
+        !RegExp(r'^\\d{4}-\\d{2}-\\d{2} The caller must
+  /// supply the confirmed available balance for this mechanic/task. The DB
+  /// transaction also checks previously credited minutes to reject retries.
+  Future<void> creditTestTaskHours({
+    required String businessId,
+    required String employeeId,
+    required String jobId,
+    required String documentId,
+    required String lineId,
+    required DateTime weekStart,
+    required int minutes,
+    required int totalEligibleMinutes,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, employeeId, jobId, documentId, lineId]
+        .any((v) => v.trim().isEmpty) ||
+        minutes <= 0 || totalEligibleMinutes < minutes ||
+        weekStart.weekday != DateTime.monday ||
+        weekStart.hour != 0 || weekStart.minute != 0 ||
+        weekStart.second != 0 || weekStart.millisecond != 0 ||
+        weekStart.microsecond != 0) {
+      throw ArgumentError('Invalid task-hour credit');
+    }
+    final week = '${weekStart.year.toString().padLeft(4, '0')}-'
+        '${weekStart.month.toString().padLeft(2, '0')}-'
+        '${weekStart.day.toString().padLeft(2, '0')}';
+    await db.transaction(() async {
+      final rows = await db.customSelect(
+        'SELECT COALESCE(SUM(paid_minutes),0) AS total '
+        'FROM local_lab_payroll_task_credits '
+        'WHERE business_id=? AND employee_id=? AND job_id=? '
+        'AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(employeeId),
+          Variable<String>(jobId), Variable<String>(documentId),
+          Variable<String>(lineId)],
+      ).getSingle();
+      final credited = rows.read<int>('total');
+      if (credited + minutes > totalEligibleMinutes) {
+        throw StateError('Hours already paid or exceed task allocation');
+      }
+      // No upsert: identical retry in the same week fails rather than
+      // crediting the same hours twice.
+      await db.customStatement(
+        'INSERT INTO local_lab_payroll_task_credits '
+        '(business_id, employee_id, job_id, document_id, line_id, '
+        'week_start, paid_minutes, recorded_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [businessId, employeeId, jobId, documentId, lineId, week,
+          minutes, DateTime.now().millisecondsSinceEpoch],
+      );
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> testTaskHourCredits(
+      String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT employee_id, job_id, document_id, line_id, week_start, '
+      'paid_minutes FROM local_lab_payroll_task_credits '
+      'WHERE business_id=? ORDER BY week_start DESC',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> payrollTestPayments(
+      String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT id, employee_id, cents, kind, method, note, paid_at '
+      'FROM local_lab_payroll_disbursements WHERE business_id=? '
+      'ORDER BY paid_at DESC, id DESC',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> list(String businessId, String jobId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT * FROM local_job_tasks_lab WHERE business_id=? AND job_id=? '
+      'ORDER BY document_id, line_id',
+      variables: [Variable<String>(businessId), Variable<String>(jobId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
+
+  /// All jobs in the isolated task store, including newly created test jobs.
+  Future<List<Map<String, dynamic>>> allTasks(String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT * FROM local_job_tasks_lab WHERE business_id=? '
+      'AND source_missing=0 ORDER BY updated_at DESC',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
+
+  /// Update source description, but preserve edited text, assigned employee,
+  /// hours, completion time and status. Invoice deletion is non-destructive.
+  Future<void> reconcileDocument({
+    required String businessId, required String jobId,
+    required String documentId,
+    required List<Map<String, dynamic>> laborLines,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, jobId, documentId].any((v) => v.trim().isEmpty)) {
+      throw ArgumentError('Missing shop, job or invoice identity');
+    }
+    await db.transaction(() async {
+      await db.customStatement(
+        'UPDATE local_job_tasks_lab SET source_missing=1 '
+        'WHERE business_id=? AND job_id=? AND document_id=?',
+        [businessId, jobId, documentId],
+      );
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final lead = await leadMechanic(businessId, jobId);
+      for (final line in laborLines) {
+        final id = line['id']?.toString().trim() ?? '';
+        if (id.isEmpty) continue;
+        final description = (line['description'] ?? line['name'] ?? '')
+            .toString().trim();
+        if (description.isEmpty) continue;
+        final qty = _numeric(line['quantity']);
+        await db.customStatement('''
+          INSERT INTO local_job_tasks_lab
+            (business_id, job_id, document_id, line_id,
+             source_description, source_invoice_hours, payroll_hours,
+             employee_id, status, updated_at, source_missing)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, 0)
+          ON CONFLICT(business_id, job_id, document_id, line_id)
+          DO UPDATE SET source_description=excluded.source_description,
+                        source_invoice_hours=excluded.source_invoice_hours,
+                        source_missing=0
+        ''', [businessId, jobId, documentId, id, description, qty, qty, lead, now]);
+      }
+    });
+  }
+
+  static double? _numeric(dynamic value) {
+    final n = value is num ? value.toDouble() :
+        double.tryParse(value?.toString() ?? '');
+    if (n == null || !n.isFinite || n < 0) return null;
+    return n;
+  }
+
+  Future<void> editTask({
+    required String businessId, required String jobId,
+    required String documentId, required String lineId,
+    String? employeeId, String? status, String? description, double? hours,
+    bool editEmployee = false, bool editDescription = false,
+    bool editHours = false,
+  }) async {
+    await ensureTables(db);
+    if (hours != null && (!hours.isFinite || hours < 0)) {
+      throw ArgumentError('Invalid hours');
+    }
+    if (status != null &&
+        !const {'planned', 'in_progress', 'done'}.contains(status)) {
+      throw ArgumentError('Invalid task status');
+    }
+    if (editDescription && (description?.trim().isEmpty ?? true)) {
+      throw ArgumentError('Description required');
+    }
+    await db.transaction(() async {
+      if (status != null && status != 'done' &&
+          await jobStatus(businessId, jobId) == 'completed') {
+        throw StateError('Reopen the job before changing completed tasks');
+      }
+      final row = await db.customSelect(
+        'SELECT status, completed_at FROM local_job_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [
+          Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(documentId), Variable<String>(lineId),
+        ],
+      ).getSingleOrNull();
+      if (row == null) throw StateError('Task not found');
+      final previousStatus = row.read<String>('status');
+      final frozen = await db.customSelect(
+        'SELECT 1 FROM local_payroll_preserved_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(documentId), Variable<String>(lineId)],
+      ).getSingleOrNull();
+      if (previousStatus == 'done' || frozen != null) {
+        throw StateError('Completed work is read-only. '
+          'Add a separate recheck task instead.');
+      }
+      final finished = status == 'done'
+          ? (previousStatus == 'done'
+              ? row.readNullable<int>('completed_at') ??
+                  DateTime.now().millisecondsSinceEpoch
+              : DateTime.now().millisecondsSinceEpoch)
+          : status == null ? row.readNullable<int>('completed_at') : null;
+      final changes = <String>['updated_at=?'];
+      final args = <Object?>[DateTime.now().millisecondsSinceEpoch];
+      if (editEmployee) {
+        changes.add('employee_id=?');
+        args.add(employeeId == null || employeeId.isEmpty ? null : employeeId);
+      }
+      if (editHours) {
+        changes.add('payroll_hours=?'); args.add(hours);
+      }
+      if (editDescription) {
+        changes.add('custom_description=?'); args.add(description!.trim());
+      }
+      if (status != null) {
+        changes.add('status=?'); args.add(status);
+        changes.add('completed_at=?'); args.add(finished);
+      }
+      await db.customStatement(
+        "UPDATE local_job_tasks_lab SET ${changes.join(', ')} "
+        "WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?",
+        [...args, businessId, jobId, documentId, lineId],
+      );
+      if (status == 'done') {
+        await _freezeFirstCompletedTasks(
+          businessId, jobId, DateTime.now().millisecondsSinceEpoch);
+      }
+      // Only the Open status auto-promotes; pause/recheck statuses remain.
+      if (status == 'in_progress' || status == 'done') {
+        if (await jobStatus(businessId, jobId) == 'open') {
+          await db.customStatement(
+            'INSERT INTO local_job_status_lab '
+            '(business_id, job_id, status_code, updated_at) '
+            "VALUES (?, ?, 'in_progress', ?) "
+            'ON CONFLICT(business_id, job_id) DO UPDATE SET '
+            'status_code=excluded.status_code, updated_at=excluded.updated_at',
+            [businessId, jobId, DateTime.now().millisecondsSinceEpoch],
+          );
+        }
+      }
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> allocations({
+    required String businessId, required String jobId,
+    required String documentId, required String lineId,
+  }) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT employee_id, hours FROM local_task_allocations_lab '
+      'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=? '
+      'ORDER BY employee_id',
+      variables: [Variable<String>(businessId), Variable<String>(jobId),
+        Variable<String>(documentId), Variable<String>(lineId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
+
+  /// One authoritative allocation per invoice labor line, shared by invoice,
+  /// task editor and payroll preview. Never modifies invoice price or quantity.
+  Future<void> saveAllocations({
+    required String businessId, required String jobId,
+    required String documentId, required String lineId,
+    required Map<String, double> hoursByEmployee,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, jobId, documentId, lineId]
+        .any((value) => value.trim().isEmpty)) {
+      throw ArgumentError('Missing task identity');
+    }
+    if (hoursByEmployee.length > 2 ||
+        hoursByEmployee.keys.any((id) => id.trim().isEmpty) ||
+        hoursByEmployee.values.any((hours) => !hours.isFinite || hours <= 0)) {
+      throw ArgumentError('Choose one or two mechanics with positive hours');
+    }
+    await db.transaction(() async {
+      final task = await db.customSelect(
+        'SELECT line_id, status FROM local_job_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(documentId), Variable<String>(lineId)],
+      ).getSingleOrNull();
+      if (task == null) throw StateError('Labor task not found');
+      final frozen = await db.customSelect(
+        'SELECT 1 FROM local_payroll_preserved_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId), Variable<String>(jobId),
+          Variable<String>(documentId), Variable<String>(lineId)],
+      ).getSingleOrNull();
+      if (task.read<String>('status') == 'done' || frozen != null) {
+        throw StateError('Completed payroll cannot be edited. '
+          'Create a separate recheck task.');
+      }
+      // Billed book time is a default, never a ceiling on earned payroll.
+      // The task's source_invoice_hours / invoice price remain unchanged.
+      await db.customStatement(
+        'DELETE FROM local_task_allocations_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        [businessId, jobId, documentId, lineId],
+      );
+      for (final item in hoursByEmployee.entries) {
+        await db.customStatement(
+          'INSERT INTO local_task_allocations_lab '
+          '(business_id, job_id, document_id, line_id, employee_id, hours) '
+          'VALUES (?, ?, ?, ?, ?, ?)',
+          [businessId, jobId, documentId, lineId, item.key, item.value],
+        );
+      }
+      // Avoid double counting: the existing single-mechanic columns become
+      // an aggregate/compatibility view, NOT additional payroll credit.
+      await db.customStatement(
+        'UPDATE local_job_tasks_lab SET employee_id=?, payroll_hours=?, '
+        'updated_at=? WHERE business_id=? AND job_id=? '
+        'AND document_id=? AND line_id=?',
+        [hoursByEmployee.length == 1 ? hoursByEmployee.keys.first : null,
+          hoursByEmployee.values.fold<double>(0, (total, h) => total + h),
+          DateTime.now().millisecondsSinceEpoch,
+          businessId, jobId, documentId, lineId],
+      );
+    });
+  }
+
+  /// Bulk task completion is one atomic local transaction. Every visible
+  /// active task must be acknowledged in the confirmation first. Existing
+  /// completion times are preserved; invoices and payment state are untouched.
+  Future<int> completeConfirmedJobTasks({
+    required String businessId,
+    required String jobId,
+    required List<Map<String, String>> confirmedTasks,
+  }) async {
+    await ensureTables(db);
+    if (businessId.trim().isEmpty || jobId.trim().isEmpty ||
+        confirmedTasks.isEmpty) {
+      throw ArgumentError('Confirm the active job tasks first');
+    }
+    String identity(String documentId, String lineId) =>
+        '${documentId.length}:$documentId$lineId';
+    final acknowledged = <String>{};
+    for (final task in confirmedTasks) {
+      final doc = task['document_id']?.trim() ?? '';
+      final line = task['line_id']?.trim() ?? '';
+      if (doc.isEmpty || line.isEmpty ||
+          !acknowledged.add(identity(doc, line))) {
+        throw ArgumentError('Invalid or duplicate confirmed task');
+      }
+    }
+    return db.transaction(() async {
+      final rows = await db.customSelect(
+        'SELECT document_id, line_id, status FROM local_job_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND source_missing=0',
+        variables: [
+          Variable<String>(businessId), Variable<String>(jobId),
+        ],
+      ).get();
+      final current = {
+        for (final row in rows)
+          identity(row.read<String>('document_id'), row.read<String>('line_id')),
+      };
+      if (current.length != acknowledged.length ||
+          !current.containsAll(acknowledged)) {
+        throw StateError('Tasks changed. Review the list and confirm again.');
+      }
+      final remaining = rows.where((row) =>
+          row.read<String>('status') != 'done').length;
+      if (remaining == 0) return 0;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await db.customStatement(
+        "UPDATE local_job_tasks_lab SET status='done', "
+        "completed_at=?, updated_at=? "
+        "WHERE business_id=? AND job_id=? AND source_missing=0 "
+        "AND status!='done'",
+        [now, now, businessId, jobId],
+      );
+      await _freezeFirstCompletedTasks(businessId, jobId, now);
+      return remaining;
+    });
+  }
+
+  Future<Map<String, String>> nicknames(String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT employee_id, nickname FROM local_employee_nicknames_lab '
+      'WHERE business_id=?', variables: [Variable<String>(businessId)],
+    ).get();
+    return {for (final row in rows)
+      row.read<String>('employee_id'): row.read<String>('nickname')};
+  }
+
+  Future<void> saveNickname(
+      String businessId, String employeeId, String nickname) async {
+    await ensureTables(db);
+    if (employeeId.isEmpty || nickname.trim().isEmpty) {
+      throw ArgumentError('Nickname and employee required');
+    }
+    await db.customStatement(
+      'INSERT INTO local_employee_nicknames_lab '
+      '(business_id, employee_id, nickname) VALUES (?, ?, ?) '
+      'ON CONFLICT(business_id, employee_id) '
+      'DO UPDATE SET nickname=excluded.nickname',
+      [businessId, employeeId, nickname.trim()],
+    );
+  }
+
+  Future<Map<String, String>> fullNames(String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT employee_id, full_name FROM local_employee_full_names_lab '
+      'WHERE business_id=?', variables: [Variable<String>(businessId)],
+    ).get();
+    return {for (final row in rows)
+      row.read<String>('employee_id'): row.read<String>('full_name')};
+  }
+
+  /// Only changes the local display profile for a synthetic test employee.
+  /// Employee IDs and job/task assignments remain unchanged.
+  Future<void> saveEmployeeProfile({
+    required String businessId, required String employeeId,
+    required String fullName, required String displayName,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, employeeId, fullName, displayName]
+        .any((part) => part.trim().isEmpty)) {
+      throw ArgumentError('Employee name and display name are required');
+    }
+    await db.transaction(() async {
+      await db.customStatement(
+        'INSERT INTO local_employee_full_names_lab '
+        '(business_id, employee_id, full_name) VALUES (?, ?, ?) '
+        'ON CONFLICT(business_id, employee_id) '
+        'DO UPDATE SET full_name=excluded.full_name',
+        [businessId, employeeId, fullName.trim()],
+      );
+      await db.customStatement(
+        'INSERT INTO local_employee_nicknames_lab '
+        '(business_id, employee_id, nickname) VALUES (?, ?, ?) '
+        'ON CONFLICT(business_id, employee_id) '
+        'DO UPDATE SET nickname=excluded.nickname',
+        [businessId, employeeId, displayName.trim()],
+      );
+    });
+  }
+
+  /// Labor only: never parts, discounts, tax or price-only invoice lines.
+  static List<Map<String, dynamic>> laborLines(Map<String, dynamic> invoice) {
+    if (invoice['kind']?.toString() != 'invoice') return const [];
+    final raw = invoice['lines'] ?? invoice['items'];
+    if (raw is! List) return const [];
+    return raw.whereType<Map>().map((x) =>
+        Map<String, dynamic>.from(x)).where((row) {
+      final kind = (row['line_kind'] ?? row['item_type'] ??
+          row['type'] ?? row['category'] ?? '').toString().toLowerCase();
+      if (const {'part', 'parts', 'discount', 'tax', 'fee'}.contains(kind)) {
+        return false;
+      }
+      final name = row['name']?.toString().trim().toLowerCase() ?? '';
+      return kind == 'labor' || kind == 'labour' ||
+          name == 'labor' || name == 'labour';
+    }).where((line) =>
+        line['id']?.toString().trim().isNotEmpty == true).toList();
+  }
+
+  static String displayName(String name, String? nickname) {
+    if (nickname?.trim().isNotEmpty == true) return nickname!.trim();
+    final word = name.trim().split(RegExp(r'\s+')).first;
+    return word.isEmpty ? 'Unassigned' : word;
+  }
+}
+).hasMatch(weekStart) ||
+        selectedMinutes <= 0) {
+      throw ArgumentError('Invalid test payroll draft');
+    }
+    await db.customStatement(
+      'INSERT INTO local_lab_weekly_payroll_approvals '
+      '(business_id, employee_id, week_start, selected_minutes) '
+      "VALUES (?, ?, ?, ?) ON CONFLICT(business_id, employee_id, week_start) "
+      "DO UPDATE SET selected_minutes=excluded.selected_minutes "
+      "WHERE local_lab_weekly_payroll_approvals.state='draft'",
+      [businessId, employeeId, weekStart, selectedMinutes],
+    );
+  }
+
+  Future<bool> approveTestWeeklyPayroll({
+    required String businessId, required String employeeId,
+    required String weekStart, required String approvedBy,
+  }) async {
+    await ensureTables(db);
+    if (approvedBy.trim().isEmpty) {
+      throw ArgumentError('Approver required');
+    }
+    final changed = await db.customUpdate(
+      'UPDATE local_lab_weekly_payroll_approvals '
+      "SET state='approved', approved_by=?, approved_at=? "
+      'WHERE business_id=? AND employee_id=? AND week_start=? '
+      "AND state='draft' AND selected_minutes>0",
+      variables: [Variable<String>(approvedBy),
+        Variable<int>(DateTime.now().millisecondsSinceEpoch),
+        Variable<String>(businessId), Variable<String>(employeeId),
+        Variable<String>(weekStart)],
+      updates: {},
+    );
+    return changed == 1;
+  }
+
+  Future<List<Map<String, dynamic>>> testWeeklyPayrollApprovals(
+      String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT employee_id, week_start, selected_minutes, state, '
+      'approved_by, approved_at FROM local_lab_weekly_payroll_approvals '
+      'WHERE business_id=? ORDER BY week_start DESC',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
   }
 
   /// Weekly task-hour credit for the isolated test ledger. The caller must
