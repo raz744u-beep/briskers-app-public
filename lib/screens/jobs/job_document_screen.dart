@@ -15,7 +15,6 @@ import '../../services/vehicle_finding_actions_service.dart';
 import 'package:flutter/services.dart' show MethodChannel, MissingPluginException, PlatformException;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
 
 import '../../core/briskers_colors.dart';
@@ -61,6 +60,8 @@ import '../../services/local_payment_methods_cache.dart';
 import '../expenses/expense_detail_screen.dart';
 import '../expenses/expense_entry_screen.dart';
 import '../customers/customer_detail_screen.dart';
+import '../customers/customer_vehicle_findings_section.dart';
+import '../customers/customer_quick_actions.dart';
 import 'customer_invoice_signature_screen.dart';
 import 'invoice_warranty_panel.dart';
 import 'invoice_note_draft_rules.dart';
@@ -232,7 +233,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   int _loadGeneration = 0;
   final _pendingMemo = PendingDocumentMemoProjection();
   final LocalPaymentMethodsCache _paymentMethodsCache = const LocalPaymentMethodsCache();
-  final ImagePicker _picker = ImagePicker();
   final ScrollController _workspaceHeaderController = ScrollController();
   final GlobalKey _workspaceHeaderKey = GlobalKey();
   final TextEditingController _notesController = TextEditingController();
@@ -4316,171 +4316,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
-  String _findingMime(String name) {
-    final lower = name.toLowerCase();
-    if (lower.endsWith('.png')) return 'image/png';
-    if (lower.endsWith('.webp')) return 'image/webp';
-    return 'image/jpeg';
-  }
-
-  Future<void> _addInvoiceFinding() async {
-    if (_estimate || _detail == null || _busy) return;
-
-    final vehicleId = _detail!['vehicle_id']?.toString() ?? '';
-    if (vehicleId.isEmpty) {
-      setState(() => _error = 'Select a vehicle before adding a finding.');
-      return;
-    }
-
-    final controller = TextEditingController();
-    var includeOnInvoice = true;
-    final photos = <XFile>[];
-
-    final save = await showModalBottomSheet<bool>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            16,
-            0,
-            16,
-            MediaQuery.viewInsetsOf(sheetContext).bottom + 16,
-          ),
-          child: SafeArea(
-            top: false,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Add vehicle finding',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: controller,
-                    autofocus: true,
-                    minLines: 3,
-                    maxLines: 7,
-                    decoration: const InputDecoration(
-                      labelText: 'Finding',
-                      hintText: 'Describe the issue found during service',
-                    ),
-                  ),
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Include on invoice notes'),
-                    value: includeOnInvoice,
-                    onChanged: (value) => setSheetState(
-                      () => includeOnInvoice = value == true,
-                    ),
-                  ),
-                  if (photos.isNotEmpty)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        photos.length == 1
-                            ? '1 photo selected'
-                            : '${photos.length} photos selected',
-                      ),
-                    ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            final picked = await _picker.pickMultiImage(
-                              imageQuality: 88,
-                              maxWidth: 1920,
-                              maxHeight: 1920,
-                            );
-                            if (picked.isNotEmpty) {
-                              setSheetState(() => photos.addAll(picked));
-                            }
-                          },
-                          icon: const Icon(Icons.photo_library_outlined),
-                          label: const Text('Gallery'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            final photo = await _picker.pickImage(
-                              source: ImageSource.camera,
-                              imageQuality: 88,
-                              maxWidth: 1920,
-                              maxHeight: 1920,
-                            );
-                            if (photo != null) {
-                              setSheetState(() => photos.add(photo));
-                            }
-                          },
-                          icon: const Icon(Icons.photo_camera_outlined),
-                          label: const Text('Camera'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _documentActionColor,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: () {
-                        if (controller.text.trim().isNotEmpty) {
-                          Navigator.pop(sheetContext, true);
-                        }
-                      },
-                      child: const Text('Add finding'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-
-    final body = controller.text.trim();
-    controller.dispose();
-    if (save != true || body.isEmpty) return;
-
-    await _run(() async {
-      final findingId = await _api.createInvoiceFinding(
-        widget.businessId,
-        widget.documentId,
-        body: body,
-        includeOnInvoice: includeOnInvoice,
-      );
-
-      for (final photo in photos) {
-        await _api.uploadVehicleFindingPhoto(
-          widget.businessId,
-          findingId,
-          filename: photo.name,
-          mimeType: _findingMime(photo.name),
-          bytes: await photo.readAsBytes(),
-        );
-      }
-    });
-  }
-
-  // Refresh just the invoice's findings banner after the sheet closes.
-  // Avoid reloading invoice items, payments, notes, and header metadata.
+  // Shared with Customer and Job Findings: all attachment/photos/status/action
+  // paths operate on one canonical local-first finding projection.
   int _findingsRefreshToken = 0;
 
   Future<void> _refreshInvoiceFindingsBanner() async {
@@ -4505,130 +4342,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
-  Future<void> _manageFindingFromInvoice(Map<String, dynamic> finding) async {
-    final id = finding['id']?.toString() ?? '';
-    if (id.isEmpty || _busy) return;
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            leading: const Icon(Icons.edit_outlined),
-            title: const Text('Edit finding'),
-            onTap: () => Navigator.pop(sheetContext, 'edit'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.check_circle_outline),
-            title: const Text('Resolve finding'),
-            onTap: () => Navigator.pop(sheetContext, 'resolve'),
-          ),
-          if (widget.isOwner)
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: const Text('Delete finding',
-                style: TextStyle(color: Colors.red)),
-              onTap: () => Navigator.pop(sheetContext, 'delete'),
-            ),
-        ]),
-      ),
-    );
-    if (!mounted || choice == null) return;
-    try {
-      if (choice == 'edit') {
-        final controller =
-            TextEditingController(text: finding['body']?.toString() ?? '');
-        final revised = await showDialog<String>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Edit finding'),
-            content: TextField(
-              controller: controller, autofocus: true,
-              minLines: 2, maxLines: 6,
-              decoration: const InputDecoration(labelText: 'Description'),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  final text = controller.text.trim();
-                  if (text.isNotEmpty) Navigator.pop(dialogContext, text);
-                },
-                child: const Text('Save'),
-              ),
-            ],
-          ),
-        );
-        controller.dispose();
-        if (revised == null ||
-            revised == (finding['body']?.toString() ?? '')) {
-          return;
-        }
-        await _api.updateVehicleFinding(widget.businessId, id, body: revised);
-      } else if (choice == 'resolve') {
-        await _api.resolveVehicleFindingByInvoice(
-            widget.businessId, id, widget.documentId);
-      } else if (choice == 'delete' && widget.isOwner) {
-        final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Delete finding?'),
-            content: const Text(
-              'Only delete incorrectly entered findings. '
-              'Use Resolve for completed repairs to preserve history.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Delete'),
-              ),
-            ],
-          ),
-        );
-        if (confirmed != true) return;
-        await _api.deleteVehicleFinding(widget.businessId, id);
-      }
-      await _refreshInvoiceFindingsBanner();
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Finding change failed: $error')),
-        );
-      }
-    }
-  }
-
   Future<void> _showInvoiceFindings() async {
     if (_estimate || _detail == null || _busy) return;
-
     final vehicleId = _detail!['vehicle_id']?.toString() ?? '';
-    if (vehicleId.isEmpty) {
-      setState(() => _error = 'Select a vehicle before viewing findings.');
+    final customerId = _detail!['customer_id']?.toString() ?? '';
+    if (vehicleId.isEmpty || customerId.isEmpty) {
+      if (mounted) {
+        setState(() => _error =
+            'A linked customer and vehicle are required to view findings.');
+      }
       return;
     }
-
-    List<Map<String, dynamic>> findings;
-    try {
-      final allFindings = await _api.vehicleFindings(
-        widget.businessId,
-        vehicleId,
-        includeResolved: false,
-      );
-      findings = allFindings
-          .where(_findingNeedsInvoiceAttention)
-          .toList();
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-      return;
-    }
-    if (!mounted) return;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -4636,97 +4360,34 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
         child: SizedBox(
-          height: MediaQuery.sizeOf(sheetContext).height * 0.68,
-          child: Column(
+          height: MediaQuery.sizeOf(sheetContext).height * 0.80,
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 12, 8),
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Vehicle findings',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Add finding',
-                      onPressed: () {
-                        Navigator.pop(sheetContext);
-                        _addInvoiceFinding();
-                      },
-                      icon: const Icon(Icons.add_circle_outline),
-                    ),
-                  ],
-                ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: Text('Vehicle findings',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
               ),
-              Expanded(
-                child: findings.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'No open findings need attention on this invoice.',
-                        ),
-                      )
-                    : ListView.separated(
-                        itemCount: findings.length,
-                        separatorBuilder: (context, index) =>
-                            const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final finding = findings[index];
-                          final sourceJob =
-                              finding['found_job_number']?.toString() ?? '';
-                          final sourceInvoice =
-                              finding['found_document_number']?.toString() ??
-                                  '';
-
-                          return ListTile(
-                            onTap: () async {
-                              Navigator.pop(sheetContext);
-                              await _manageFindingFromInvoice(finding);
-                            },
-                            onLongPress: () async {
-                              Navigator.pop(sheetContext);
-                              await _manageFindingFromInvoice(finding);
-                            },
-                            leading: const Icon(
-                              Icons.warning_amber_rounded,
-                              color: Colors.deepOrange,
-                            ),
-                            title: Text(
-                              finding['body']?.toString() ?? '',
-                            ),
-                            subtitle: Text(
-                              sourceInvoice.isNotEmpty
-                                  ? 'Found on Invoice #$sourceInvoice'
-                                  : sourceJob.isNotEmpty
-                                      ? 'Found on Job $sourceJob'
-                                      : 'Open finding',
-                            ),
-                            trailing: TextButton(
-                              onPressed: () async {
-                                Navigator.pop(sheetContext);
-                                await _run(() =>
-                                    _api.resolveVehicleFindingByInvoice(
-                                      widget.businessId,
-                                      finding['id'].toString(),
-                                      widget.documentId,
-                                    ));
-                              },
-                              child: const Text('Resolve'),
-                            ),
-                          );
-                        },
-                      ),
+              CustomerVehicleFindingsSection(
+                businessId: widget.businessId,
+                customerId: customerId,
+                vehicles: <Map<String, dynamic>>[
+                  {'id': vehicleId},
+                ],
+                canManage: canManageCustomerActions(_navigationRoleCode),
+                canDelete: widget.isOwner,
+                initiallyExpanded: true,
               ),
             ],
           ),
         ),
       ),
     );
-    if (mounted) await _refreshInvoiceFindingsBanner();
+    if (mounted && !BriskersConnectionModeController.instance.forceOffline) {
+      // Refresh only the warning count, never the full invoice/payment state.
+      unawaited(_refreshInvoiceFindingsBanner());
+    }
   }
 
   Future<void> _emailPdf() async {
