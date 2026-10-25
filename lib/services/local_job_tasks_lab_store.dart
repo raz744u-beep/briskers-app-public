@@ -144,8 +144,30 @@ class LocalJobTasksLabStore {
         business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
         cents INTEGER NOT NULL, kind TEXT NOT NULL,
         method TEXT NOT NULL, note TEXT NOT NULL,
-        paid_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+        paid_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+        approval_week_start TEXT
       )
+    ''');
+    final paymentColumns = await db.customSelect(
+      'PRAGMA table_info(local_lab_payroll_disbursements)').get();
+    if (!paymentColumns.any((row) =>
+        row.read<String>('name') == 'approval_week_start')) {
+      await db.customStatement(
+        'ALTER TABLE local_lab_payroll_disbursements '
+        'ADD COLUMN approval_week_start TEXT');
+    }
+    // Recover linkage for pre-upgrade TEST payments whose stored note began
+    // "Week YYYY-MM-DD · ". Do not modify money, dates or paid flags.
+    await db.customStatement(
+      "UPDATE local_lab_payroll_disbursements SET "
+      "approval_week_start=substr(note, 6, 10) "
+      "WHERE approval_week_start IS NULL AND kind='pay' "
+      "AND note GLOB 'Week [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] · *'");
+    await db.customStatement('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_lab_weekly_disbursement_once
+      ON local_lab_payroll_disbursements (
+        business_id, employee_id, approval_week_start)
+      WHERE approval_week_start IS NOT NULL
     ''');
     await db.customStatement('''
       CREATE INDEX IF NOT EXISTS idx_lab_payroll_payments_by_employee
@@ -1033,10 +1055,11 @@ class LocalJobTasksLabStore {
       await db.customStatement(
         'INSERT INTO local_lab_payroll_disbursements '
         '(business_id, employee_id, cents, kind, method, note, '
-        'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'paid_at, created_at, approval_week_start) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [businessId, employeeId, cents, 'pay', method,
-          'Week $weekStart · $note${checkProofReference == null ? '' : ' · Check proof: $checkProofReference'}', paidAt.millisecondsSinceEpoch,
-          DateTime.now().millisecondsSinceEpoch],
+          'Week $weekStart · $note${checkProofReference == null ? '' : ' · Check proof: $checkProofReference'}',
+          paidAt.millisecondsSinceEpoch,
+          DateTime.now().millisecondsSinceEpoch, weekStart],
       );
       return true;
     });
@@ -1162,7 +1185,8 @@ class LocalJobTasksLabStore {
       String businessId) async {
     await ensureTables(db);
     final rows = await db.customSelect(
-      'SELECT id, employee_id, cents, kind, method, note, paid_at '
+      'SELECT id, employee_id, cents, kind, method, note, paid_at, '
+      'approval_week_start '
       'FROM local_lab_payroll_disbursements WHERE business_id=? '
       'ORDER BY paid_at DESC, id DESC',
       variables: [Variable<String>(businessId)],
