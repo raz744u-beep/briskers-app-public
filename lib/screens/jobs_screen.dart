@@ -382,10 +382,13 @@ class _JobsScreenState extends State<JobsScreen>
       try {
         await readSavedJobs(online: !refreshRemote && _onlineReady);
       } catch (error) {
-        if (mode.forceOffline && mounted && visibility.isCurrent(generation)) {
+        if (mounted && visibility.isCurrent(generation)) {
+          // A failed local read must not erase job cards already painted from
+          // the device. The next entry can retry SQLite without data loss.
           setState(() {
-            _rows = const [];
-            _error = error.toString();
+            _rows ??= const [];
+            _showingLocal = _rows!.isNotEmpty;
+            _error = _rows!.isEmpty ? error.toString() : null;
           });
         }
       }
@@ -421,10 +424,13 @@ class _JobsScreenState extends State<JobsScreen>
         _onlineReady = false;
         _refreshFailed = true;
         _showingLocal = localAvailable && !mode.forceOnline;
-        if (_showingLocal) {
+        if (_showingLocal || (_rows?.isNotEmpty ?? false)) {
+          // Never remove an existing local list because an online request
+          // failed or its DNS lookup timed out.
+          _showingLocal = true;
           _error = null;
         } else {
-          _rows = const [];
+          _rows ??= const [];
           _error = error.toString();
         }
       });

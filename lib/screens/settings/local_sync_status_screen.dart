@@ -109,29 +109,32 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     }
 
     try {
-      final counts = <String, int>{
-        'customers': await _count('local_customers'),
-        'vehicles': await _count('local_vehicles'),
-        'appointments': await _count('local_appointments'),
-        'jobs': await _count('local_jobs'),
-        'catalog': await _count('local_catalog_items'),
-        'documents': await _count('local_documents'),
-        'findings': await _count('local_findings'),
-        'inspections': await _count('local_pre_inspections'),
-        'photoPending': await _count('local_expense_iq_photos',
+      // Independent read-only counts do not need fourteen sequential round
+      // trips through SQLite before the diagnostics screen can paint.
+      final names = <String>[
+        'customers', 'vehicles', 'appointments', 'jobs', 'catalog',
+        'documents', 'findings', 'inspections', 'photoPending',
+        'photoUploaded', 'photoFailed', 'pending', 'conflicts',
+      ];
+      final values = await Future.wait<int>([
+        _count('local_customers'),
+        _count('local_vehicles'),
+        _count('local_appointments'),
+        _count('local_jobs'),
+        _count('local_catalog_items'),
+        _count('local_documents'),
+        _count('local_findings'),
+        _count('local_pre_inspections'),
+        _count('local_expense_iq_photos',
             where: "state IN ('pending','uploading')"),
-        'photoUploaded': await _count('local_expense_iq_photos',
-            where: "state = 'uploaded'"),
-        'photoFailed': await _count('local_expense_iq_photos',
+        _count('local_expense_iq_photos', where: "state = 'uploaded'"),
+        _count('local_expense_iq_photos',
             where: "state IN ('failed','missing')"),
-        'pending': await _count(
-          'sync_outbox',
-          where: "state = 'pending'",
-        ),
-        'conflicts': await _count(
-          'sync_outbox',
-          where: "state = 'conflict'",
-        ),
+        _count('sync_outbox', where: "state = 'pending'"),
+        _count('sync_outbox', where: "state = 'conflict'"),
+      ]);
+      final counts = <String, int>{
+        for (var i = 0; i < names.length; i++) names[i]: values[i],
       };
 
       final stateRows = await localDatabase.customSelect(
@@ -156,6 +159,30 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         ''',
         variables: [Variable<String>(widget.businessId)],
       ).get();
+
+      // Paint the local counts and sync history before performing expensive
+      // per-outbox-record relationship checks (which can involve 120+ rows).
+      // Those checks are diagnostic only and must not hold the entire screen
+      // on a spinner.
+      if (!mounted) return;
+      setState(() {
+        _counts = counts;
+        _syncStates = stateRows.map((row) => <String, dynamic>{
+          'scope': row.read<String>('scope'),
+          'cursor': row.readNullable<int>('last_server_cursor'),
+          'last_pull_at': row.data['last_pull_at'],
+          'last_push_at': row.data['last_push_at'],
+          'last_error': row.readNullable<String>('last_error'),
+          'bootstrapped': row.read<int>('bootstrapped') == 1,
+        }).toList();
+        _outbox = outboxRows.map((row) => <String, dynamic>{
+          'entity_type': row.read<String>('entity_type'),
+          'state': row.read<String>('state'),
+          'count': row.read<int>('count'),
+          'last_error': row.readNullable<String>('last_error'),
+        }).toList();
+        _loading = false;
+      });
 
       // Read-only owner-facing inspection: never mutate or retry a queued
       // operation from the diagnostic panel. Keep raw IDs for safe cleanup.

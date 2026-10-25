@@ -156,7 +156,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   List<Map<String, dynamic>>? _serverRows;
   List<Map<String, dynamic>>? _indexRows;
   List<Map<String, dynamic>>? _savedRows;
-  List<Map<String, dynamic>>? _savedStyles;
   List<Map<String, dynamic>>? _orderedSource;
   List<Map<String, dynamic>> _orderedRows = const [];
   bool? _orderedEstimate;
@@ -365,7 +364,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       _serverRows = null;
       _indexRows = null;
       _savedRows = null;
-      _savedStyles = null;
       _receiptTotals = const {};
       _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
       _futureDatedOnly = false;
@@ -468,15 +466,6 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
     final forceOffline = BriskersConnectionModeController.instance.forceOffline;
 
-    if (!estimate && !forceOnline && _invoiceStyles.isEmpty) {
-      try {
-        final cachedStyles = await _localInvoiceStyles.load(businessId);
-        if (mounted && epoch == _loadEpoch && cachedStyles.isNotEmpty) {
-          setState(() => _invoiceStyles = cachedStyles);
-        }
-      } catch (_) {}
-    }
-
     // Warm online refreshes never replace richer API rows with index-only
     // placeholders. Offline entries must read the index to pick up edits made
     // in another module, since there is no server refresh in that mode.
@@ -484,6 +473,16 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       localShown = await _loadLocalRows(
         epoch, businessId, kind, estimate: estimate,
       );
+    }
+
+    // Status colors are cosmetic and must not block the first offline-first
+    // document list frame, including in Auto mode after a cold start.
+    if (!estimate && !forceOnline && _invoiceStyles.isEmpty) {
+      unawaited(_localInvoiceStyles.load(businessId).then((styles) {
+        if (mounted && epoch == _loadEpoch && styles.isNotEmpty) {
+          setState(() => _invoiceStyles = styles);
+        }
+      }).catchError((Object _) {}));
     }
 
     if (!mounted || epoch != _loadEpoch) return;
@@ -498,22 +497,18 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     }
 
     try {
-      final results = await Future.wait<dynamic>([
-        _api.documents(businessId, kind: kind),
-        if (!estimate)
-          _api.invoiceStatusStyles(businessId)
-        else
-          Future.value(const <Map<String, dynamic>>[]),
-      ]);
+      // The document payload is authoritative. Optional invoice colors must
+      // not delay or fail the list when that independent endpoint is slow.
+      final fetched = await _api.documents(businessId, kind: kind);
 
       if (!mounted || epoch != _loadEpoch) return;
       final blocked = await (widget.blockedDocumentIds?.call(businessId) ??
           LocalJobRetirement.blockedDocumentIds(localDatabase, businessId));
-      final rows = List<Map<String, dynamic>>.from(results[0] as List)
+      final rows = List<Map<String, dynamic>>.from(fetched)
           .where((row) => !blocked.contains('${row['id'] ?? ''}'))
           .toList();
       if (!mounted || epoch != _loadEpoch) return;
-      final styles = List<Map<String, dynamic>>.from(results[1] as List);
+      final styles = _invoiceStyles;
 
       // Preserve first paint and scroll position when the remote response
       // contains no changes, including financial fields absent in the index.
@@ -552,17 +547,19 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       }
       if (!mounted || epoch != _loadEpoch) return;
       if (!estimate) {
-        _styleCache[businessId] = styles;
-        if (!documentListDataEquals(_savedStyles, styles)) {
-          try {
-            await _localInvoiceStyles.save(businessId, styles);
-            if (mounted && widget.businessId == businessId && widget.kind == kind) {
-              _savedStyles = styles;
-            }
-          } catch (_) {
-            // A cache failure must not hide a successfully refreshed list.
+        unawaited(_api.invoiceStatusStyles(businessId).then((fetchedStyles) async {
+          if (!mounted || epoch != _loadEpoch) return;
+          if (!documentListDataEquals(_invoiceStyles, fetchedStyles)) {
+            setState(() => _invoiceStyles = fetchedStyles);
           }
-        }
+          if (!mounted || widget.businessId != businessId || widget.kind != kind || epoch != _loadEpoch) return;
+          _styleCache[businessId] = fetchedStyles;
+          try {
+            await _localInvoiceStyles.save(businessId, fetchedStyles);
+          } catch (_) {
+            // Status styles are nonessential to document availability.
+          }
+        }).catchError((Object _) {}));
       }
     } catch (_) {
       if (!mounted || epoch != _loadEpoch) return;

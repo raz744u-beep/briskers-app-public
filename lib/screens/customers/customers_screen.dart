@@ -81,32 +81,42 @@ class _CustomersScreenState extends State<CustomersScreen> {
 
     if (!forceOnline) {
       try {
-      final results = await Future.wait<dynamic>([
-        _localCustomers.customers(
+        // Paint available saved customer rows before waiting for the total or
+        // bootstrap bookkeeping. A slow count must not block the first frame.
+        final rows = await _localCustomers.customers(
           widget.businessId,
           search: query.isEmpty ? null : query,
-        ),
-        _localCustomers.customerTotal(widget.businessId),
-        _localCustomers.hasBootstrap(widget.businessId),
-      ]);
-
-      final rows =
-          List<Map<String, dynamic>>.from(results[0] as List);
-      final total = results[1] as int;
-      final bootstrapped = results[2] == true;
-      localAvailable = bootstrapped || rows.isNotEmpty;
-
-      if (current() && localAvailable) {
-        setState(() {
-          _rows = rows;
-          _totalCustomers = total;
-          _showingLocal = !_onlineReady;
-          // A cache-first paint is expected in Auto, not a network error.
-          _error = null;
-        });
-      }
-    } catch (_) {
-      // The online refresh below can still populate the local cache.
+        );
+        if (!current()) return;
+        if (rows.isNotEmpty) {
+          localAvailable = true;
+          setState(() {
+            _rows = rows;
+            _showingLocal = true;
+            _error = null;
+          });
+        }
+        // The count is independent from painting the list. Preserve the last
+        // known nonzero total until this business's actual count is read.
+        unawaited(Future<void>(() async {
+          try {
+            final total = await _localCustomers.customerTotal(widget.businessId);
+            final bootstrapped = await _localCustomers.hasBootstrap(widget.businessId);
+            if (!current()) return;
+            if (!_onlineReady && (bootstrapped || rows.isNotEmpty || total > 0)) {
+              localAvailable = true;
+              setState(() {
+                _totalCustomers = total;
+                _rows ??= rows;
+                _showingLocal = !_onlineReady;
+              });
+            }
+          } catch (_) {
+            // Keep previously painted records while bookkeeping retries.
+          }
+        }));
+      } catch (_) {
+        // The online refresh below can still populate the local cache.
       }
     }
 
@@ -299,7 +309,9 @@ class _CustomersScreenState extends State<CustomersScreen> {
                   ),
                 ),
               Text(
-                '${tr('total')} $_totalCustomers',
+                _rows == null && _totalCustomers == 0
+                    ? '${tr('total')} …'
+                    : '${tr('total')} $_totalCustomers',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
