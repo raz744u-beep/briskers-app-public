@@ -16,6 +16,7 @@ class VerifiedExpenseTotalsCache {
     await prefs.setString(_key(scope), jsonEncode({
       'income': totals.income, 'expenses': totals.expenses,
       'transactions': totals.transactions, 'feesUnverified': totals.feesUnverified,
+      'unverifiedIncomeReceipts': totals.unverifiedIncomeReceipts,
       'verifiedAt': at.toUtc().toIso8601String(),
     }));
   }
@@ -35,7 +36,9 @@ class VerifiedExpenseTotalsCache {
         return null;
       }
       return (totals: ExpensesPeriodTotals(income: income, expenses: expenses,
-        transactions: transactions, feesUnverified: data['feesUnverified'] as bool), at: at);
+        transactions: transactions, feesUnverified: data['feesUnverified'] as bool,
+        unverifiedIncomeReceipts: data['unverifiedIncomeReceipts'] is int
+            ? data['unverifiedIncomeReceipts'] as int : null), at: at);
     } catch (_) {
       return null;
     }
