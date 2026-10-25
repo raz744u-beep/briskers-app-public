@@ -240,7 +240,7 @@ void main() {
   });
 
   test(
-    'Job and invoice routes preserve the online/offline summary contract',
+    'Job and invoice routes pass safe visible previews in Auto and Offline',
     () async {
       final job = await File('lib/screens/jobs/job_detail_screen.dart')
           .readAsString();
@@ -248,21 +248,23 @@ void main() {
         job.indexOf('Future<void> _openExpense('),
         job.indexOf('Future<void> _editJobExpense('),
       );
-      expect(route, contains('cachedDetail: _showingLocal ? cached : null'));
-      for (final path in [
-        'lib/screens/jobs/job_document_screen.dart',
-        'lib/screens/documents_screen.dart',
-      ]) {
-        final invoice = await File(path).readAsString();
-        expect(
-          invoice,
-          matches(
-            r'cachedDetail:\s*offline\s*\?\s*'
-            r'Map<String, dynamic>\.from\(expense\)\s*:\s*null',
-          ),
-          reason: '$path must pass its offline linked expense summary',
-        );
-      }
+      expect(route, contains('cachedDetail: cached,'));
+
+      final invoice = await File('lib/screens/jobs/job_document_screen.dart')
+          .readAsString();
+      expect(invoice, contains('cachedDetail: Map<String, dynamic>.from(item)'));
+      expect(invoice,
+          contains('cachedDetail: Map<String, dynamic>.from(expense)'));
+
+      final mainExpenses = await File('lib/screens/expenses_screen.dart')
+          .readAsString();
+      expect(mainExpenses,
+          contains('cachedDetail: Map<String, dynamic>.from(transaction)'));
+
+      final detail = await File('lib/screens/expenses/expense_detail_screen.dart')
+          .readAsString();
+      expect(detail, contains("..['editable'] = false"));
+      expect(detail, contains("..['deletable'] = false"));
     },
   );
 }
