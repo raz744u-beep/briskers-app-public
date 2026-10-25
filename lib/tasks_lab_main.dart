@@ -2074,6 +2074,33 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       ));
     if (chosen == null || !mounted) return;
     final item = choices[chosen];
+    // The Owner may credit only part of the unpaid time this week and carry
+    // the rest forward. Minutes avoid floating-point double-credit errors.
+    final minutesInput = TextEditingController(
+      text: (item.remaining / 60).toStringAsFixed(2));
+    final requested = await showDialog<int>(context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Credit hours this week · TEST'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('${(item.remaining / 60).toStringAsFixed(2)} hours available'),
+          TextField(controller: minutesInput,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Hours to credit')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () {
+            final hours = double.tryParse(minutesInput.text.trim());
+            final minutes = hours == null || !hours.isFinite
+              ? 0 : (hours * 60).round();
+            if (minutes < 1 || minutes > item.remaining) return;
+            Navigator.pop(dialogContext, minutes);
+          }, child: const Text('Credit TEST hours')),
+        ],
+      ));
+    minutesInput.dispose();
+    if (requested == null || !mounted) return;
     final now = DateTime.now();
     final monday = DateTime(now.year, now.month, now.day)
         .subtract(Duration(days: now.weekday - 1));
@@ -2085,7 +2112,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         documentId: item.task['document_id'].toString(),
         lineId: item.task['line_id'].toString(),
         weekStart: monday,
-        minutes: item.remaining,
+        minutes: requested,
         totalEligibleMinutes: item.eligible,
       );
       await _refresh();
