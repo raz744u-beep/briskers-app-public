@@ -70,7 +70,9 @@ class VehicleFindings extends StatelessWidget {
             padding: EdgeInsets.all(16),
             child: Text('No unresolved findings for this vehicle.'),
           ),
-        for (final row in [...open, ...inJob]) _row(context, row),
+        for (final row in [...open, ...inJob])
+          _maybeCollapsedRow(context, row,
+              collapsed: open.length + inJob.length > 1),
         if (resolved.isNotEmpty)
           ExpansionTile(
             key: const ValueKey('vehicle-findings-resolved'),
@@ -81,9 +83,36 @@ class VehicleFindings extends StatelessWidget {
               Icons.check_circle_outline,
               color: Colors.green,
             ),
-            children: [for (final row in resolved) _row(context, row)],
+            children: [for (final row in resolved)
+              _maybeCollapsedRow(context, row,
+                  collapsed: resolved.length > 1)],
           ),
       ],
+    );
+  }
+
+  // Keep a single issue readable, but prevent multiple long photo-rich
+  // findings from pushing unrelated issues off-screen. Expanding a summary
+  // never invokes an edit/resolve action or changes the underlying finding.
+  Widget _maybeCollapsedRow(
+    BuildContext context,
+    Map<String, dynamic> finding, {
+    required bool collapsed,
+  }) {
+    if (!collapsed) return _row(context, finding);
+    final id = finding['id']?.toString() ?? '';
+    final status = statusLabel(finding);
+    final description = finding['body']?.toString().trim() ?? '';
+    return ExpansionTile(
+      key: ValueKey('finding-collapsed-$id'),
+      initiallyExpanded: false,
+      title: Text(description.isEmpty ? 'Vehicle finding' : description,
+        maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(status),
+      leading: Icon(status == 'Resolved' ? Icons.check_circle_outline
+          : status == 'In Job' ? Icons.handyman_outlined
+          : Icons.warning_amber_rounded),
+      children: [_row(context, finding)],
     );
   }
 
