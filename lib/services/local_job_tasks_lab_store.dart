@@ -905,8 +905,58 @@ class LocalJobTasksLabStore {
     required String weekStart, required int selectedMinutes,
   }) async {
     await ensureTables(db);
+    final weekDate = DateTime.tryParse(weekStart);
     if ([businessId, employeeId].any((v) => v.trim().isEmpty) ||
-        !RegExp(r'^\\d{4}-\\d{2}-\\d{2} The caller must
+        weekDate == null || weekDate.weekday != DateTime.monday ||
+        weekStart != weekDate.toIso8601String().substring(0, 10) ||
+        selectedMinutes <= 0) {
+      throw ArgumentError('Invalid test payroll draft');
+    }
+    await db.customStatement(
+      'INSERT INTO local_lab_weekly_payroll_approvals '
+      '(business_id, employee_id, week_start, selected_minutes) '
+      'VALUES (?, ?, ?, ?) ON CONFLICT(business_id, employee_id, week_start) '
+      'DO UPDATE SET selected_minutes=excluded.selected_minutes '
+      "WHERE local_lab_weekly_payroll_approvals.state='draft'",
+      [businessId, employeeId, weekStart, selectedMinutes],
+    );
+  }
+
+  Future<bool> approveTestWeeklyPayroll({
+    required String businessId, required String employeeId,
+    required String weekStart, required String approvedBy,
+  }) async {
+    await ensureTables(db);
+    if (approvedBy.trim().isEmpty) {
+      throw ArgumentError('Approver required');
+    }
+    final changed = await db.customUpdate(
+      'UPDATE local_lab_weekly_payroll_approvals '
+      "SET state='approved', approved_by=?, approved_at=? "
+      'WHERE business_id=? AND employee_id=? AND week_start=? '
+      "AND state='draft' AND selected_minutes>0",
+      variables: [Variable<String>(approvedBy),
+        Variable<int>(DateTime.now().millisecondsSinceEpoch),
+        Variable<String>(businessId), Variable<String>(employeeId),
+        Variable<String>(weekStart)],
+      updates: {},
+    );
+    return changed == 1;
+  }
+
+  Future<List<Map<String, dynamic>>> testWeeklyPayrollApprovals(
+      String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT employee_id, week_start, selected_minutes, state, '
+      'approved_by, approved_at FROM local_lab_weekly_payroll_approvals '
+      'WHERE business_id=? ORDER BY week_start DESC',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((row) => Map<String, dynamic>.from(row.data)).toList();
+  }
+
+  /// Weekly task-hour credit for the isolated test ledger. The caller must
   /// supply the confirmed available balance for this mechanic/task. The DB
   /// transaction also checks previously credited minutes to reject retries.
   Future<void> creditTestTaskHours({
