@@ -14,7 +14,6 @@ import '../core/briskers_i18n.dart';
 import '../core/connection_mode.dart';
 import '../services/briskers_api.dart';
 import '../services/warranty_receipt_reporting.dart';
-import '../services/local_attachment_cache.dart';
 import '../services/local_financial_cache.dart';
 import '../services/invoice_payment_feed.dart';
 import '../services/expenses_period_totals.dart';
@@ -55,7 +54,6 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   final InvoicePaymentFeed _invoiceFeed = InvoicePaymentFeed();
   List<Map<String, dynamic>> _invoiceReceipts = const [];
   bool _recoveringCachedReceipts = false;
-  final LocalAttachmentCache _attachmentCache = LocalAttachmentCache();
 
   static const int _pageSize = 50;
   int _visibleCount = _pageSize;
