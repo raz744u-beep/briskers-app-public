@@ -563,7 +563,7 @@ class _CustomerVehicleFindingsSectionState
                         child: OutlinedButton.icon(
                           onPressed: () async {
                             final picked = await _picker.pickMultiImage(
-                              imageQuality: 88,
+                              imageQuality: 100,
                               maxWidth: 1920,
                               maxHeight: 1920,
                             );
@@ -582,7 +582,7 @@ class _CustomerVehicleFindingsSectionState
                           onPressed: () async {
                             final photo = await _picker.pickImage(
                               source: ImageSource.camera,
-                              imageQuality: 88,
+                              imageQuality: 100,
                               maxWidth: 1920,
                               maxHeight: 1920,
                             );
@@ -902,7 +902,7 @@ class _CustomerVehicleFindingsSectionState
     if (source == 'gallery') {
       picked.addAll(
         await _picker.pickMultiImage(
-          imageQuality: 88,
+          imageQuality: 100,
           maxWidth: 1920,
           maxHeight: 1920,
         ),
@@ -910,7 +910,7 @@ class _CustomerVehicleFindingsSectionState
     } else {
       final photo = await _picker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 88,
+        imageQuality: 100,
         maxWidth: 1920,
         maxHeight: 1920,
       );
