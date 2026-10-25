@@ -325,6 +325,21 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
   }
 
+  // Detail navigation must show the verified local Job before querying
+  // separately cached invoice/estimate links. This read can be slow on shops
+  // with thousands of historical documents and should never gate the header.
+  Future<void> _hydrateLocalJobDocuments(int epoch) async {
+    try {
+      final documents = await _localDocumentsForJob();
+      if (!_currentLoad(epoch) || !_showingLocal || _onlineReady ||
+          !_canSeeFinancial) return;
+      setState(() => _documents = documents);
+      _modalRefresh?.call();
+    } catch (_) {
+      // Leave the locally rendered Job usable if links cannot be read.
+    }
+  }
+
   Future<void> _load() async {
     final epoch = ++_loadEpoch;
     try {
@@ -363,10 +378,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         milliseconds:loadWatch.elapsedMilliseconds,
       ));
       if (snapshot != null && _currentLoad(epoch)) {
-        final localDocuments = _canSeeFinancial
-            ? await _localDocumentsForJob()
-            : const <Map<String, dynamic>>[];
-        if (!_currentLoad(epoch)) return;
+        // Paint the core saved Job immediately. Linked documents are a
+        // secondary section, hydrated independently after the first frame.
         localShown = true;
         unawaited(const JobPerformanceMetrics().record(
           widget.businessId,
@@ -378,7 +391,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           _job = snapshot.job;
           _preInspection = snapshot.preInspection;
           _statuses = snapshot.statuses;
-          _documents = localDocuments;
+          _documents = const <Map<String, dynamic>>[];
           _jobExpenses = const [];
           _linkedExpensesCached = false;
           _findings = snapshot.findings;
@@ -389,9 +402,11 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         });
         _showCachedDataNotice(epoch);
         _modalRefresh?.call();
-        // Linked expenses are a secondary tile. Their cache lookup should
-        // never delay the first usable Job detail frame.
+        // Linked documents and expenses hydrate independently of first paint.
+        // Each is fenced by the load epoch so back/forward navigation cannot
+        // replace data from a newer Job or remote refresh.
         if (_canSeeFinancial) {
+          unawaited(_hydrateLocalJobDocuments(epoch));
           unawaited(_hydrateLocalLinkedExpenses());
         }
         unawaited(_prefetchFindingPhotos(snapshot.findings));
