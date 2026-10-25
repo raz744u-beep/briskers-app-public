@@ -106,7 +106,7 @@ void main() {
     expect(jobs, isNot(contains("title: const Text('New job — choose customer')")));
     expect(picker, contains('Scaffold('));
     expect(picker, contains('Expanded('));
-    expect(picker, contains('onTap: () => Navigator.pop(context, customer)'));
+    expect(picker, contains('onTap: _searching ? null : () => Navigator.pop(context, customer)'));
   });
 
   test('shared header exposes real connection preferences and sync timestamp', () async {
