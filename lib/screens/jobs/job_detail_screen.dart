@@ -2751,6 +2751,13 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }
 
   Future<void> _openDocument(String documentId) async {
+    Map<String, dynamic>? selected;
+    for (final row in _documents) {
+      if (row['id']?.toString() == documentId) {
+        selected = Map<String, dynamic>.from(row);
+        break;
+      }
+    }
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
@@ -2758,6 +2765,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           roleCode: widget.roleCode,
           businessId: widget.businessId,
           documentId: documentId,
+          initialDocumentSummary: selected,
           isOwner: _owner,
           canManageExpenses: <String>{
             'owner',
