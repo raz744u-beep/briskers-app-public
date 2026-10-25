@@ -208,6 +208,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
         builder: (_) => JobDocumentScreen(
           businessId: widget.businessId,
           documentId: id,
+          initialDocumentSummary: Map<String, dynamic>.from(item),
           isOwner: widget.roleCode == 'owner',
           roleCode: widget.roleCode)));
       await _refreshEditedCustomerDocument(id);
