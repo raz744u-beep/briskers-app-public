@@ -104,6 +104,27 @@ void main() {
       'widget.businessId, finding, widget.jobId));')));
   });
 
+  test('Invoice first-open overlaps independent local reads without changing payment order', () {
+    final invoice = File('lib/screens/jobs/job_document_screen.dart')
+        .readAsStringSync();
+    final start = invoice.indexOf('Future<Map<String, dynamic>> _withLocalPayments(');
+    final end = invoice.indexOf('Set<String> get _queuedPaymentOperationIds', start);
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    final code = invoice.substring(start, end);
+    expect(code, contains('Future.wait<dynamic>(['));
+    expect(code, contains('_pendingMemo.project('));
+    expect(code, contains('_offlinePayments.pendingForInvoice('));
+    expect(code, contains('_offlinePayments.pendingEditsForInvoice('));
+    final idxFindings = code.indexOf('.projectInvoiceNotes(');
+    final idxReceipts = code.indexOf('OfflineInvoicePaymentLedger.projectPendingPayments(');
+    final idxEdits = code.indexOf('OfflineInvoicePaymentLedger.projectPendingEdits(');
+    expect(idxFindings, greaterThan(0));
+    expect(idxReceipts, greaterThan(idxFindings));
+    expect(idxEdits, greaterThan(idxReceipts));
+    expect(code, contains('_invoiceMileage.project('));
+  });
+
   test('Invoice Findings reuses customer photo-capable local-first UI', () {
     final invoice =
         File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
