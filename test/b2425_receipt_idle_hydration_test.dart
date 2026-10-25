@@ -1,5 +1,5 @@
 import 'package:briskers_app/core/connection_mode.dart';
-import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/local/briskers_local_database.dart' show BriskersLocalDatabase;
 import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/local_financial_cache.dart';
 import 'package:briskers_app/services/offline_receipt_metadata_sync_service.dart';
