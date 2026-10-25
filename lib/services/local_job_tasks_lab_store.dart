@@ -729,6 +729,46 @@ class LocalJobTasksLabStore {
     return jobId;
   }
 
+  /// Create a new synthetic job and its first task atomically. A failed task
+  /// insert must not leave behind an empty job after a retry/restart.
+  Future<String> createSyntheticJobWithTask({
+    required String businessId,
+    required String customerId,
+    required String vehicleId,
+    required String description,
+    required double hours,
+    String? employeeId,
+  }) async {
+    await ensureTables(db);
+    if ([businessId, customerId, vehicleId, description]
+        .any((value) => value.trim().isEmpty) ||
+        !hours.isFinite || hours < 0) {
+      throw ArgumentError('Invalid synthetic job or task');
+    }
+    final stamp = DateTime.now().microsecondsSinceEpoch;
+    final jobId = 'lab-task-job-$stamp';
+    final lineId = 'new-task-$stamp';
+    await db.transaction(() async {
+      await db.customStatement(
+        'INSERT INTO local_tasks_lab_jobs '
+        '(business_id, job_id, customer_id, vehicle_id, description, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        [businessId, jobId, customerId, vehicleId, description.trim(),
+          DateTime.now().millisecondsSinceEpoch],
+      );
+      await db.customStatement(
+        'INSERT INTO local_job_tasks_lab '
+        '(business_id, job_id, document_id, line_id, '
+        'source_description, source_invoice_hours, payroll_hours, '
+        'employee_id, status, updated_at, source_missing) '
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, 0)",
+        [businessId, jobId, recheckDocumentId, lineId, description.trim(),
+          hours, hours, employeeId, DateTime.now().millisecondsSinceEpoch],
+      );
+    });
+    return jobId;
+  }
+
   Future<List<Map<String, dynamic>>> syntheticJobs(String businessId) async {
     await ensureTables(db);
     final rows = await db.customSelect(
