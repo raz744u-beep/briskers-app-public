@@ -4376,6 +4376,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               CustomerVehicleFindingsSection(
                 businessId: widget.businessId,
                 customerId: customerId,
+                cacheScopeKey: 'finding-vehicle-$vehicleId',
                 vehicles: <Map<String, dynamic>>[
                   {'id': vehicleId},
                 ],
