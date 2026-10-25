@@ -57,6 +57,7 @@ class JobDetailScreen extends StatefulWidget {
     required this.jobId,
     required this.roleCode,
     this.initialAction,
+    this.initialJobSummary,
     this.bottomNavigationBar,
   });
 
@@ -64,6 +65,8 @@ class JobDetailScreen extends StatefulWidget {
   final String jobId;
   final String roleCode;
   final String? initialAction;
+  // Already authorized list row, shown read-only while detail verification runs.
+  final Map<String, dynamic>? initialJobSummary;
   final Widget? bottomNavigationBar;
 
   @override
@@ -5353,7 +5356,37 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
   Widget _buildContent(BuildContext context) {
     if (_loading) {
-      return Scaffold(appBar: AppBar(backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10), title: const Text('Job')), body: const Center(child: CircularProgressIndicator()));
+      final preview = widget.initialJobSummary;
+      return Scaffold(
+        appBar: AppBar(
+          backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10),
+          title: const Text('Job'),
+        ),
+        body: preview == null
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Card(child: ListTile(
+                    leading: const Icon(Icons.build_outlined,
+                        color: BriskersColors.jobs),
+                    title: Text(preview['customer_name']?.toString() ?? 'Job',
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text([
+                      preview['job_number']?.toString() ?? '',
+                      preview['vehicle_label']?.toString() ??
+                          preview['vehicle']?.toString() ?? '',
+                      preview['title']?.toString() ?? '',
+                    ].where((value) => value.isNotEmpty).join(' • ')),
+                  )),
+                  const ListTile(
+                    leading: SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2)),
+                    title: Text('Opening saved job details…'),
+                  ),
+                ],
+              ),
+      );
     }
     if (_job == null) {
       return Scaffold(appBar: AppBar(backgroundColor: BriskersColors.jobs.withValues(alpha: 0.10), title: const Text('Job')), body: Center(child: Text(_error ?? 'Job not found.')));
