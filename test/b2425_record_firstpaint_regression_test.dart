@@ -96,6 +96,7 @@ void main() {
     expect(invoice,
         contains("import '../customers/customer_vehicle_findings_section.dart';"));
     expect(code, contains('CustomerVehicleFindingsSection('));
+    expect(code, contains("cacheScopeKey: 'finding-vehicle-\$vehicleId'"));
     expect(code, contains('initiallyExpanded: true'));
     expect(code, contains('canDelete: widget.isOwner'));
     expect(code, contains('canManageCustomerActions(_navigationRoleCode)'));
@@ -108,6 +109,9 @@ void main() {
       'lib/screens/customers/customer_vehicle_findings_section.dart',
     ).readAsStringSync();
     expect(shared, contains('VehicleFindings('));
+    expect(shared, contains("widget.cacheScopeKey ?? 'findings'"));
+    expect(shared, contains('final scopedRows = rows.where((row)'));
+    expect(shared, contains('vehicleIds.contains(vehicle)'));
     expect(shared, contains('_findingThumbnail('));
     expect(shared, contains('_showPhotoGallery('));
     expect(shared, contains('final local = await cachedFindings();'));
