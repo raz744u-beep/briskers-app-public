@@ -6,6 +6,8 @@ import '../core/briskers_colors.dart';
 import '../local/local_database_provider.dart';
 import 'employee_advance_ledger.dart';
 import 'payroll_week_projection.dart';
+import 'payroll_period_projection.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'payroll_history_panel.dart';
 import '../services/local_job_tasks_lab_store.dart';
 import 'weekly_labor_review_screen.dart';
@@ -17,6 +19,7 @@ class EmployeePayrollProfileLab extends StatefulWidget {
     super.key,
     required this.employeeId,
     required this.name,
+    required this.nickname,
     required this.role,
     required this.tasks,
     required this.allocationsByLine,
@@ -28,6 +31,7 @@ class EmployeePayrollProfileLab extends StatefulWidget {
 
   final String employeeId;
   final String name;
+  final String nickname;
   final String role;
   final List<Map<String, dynamic>> tasks;
   final Map<String, List<Map<String, dynamic>>> allocationsByLine;
@@ -50,6 +54,9 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   DateTime _week = DateTime.now();
   List<Map<String, dynamic>> _drafts = const [];
   List<Map<String, dynamic>> _payments = const [];
+  List<Map<String, dynamic>> _taskPayments = const [];
+  String _payrollPeriod = 'This Week';
+  DateTimeRange? _customPeriod;
   DateTime _repaymentDate = DateTime.now();
   String _repaymentMethod = 'Payroll deduction';
   bool _advanceExpanded = false;
@@ -96,26 +103,33 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
       final drafts = await LabPayrollWeekSource.readDrafts();
       final payments = await LocalJobTasksLabStore(localDatabase)
           .payrollTestPayments(LabPayrollWeekSource.businessId);
+      await localDatabase.customStatement('''
+        CREATE TABLE IF NOT EXISTS lab_payroll_task_payments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+          document_id TEXT NOT NULL, line_id TEXT NOT NULL,
+          week_key TEXT NOT NULL, description TEXT NOT NULL,
+          hours REAL NOT NULL, cents INTEGER NOT NULL,
+          method TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
+          paid_at INTEGER NOT NULL
+        )
+      ''');
+      final linked = await localDatabase.customSelect(
+        'SELECT employee_id, week_key, hours, cents, paid_at '
+        'FROM lab_payroll_task_payments '
+        'WHERE business_id=? AND employee_id=?',
+        variables: [
+          const Variable<String>(LabPayrollWeekSource.businessId),
+          Variable<String>(widget.employeeId),
+        ],
+      ).get();
       if (!mounted) { return; }
-      setState(() { _drafts = drafts; _payments = payments; });
+      setState(() { _drafts = drafts; _payments = payments;
+        _taskPayments = linked.map((r) => Map<String, dynamic>.from(r.data)).toList(); });
     } catch (error) {
       _snack('Unable to load TEST payroll summary: ' + error.toString());
     }
   }
-
-  LabPayrollWeek _weekSummary(DateTime date) =>
-    LabPayrollWeekSource.summarize(
-      employeeId: widget.employeeId, week: date,
-      hourlyCents: widget.rateCents,
-      drafts: _drafts, payments: _payments,
-    );
-
-  int? _previousOwed(DateTime date) =>
-    LabPayrollWeekSource.previousBalance(
-      employeeId: widget.employeeId,
-      selectedWeek: date, rateCents: widget.rateCents,
-      drafts: _drafts, payments: _payments,
-    );
 
   Widget _financeMetric(String label, String value, {Color? color}) =>
     Expanded(child: Column(
@@ -383,7 +397,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     Expanded(child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(widget.name.split(' ').first, maxLines: 1, overflow: TextOverflow.ellipsis,
+        Text(widget.nickname, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
         Text(widget.role == 'mechanic' ? 'Mechanic · Active'
           : widget.role + ' · Active',
@@ -397,133 +411,140 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     ),
   ]);
 
-  Future<void> _pickWeek() async {
-    final chosen = await showDatePicker(
-      context: context,
-      initialDate: _week,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-      helpText: 'Choose any date in the payroll week',
-    );
-    if (chosen != null && mounted) {
-      setState(() { _week = chosen; });
+  Widget _tasksTab() => WeeklyLaborReviewLab(
+    employeeId: widget.employeeId,
+    employeeName: widget.nickname,
+    tasks: _employeeTasks,
+    hoursOf: _hours,
+    rateCents: widget.rateCents,
+    week: _week,
+    embedded: true,
+    onCancel: () => Navigator.of(context).pop(),
+    onWeekChanged: (date) => _week = date,
+    onPaymentSaved: _refreshPayrollData,
+  );
+
+  ({DateTime from, DateTime until}) _periodBounds() {
+    final today = DateTime.now();
+    final midnight = DateTime(today.year, today.month, today.day);
+    final monday = LabPayrollPeriodProjection.weekMonday(today);
+    final tomorrow = midnight.add(const Duration(days: 1));
+    switch (_payrollPeriod) {
+      case 'This Week':
+        return (from:monday,until:monday.add(const Duration(days: 7)));
+      case 'Last Week':
+        return (from:monday.subtract(const Duration(days: 7)),until:monday);
+      case 'Last 30 Days':
+        return (from:midnight.subtract(const Duration(days: 29)),until:tomorrow);
+      case 'Last 3 Months':
+        return (from:DateTime(today.year,today.month-2),until:tomorrow);
+      case 'Last 6 Months':
+        return (from:DateTime(today.year,today.month-5),until:tomorrow);
+      case 'Year to Date':
+        return (from:DateTime(today.year),until:tomorrow);
+      case 'All Time':
+        return (from:DateTime(2000),until:DateTime(2100));
+      case 'Custom':
+        if (_customPeriod != null) {
+          return (from:DateTime(_customPeriod!.start.year,
+            _customPeriod!.start.month,_customPeriod!.start.day),
+            until:DateTime(_customPeriod!.end.year,
+              _customPeriod!.end.month,_customPeriod!.end.day)
+              .add(const Duration(days: 1)));
+        }
+        return (from:monday,until:monday.add(const Duration(days: 7)));
+      default:
+        return (from:monday,until:monday.add(const Duration(days: 7)));
     }
   }
 
-  Widget _weekPicker() {
-    final start = _start(_week);
-    final end = _end(_week).subtract(const Duration(days: 1));
-    final current = _start(DateTime.now()) == start;
-    return Row(children: [
-      IconButton(
-        onPressed: () => setState(() {
-          _week = _week.subtract(const Duration(days: 7));
-         
-        }),
-        icon: const Icon(Icons.chevron_left)),
-      Expanded(child: InkWell(
-        onTap: _pickWeek,
-        child: Column(children: [
-          Text('${DateFormat('MMM d').format(start)} – '
-            '${DateFormat('MMM d, yyyy').format(end)}',
-            style: const TextStyle(fontWeight: FontWeight.w700)),
-          Text(current ? 'Current week' : start.isAfter(DateTime.now())
-            ? 'Future week' : 'Selected past week',
-            style: const TextStyle(color: Color(0xFF64748B),
-              fontSize: 12)),
-        ]),
-      )),
-      IconButton(
-        onPressed: () => setState(() {
-          _week = _week.add(const Duration(days: 7));
-         
-        }),
-        icon: const Icon(Icons.chevron_right)),
-      IconButton(
-        tooltip: 'Return to current week',
-        onPressed: () => setState(() {
-          _week = DateTime.now();
-         
-        }),
-        icon: const Icon(Icons.today_outlined)),
-    ]);
-  }
-
-  Widget _tasksTab() {
-    final tasks = _employeeTasks;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 11, 12, 18),
-      children: [
-        Row(children: [
-          Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
-            style: const TextStyle(fontSize: 16,
-              fontWeight: FontWeight.w800))),
-          TextButton(onPressed: _openWeeklyLabor,
-            child: const Text('Review weekly labor')),
-        ]),
-        for (final task in tasks)
-          Card(
-            color: const Color(0xFFF0F6F5),
-            margin: const EdgeInsets.only(bottom: 6),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 11, vertical: 9),
-              child: Row(children: [
-                Icon(task['status'] == 'done'
-                  ? Icons.check_circle_outline : Icons.work_outline,
-                  color: BriskersColors.jobs),
-                const SizedBox(width: 10),
-                Expanded(child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text((task['custom_description'] ??
-                      task['source_description'] ?? 'Task').toString(),
-                      maxLines: 2, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w700)),
-                    Text('J-24 · ' + task['status'].toString() +
-                      ' · assigned hours',
-                      style: const TextStyle(fontSize: 11,
-                        color: Color(0xFF64748B))),
-                  ],
-                )),
-                Text(_hours(task).toStringAsFixed(1) + 'h',
-                  style: const TextStyle(fontWeight: FontWeight.w800)),
-              ]),
-            ),
-          ),
-      ],
+  LabPayrollPeriodProjection _projectPeriod(DateTime from, DateTime until) =>
+    LabPayrollPeriodProjection.calculate(
+      employeeId: widget.employeeId,
+      from:from, until:until,
+      hourlyRateCents:widget.rateCents,
+      drafts:_drafts, payments:_payments,
+      taskPayments:_taskPayments,
     );
-  }
 
-  Future<void> _openWeeklyLabor() async {
-    final saved = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (_) => WeeklyLaborReviewLab(
-        employeeId: widget.employeeId,
-        employeeName: widget.name.split(' ').first,
-        tasks: _employeeTasks,
-        hoursOf: _hours,
-        rateCents: widget.rateCents,
-        week: _week,
-      )),
-    );
-    if (saved == true) {
-      await _refreshPayrollData();
-      _snack('Offline TEST weekly labor draft saved. No payroll posted.');
+  Future<void> _setPayrollPeriod(String? next) async {
+    if (next == null) return;
+    if (next == 'Custom') {
+      final chosen = await showDateRangePicker(
+        context: context,
+        firstDate: DateTime(2020),
+        lastDate: DateTime(2100),
+        initialDateRange: _customPeriod,
+      );
+      if (chosen != null && mounted) {
+        setState(() { _customPeriod = chosen; _payrollPeriod = next; });
+      }
+      return;
     }
+    setState(() => _payrollPeriod = next);
   }
 
   Widget _payrollTab() {
-    final current = _weekSummary(_week);
-    final prior = _previousOwed(_week);
-    final currentDue = current.balanceCents;
-    final allDue = prior == null || currentDue == null
-      ? null : prior + currentDue;
-    final weekLabel = DateFormat('MMM d, yyyy').format(_start(_week));
+    final period = _periodBounds();
+    final current = _projectPeriod(period.from, period.until);
+    final overall = _projectPeriod(DateTime(2000), DateTime(2100));
+    final previous = overall.balanceCents == null || current.balanceCents == null
+      ? null : (overall.balanceCents! - current.balanceCents!)
+        .clamp(0, 1000000000).toInt();
+    final outsideLabel = _payrollPeriod == 'This Week'
+      ? 'Previous weeks' : 'Outside period';
+    const options = [
+      'This Week', 'Last Week', 'Last 30 Days', 'Last 3 Months',
+      'Last 6 Months', 'Year to Date', 'All Time', 'Custom',
+    ];
     return ListView(
       padding: const EdgeInsets.all(11),
       children: [
+        _panel(Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              const Expanded(child: Text('Payroll summary',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
+              SizedBox(width: 166, child: DropdownButtonFormField<String>(
+                key: const Key('employee-payroll-period-dropdown'),
+                initialValue: _payrollPeriod,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 8,
+                    vertical: 9),
+                  border: OutlineInputBorder()),
+                items: options.map((label) => DropdownMenuItem(
+                  value: label, child: Text(label,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12)))).toList(),
+                onChanged: _setPayrollPeriod,
+              )),
+            ]),
+            const SizedBox(height: 12),
+            Row(children: [
+              _financeMetric('Hours',
+                current.hours?.toStringAsFixed(1) ?? '—'),
+              _financeMetric('Gross', _moneyNullable(current.grossCents)),
+              _financeMetric('Paid', _money(current.paidCents)),
+              _financeMetric('Balance', _moneyNullable(current.balanceCents),
+                color: const Color(0xFFCC6222)),
+            ]),
+            const SizedBox(height: 12),
+            Builder(builder: (tabContext) => SizedBox(
+              height: 41,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF007E78)),
+                onPressed: () =>
+                  DefaultTabController.of(tabContext).animateTo(0),
+                icon: const Icon(Icons.assignment_outlined),
+                label: const Text('Review Weekly Labor'),
+              ),
+            )),
+          ],
+        )),
         _panel(Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -532,61 +553,32 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
                 fontSize: 15, fontWeight: FontWeight.w800)),
             const SizedBox(height: 9),
             Row(children: [
-              _financeMetric('Previous weeks',
-                prior == null ? '—' : _money(prior),
+              _financeMetric(outsideLabel,
+                previous == null ? '—' : _money(previous),
                 color: const Color(0xFFCC6222)),
               const SizedBox(width: 8),
-              _financeMetric('Selected week',
-                currentDue == null ? '—' : _money(currentDue),
+              _financeMetric('Selected period',
+                current.balanceCents == null
+                  ? '—' : _money(current.balanceCents!),
                 color: const Color(0xFFCC6222)),
             ]),
             const Divider(height: 20),
             const Text('Total amount owed',
               style: TextStyle(fontSize: 12,
                 fontWeight: FontWeight.w700)),
-            Text(allDue == null ? '—' : _money(allDue),
+            Text(overall.balanceCents == null
+                ? '—' : _money(overall.balanceCents!),
               style: const TextStyle(
                 fontSize: 25, fontWeight: FontWeight.w800,
                 color: Color(0xFFC76023))),
           ],
         )),
-        _panel(Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('Selected week (' + weekLabel + ')',
-              style: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 3),
-            _weekPicker(),
-            const SizedBox(height: 8),
-            Row(children: [
-              _financeMetric('Hours',
-                current.hasDraft ? current.hours.toStringAsFixed(1) : '—'),
-              _financeMetric('Gross', _moneyNullable(current.grossCents)),
-              _financeMetric('Paid', _money(current.paidCents)),
-              _financeMetric('Balance',
-                _moneyNullable(current.balanceCents),
-                color: const Color(0xFFCC6222)),
-            ]),
-            const SizedBox(height: 12),
-            SizedBox(height: 40,
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF007E78)),
-                onPressed: _openWeeklyLabor,
-                icon: const Icon(Icons.assignment_outlined),
-                label: Text('Review Weekly Labor (' +
-                  _employeeTasks.length.toString() + ' tasks)'),
-              ),
-            ),
-          ],
-        )),
         _advancePanel(),
         const Padding(
           padding: EdgeInsets.all(7),
-          child: Text('TEST only. Weekly amounts are based on saved '
-            'local drafts and payments dated during the week, not '
-            'verified covered-week payroll. No actual payments are posted.',
+          child: Text('OFFLINE TEST: amounts are projections from '
+            'saved weekly records and dated test payments; '
+            'they do not verify production payroll posting.',
             style: TextStyle(fontSize: 11,
               color: Color(0xFF64748B))),
         ),
