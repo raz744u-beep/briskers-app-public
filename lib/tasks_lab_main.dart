@@ -9,6 +9,7 @@ import 'widgets/briskers_module_dock.dart';
 import 'local/local_database_provider.dart';
 import 'services/local_job_tasks_lab_store.dart';
 import 'tasks_lab/fixture.dart';
+import 'tasks_lab/employee_payroll_profile.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1886,6 +1887,27 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (saved == true) await _refresh();
   }
 
+  Future<void> _openEmployeeProfile(String employeeId) async {
+    final employee = BriskersLabFixture.employees.firstWhere(
+      (value) => value['id'] == employeeId,
+    );
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EmployeePayrollProfileLab(
+          employeeId: employeeId,
+          name: _employeeName(employeeId),
+          role: employee['role']!,
+          tasks: tasks,
+          allocationsByLine: allocationsByLine,
+          payments: testPayrollPayments,
+          rateCents: testHourlyRates[employeeId],
+        ),
+      ),
+    );
+    if (mounted) await _refresh();
+  }
+
   Widget _payrollPage() {
     // Rates and disbursements are LOCAL TEST values, never live payroll.
     return ListView(
@@ -1957,6 +1979,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         onPressed: () => _recordTestPayrollPayment(id),
                         icon: const Icon(Icons.payments_outlined),
                         label: const Text('Record TEST payment / advance'),
+                      ),
+                      const SizedBox(height: 6),
+                      FilledButton.tonalIcon(
+                        onPressed: () => _openEmployeeProfile(id),
+                        icon: const Icon(Icons.person_outline),
+                        label: const Text('Open Employee Profile (TEST)'),
                       ),
                     ],
                   ),
