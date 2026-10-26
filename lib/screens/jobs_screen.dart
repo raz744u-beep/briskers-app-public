@@ -748,11 +748,15 @@ class _JobsScreenState extends State<JobsScreen>
   void _applyLocalStatus(LocalJobStatusChanged event) {
     final current = _rows;
     if (!mounted || current == null ||
-        event.businessId != widget.businessId) return;
+        event.businessId != widget.businessId) {
+      return;
+    }
     final index = current.indexWhere(
       (row) => row['id']?.toString() == event.jobId,
     );
-    if (index < 0) return; // Never resurrect hidden or retired Jobs.
+    if (index < 0) {
+      return; // Never resurrect hidden or retired Jobs.
+    }
     final prior = current[index];
     final oldCode = prior['status']?.toString() ?? '';
     final newCode = event.code.toLowerCase();
@@ -780,7 +784,9 @@ class _JobsScreenState extends State<JobsScreen>
         };
       } else {
         updated.removeAt(index);
-        if (_totalCount > 0) _totalCount--;
+        if (_totalCount > 0) {
+          _totalCount--;
+        }
       }
       _rows = updated;
       if (oldCode != event.code) {
