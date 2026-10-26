@@ -44,15 +44,15 @@ void main() {
     expect(source, contains('Icons.engineering_outlined'));
 
     expect(source, contains("Text('Cancel')"));
-    expect(source, contains("Text('Save weekly hours')"));
+    expect(source, contains("Text('Verify Payment')"));
     expect(source, contains('Tasks selected'));
     expect(source, contains('Selected this week'));
     expect(source, contains('Available hours'));
-    expect(source, contains('Notes (optional)'));
+    expect(source, contains('Payment note (optional)'));
     expect(source, isNot(contains('Final amount override (TEST)')));
-    expect(source, contains('hours > 0 && hours <= widget.hoursOf(task)'));
+    expect(source, contains('lab_payroll_task_payments'));
     expect(source, contains('lab_weekly_payroll_drafts'));
-    expect(source, contains('ON CONFLICT'));
+    expect(source, contains('Payment not saved'));
     expect(source, isNot(contains('Supabase')));
     expect(source, isNot(contains('BriskersApi')));
   });
