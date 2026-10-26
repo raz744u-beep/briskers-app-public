@@ -101,7 +101,7 @@ class _LabPayrollOverviewScreenState extends State<LabPayrollOverviewScreen> {
     final day = await showDatePicker(
       context: context, initialDate: _week,
       firstDate: DateTime(2020), lastDate: DateTime(2100));
-    if (day != null && mounted) setState(() => _week = day);
+    if (day != null && mounted) { setState(() => _week = day); }
   }
 
   Widget _weekSelector() {
