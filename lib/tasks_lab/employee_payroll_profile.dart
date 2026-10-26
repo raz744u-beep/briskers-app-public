@@ -383,8 +383,9 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
         week: _week,
       )),
     );
-    if (saved == true) _snack(
-      'Offline TEST weekly labor draft saved. No payroll posted.');
+    if (saved == true) {
+      _snack('Offline TEST weekly labor draft saved. No payroll posted.');
+    }
   }
 
   Widget _payrollTab() {
