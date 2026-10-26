@@ -1002,7 +1002,9 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
 
   Future<void> _onWarrantyChecked(bool selected) async {
     if (_toggleInFlight || _busy || widget.readOnly ||
-        selected == _enabled) return;
+        selected == _enabled) {
+      return;
+    }
     setState(() => _toggleInFlight = true);
     try {
       if (selected) {
