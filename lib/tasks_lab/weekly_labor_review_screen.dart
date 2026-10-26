@@ -36,7 +36,6 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   final Map<String, double> _selected = {};
   final _notes = TextEditingController();
   final Map<String, double> _paidHours = {};
-  bool _verifiedPayment = false;
   int? _savedOverrideCents;
   bool _showTip = true;
   Timer? _tipTimer;
@@ -276,52 +275,6 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
     await _load();
   }
 
-  Future<void> _save() async {
-    if (_loading || _saving || _future) { return; }
-    final valid = <String, double>{};
-    for (final task in _eligible) {
-      final key = _id(task), hours = _selected[key];
-      if (hours != null && hours > 0 && hours <= _available(task)) {
-        valid[key] = hours;
-      }
-    }
-    setState(() => _saving = true);
-    try {
-      await _ensure();
-      await localDatabase.transaction(() async {
-        await localDatabase.customStatement(
-          'INSERT INTO lab_weekly_payroll_drafts '
-          '(business_id, employee_id, week_key, selected_json, '
-          'override_cents, updated_at) VALUES (?, ?, ?, ?, ?, ?) '
-          'ON CONFLICT(business_id,employee_id,week_key) DO UPDATE SET '
-          'selected_json=excluded.selected_json, '
-          'override_cents=excluded.override_cents, updated_at=excluded.updated_at',
-          ['briskers-tasks-test-only', widget.employeeId,
-            _weekKey(_week), jsonEncode(valid), _savedOverrideCents,
-            DateTime.now().millisecondsSinceEpoch],
-        );
-        await localDatabase.customStatement(
-          'INSERT INTO lab_weekly_labor_notes '
-          '(business_id, employee_id, week_key, note, updated_at) '
-          'VALUES (?, ?, ?, ?, ?) '
-          'ON CONFLICT(business_id,employee_id,week_key) DO UPDATE SET '
-          'note=excluded.note, updated_at=excluded.updated_at',
-          ['briskers-tasks-test-only', widget.employeeId,
-            _weekKey(_week), _notes.text.trim(),
-            DateTime.now().millisecondsSinceEpoch],
-        );
-      });
-      if (mounted) { Navigator.pop(context, true); }
-    } catch (error) {
-      if (mounted) {
-        setState(() =>
-          _error = 'Unable to save test draft: ' + error.toString());
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
   Future<void> _verifyPayment() async {
     if (_saving || _loading || _future || widget.rateCents == null ||
         widget.rateCents! <= 0 || _totalHours <= 0) { return; }
@@ -460,7 +413,6 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
             );
           }
         });
-        _verifiedPayment = true;
         if (mounted) Navigator.pop(context, true);
       } catch (error) {
         if (mounted) {
