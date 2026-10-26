@@ -12,7 +12,6 @@ import 'services/local_job_tasks_lab_store.dart';
 import 'tasks_lab/fixture.dart';
 import 'tasks_lab/employee_payroll_profile.dart';
 import 'tasks_lab/payroll_overview_screen.dart';
-import 'tasks_lab/weekly_labor_review_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1890,12 +1889,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         builder: (_) => EmployeePayrollProfileLab(
           employeeId: employeeId,
           name: fullNames[employeeId] ?? employee['name']!,
+          nickname: nicknames[employeeId] ?? employee['nickname'] ?? employee['name']!,
           role: employee['role']!,
           tasks: tasks,
           allocationsByLine: allocationsByLine,
           payments: testPayrollPayments,
           rateCents: testHourlyRates[employeeId],
-          initialTab: 1,
+          initialTab: 0,
           initialWeek: week,
         ),
       ),
@@ -1903,42 +1903,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (mounted) await _refresh();
   }
 
-  Future<void> _reviewEmployeeWeek(String employeeId, DateTime week) async {
-    final emp = BriskersLabFixture.employees.firstWhere(
-      (e) => e['id'] == employeeId);
-    final employeeTasks = tasks.where((task) {
-      final line = task['line_id']?.toString() ?? '';
-      final allocations = allocationsByLine[line] ?? const [];
-      return task['source_missing'] != 1 && (allocations.isNotEmpty
-        ? allocations.any((a) => a['employee_id'] == employeeId)
-        : task['employee_id'] == employeeId);
-    }).toList();
-    double hoursFor(Map<String, dynamic> task) {
-      final line = task['line_id']?.toString() ?? '';
-      final allocations = allocationsByLine[line] ?? const [];
-      if (allocations.isNotEmpty) {
-        final matches = allocations.where(
-          (a) => a['employee_id'] == employeeId);
-        if (matches.isEmpty) return 0;
-        final raw = matches.first['hours'];
-        return raw is num ? raw.toDouble() : 0;
-      }
-      final raw = task['payroll_hours'];
-      return raw is num ? raw.toDouble() : 0;
-    }
-    await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (_) => WeeklyLaborReviewLab(
-        employeeId: employeeId,
-        employeeName: nicknames[employeeId] ?? emp['nickname'] ?? emp['name']!,
-        tasks: employeeTasks,
-        hoursOf: hoursFor,
-        rateCents: testHourlyRates[employeeId],
-        week: week,
-      )),
-    );
-    if (mounted) await _refresh();
-  }
+  Future<void> _reviewEmployeeWeek(String employeeId, DateTime week) =>
+    _openEmployeeProfile(employeeId, week);
 
   Widget _payrollPage() => LabPayrollOverviewScreen(
     employees: BriskersLabFixture.employees,
