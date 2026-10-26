@@ -55,6 +55,23 @@ String documentListStage(Map<String, dynamic> row, {required bool estimate}) {
   }
 }
 
+/// The confirmed document lifecycle state outranks a stale receipt index.
+/// For an unclosed invoice, retain the existing receipt-based Open/Pending
+/// Close distinction without ever inventing Closed.
+String invoiceListStageWithReceipts(
+  Map<String, dynamic> row, {
+  required num receipts,
+}) {
+  final existing = documentListStage(row, estimate: false);
+  if (const {'Closed', 'Void', 'Reopened'}.contains(existing)) {
+    return existing;
+  }
+  if (invoiceNeedsPayment(row, receipts: receipts)) {
+    return 'Open';
+  }
+  return existing == 'Open' ? 'Pending Close' : existing;
+}
+
 const invoiceListStatusFilters = [
   'Open',
   'Pending Close',
@@ -182,18 +199,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if (_estimate) {
       return documentListStage(row, estimate: true);
     }
-    // A server-confirmed Closed/Void/Reopened state is authoritative.
-    // Cached receipts can be late or incomplete and MUST NOT make a closed
-    // invoice display Open for several seconds after confirmation.
-    final existing = documentListStage(row, estimate: false);
-    if (const {'Closed', 'Void', 'Reopened'}.contains(existing)) {
-      return existing;
-    }
-    if (invoiceNeedsPayment(row,
-        receipts: _receiptTotals[row['id']?.toString()] ?? 0)) {
-      return 'Open';
-    }
-    return existing == 'Open' ? 'Pending Close' : existing;
+    return invoiceListStageWithReceipts(
+      row, receipts: _receiptTotals[row['id']?.toString()] ?? 0,
+    );
   }
 
   bool _matchesStatus(Map<String, dynamic> row, String status) {
