@@ -18,6 +18,7 @@ class EmployeePayrollProfileLab extends StatefulWidget {
     required this.allocationsByLine,
     required this.payments,
     required this.rateCents,
+    this.initialTab = 0,
   });
 
   final String employeeId;
@@ -27,6 +28,7 @@ class EmployeePayrollProfileLab extends StatefulWidget {
   final Map<String, List<Map<String, dynamic>>> allocationsByLine;
   final List<Map<String, dynamic>> payments;
   final int? rateCents;
+  final int initialTab;
 
   @override
   State<EmployeePayrollProfileLab> createState() =>
@@ -724,6 +726,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   @override
   Widget build(BuildContext context) => DefaultTabController(
     length: 4,
+    initialIndex: widget.initialTab,
     child: Scaffold(
       appBar: AppBar(title: const Text('Employee Profile')),
       body: Column(children: [
