@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'job_status_local_events.dart';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
@@ -357,6 +358,16 @@ class OfflineJobAdminService {
         'status_note': note,
       });
     });
+    // The persisted local row and retry-safe outbox are committed.
+    // Repaint retained Jobs immediately; network sync is independent.
+    LocalJobStatusEvents.committed(LocalJobStatusChanged(
+      businessId: businessId,
+      jobId: jobId,
+      code: code,
+      name: name,
+      colorHex: colorHex,
+      iconKey: iconKey,
+    ));
   }
 
   Future<void> queueAssignment(
