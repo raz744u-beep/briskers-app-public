@@ -118,17 +118,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   bool _onlineReady = false;
   bool _initialActionScheduled = false;
   bool _showingLocal = false;
-  bool _cachedNoticeVisible = false;
-
-  void _showCachedDataNotice(int epoch) {
-    if (!mounted) return;
-    setState(() => _cachedNoticeVisible = true);
-    Future<void>.delayed(const Duration(seconds: 2), () {
-      if (!mounted || epoch != _loadEpoch) return;
-      setState(() => _cachedNoticeVisible = false);
-    });
-  }
-
   String? _error;
   VoidCallback? _modalRefresh;
   int _loadEpoch = 0;
@@ -407,7 +396,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           _showingLocal = true;
           _error = null;
         });
-        _showCachedDataNotice(epoch);
         _modalRefresh?.call();
         // Linked documents and expenses hydrate independently of first paint.
         // Each is fenced by the load epoch so back/forward navigation cannot
@@ -5694,30 +5682,6 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           ],
         ]),
       ),
-          if (_showingLocal && _cachedNoticeVisible)
-            Positioned(
-              top: 0,
-              left: 10,
-              right: 10,
-              child: IgnorePointer(
-                child: Material(
-                  elevation: 3,
-                  borderRadius: BorderRadius.circular(9),
-                  color: const Color(0xFFE5F2FC),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                    child: Tooltip(
-                      message: 'Showing saved job data. Offline edits sync later.',
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.cloud_off_outlined, size: 15),
-                        SizedBox(width: 5),
-                        Text('Offline', style: TextStyle(fontWeight: FontWeight.w600)),
-                      ]),
-                    ),
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
       ),
