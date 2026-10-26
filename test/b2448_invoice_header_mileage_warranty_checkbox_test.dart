@@ -51,9 +51,7 @@ void main() {
 
   test('Invoice mileage lives under vehicle and uses existing typed mileage workflows', () {
     final src = File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
-    final header = src.substring(src.indexOf('Widget _customerHeader()'),
-        src.indexOf('Widget _convertedInvoiceBanner()', src.indexOf('Widget _customerHeader()')) > 0
-            ? src.length : src.length);
+    final header = src.substring(src.indexOf('Widget _customerHeader()'));
     expect(src, contains("final mileage = _visibleInvoiceMileage;"));
     expect(src, contains("final mileageName = _usesInvoiceMileageOut ? 'Mileage Out' : 'Mileage';"));
     expect(src, contains("key: const ValueKey('invoice-header-mileage')"));
