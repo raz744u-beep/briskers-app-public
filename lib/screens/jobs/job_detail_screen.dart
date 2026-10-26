@@ -465,6 +465,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
       List<Map<String, dynamic>> employees = const [];
       List<Map<String, dynamic>> documents = const [];
+      var documentsVerified = false;
       List<Map<String, dynamic>> findings = const [];
       List<Map<String, dynamic>> jobExpenses = const [];
       Map<String, dynamic>? profitability;
@@ -484,6 +485,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             widget.businessId,
             widget.jobId,
           );
+          documentsVerified = true;
         } catch (_) {
           documents = const [];
         }
@@ -707,6 +709,35 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         _showingLocal = false;
         _error = null;
       });
+      // Fill a missing/stale local payment summary from an actual successful
+      // authorized server document response. No payment/ledger mutation.
+      // Do not persist a fabricated Paid state from a zero-amount invoice or
+      // a failed jobDocuments request.
+      if (canSeeFinancial && documentsVerified &&
+          job['status']?.toString() == 'completed') {
+        final invoices = documents.where(
+          (row) => row['kind']?.toString() == 'invoice',
+        ).toList();
+        num total = 0;
+        num paid = 0;
+        num pending = 0;
+        for (final invoice in invoices) {
+          total += num.tryParse(invoice['total_amount']?.toString() ?? '') ?? 0;
+          paid += num.tryParse(invoice['paid_amount']?.toString() ?? '') ?? 0;
+          pending += num.tryParse(invoice['pending_payment']?.toString() ?? '') ?? 0;
+        }
+        final verifiedState = invoices.isEmpty
+            ? 'invoice_needed'
+            : total <= 0 ? null
+            : paid >= total - 0.005 ? 'paid'
+            : pending > 0 && paid + pending >= total - 0.005
+                ? 'awaiting_clearance' : 'awaiting_payment';
+        if (verifiedState != null) {
+          unawaited(_localJobs.saveVerifiedPaymentState(
+            widget.businessId, widget.jobId, verifiedState,
+          ).catchError((Object _) {}));
+        }
+      }
       _modalRefresh?.call();
       _scheduleInitialAction();
       unawaited(_prefetchFindingPhotos(findings));
