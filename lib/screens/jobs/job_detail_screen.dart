@@ -1434,10 +1434,12 @@ class _JobDetailScreenState extends State<JobDetailScreen>
               .catchError((Object _) {}));
         }
       } catch (error) {
-        if (mounted) setState(() {
-          _busy = false;
-          _error = error.toString();
-        });
+        if (mounted) {
+          setState(() {
+            _busy = false;
+            _error = error.toString();
+          });
+        }
       }
       return;
     }
