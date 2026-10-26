@@ -3390,7 +3390,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                         ? _mileageOut : null,
                     onEditIn: _canEditInspection && !_busy
                         ? _editMileageIn : null,
-                    onOpenOut: _canSeeFinancial && !_busy
+                    onOpenOut: _canSeeFinancial && !_busy &&
+                            _job?['_first_frame_only'] != true
                         ? _openMileageOutInvoice : null,
                   ),
                 ),
