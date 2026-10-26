@@ -369,33 +369,9 @@ class _JobsScreenState extends State<JobsScreen>
     final mode = BriskersConnectionModeController.instance;
 
     Future<void> readSavedJobs({required bool online}) async {
-      // Start secondary counters/search lookups concurrently, but do not
-      // block the first usable Jobs list frame on all five SQLite reads.
-      final metadata = Future.wait<dynamic>([
-        _localJobs.jobStatuses(businessId),
-        _localJobs.jobCount(
-          businessId, status: status, search: query, view: view,
-        ),
-        _localJobs.jobStatusCounts(businessId, view: JobListView.all),
-        query.isEmpty
-            ? Future.value(<Map<String, dynamic>>[])
-            : _localDocuments.search(businessId, query, limit: 30),
-      ]).then<void>((results) async {
-        if (!mounted || !visibility.isCurrent(generation)) return;
-        final blocked = await visibility.blockedJobIds();
-        if (!mounted || !visibility.isCurrent(generation)) return;
-        setState(() {
-          _statuses = List<Map<String, dynamic>>.from(results[0] as List);
-          _totalCount = results[1] as int;
-          _statusCounts = Map<String, int>.from(results[2] as Map);
-          _documentMatches = _withoutJobLabels(
-            List<Map<String, dynamic>>.from(results[3] as List), blocked,
-          );
-        });
-      }).catchError((Object _) {
-        // A stale/failed count may not hide already-rendered job cards.
-      });
-      unawaited(metadata);
+      // Job rows contain the vehicle and description together. Give their
+      // SQLite read priority over counts/statuses/document search, which
+      // previously queued several other queries first on the same database.
       final rows = await _localJobs.listJobs(
         businessId,
         status: status,
@@ -414,6 +390,38 @@ class _JobsScreenState extends State<JobsScreen>
         _showingLocal = !online;
         _onlineReady = online;
         _error = null;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !visibility.isCurrent(generation)) return;
+        // Defer metadata until the painted Job cards are visible. SQLite uses
+        // a shared executor, so starting heavy counts first can add seconds of
+        // head-of-line blocking to vehicle/description first paint.
+        final metadata = Future.wait<dynamic>([
+          _localJobs.jobStatuses(businessId),
+          _localJobs.jobCount(
+            businessId, status: status, search: query, view: view,
+          ),
+          _localJobs.jobStatusCounts(businessId, view: JobListView.all),
+          query.isEmpty
+              ? Future.value(<Map<String, dynamic>>[])
+              : _localDocuments.search(businessId, query, limit: 30),
+        ]).then<void>((results) async {
+          if (!mounted || !visibility.isCurrent(generation)) return;
+          final blocked = await visibility.blockedJobIds();
+          if (!mounted || !visibility.isCurrent(generation)) return;
+          setState(() {
+            _statuses = List<Map<String, dynamic>>.from(results[0] as List);
+            _totalCount = results[1] as int;
+            _statusCounts = Map<String, int>.from(results[2] as Map);
+            _documentMatches = _withoutJobLabels(
+              List<Map<String, dynamic>>.from(results[3] as List), blocked,
+            );
+          });
+        }).catchError((Object _) {
+          // A stale/failed count may not hide already-rendered job cards.
+        });
+        unawaited(metadata);
+
       });
     }
 
@@ -434,6 +442,13 @@ class _JobsScreenState extends State<JobsScreen>
     }
     if (!mounted || !visibility.isCurrent(generation)) return;
     if (mode.forceOffline || !refreshRemote) return;
+
+    // Let the just-updated local cards reach the display before starting
+    // another sync pull and its SQLite writes. Remote data stays best effort.
+    if (localAvailable) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !visibility.isCurrent(generation)) return;
+    }
 
     // Do not hold the Jobs list/navigation on remote statuses or replay.
     // Retain the already-painted local rows during a failed background pull.
