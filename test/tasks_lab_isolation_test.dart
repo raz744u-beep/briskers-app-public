@@ -61,7 +61,7 @@ void main() {
     expect(main, contains('_addRecheckWork'));
     expect(main, contains('onReviewWeek: _reviewEmployeeWeek'));
     expect(main, contains('LabPayrollOverviewScreen('));
-    expect(main, contains('initialTab: 1'));
+    expect(main, contains('initialTab: 0'));
     expect(main, contains('store.payrollTestPayments('));
     expect(main, contains('store.recordLabPayrollPayment('));
     expect(main, contains('earnedPayrollPreviewHours'));
