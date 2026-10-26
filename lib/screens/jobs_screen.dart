@@ -868,6 +868,10 @@ class _JobsScreenState extends State<JobsScreen>
       }
     } finally {
       _pendingStatusIds.remove(jobId);
+      // Restore the action chevron immediately after the queued write.
+      if (mounted) {
+        setState(() {});
+      }
     }
   }
 
