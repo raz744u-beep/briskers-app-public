@@ -59,8 +59,8 @@ void main() {
     expect(main, isNot(contains('Assigned hours cannot exceed')));
 
     expect(main, contains('_addRecheckWork'));
-    expect(main, contains('Simulate payment'));
-    expect(main, contains('Review Weekly Labor'));
+    expect(main, contains('onReviewWeek: _reviewEmployeeWeek'));
+    expect(main, contains('LabPayrollOverviewScreen('));
     expect(main, contains('initialTab: 1'));
     expect(main, contains('store.payrollTestPayments('));
     expect(main, contains('store.recordLabPayrollPayment('));
@@ -136,7 +136,7 @@ void main() {
     expect(main, contains("page == 0 ? null : AppBar("));
     expect(main, contains('_verticalMenu(int index)'));
     expect(main, contains('Edit employee names'));
-    expect(main, contains("for (final employee in BriskersLabFixture.employees)"));
+    expect(main, contains('employees: BriskersLabFixture.employees'));
     expect(main, isNot(contains('_navRail()')));
     final dock = File('lib/widgets/briskers_module_dock.dart')
       .readAsStringSync();
