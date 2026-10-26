@@ -21,7 +21,9 @@ class VerifiedInvoiceCloseEvents {
   static Stream<VerifiedInvoiceClosed> get changes => _events.stream;
 
   static void serverConfirmed(VerifiedInvoiceClosed event) {
-    if (event.businessId.isEmpty || event.invoiceId.isEmpty) return;
+    if (event.businessId.isEmpty || event.invoiceId.isEmpty) {
+      return;
+    }
     _events.add(event);
   }
 }
