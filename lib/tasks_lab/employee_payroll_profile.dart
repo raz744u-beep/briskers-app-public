@@ -614,7 +614,8 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
           ? end : _customRange!.end.add(const Duration(days: 1));
         break;
       default:
-        start = DateTime(today.year);    }
+        start = DateTime(today.year);
+    }
     return widget.payments.where((p) {
       if (p['employee_id'] != widget.employeeId || p['kind'] != 'pay') {
         return false;
