@@ -1521,43 +1521,63 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
     if (selectedStatus == null) return;
 
+    final original = Map<String, dynamic>.from(_job!);
+    final nextName = selectedStatus['name']?.toString() ?? code;
+    final nextColor = selectedStatus['color_hex']?.toString();
+    final nextIcon = selectedStatus['icon_key']?.toString();
+
+    // The Job header reflects the owner's selection immediately, while
+    // SQLite/outbox durability is established before background replay.
     setState(() {
       _busy = true;
       _error = null;
+      _job = <String, dynamic>{
+        ..._job!,
+        'status': code,
+        'status_name': nextName,
+        'status_color': nextColor,
+        'status_icon': nextIcon,
+      };
     });
     try {
       await _offlineJobAdmin.queueStatus(
         widget.businessId,
         widget.jobId,
         code: code,
-        name: selectedStatus['name']?.toString() ?? code,
-        colorHex: selectedStatus['color_hex']?.toString(),
-        iconKey: selectedStatus['icon_key']?.toString(),
+        name: nextName,
+        colorHex: nextColor,
+        iconKey: nextIcon,
         note: note,
       );
+      if (!mounted) return;
+      setState(() => _busy = false);
+      // Do not await HTTP, invoice closing or a full Job Detail graph to
+      // repaint the completed badge and remove this Job from Open.
       if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {}
+        unawaited(() async {
+          try {
+            await _offlineJobAdmin.flush(widget.businessId);
+            if (code == 'completed' && widget.roleCode == 'owner') {
+              await OwnerInvoiceAutoCloseService().closeEligible(
+                businessId: widget.businessId,
+                jobId: widget.jobId,
+                isOwner: true,
+              );
+            }
+            if (mounted && !_contentBlocked) unawaited(_load());
+          } catch (_) {
+            // The durable local status + outbox still own the UI.
+          }
+        }());
       }
-      if (code == 'completed' && widget.roleCode == 'owner' &&
-          !BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await OwnerInvoiceAutoCloseService().closeEligible(
-            businessId: widget.businessId,
-            jobId: widget.jobId,
-            isOwner: true,
-          );
-        } catch (_) {
-          // A failed close does not undo job completion or payment history.
-          // The owner may review the invoice later.
-        }
-      }
-      if (mounted) await _load();
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _job = original;
+          _error = error.toString();
+          _busy = false;
+        });
+      }
     }
   }
 
