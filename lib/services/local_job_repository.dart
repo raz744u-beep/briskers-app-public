@@ -923,6 +923,7 @@ class LocalJobRepository {
       'vehicle_id': row.readNullable<String>('vehicle_id'),
       'vehicle_vin': row.readNullable<String>('vehicle_vin'),
       'vehicle': row.readNullable<String>('vehicle_label'),
+      'odometer_in': row.data['odometer_in'],
       'planned_hours': row.data['planned_hours'],
       'assigned_employee': row.readNullable<String>('assigned_employee_name'),
       'assigned_employee_id': row.readNullable<String>('assigned_employee_id'),
