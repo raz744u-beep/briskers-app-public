@@ -330,7 +330,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     }
     if (!_estimate) {
       _invoiceCloseEvents = VerifiedInvoiceCloseEvents.changes.listen((event) {
-        if (!mounted || event.businessId != widget.businessId) {
+        if (!mounted || _estimate ||
+            event.businessId != widget.businessId) {
           return;
         }
         // Do not create a card for a different customer or a hidden invoice:
