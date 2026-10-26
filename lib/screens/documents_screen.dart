@@ -1341,8 +1341,20 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           isOwner: widget.isOwner,
           action: () => _api.closeInvoice(widget.businessId, id),
         );
+        // The backend acknowledged this exact close. Update the cached
+        // index and live list now; don't wait for the full invoice query.
+        try {
+          await _localDocuments.recordServerConfirmedClosed(
+            widget.businessId, id,
+          );
+        } catch (_) {
+          // Server confirmation remains valid; cache refresh can retry.
+        }
+        VerifiedInvoiceCloseEvents.serverConfirmed(VerifiedInvoiceClosed(
+          businessId: widget.businessId, invoiceId: id,
+        ));
       }
-      await _load();
+      unawaited(_load());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
