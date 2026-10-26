@@ -1891,6 +1891,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           allocationsByLine: allocationsByLine,
           payments: testPayrollPayments,
           rateCents: testHourlyRates[employeeId],
+          initialTab: 1,
         ),
       ),
     );
@@ -1898,114 +1899,120 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   Widget _payrollPage() {
-    // Rates and disbursements are LOCAL TEST values, never live payroll.
+    // TEST-only overview; no paid-once ledger or production payroll.
     return ListView(
-      padding: const EdgeInsets.only(bottom: 25),
+      padding: const EdgeInsets.fromLTRB(10, 12, 10, 24),
       children: [
-        _sectionHeader('Payroll TEST ledger',
-          subtitle: 'Original + recheck hours · Simulation only'),
+        Row(children: [
+          const Icon(Icons.account_balance_wallet_outlined,
+            color: BriskersColors.jobs, size: 24),
+          const SizedBox(width: 9),
+          const Expanded(child: Text('Payroll',
+            style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800))),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(12)),
+            child: const Text('OFFLINE TEST',
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold,
+                color: Color(0xFF886329))),
+          ),
+        ]),
         const Padding(
-          padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Text('Earned hours stay after reopening. Test payments '
-            'and advances reduce the balance but never create real '
-            'payments. A negative balance is credit toward future work.',
+          padding: EdgeInsets.only(top: 6, bottom: 12),
+          child: Text('Select an employee to review their week, tasks, '
+            'draft payroll, and reports. This app never posts real payments.',
             style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
         ),
         for (final employee in BriskersLabFixture.employees)
-          if (employee['role'] != 'secretary')
-            Builder(builder: (_) {
-              final id = employee['id']!;
-              final hours = earnedPayrollPreviewHours[id] ?? 0;
-              final rate = testHourlyRates[id];
-              final earnedCents = rate == null
-                ? null : (hours * rate).round();
-              final payments = testPayrollPayments.where(
-                (payment) => payment['employee_id'] == id).toList();
-              final paidCents = payments.fold<int>(0,
-                (sum, payment) => sum + (payment['cents'] as int));
-              final owing = (earnedCents ?? 0) - paidCents;
-              return Card(
-                margin: const EdgeInsets.fromLTRB(10, 4, 10, 5),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(children: [
-                        Expanded(child: Text(_employeeName(id),
-                          style: const TextStyle(
-                            fontSize: 17, fontWeight: FontWeight.w700))),
-                        Text('${hours.toStringAsFixed(1)} hrs',
-                          style: const TextStyle(fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            color: BriskersColors.jobs)),
-                      ]),
-                      const SizedBox(height: 4),
-                      Row(children: [
-                        Expanded(child: Text(rate == null
-                          ? 'Test rate not set'
-                          : 'Rate ${_labMoney(rate)}/hr · '
-                            'Earned ${_labMoney(earnedCents!)}',
-                          style: const TextStyle(fontSize: 12.5))),
-                        TextButton.icon(
-                          onPressed: () => _setTestPayrollRate(id),
-                          icon: const Icon(Icons.edit_outlined, size: 15),
-                          label: const Text('Rate'),
-                        ),
-                      ]),
-                      Text('Recorded test payments: ${_labMoney(paidCents)}',
-                        style: const TextStyle(fontSize: 12.5)),
-                      if (rate != null)
-                        Text(owing >= 0
-                          ? 'Remaining to pay: ${_labMoney(owing)}'
-                          : 'Advance / credit: ${_labMoney(-owing)}',
-                          style: TextStyle(fontWeight: FontWeight.w800,
-                            color: owing > 0
-                              ? BriskersColors.jobs
-                              : const Color(0xFF546E7A))),
-                      const SizedBox(height: 6),
-                      OutlinedButton.icon(
-                        onPressed: () => _recordTestPayrollPayment(id),
-                        icon: const Icon(Icons.payments_outlined),
-                        label: const Text('Record TEST payment / advance'),
+          Builder(builder: (_) {
+            final id = employee['id']!;
+            final hours = earnedPayrollPreviewHours[id] ?? 0;
+            final rate = testHourlyRates[id];
+            final earned = rate == null ? null : (hours * rate).round();
+            final rows = testPayrollPayments.where(
+              (payment) => payment['employee_id'] == id).toList();
+            final paid = rows.fold<int>(0, (sum, payment) =>
+              sum + (payment['cents'] as int));
+            return Card(
+              margin: const EdgeInsets.only(bottom: 7),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(children: [
+                      CircleAvatar(
+                        radius: 21,
+                        backgroundColor: const Color(0xFFDDECFD),
+                        child: Icon(employee['role'] == 'secretary'
+                          ? Icons.headset_mic_outlined
+                          : employee['role'] == 'owner'
+                            ? Icons.shield_outlined
+                            : Icons.build_outlined,
+                          color: BriskersColors.jobs),
                       ),
-                      const SizedBox(height: 6),
-                      FilledButton.tonalIcon(
+                      const SizedBox(width: 10),
+                      Expanded(child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_employeeName(id),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800, fontSize: 17)),
+                          Text(employee['role'] == 'secretary'
+                            ? 'Secretary' : employee['role'] == 'owner'
+                              ? 'Owner' : 'Mechanic',
+                            style: const TextStyle(
+                              fontSize: 12, color: Color(0xFF64748B))),
+                        ],
+                      )),
+                      IconButton(
+                        tooltip: 'Open employee payroll',
                         onPressed: () => _openEmployeeProfile(id),
-                        icon: const Icon(Icons.person_outline),
-                        label: const Text('Open Employee Profile (TEST)'),
-                      ),
-                    ],
-                  ),
+                        icon: const Icon(Icons.chevron_right)),
+                    ]),
+                    const SizedBox(height: 7),
+                    Row(children: [
+                      Expanded(child: Text(
+                        'Earned (TEST) ' +
+                          (earned == null ? '—' : _labMoney(earned)),
+                        style: const TextStyle(fontWeight: FontWeight.w700))),
+                      Text(hours.toStringAsFixed(1) + ' hrs',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: BriskersColors.jobs)),
+                    ]),
+                    const SizedBox(height: 4),
+                    Text('Recorded TEST payments ' + _labMoney(paid),
+                      style: const TextStyle(
+                        color: Color(0xFF64748B), fontSize: 12)),
+                    const SizedBox(height: 9),
+                    OutlinedButton.icon(
+                      onPressed: () => _openEmployeeProfile(id),
+                      icon: const Icon(Icons.checklist, size: 18),
+                      label: const Text('Review Weekly Labor'),
+                    ),
+                    Row(children: [
+                      TextButton(
+                        onPressed: () => _setTestPayrollRate(id),
+                        child: const Text('Set test rate')),
+                      const SizedBox(width: 5),
+                      TextButton(
+                        onPressed: () => _recordTestPayrollPayment(id),
+                        child: const Text('Simulate payment')),
+                    ]),
+                  ],
                 ),
-              );
-            }),
-        if (testPayrollPayments.isNotEmpty) ...[
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
-            child: Text('TEST payment history · Read-only',
-              style: TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w800))),
-          for (final payment in testPayrollPayments)
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.receipt_long_outlined,
-                color: BriskersColors.jobs),
-              title: Text('${_employeeName(payment['employee_id'].toString())} '
-                '· ${_labMoney(payment['cents'] as int)}'),
-              subtitle: Text(
-                "${payment['kind'] == 'advance' ? 'Advance' : 'Payment'} "
-                '· ${payment['method']} · '
-                "${DateFormat('MMM d, yyyy').format(DateTime.fromMillisecondsSinceEpoch(payment['paid_at'] as int))}"
-                "${(payment['note']?.toString() ?? '').isEmpty ? '' : ' · ${payment['note']}'}"),
-            ),
-        ],
+              ),
+            );
+          }),
         const Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('This test ledger cannot pay mechanics, issue checks, '
-            'or update actual shop expenses. Weekly paid-task selection '
-            'and production payroll approval are not connected.',
-            style: TextStyle(fontSize: 12,
+          padding: EdgeInsets.all(8),
+          child: Text('These figures are lifetime TEST snapshots, not '
+            'week-filtered shop payroll. Open an employee to select a '
+            'specific week. Real payment reconciliation is disabled.',
+            style: TextStyle(fontSize: 11,
               color: Color(0xFF64748B))),
         ),
       ],
