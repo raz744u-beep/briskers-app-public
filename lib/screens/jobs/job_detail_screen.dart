@@ -161,9 +161,12 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }
 
   bool get _canQuickAdmin =>
-      widget.roleCode == 'owner' ||
-      widget.roleCode == 'manager' ||
-      widget.roleCode == 'office';
+      // A read-only selected row paints immediately but cannot authorize any
+      // edits until the verified on-device Job Detail graph is loaded.
+      _job?['_first_frame_only'] != true &&
+      (widget.roleCode == 'owner' ||
+       widget.roleCode == 'manager' ||
+       widget.roleCode == 'office');
 
   bool get _canManage {
     if (!_onlineReady) return false;
