@@ -2226,12 +2226,25 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               eligibleMinutes: choice.eligible,
             ));
           }
-          return AlertDialog(
-            title: Text('Weekly task hours · ${_employeeName(employeeId)}'),
-            content: SizedBox(
-              width: 460,
-              height: MediaQuery.sizeOf(dialogContext).height * 0.55,
-              child: ListView(children: [
+          return Dialog.fullscreen(
+            child: Scaffold(
+              appBar: AppBar(
+                title: Text('Weekly hours · ${_employeeName(employeeId)}',
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+                leading: IconButton(
+                  tooltip: 'Close weekly payroll',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(dialogContext),
+                ),
+              ),
+              body: SafeArea(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+                  children: [
+                    const Text('Choose tasks and hours for this payroll week.',
+                      style: TextStyle(fontSize: 15,
+                        color: Color(0xFF334155))),
+                    const SizedBox(height: 14),
                 OutlinedButton.icon(
                   onPressed: () async {
                     final day = await showDatePicker(
@@ -2250,9 +2263,26 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   label: Text('Week of $weekText'),
                 ),
                 if (locked)
-                  const Text('This week is Approved or Paid and cannot be '
-                    'edited. Choose another week or make an audited correction.',
-                    style: TextStyle(color: Colors.deepOrange)),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.lock_outline, size: 20,
+                          color: Color(0xFF9A3412)),
+                        SizedBox(width: 10),
+                        Expanded(child: Text(
+                          'Approved or Paid · read-only. You can review '
+                          'every task and its saved hours here. Choose '
+                          'another week or make an audited correction to '
+                          'change payroll.',
+                          style: TextStyle(fontSize: 15, height: 1.35,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF9A3412)),
+                        )),
+                      ],
+                    ),
+                  ),
                 if (choices.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(12),
@@ -2263,9 +2293,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   CheckboxListTile(
                     key: const ValueKey('weekly-select-all'),
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Select all'),
+                    title: const Text('Select all',
+                      style: TextStyle(color: Color(0xFF17212B),
+                        fontSize: 16, fontWeight: FontWeight.w700)),
                     subtitle: Text('${selectedKeys.length} of '
-                      '${choices.length} tasks selected'),
+                      '${choices.length} tasks selected',
+                      style: const TextStyle(color: Color(0xFF475569),
+                        fontSize: 13)),
                     value: selectedKeys.length == choices.length,
                     onChanged: locked ? null : (checked) => update(() {
                       selectedKeys.clear();
@@ -2280,13 +2314,16 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     key: ValueKey('weekly-select-${_allocationKey(choice.task)}'),
                     contentPadding: EdgeInsets.zero,
                     title: Text(_description(choice.task),
-                      style: const TextStyle(fontSize: 14)),
+                      style: const TextStyle(fontSize: 16, height: 1.25,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF17212B))),
                     subtitle: Text(
                       '${choice.task['job_id']} · '
                       '${(choice.available / 60).toStringAsFixed(2)} hrs '
                       'available · ${(choice.current / 60).toStringAsFixed(2)} '
                       'hrs saved for this week',
-                      style: const TextStyle(fontSize: 12)),
+                      style: const TextStyle(fontSize: 13, height: 1.3,
+                        color: Color(0xFF475569))),
                     value: selectedKeys.contains(_allocationKey(choice.task)),
                     onChanged: locked ? null : (checked) => update(() {
                       final key = _allocationKey(choice.task);
@@ -2299,18 +2336,29 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   ),
                   if (selectedKeys.contains(_allocationKey(choice.task)))
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(40, 0, 8, 12),
-                      child: WeeklyHoursTextField(
-                        key: ValueKey('weekly-hours-${DateFormat('yyyy-MM-dd').format(selectedWeek)}-${_allocationKey(choice.task)}'),
-                        initialHours: hourInputs[_allocationKey(choice.task)] ?? '',
-                        enabled: !locked,
-                        onChanged: (value) => update(() {
-                          hourInputs[_allocationKey(choice.task)] = value;
-                        }),
-                      ),
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                      child: locked
+                        ? InputDecorator(
+                            decoration: const InputDecoration(
+                              labelText: 'Hours saved this week · read-only',
+                              border: OutlineInputBorder()),
+                            child: Text(
+                              hourInputs[_allocationKey(choice.task)] ?? '—',
+                              style: const TextStyle(fontSize: 18,
+                                color: Color(0xFF17212B),
+                                fontWeight: FontWeight.w700)),
+                          )
+                        : WeeklyHoursTextField(
+                            key: ValueKey('weekly-hours-${DateFormat('yyyy-MM-dd').format(selectedWeek)}-${_allocationKey(choice.task)}'),
+                            initialHours: hourInputs[_allocationKey(choice.task)] ?? '',
+                            enabled: true,
+                            onChanged: (value) => update(() {
+                              hourInputs[_allocationKey(choice.task)] = value;
+                            }),
+                          ),
                     ),
                 ],
-                const SizedBox(height: 6),
+                const SizedBox(height: 12),
                 Text('Selected this week: '
                   '${(selectedMinutes / 60).toStringAsFixed(2)} hrs',
                   style: const TextStyle(fontWeight: FontWeight.w800)),
@@ -2321,18 +2369,27 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 const Text('Saving this selection does not pay anyone. '
                   'You can revise it until weekly payroll is approved.',
                   style: TextStyle(fontSize: 12)),
-              ]),
+                  ],
+                ),
+              ),
+              bottomNavigationBar: SafeArea(
+                minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: Row(children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('Cancel')),
+                  const SizedBox(width: 12),
+                  Expanded(child: FilledButton(
+                    onPressed: locked || !valid ? null : () =>
+                      Navigator.pop(dialogContext,
+                        (week: selectedWeek, selections: selections)),
+                    child: Text(locked
+                      ? 'Approved / Paid · Read-only'
+                      : 'Save weekly hours · TEST'),
+                  )),
+                ]),
+              ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancel')),
-              FilledButton(
-                onPressed: locked || !valid ? null : () =>
-                  Navigator.pop(dialogContext,
-                    (week: selectedWeek, selections: selections)),
-                child: const Text('Save weekly hours · TEST')),
-            ],
           );
         },
       ),
