@@ -2229,8 +2229,21 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           return Dialog.fullscreen(
             child: Scaffold(
               appBar: AppBar(
-                title: Text('Weekly hours · ${_employeeName(employeeId)}',
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
+                title: Row(children: [
+                  const Expanded(child: Text('Weekly labor times',
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 18,
+                      fontWeight: FontWeight.w400))),
+                  const Icon(Icons.engineering_outlined,
+                    color: BriskersColors.jobs, size: 23),
+                  const SizedBox(width: 8),
+                  Container(width: 1, height: 25,
+                    color: const Color(0xFFCBD5E1)),
+                  const SizedBox(width: 8),
+                  Text(_employeeName(employeeId),
+                    style: const TextStyle(fontSize: 19,
+                      fontWeight: FontWeight.w800)),
+                ]),
                 leading: IconButton(
                   tooltip: 'Close weekly payroll',
                   icon: const Icon(Icons.close),
@@ -2241,10 +2254,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
                   children: [
-                    const Text('Choose tasks and hours for this payroll week.',
-                      style: TextStyle(fontSize: 15,
-                        color: Color(0xFF334155))),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 2),
                 OutlinedButton.icon(
                   onPressed: () async {
                     final day = await showDatePicker(
@@ -2260,7 +2270,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     });
                   },
                   icon: const Icon(Icons.calendar_month_outlined),
-                  label: Text('Week of $weekText'),
+                  label: Text('Week of $weekText',
+                    style: const TextStyle(fontSize: 19,
+                      fontWeight: FontWeight.w700)),
                 ),
                 if (locked)
                   const Padding(
@@ -2268,7 +2280,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.lock_outline, size: 20,
+                        Icon(Icons.lock_outline, size: 23,
                           color: Color(0xFF9A3412)),
                         SizedBox(width: 10),
                         Expanded(child: Text(
@@ -2276,7 +2288,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                           'every task and its saved hours here. Choose '
                           'another week or make an audited correction to '
                           'change payroll.',
-                          style: TextStyle(fontSize: 15, height: 1.35,
+                          style: TextStyle(fontSize: 16, height: 1.3,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF9A3412)),
                         )),
@@ -2359,9 +2371,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     ),
                 ],
                 const SizedBox(height: 12),
-                Text('Selected this week: '
-                  '${(selectedMinutes / 60).toStringAsFixed(2)} hrs',
-                  style: const TextStyle(fontWeight: FontWeight.w800)),
                 if (!valid)
                   const Text('Enter positive hours not exceeding the '
                     'available amount for each selected task.',
@@ -2373,20 +2382,58 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 ),
               ),
               bottomNavigationBar: SafeArea(
-                minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: Row(children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(dialogContext),
-                    child: const Text('Cancel')),
-                  const SizedBox(width: 12),
-                  Expanded(child: FilledButton(
-                    onPressed: locked || !valid ? null : () =>
-                      Navigator.pop(dialogContext,
-                        (week: selectedWeek, selections: selections)),
-                    child: Text(locked
-                      ? 'Approved / Paid · Read-only'
-                      : 'Save weekly hours · TEST'),
-                  )),
+                minimum: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Container(
+                    key: const ValueKey('weekly-sticky-summary'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0F6F7),
+                      borderRadius: BorderRadius.circular(12)),
+                    child: Row(children: [
+                      Expanded(child: Column(children: [
+                        const Text('Tasks selected',
+                          style: TextStyle(fontSize: 11,
+                            color: Color(0xFF475569))),
+                        Text('${selectedKeys.length} of ${choices.length}',
+                          style: const TextStyle(fontSize: 18,
+                            fontWeight: FontWeight.w800)),
+                      ])),
+                      Expanded(child: Column(children: [
+                        const Text('Selected this week',
+                          style: TextStyle(fontSize: 11,
+                            color: Color(0xFF475569))),
+                        Text('${(selectedMinutes / 60).toStringAsFixed(2)} hrs',
+                          style: const TextStyle(fontSize: 18,
+                            color: BriskersColors.jobs,
+                            fontWeight: FontWeight.w800)),
+                      ])),
+                      Expanded(child: Column(children: [
+                        const Text('Available hours',
+                          style: TextStyle(fontSize: 11,
+                            color: Color(0xFF475569))),
+                        Text('${(choices.fold<int>(0,
+                          (sum, choice) => sum + choice.available) / 60).toStringAsFixed(2)} hrs',
+                          style: const TextStyle(fontSize: 18,
+                            fontWeight: FontWeight.w800)),
+                      ])),
+                    ]),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(child: OutlinedButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('Cancel'))),
+                    const SizedBox(width: 8),
+                    Expanded(child: FilledButton(
+                      onPressed: locked || !valid ? null : () =>
+                        Navigator.pop(dialogContext,
+                          (week: selectedWeek, selections: selections)),
+                      child: Text(locked ? 'Read-only'
+                        : 'Save weekly hours · TEST'),
+                    )),
+                  ]),
                 ]),
               ),
             ),
