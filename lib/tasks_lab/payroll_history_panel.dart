@@ -1,3 +1,4 @@
+// ignore_for_file: prefer_const_constructors
 // ignore_for_file: prefer_interpolation_to_compose_strings
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
