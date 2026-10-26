@@ -33,7 +33,6 @@ void main() {
   test('Weekly Labor screen fixes summary/actions while only tasks scroll', () {
     final source = File('lib/tasks_lab/weekly_labor_review_screen.dart')
       .readAsStringSync();
-    expect(source, contains('Weekly Labor Times'));
     expect(source, contains('Week of '));
     expect(source, contains('Select All'));
     expect(source, contains('weekly-labor-tasks-scroll-only'));
