@@ -21,14 +21,17 @@ void main() {
         lessThan(read.indexOf('final rows = await _localJobs.listJobs(')));
   });
 
-  test('Saved Jobs banner is not confused with Auto cached-first paint', () {
+  test('Jobs offline state uses global status without repeat list banner', () {
     final src = File('lib/screens/jobs_screen.dart').readAsStringSync();
-    expect(src, contains('if (_showingLocal &&'));
-    expect(src, contains('instance.forceOffline ||'));
-    expect(src, contains('_refreshFailed'));
-    expect(src, contains('Offline · showing saved jobs'));
-    expect(src, contains('Showing saved jobs · refresh needs attention'));
-    expect(src, isNot(contains('changes sync when connected')));
+    final header =
+        File('lib/widgets/connection_header_toggle.dart').readAsStringSync();
+    expect(src, contains('await readSavedJobs(online: !refreshRemote && _onlineReady)'));
+    expect(src, contains('if (_showingLocal || (_rows?.isNotEmpty ?? false))'));
+    expect(src, isNot(contains('_refreshFailed')));
+    expect(src, isNot(contains('Offline · showing saved jobs')));
+    expect(src, isNot(contains('Showing saved jobs · refresh needs attention')));
+    expect(header, contains('Sync needs attention'));
+    expect(header, contains('Last sync:'));
   });
 
   test('Expenses confirms cloud icon only from an actual server ID', () {

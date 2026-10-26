@@ -23,7 +23,9 @@ void main() {
     final job = File('lib/screens/jobs/job_detail_screen.dart')
         .readAsStringSync();
     expect(customer, contains('Using saved local records. Edits sync on reconnection.'));
-    expect(job, contains('Showing saved job data. Offline edits sync later.'));
+    expect(job, contains('_showingLocal = true;'));
+    expect(job, isNot(contains('_cachedNoticeVisible')));
+    expect(job, isNot(contains('Showing saved job data. Offline edits sync later.')));
     expect(customer, isNot(contains('Showing saved customer and vehicle data •')));
     expect(job, isNot(contains('Showing saved job data • offline-capable work')));
   });

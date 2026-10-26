@@ -283,9 +283,9 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       setState(() {
         _detail = detail;
         _detailSource = 'server';
-        // Keep in-flight and completed local-image lookups when metadata
-        // refreshes. The per-attachment key already changes for new files.
-        _attachmentUrls.clear();
+        // A metadata refresh must not invalidate in-flight thumbnail URLs.
+        // Each URL is already keyed by storage bucket + object key; a newly
+        // uploaded/replaced photo naturally uses a different key.
         _hasAuthoritativeDetail = true;
         _loading = false;
         _error = null;
@@ -331,27 +331,29 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
   ) async {
     try {
       if (!mounted || !_isCurrent(generation)) return;
+      // Warm the actual receipt files immediately, in parallel with saving
+      // metadata to SQLite. Previously the image download could not begin
+      // until the detail save finished, adding a visible delay.
+      final attachments = List<dynamic>.from(
+        rawDetail['attachments'] ?? const [],
+      ).whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+      if (!BriskersConnectionModeController.instance.forceOffline &&
+          attachments.isNotEmpty) {
+        unawaited(_prefetchLocalAttachments(attachments, generation)
+            .catchError((Object _) {}));
+      }
       await _localFinancial.saveTransactionDetail(
         businessId,
         transactionId,
         rawDetail,
       );
-      if (!_isCurrent(generation) ||
-          BriskersConnectionModeController.instance.forceOffline) {
-        return;
-      }
-      await _prefetchLocalAttachments(
-        List<dynamic>.from(rawDetail['attachments'] ?? const [])
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList(),
-        generation,
-      );
-      if (_isCurrent(generation) && _attachmentFiles.isNotEmpty) {
-        setState(_attachmentFiles.clear);
-      }
+      // Do not clear _attachmentFiles after warming. Active thumbnails should
+      // never be forced to re-check the same cache or lose an already-painted
+      // image simply because background photo work finished.
     } catch (_) {
-      // Receipt/cache warming must not block the visible transaction.
+      // Saving a local copy or warming receipt thumbnails is best-effort.
     }
   }
 
