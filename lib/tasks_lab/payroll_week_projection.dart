@@ -21,7 +21,7 @@ class LabPayrollWeek {
   final int paidCents;
   final bool hasDraft;
   int? get balanceCents => grossCents == null
-      ? null : (grossCents! - paidCents).clamp(0, 1000000000);
+      ? null : (grossCents! - paidCents).clamp(0, 1000000000).toInt();
   bool get isPaid => hasDraft && grossCents != null &&
       grossCents! > 0 && paidCents >= grossCents!;
   bool get isPartial => hasDraft && paidCents > 0 &&
