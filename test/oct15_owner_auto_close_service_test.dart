@@ -4,6 +4,7 @@ import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/briskers_api.dart';
 import 'package:briskers_app/services/invoice_finalization_guard.dart';
 import 'package:briskers_app/services/owner_invoice_auto_close_service.dart';
+import 'package:briskers_app/services/local_document_repository.dart';
 
 class _Api extends BriskersApi {
   Map<String,dynamic> job = {'status':'completed'};
@@ -51,7 +52,9 @@ void main() {
   test('secretary cannot close any paid invoice',() async {
     final db=BriskersLocalDatabase(NativeDatabase.memory());
     final api=_Api()..entries['inv'] = _invoice('job');
-    final service=OwnerInvoiceAutoCloseService(api:api,guard:_Guard(db));
+    final service=OwnerInvoiceAutoCloseService(
+      api:api,guard:_Guard(db),
+      localDocuments:LocalDocumentRepository(database:db));
     expect(await service.closeEligible(
       businessId:'shop',jobId:'job',isOwner:false),0);
     expect(api.closed,isEmpty);
@@ -67,7 +70,9 @@ void main() {
       'reopened':_invoice('job',status:'reopened'),
       'other-job':_invoice('different'),
     });
-    final service=OwnerInvoiceAutoCloseService(api:api,guard:_Guard(db));
+    final service=OwnerInvoiceAutoCloseService(
+      api:api,guard:_Guard(db),
+      localDocuments:LocalDocumentRepository(database:db));
     expect(await service.closeEligible(
       businessId:'shop',jobId:'job',isOwner:true),1);
     expect(api.closed,['paid']);
@@ -77,7 +82,9 @@ void main() {
     final db=BriskersLocalDatabase(NativeDatabase.memory());
     final api=_Api()..entries['paid']=_invoice('job');
     api.job={'status':'in_progress'};
-    expect(await OwnerInvoiceAutoCloseService(api:api,guard:_Guard(db))
+    expect(await OwnerInvoiceAutoCloseService(
+      api:api,guard:_Guard(db),
+      localDocuments:LocalDocumentRepository(database:db))
         .closeEligible(businessId:'shop',jobId:'job',isOwner:true),0);
     expect(api.closed,isEmpty);
     await db.close();
