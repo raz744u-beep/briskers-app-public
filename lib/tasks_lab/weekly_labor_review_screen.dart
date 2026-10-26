@@ -7,6 +7,7 @@ import 'package:drift/drift.dart' show Variable;
 import 'package:intl/intl.dart';
 
 import '../local/local_database_provider.dart';
+import '../services/local_job_tasks_lab_store.dart';
 
 /// Offline-only TEST labor draft. Never posts money or marks work paid.
 class WeeklyLaborReviewLab extends StatefulWidget {
@@ -34,6 +35,8 @@ class WeeklyLaborReviewLab extends StatefulWidget {
 class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   final Map<String, double> _selected = {};
   final _notes = TextEditingController();
+  final Map<String, double> _paidHours = {};
+  bool _verifiedPayment = false;
   int? _savedOverrideCents;
   bool _showTip = true;
   Timer? _tipTimer;
@@ -82,6 +85,22 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
       )
     ''');
     await localDatabase.customStatement('''
+      CREATE TABLE IF NOT EXISTS lab_payroll_task_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        document_id TEXT NOT NULL,
+        line_id TEXT NOT NULL,
+        week_key TEXT NOT NULL,
+        description TEXT NOT NULL,
+        hours REAL NOT NULL,
+        cents INTEGER NOT NULL,
+        method TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        paid_at INTEGER NOT NULL
+      )
+    ''');
+    await localDatabase.customStatement('''
       CREATE TABLE IF NOT EXISTS lab_weekly_labor_notes (
         business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
         week_key TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
@@ -104,6 +123,13 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
           Variable<String>(_weekKey(_week)),
         ],
       ).getSingleOrNull();
+      final paidRows = await localDatabase.customSelect(
+        'SELECT document_id, line_id, SUM(hours) AS paid_hours '
+        'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+        'GROUP BY document_id, line_id',
+        variables: [const Variable<String>('briskers-tasks-test-only'),
+          Variable<String>(widget.employeeId)],
+      ).get();
       final noteRow = await localDatabase.customSelect(
         'SELECT note FROM lab_weekly_labor_notes '
         'WHERE business_id=? AND employee_id=? AND week_key=?',
@@ -127,7 +153,22 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
       }
       if (!mounted) { return; }
       setState(() {
-        _selected..clear()..addAll(selections);
+        _paidHours.clear();
+        for (final paid in paidRows) {
+          final key = paid.read<String>('document_id') + ':' +
+            paid.read<String>('line_id');
+          _paidHours[key] = paid.read<double>('paid_hours');
+        }
+        _selected.clear();
+        for (final task in _eligible) {
+          final key = _id(task);
+          final remaining = _available(task);
+          if (remaining > 0) {
+            final requested = selections[key];
+            _selected[key] = requested == null ? remaining :
+              requested.clamp(0.0, remaining);
+          }
+        }
         _savedOverrideCents = row?.readNullable<int>('override_cents');
         _notes.text = noteRow?.read<String>('note') ?? '';
         _loading = false;
@@ -153,6 +194,9 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
     }).toList();
   }
 
+  double _available(Map<String, dynamic> task) =>
+    (widget.hoursOf(task) - (_paidHours[_id(task)] ?? 0)).clamp(0.0, double.infinity);
+
   double get _totalHours {
     final ids = _eligible.map(_id).toSet();
     return _selected.entries.where((x) => ids.contains(x.key))
@@ -169,7 +213,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
         if (all) {
           _selected.remove(key);
         } else {
-          final hours = widget.hoursOf(t);
+          final hours = _available(t);
           if (hours > 0) { _selected.putIfAbsent(key, () => hours); }
         }
       }
@@ -178,7 +222,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
 
   Future<void> _editHours(Map<String, dynamic> task) async {
     final key = _id(task);
-    final maxHours = widget.hoursOf(task);
+    final maxHours = _available(task);
     final input = TextEditingController(text:
       (_selected[key] ?? maxHours).toStringAsFixed(1));
     final value = await showDialog<double>(
@@ -237,7 +281,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
     final valid = <String, double>{};
     for (final task in _eligible) {
       final key = _id(task), hours = _selected[key];
-      if (hours != null && hours > 0 && hours <= widget.hoursOf(task)) {
+      if (hours != null && hours > 0 && hours <= _available(task)) {
         valid[key] = hours;
       }
     }
@@ -276,6 +320,158 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<void> _verifyPayment() async {
+    if (_saving || _loading || _future || widget.rateCents == null ||
+        widget.rateCents! <= 0 || _totalHours <= 0) { return; }
+    final selected = Map<String, double>.from(_selected)
+      ..removeWhere((key, hours) => hours <= 0);
+    final amount = TextEditingController(
+      text: (_totalHours * widget.rateCents! / 100)
+        .toStringAsFixed(2));
+    final memo = TextEditingController();
+    var method = 'zelle';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (outer) => StatefulBuilder(
+        builder: (dialog, update) => AlertDialog(
+          title: const Text('Verify Payment · TEST'),
+          content: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.employeeName + ' · Week of ' +
+                DateFormat('MMM d, yyyy').format(_start(_week))),
+              Text(selected.length.toString() + ' tasks · ' +
+                _totalHours.toStringAsFixed(2) + ' hours'),
+              const SizedBox(height: 8),
+              TextField(
+                controller: amount,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Final amount',
+                  prefixText: r'$ ', border: OutlineInputBorder())),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                initialValue: method,
+                decoration: const InputDecoration(
+                  labelText: 'Payment method',
+                  border: OutlineInputBorder()),
+                items: const [
+                  DropdownMenuItem(value: 'zelle', child: Text('Zelle')),
+                  DropdownMenuItem(value: 'cash', child: Text('Cash')),
+                  DropdownMenuItem(value: 'check', child: Text('Check')),
+                  DropdownMenuItem(value: 'ach', child: Text('ACH')),
+                ],
+                onChanged: (v) {
+                  if (v != null) update(() => method = v);
+                },
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: memo,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        _verifiedPayment = true;
+        if (mounted) Navigator.pop(context, true);
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
   }
 
   Widget _weekSelector() {
@@ -389,7 +585,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                       value: _selected.containsKey(_id(task)),
                       onChanged: (v) => setState(() {
                         if (v == true) {
-                          final h = widget.hoursOf(task);
+                          final h = _available(task);
                           if (h > 0) { _selected[_id(task)] = h; }
                         } else { _selected.remove(_id(task)); }
                       }),
@@ -402,13 +598,13 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                           maxLines: 2, overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontWeight: FontWeight.w600)),
                         Text('J-24 · ' + task['status'].toString() +
-                          ' · ' + widget.hoursOf(task).toStringAsFixed(1) +
-                          ' assigned hrs', style: const TextStyle(
+                          ' · ' + _available(task).toStringAsFixed(1) +
+                          ' unpaid hrs', style: const TextStyle(
                             fontSize: 11, color: Color(0xFF64748B))),
                       ],
                     )),
                     Text((_selected[_id(task)] ??
-                      widget.hoursOf(task)).toStringAsFixed(1) + 'h',
+                      _available(task)).toStringAsFixed(1) + 'h',
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                     IconButton(
                       icon: const Icon(Icons.edit_outlined, size: 19),
@@ -459,20 +655,11 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                     fontSize: 10.5, color: Color(0xFF64748B))),
                   const SizedBox(height: 3),
                   Text(tasks.fold<double>(0, (sum, task) =>
-                    sum + widget.hoursOf(task)).toStringAsFixed(2) + ' hrs',
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
                     style: const TextStyle(
                       fontSize: 16, fontWeight: FontWeight.w800)),
                 ])),
               ]),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _notes,
-              maxLines: 1,
-              decoration: const InputDecoration(
-                isDense: true,
-                labelText: 'Notes (optional)',
-                border: OutlineInputBorder()),
             ),
             const SizedBox(height: 9),
             Row(children: [
@@ -481,8 +668,9 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                 child: const Text('Cancel'))),
               const SizedBox(width: 10),
               Expanded(child: FilledButton(
-                onPressed: _loading || _saving || _future ? null : _save,
-                child: const Text('Save weekly hours'))),
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
             ]),
           ]),
         ),
