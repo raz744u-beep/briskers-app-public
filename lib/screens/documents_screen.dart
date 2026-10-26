@@ -23,6 +23,7 @@ import '../local/local_database_provider.dart';
 import '../services/local_financial_cache.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_document_detail_cache.dart';
+import '../services/verified_invoice_close_events.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
 import '../services/invoice_finalization_guard.dart';
@@ -164,6 +165,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   int _descriptionEpoch = 0;
   int _receiptEpoch = 0;
   StreamSubscription<({String businessId, Set<String> jobIds})>? _retirement;
+  StreamSubscription<VerifiedInvoiceClosed>? _invoiceCloseEvents;
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
   Map<String, num> _receiptTotals = const {};
@@ -180,11 +182,17 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if (_estimate) {
       return documentListStage(row, estimate: true);
     }
+    // A server-confirmed Closed/Void/Reopened state is authoritative.
+    // Cached receipts can be late or incomplete and MUST NOT make a closed
+    // invoice display Open for several seconds after confirmation.
+    final existing = documentListStage(row, estimate: false);
+    if (const {'Closed', 'Void', 'Reopened'}.contains(existing)) {
+      return existing;
+    }
     if (invoiceNeedsPayment(row,
         receipts: _receiptTotals[row['id']?.toString()] ?? 0)) {
       return 'Open';
     }
-    final existing = documentListStage(row, estimate: false);
     return existing == 'Open' ? 'Pending Close' : existing;
   }
 
@@ -312,6 +320,41 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     if (!_estimate && cachedStyles != null) {
       _invoiceStyles = List<Map<String, dynamic>>.from(cachedStyles);
     }
+    if (!_estimate) {
+      _invoiceCloseEvents = VerifiedInvoiceCloseEvents.changes.listen((event) {
+        if (!mounted || event.businessId != widget.businessId) return;
+        // Do not create a card for a different customer or a hidden invoice:
+        // patch only the matching existing row. Preserve all amount/receipt
+        // fields, and invalidate any remote read begun before this closure.
+        Map<String, dynamic> markClosed(Map<String, dynamic> row) =>
+            row['id']?.toString() == event.invoiceId
+                ? <String, dynamic>{
+                    ...row,
+                    'status': 'closed',
+                    'display_status_code': 'closed',
+                  }
+                : row;
+        if (_rows == null ||
+            !_rows!.any((row) => row['id']?.toString() == event.invoiceId)) {
+          return;
+        }
+        ++_loadEpoch;
+        setState(() {
+          _rows = _rows!.map(markClosed).toList();
+          if (_serverRows != null) {
+            _serverRows = _serverRows!.map(markClosed).toList();
+          }
+          if (_indexRows != null) {
+            _indexRows = _indexRows!.map(markClosed).toList();
+          }
+          _orderedSource = null;
+          _descriptionEpoch++;
+        });
+        // Refresh in the background, without gating the Closed pill. A
+        // pre-closure HTTP response is already invalidated by the epoch.
+        unawaited(_load());
+      });
+    }
     _retirement = LocalJobRetirement.events.listen((event) {
       if (event.businessId == widget.businessId && mounted) {
         // Hide known retired jobs immediately, even when a pre-retirement
@@ -383,6 +426,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   void dispose() {
     BriskersConnectionModeController.instance.removeListener(_connectionChanged);
     _retirement?.cancel();
+    _invoiceCloseEvents?.cancel();
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
