@@ -836,6 +836,10 @@ class LocalJobRepository {
       'title': row.read<String>('title'),
       'requested_work': row.readNullable<String>('requested_work'),
       'status': row.read<String>('status'),
+      // Already in the same permitted local_jobs row used by the Jobs list.
+      // The saved payment summary must be available on the *first* detail
+      // frame; invoice hydration must not change the screen a second later.
+      'payment_state': row.readNullable<String>('payment_state'),
       'status_name': row.readNullable<String>('status_name'),
       'status_color': row.readNullable<String>('status_color'),
       'status_icon': row.readNullable<String>('status_icon'),
