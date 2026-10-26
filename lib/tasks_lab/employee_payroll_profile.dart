@@ -131,6 +131,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
       ],
     ));
 
+  // ignore: unused_element
   Future<void> _recordTestPayment() async {
     final amount = TextEditingController();
     final note = TextEditingController();
