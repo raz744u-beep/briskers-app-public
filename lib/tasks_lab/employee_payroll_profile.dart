@@ -382,7 +382,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     Expanded(child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(widget.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+        Text(widget.name.split(' ').first, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
         Text(widget.role == 'mechanic' ? 'Mechanic · Active'
           : widget.role + ' · Active',
@@ -450,55 +450,49 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
 
   Widget _tasksTab() {
     final tasks = _employeeTasks;
-    final active = tasks.where((t) => t['status'] != 'done').toList();
-    final finished = tasks.where((t) => t['status'] == 'done').toList();
-    Widget workGroup(String title, List<Map<String, dynamic>> rows) => _panel(
-      Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(title, style: const TextStyle(
-          fontSize: 16, fontWeight: FontWeight.w800)),
-        if (rows.isEmpty)
-          const Padding(padding: EdgeInsets.symmetric(vertical: 10),
-            child: Text('None in this test fixture')),
-        for (final t in rows)
-          Column(children: [
-            const Divider(height: 14),
-            Row(children: [
-              Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text((t['custom_description'] ??
-                    t['source_description'] ?? 'Task').toString(),
-                    maxLines: 2, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13.5,
-                      fontWeight: FontWeight.w600)),
-                  Text('J-24 · ' + t['status'].toString(),
-                    style: const TextStyle(fontSize: 11.5,
-                      color: Color(0xFF64748B))),
-                ],
-              )),
-              const SizedBox(width: 8),
-              Text(_hours(t).toStringAsFixed(1) + ' hrs',
-                style: const TextStyle(fontWeight: FontWeight.w800)),
-            ]),
-          ]),
-      ]),
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 18),
+      children: [
+        Row(children: [
+          Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+            style: const TextStyle(fontSize: 16,
+              fontWeight: FontWeight.w800))),
+          TextButton(onPressed: _openWeeklyLabor,
+            child: const Text('Review weekly labor')),
+        ]),
+        for (final task in tasks)
+          Card(
+            color: const Color(0xFFF0F6F5),
+            margin: const EdgeInsets.only(bottom: 6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 11, vertical: 9),
+              child: Row(children: [
+                Icon(task['status'] == 'done'
+                  ? Icons.check_circle_outline : Icons.work_outline,
+                  color: BriskersColors.jobs),
+                const SizedBox(width: 10),
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text((task['custom_description'] ??
+                      task['source_description'] ?? 'Task').toString(),
+                      maxLines: 2, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w700)),
+                    Text('J-24 · ' + task['status'].toString() +
+                      ' · assigned hours',
+                      style: const TextStyle(fontSize: 11,
+                        color: Color(0xFF64748B))),
+                  ],
+                )),
+                Text(_hours(task).toStringAsFixed(1) + 'h',
+                  style: const TextStyle(fontWeight: FontWeight.w800)),
+              ]),
+            ),
+          ),
+      ],
     );
-    return ListView(padding: const EdgeInsets.all(12), children: [
-      _panel(Row(children: [
-        const Icon(Icons.work_outline, color: BriskersColors.jobs),
-        const SizedBox(width: 10),
-        Expanded(child: Text('Assigned Jobs & Tasks · ' +
-          tasks.length.toString(),
-          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800))),
-      ])),
-      workGroup('J-24 · Active tasks', active),
-      if (finished.isNotEmpty) workGroup('Completed work', finished),
-      const Padding(padding: EdgeInsets.all(8), child: Text(
-        'TEST fixture only. Actual job grouping and employee-first '
-        'task creation are not connected to the shop database.',
-        style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-      ),
-    ]);
   }
 
   Future<void> _openWeeklyLabor() async {
@@ -506,7 +500,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
       context,
       MaterialPageRoute(builder: (_) => WeeklyLaborReviewLab(
         employeeId: widget.employeeId,
-        employeeName: widget.name,
+        employeeName: widget.name.split(' ').first,
         tasks: _employeeTasks,
         hoursOf: _hours,
         rateCents: widget.rateCents,
@@ -525,20 +519,10 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     final currentDue = current.balanceCents;
     final allDue = prior == null || currentDue == null
       ? null : prior + currentDue;
-    final history = _payments.where((payment) =>
-      payment['employee_id'] == widget.employeeId &&
-      payment['kind'] == 'pay').take(3).toList();
     final weekLabel = DateFormat('MMM d, yyyy').format(_start(_week));
     return ListView(
       padding: const EdgeInsets.all(11),
       children: [
-        _panel(Row(children: [
-          _financeMetric('Hourly rate',
-            widget.rateCents == null ? 'Not set'
-            : _money(widget.rateCents!) + '/hr'),
-          _financeMetric('Default payment method',
-            'Not configured (TEST)'),
-        ])),
         _panel(Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -547,11 +531,11 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
                 fontSize: 15, fontWeight: FontWeight.w800)),
             const SizedBox(height: 9),
             Row(children: [
-              _financeMetric('Outstanding from previous weeks',
+              _financeMetric('Previous weeks',
                 prior == null ? '—' : _money(prior),
                 color: const Color(0xFFCC6222)),
               const SizedBox(width: 8),
-              _financeMetric('Selected week balance',
+              _financeMetric('Selected week',
                 currentDue == null ? '—' : _money(currentDue),
                 color: const Color(0xFFCC6222)),
             ]),
@@ -594,50 +578,6 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
                   _employeeTasks.length.toString() + ' tasks)'),
               ),
             ),
-          ],
-        )),
-        _panel(Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(children: [
-              const Expanded(child: Text('Recent payroll payments',
-                style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w800))),
-              Builder(builder: (inner) => TextButton(
-                onPressed: () =>
-                  DefaultTabController.of(inner).animateTo(2),
-                child: const Text('View all'))),
-            ]),
-            if (history.isEmpty)
-              const Padding(padding: EdgeInsets.all(8),
-                child: Text('No TEST payments recorded.')),
-            for (final payment in history)
-              Column(children: [
-                const Divider(height: 15),
-                Row(children: [
-                  Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(_date.format(
-                        DateTime.fromMillisecondsSinceEpoch(
-                          payment['paid_at'] as int)),
-                        style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w700)),
-                      Text(payment['method'].toString().toUpperCase(),
-                        style: const TextStyle(
-                          fontSize: 10, color: Color(0xFF64748B))),
-                    ],
-                  )),
-                  Text(_money(payment['cents'] as int),
-                    style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w800)),
-                ]),
-              ]),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: _recordTestPayment,
-              icon: const Icon(Icons.payments_outlined),
-              label: const Text('Add Payment (TEST)')),
           ],
         )),
         _advancePanel(),
