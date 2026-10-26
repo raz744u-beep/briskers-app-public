@@ -100,7 +100,7 @@ void main() {
     expect(docs, contains('invoiceListStageWithReceipts('));
     expect(docs, contains("if (const {'Closed', 'Void', 'Reopened'}.contains(existing))"));
     expect(closeService, contains('await _guard.run<void>('));
-    expect(closeService, contains('_localDocuments.recordServerConfirmedClosed('));
+    expect(closeService, contains('.recordServerConfirmedClosed(businessId, id)'));
     expect(closeService, contains('VerifiedInvoiceCloseEvents.serverConfirmed('));
     expect(detail, contains('await InvoiceFinalizationGuard().run<void>('));
     expect(detail, contains('VerifiedInvoiceCloseEvents.serverConfirmed('));
