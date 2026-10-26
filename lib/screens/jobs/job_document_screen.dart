@@ -5204,12 +5204,125 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (mounted) await _load();
   }
 
+  bool get _usesInvoiceMileageOut =>
+      !_estimate && _detail != null &&
+      (_offlineDocumentDraft.isLocalDraftId(widget.documentId) ||
+       _detail!['mileage_schema_version'] == 2 ||
+       _detail!.containsKey('mileage_out'));
+
+  String get _visibleInvoiceMileage {
+    final detail = _detail;
+    if (detail == null) return '';
+    final raw = _usesInvoiceMileageOut
+        ? detail['mileage_out'] : detail['odometer_in'];
+    return raw?.toString().trim() ?? '';
+  }
+
+  Future<void> _editInvoiceMileage() async {
+    final vehicleId = _detail?['vehicle_id']?.toString() ?? '';
+    if (_estimate || _readOnly || _busy || _detail == null ||
+        vehicleId.isEmpty) {
+      return;
+    }
+    final usesMileageOut = _usesInvoiceMileageOut;
+    final existing = _visibleInvoiceMileage.replaceAll(',', '').trim();
+    final controller = TextEditingController(text: existing);
+    ModalRoute<dynamic>? mileageDialogRoute;
+    final changed = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        mileageDialogRoute ??= ModalRoute.of(dialogContext);
+        return AlertDialog(
+        title: Text(usesMileageOut ? 'Mileage Out' : 'Mileage'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: usesMileageOut
+                ? 'Mileage Out at repair completion' : 'Invoice mileage',
+            suffixText: 'mi',
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(tr('cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: _documentActionColor,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(dialogContext,
+                controller.text.replaceAll(',', '').trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      );
+      },
+    );
+    // Let the closing route finish before disposing its TextField controller.
+    await mileageDialogRoute?.completed;
+    controller.dispose();
+    if (changed == null || !mounted || _detail == null ||
+        changed == existing) {
+      return;
+    }
+    final reading = changed.isEmpty ? null
+        : (usesMileageOut ? MileageWorkflow.parse(changed)
+                          : num.tryParse(changed));
+    if (changed.isNotEmpty &&
+        (reading == null || !reading.isFinite || reading < 0)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter valid mileage.')),
+      );
+      return;
+    }
+
+    final saved = await _run(() async {
+      if (_offlineDocumentDraft.isLocalDraftId(widget.documentId)) {
+        await _offlineDocumentDraft.updatePendingInvoiceDetails(
+          widget.businessId, widget.documentId,
+          documentDate: DateTime.tryParse(
+            _detail?['document_date']?.toString() ?? '') ?? DateTime.now(),
+          mileage: usesMileageOut ? null : changed,
+          mileageOut: usesMileageOut ? changed : null,
+        );
+      } else if (usesMileageOut) {
+        // Only the v2 departure field may change: never overwrite arrival
+        // mileage on the Job or issue an unsafe legacy update.
+        await _invoiceMileage.queue(
+          widget.businessId, widget.documentId,
+          expectedVersion: _version, mileageOut: reading,
+        );
+        if (!BriskersConnectionModeController.instance.forceOffline) {
+          await _invoiceMileage.flush(widget.businessId);
+        }
+      } else {
+        if (BriskersConnectionModeController.instance.forceOffline) {
+          throw StateError('Legacy invoice mileage requires a connection.');
+        }
+        await _api.updateDocumentMileage(
+          widget.businessId, widget.documentId, odometer: reading,
+        );
+      }
+    });
+    if (saved && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Mileage saved.')),
+      );
+    }
+  }
+
   Widget _customerHeader() {
     final customer = _detail?['customer_name']?.toString().trim() ?? '';
     final phone = _detail?['customer_phone']?.toString().trim() ?? '';
     final vehicle = _detail?['vehicle']?.toString().trim() ?? '';
     final vin = _detail?['vehicle_vin']?.toString().trim() ?? '';
-    final mileage = _detail?['odometer_in']?.toString().trim() ?? '';
+    final mileage = _visibleInvoiceMileage;
+    final mileageName = _usesInvoiceMileageOut ? 'Mileage Out' : 'Mileage';
     final documentDateRaw =
         _detail?['document_date']?.toString().trim() ?? '';
     final createdAtRaw =
@@ -5280,10 +5393,35 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             );
     }
 
-    final vehicleMileage = <String>[
-      if (vehicle.isNotEmpty) vehicle,
-      if (mileage.isNotEmpty) '${_quantity(mileage)} mi',
-    ].join(' · ');
+    // Always show invoice mileage independently of the vehicle name.
+    // New schema uses departure mileage; older invoices use the legacy field.
+    final vehicleMileage = vehicle;
+    Widget mileageLine() => Padding(
+      padding: const EdgeInsets.only(left: 30, top: 3),
+      child: InkWell(
+        key: const ValueKey('invoice-header-mileage'),
+        onTap: !_readOnly && !_busy &&
+                (_detail?['vehicle_id']?.toString().isNotEmpty ?? false)
+            ? _editInvoiceMileage : null,
+        borderRadius: BorderRadius.circular(6),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '$mileageName: ${mileage.isEmpty ? 'Not entered' : '${_quantity(mileage)} mi'}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12.5,
+                    color: Color(0xFF405064), fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (!_readOnly)
+              const Icon(Icons.edit_outlined, size: 16,
+                  color: Color(0xFF667085)),
+          ],
+        ),
+      ),
+    );
 
     final customerInfo = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5328,6 +5466,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             ),
           ),
         ],
+        if (!_estimate) mileageLine(),
       ],
     );
 
@@ -5408,6 +5547,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                     ),
                   ),
                 ],
+                if (!_estimate) mileageLine(),
               ],
             );
 

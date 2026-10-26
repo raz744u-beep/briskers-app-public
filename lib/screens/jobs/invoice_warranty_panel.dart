@@ -141,6 +141,7 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
 
   bool _expanded = false;
   bool _busy = false;
+  bool _toggleInFlight = false;
   late bool _localEnabled;
   num _cardSurchargeRate = 0.03;
 
@@ -1000,15 +1001,20 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
   }
 
   Future<void> _onWarrantyChecked(bool selected) async {
+    if (_toggleInFlight || _busy || widget.readOnly ||
+        selected == _enabled) {
+      return;
+    }
+    setState(() => _toggleInFlight = true);
     try {
       if (selected) {
+        // Only enable and expand once. The old implementation first saved,
+        // refreshed the invoice, then immediately opened a second editor
+        // sheet; users saw the warranty box close/reopen on one checkbox tap.
+        // Details are entered using the visible Enter/Edit action.
         await _enableWarranty();
-        // Reuse the existing validated data-entry form, rather than making
-        // the owner search for an Edit action after checking Warranty Job.
-        if (mounted && _enabled) await _editWarranty();
       } else {
-        // Existing details/payment allocations may be present. The original
-        // confirmation and server/local safety checks are intentionally kept.
+        // Keep existing confirmation and all warranty accounting safeguards.
         await _disableWarranty();
       }
     } catch (error) {
@@ -1017,13 +1023,15 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
           SnackBar(content: Text('Could not update warranty: $error')),
         );
       }
+    } finally {
+      if (mounted) setState(() => _toggleInFlight = false);
     }
   }
 
   Widget _warrantyToggle() {
     final enabled = _enabled;
     final company = widget.detail['warranty_company_name']?.toString() ?? '';
-    final canChange = !widget.readOnly && !_busy;
+    final canChange = !widget.readOnly && !_busy && !_toggleInFlight;
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(16, 0, 12, 6),
@@ -1291,7 +1299,9 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
                             ),
                             onPressed: _busy ? null : _editWarranty,
                             icon: const Icon(Icons.edit_outlined),
-                            label: Text(tr('edit')),
+                            label: Text(missing.isNotEmpty
+                                ? 'Enter warranty details'
+                                : tr('edit')),
                           ),
                         ),
                       ],
