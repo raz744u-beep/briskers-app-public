@@ -429,17 +429,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (saved == true) await _refresh();
   }
 
-  Widget _statusChip(String value) {
-    final done = value == 'done';
-    final label = done ? 'Done'
-      : value == 'in_progress' ? 'In progress' : 'Planned';
-    return Text(label, style: TextStyle(
-      fontSize: 12, fontWeight: FontWeight.w700,
-      color: done ? const Color(0xFF168058)
-        : const Color(0xFF3570B6),
-    ));
-  }
-
   List<Map<String, dynamic>> _taskCorrections(
       Map<String, dynamic> task) => earnedCorrections.where((row) =>
         row['document_id'] == task['document_id'] &&
