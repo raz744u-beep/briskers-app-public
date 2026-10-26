@@ -78,6 +78,11 @@ void main() {
         .last.split('Future<void> _approveTestPayroll(').first;
     expect(weeklyScreen, contains('Dialog.fullscreen('));
     expect(weeklyScreen, contains('bottomNavigationBar: SafeArea('));
+    expect(weeklyScreen, contains('weekly-sticky-summary'));
+    expect(weeklyScreen, contains('Weekly labor times'));
+    expect(weeklyScreen, contains('Icons.engineering_outlined'));
+    expect(weeklyScreen, contains('Selected this week'));
+    expect(weeklyScreen, contains('Available hours'));
     expect(weeklyScreen, contains('child: locked'));
     expect(weeklyScreen, contains('Hours saved this week · read-only'));
     expect(weeklyScreen, contains('color: Color(0xFF17212B)'));
