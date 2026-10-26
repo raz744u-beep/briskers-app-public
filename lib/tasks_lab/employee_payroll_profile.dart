@@ -1,3 +1,4 @@
+// ignore_for_file: prefer_interpolation_to_compose_strings
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -645,7 +646,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
                       lastDate: DateTime(2100),
                       initialDateRange: _customRange,
                     );
-                    if (!mounted || range == null) return;
+                    if (!mounted || range == null) { return; }
                     setState(() {
                       _reportRange = 'Custom';
                       _customRange = range;
