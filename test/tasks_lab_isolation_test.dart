@@ -72,6 +72,15 @@ void main() {
     expect(main, contains('store.recordLabPayrollPayment('));
     expect(main, contains('weekly-select-all'));
     expect(main, contains('CheckboxListTile('));
+    // Full-screen weekly review keeps approved task labels legible while
+    // retaining the audit lock on previously approved hours.
+    final weeklyScreen = main.split('Future<void> _creditTestPayrollHours(')
+        .last.split('Future<void> _approveTestPayroll(').first;
+    expect(weeklyScreen, contains('Dialog.fullscreen('));
+    expect(weeklyScreen, contains('bottomNavigationBar: SafeArea('));
+    expect(weeklyScreen, contains('child: locked'));
+    expect(weeklyScreen, contains('Hours saved this week · read-only'));
+    expect(weeklyScreen, contains('color: Color(0xFF17212B)'));
     // The field was extracted into a reusable widget so all existing
     // hours are selected only when the owner taps inside the input.
     expect(main, contains('WeeklyHoursTextField('));
