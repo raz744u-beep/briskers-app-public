@@ -55,8 +55,7 @@ void main() {
 
     service.remote.complete(
         const CustomerFindingCounts(open: 2, inJob: 1, resolved: 1));
-    await tester.pump();
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(find.text('Open 2 • In Job 1 • Resolved 1'), findsOneWidget);
     expect(find.text('4'), findsOneWidget);
   });
