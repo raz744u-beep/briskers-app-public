@@ -1959,6 +1959,25 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         subtitle: const Text('Full names and preferred display names'),
         onTap: _editEmployeeNames,
       ),
+      ExpansionTile(
+        leading: const Icon(Icons.payments_outlined),
+        title: const Text('TEST payroll tools'),
+        subtitle: const Text('Rates and simulated disbursements'),
+        children: [
+          for (final employee in BriskersLabFixture.employees)
+            ListTile(
+              title: Text(_employeeName(employee['id']!)),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                TextButton(
+                  onPressed: () => _setTestPayrollRate(employee['id']!),
+                  child: const Text('Rate')),
+                TextButton(
+                  onPressed: () => _recordTestPayrollPayment(employee['id']!),
+                  child: const Text('Payment')),
+              ]),
+            ),
+        ],
+      ),
       const ListTile(
         leading: Icon(Icons.shield_outlined),
         title: Text('Production disconnected'),
