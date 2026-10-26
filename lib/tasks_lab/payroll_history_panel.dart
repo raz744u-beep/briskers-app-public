@@ -213,7 +213,7 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
             ].map((label) => DropdownMenuItem(
               value: label, child: Text(label))).toList(),
             onChanged: (value) {
-              if (value != null) _change(value);
+              if (value != null) { _change(value); }
             },
           ),
         )),
