@@ -1,3 +1,4 @@
+// Owner S26 APK candidate CI trigger: source-only, no production data changes.
 import 'dart:io';
 
 import 'package:drift/native.dart';
