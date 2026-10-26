@@ -20,7 +20,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 CANDIDATE_BRANCH = "release/offline-first-stability-post-b2373-20261021"
-CANDIDATE_BRANCHES = {CANDIDATE_BRANCH, "fix/post-b2382-ux-polish-20261021", "fix/b2423-first-open-local-cache-313", "fix/b2425-detail-firstpaint-regression-20261024", "fix/b2426-auto-stability-batch-20261025", "fix/b2428-findings-warranty-ui-20261025", "fix/b2436-jobs-redundant-offline-banner-20261026", "fix/b2443-job-detail-financial-status-stable-20261026", "fix/b2448-job-first-frame-compact-financial-20261026", "fix/b2448-jobs-list-first-paint-sql-priority-20261026", "fix/b2448-invoice-mileage-warranty-checkbox-20261026", "fix/b2448-job-detail-intake-departure-mileage-20261026"}
+CANDIDATE_BRANCHES = {CANDIDATE_BRANCH, "fix/post-b2382-ux-polish-20261021", "fix/b2423-first-open-local-cache-313", "fix/b2425-detail-firstpaint-regression-20261024", "fix/b2426-auto-stability-batch-20261025", "fix/b2428-findings-warranty-ui-20261025", "fix/b2436-jobs-redundant-offline-banner-20261026", "fix/b2443-job-detail-financial-status-stable-20261026", "fix/b2448-job-first-frame-compact-financial-20261026", "fix/b2448-jobs-list-first-paint-sql-priority-20261026", "fix/b2448-invoice-mileage-warranty-checkbox-20261026", "fix/b2448-job-detail-intake-departure-mileage-20261026", "fix/b2456-job-status-offline-first-frame-20261026"}
 BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
 REQUIRED_WORKFLOWS = {
     "diagnostics.yml": "Briskers Diagnostics",

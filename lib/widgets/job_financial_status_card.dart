@@ -14,6 +14,52 @@ String? savedJobFinancialStatus(Object? paymentState) {
   };
 }
 
+/// Derive only a *last verified* status from fully saved invoice detail.
+/// A bare index row, missing payment totals, zero-total invoice, or estimate
+/// does not prove Paid and must stay Not verified.
+String? cachedVerifiedJobPaymentState(
+  List<Map<String, dynamic>> savedInvoiceDetails,
+) {
+  final invoices = savedInvoiceDetails.where(
+    (document) => document['kind']?.toString() == 'invoice',
+  ).toList();
+  if (invoices.isEmpty) {
+    return null;
+  }
+  num total = 0;
+  num paid = 0;
+  num pending = 0;
+  for (final invoice in invoices) {
+    if (!invoice.containsKey('total_amount') ||
+        !invoice.containsKey('paid_amount')) {
+      return null;
+    }
+    final amount = num.tryParse(invoice['total_amount']?.toString() ?? '');
+    final receipt = num.tryParse(invoice['paid_amount']?.toString() ?? '');
+    if (amount == null || receipt == null ||
+        !amount.isFinite || !receipt.isFinite ||
+        amount <= 0 || receipt < 0) {
+      return null;
+    }
+    final awaiting = num.tryParse(
+      invoice['pending_payment']?.toString() ?? '0',
+    );
+    if (awaiting == null || !awaiting.isFinite || awaiting < 0) {
+      return null;
+    }
+    total += amount;
+    paid += receipt;
+    pending += awaiting;
+  }
+  if (paid >= total - 0.005) {
+    return 'paid';
+  }
+  if (pending > 0 && paid + pending >= total - 0.005) {
+    return 'awaiting_clearance';
+  }
+  return 'awaiting_payment';
+}
+
 /// Keeps a completed Job's financial-status footprint stable while its linked
 /// invoice/payment data is being verified. Never infer a paid/unpaid state from
 /// an empty or not-yet-loaded document list.

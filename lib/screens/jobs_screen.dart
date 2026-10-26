@@ -19,6 +19,7 @@ import '../services/local_job_repository.dart';
 import '../services/local_job_access_history.dart';
 import '../services/local_customer_repository.dart';
 import '../services/offline_job_admin_service.dart';
+import '../services/job_status_local_events.dart';
 import '../widgets/job_compact_card.dart';
 import 'jobs/job_detail_screen.dart';
 import 'jobs/job_create_screen.dart';
@@ -120,6 +121,8 @@ class _JobsScreenState extends State<JobsScreen>
   final TextEditingController _search = TextEditingController();
   Timer? _searchDebounce;
   StreamSubscription<String>? _retirementChanges;
+  StreamSubscription<LocalJobStatusChanged>? _statusChanges;
+  final Set<String> _pendingStatusIds = <String>{};
   late JobSummaryVisibility _jobVisibility;
   int _totalCount = 0;
   Map<String, int> _statusCounts = const {};
@@ -170,6 +173,13 @@ class _JobsScreenState extends State<JobsScreen>
   void initState() {
     super.initState();
     _listenForQuarantine();
+    _statusChanges = LocalJobStatusEvents.changes.listen((event) {
+      if (!mounted || event.businessId != widget.businessId) return;
+      // A status stored on this device must reflect immediately on the
+      // retained Jobs screen, including changes made inside Job Detail.
+      _applyLocalStatus(event);
+      unawaited(_load(refreshRemote: false));
+    });
     _retirementChanges = OwnerJobRetirementService.statusEvents.listen((
       businessId,
     ) {
@@ -264,6 +274,7 @@ class _JobsScreenState extends State<JobsScreen>
   void dispose() {
     _jobVisibility.dispose();
     _retirementChanges?.cancel();
+    _statusChanges?.cancel();
     _searchDebounce?.cancel();
     _search.dispose();
     super.dispose();
@@ -734,11 +745,67 @@ class _JobsScreenState extends State<JobsScreen>
     }
   }
 
+  void _applyLocalStatus(LocalJobStatusChanged event) {
+    final current = _rows;
+    if (!mounted || current == null ||
+        event.businessId != widget.businessId) {
+      return;
+    }
+    final index = current.indexWhere(
+      (row) => row['id']?.toString() == event.jobId,
+    );
+    if (index < 0) {
+      return; // Never resurrect hidden or retired Jobs.
+    }
+    final prior = current[index];
+    final oldCode = prior['status']?.toString() ?? '';
+    final newCode = event.code.toLowerCase();
+    final finished = const {'completed', 'cancelled', 'closed'}
+        .contains(newCode);
+    final matchesCurrentFilter = _selectedStatus == '__open__'
+        ? !finished
+        : _selectedStatus == 'paid_still_open'
+            ? !finished && prior['payment_state'] == 'paid'
+            : _selectedStatus == null || _selectedStatus == '__all__' ||
+                _selectedStatus == event.code;
+    setState(() {
+      final updated = List<Map<String, dynamic>>.from(current);
+      if (matchesCurrentFilter) {
+        updated[index] = <String, dynamic>{
+          ...prior,
+          'status': event.code,
+          'status_name': event.name,
+          'status_color': event.colorHex,
+          'status_icon': event.iconKey,
+          if (newCode == 'completed' && oldCode != 'completed')
+            'completed_at': DateTime.now().toUtc().toIso8601String(),
+          if (!finished && const {'completed', 'cancelled', 'closed'}
+              .contains(oldCode)) 'completed_at': null,
+        };
+      } else {
+        updated.removeAt(index);
+        if (_totalCount > 0) {
+          _totalCount--;
+        }
+      }
+      _rows = updated;
+      if (oldCode != event.code) {
+        final previous = (_statusCounts[oldCode] ?? 0);
+        _statusCounts = {
+          ..._statusCounts,
+          if (previous > 0) oldCode: previous - 1,
+          event.code: (_statusCounts[event.code] ?? 0) + 1,
+        };
+      }
+    });
+  }
+
   Future<void> _changeStatus(
     Map<String, dynamic> job,
     String statusCode,
   ) async {
-    if (!_canManage || statusCode == job['status']?.toString()) {
+    if (!_canManage || _pendingStatusIds.contains(job['id']?.toString()) ||
+        statusCode == job['status']?.toString()) {
       return;
     }
 
@@ -751,20 +818,28 @@ class _JobsScreenState extends State<JobsScreen>
     }
     if (selectedStatus == null) return;
 
-    setState(() => _busyJobId = job['id']?.toString());
+    final jobId = job['id'].toString();
+    final optimistic = LocalJobStatusChanged(
+      businessId: widget.businessId,
+      jobId: jobId,
+      code: statusCode,
+      name: selectedStatus['name']?.toString() ?? statusCode,
+      colorHex: selectedStatus['color_hex']?.toString(),
+      iconKey: selectedStatus['icon_key']?.toString(),
+    );
+    _pendingStatusIds.add(jobId);
+    // Paint the selected pill or remove a completed job from Open in this
+    // frame. SQLite + durable outbox are still committed before sync.
+    _applyLocalStatus(optimistic);
     try {
       await _offlineJobAdmin.queueStatus(
         widget.businessId,
-        job['id'].toString(),
+        jobId,
         code: statusCode,
-        name: selectedStatus['name']?.toString() ?? statusCode,
-        colorHex: selectedStatus['color_hex']?.toString(),
-        iconKey: selectedStatus['icon_key']?.toString(),
+        name: optimistic.name,
+        colorHex: optimistic.colorHex,
+        iconKey: optimistic.iconKey,
       );
-
-      // Paint the durable local status immediately. The pending outbox is
-      // synchronized independently; the status picker does not wait for HTTP.
-      await _load(refreshRemote: false);
       if (statusCode == 'completed' && widget.roleCode == 'owner' &&
           !BriskersConnectionModeController.instance.forceOffline) {
         // Do not close the invoice before the queued completion reaches
@@ -786,9 +861,17 @@ class _JobsScreenState extends State<JobsScreen>
       }
       widget.onJobsChanged?.call();
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) {
+        // A failed local transaction must not masquerade as completion.
+        unawaited(_load(refreshRemote: false));
+        setState(() => _error = error.toString());
+      }
     } finally {
-      if (mounted) setState(() => _busyJobId = null);
+      _pendingStatusIds.remove(jobId);
+      // Restore the action chevron immediately after the queued write.
+      if (mounted) {
+        setState(() {});
+      }
     }
   }
 
@@ -823,7 +906,8 @@ class _JobsScreenState extends State<JobsScreen>
       job['status']?.toString(),
       job['status_name']?.toString() ?? 'Status',
     );
-    final busy = _busyJobId == job['id']?.toString();
+    final busy = _busyJobId == job['id']?.toString() ||
+        _pendingStatusIds.contains(job['id']?.toString());
 
     final child = Container(
       constraints: const BoxConstraints(maxWidth: 155),
@@ -836,27 +920,20 @@ class _JobsScreenState extends State<JobsScreen>
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (busy)
-            SizedBox(
-              width: 12,
-              height: 12,
-              child: CircularProgressIndicator(strokeWidth: 1.5, color: color),
-            )
-          else
-            Flexible(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w800,
-                  ),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
             ),
+          ),
           if (_canManage && !busy) ...[
             const SizedBox(width: 3),
             Icon(Icons.chevron_right, size: 15, color: color),

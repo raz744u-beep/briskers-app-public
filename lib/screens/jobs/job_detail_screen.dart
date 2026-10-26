@@ -24,6 +24,7 @@ import '../../services/owner_job_retirement_service.dart';
 import '../../core/supabase_config.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
+import '../../services/local_customer_repository.dart';
 import '../../core/job_mileage_summary.dart';
 import '../../services/offline_invoice_mileage_service.dart';
 import '../../widgets/job_mileage_row.dart';
@@ -176,6 +177,17 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       (widget.roleCode == 'owner' ||
        widget.roleCode == 'manager' ||
        widget.roleCode == 'office');
+
+  // Only a verified local Job can initiate a queued vehicle change.
+  // Server-only Job actions must remain disabled while offline.
+  bool get _canEditVehicleLocally =>
+      !_onlineReady && _canQuickAdmin && !_contentBlocked &&
+      _job?['_local_snapshot'] == true;
+
+  bool get _showVehicleChevron =>
+      _canManage || _canEditVehicleLocally ||
+      (_job?['_first_frame_only'] == true &&
+       const {'owner', 'manager', 'office'}.contains(widget.roleCode));
 
   bool get _canManage {
     if (!_onlineReady) return false;
@@ -385,6 +397,61 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (id.isNotEmpty) await _openDocument(id);
   }
 
+  // Reuse last verified invoice details saved on this device when the
+  // Job's payment-state index is missing. Do not classify bare index rows as
+  // paid: they contain no confirmed payment receipts.
+  Future<void> _hydrateCachedFinancialStatus(
+    int epoch,
+    List<Map<String, dynamic>> documents,
+  ) async {
+    if (!_currentLoad(epoch) || !_canSeeFinancial ||
+        _job?['status']?.toString() != 'completed') {
+      return;
+    }
+    if (savedJobFinancialStatus(_job?['payment_state']) != null) {
+      return;
+    }
+    final verified = <Map<String, dynamic>>[];
+    for (final document in documents) {
+      if (document['kind']?.toString() != 'invoice') {
+        continue;
+      }
+      final id = document['id']?.toString() ?? '';
+      if (id.isEmpty) {
+        continue;
+      }
+      final cached = await _documentDetailCache.load(
+        widget.businessId, id,
+      );
+      if (!_currentLoad(epoch)) {
+        return;
+      }
+      if (cached == null || cached['kind'] != 'invoice' ||
+          cached['job_id']?.toString() != widget.jobId) {
+        return;
+      }
+      verified.add(cached);
+    }
+    final state = cachedVerifiedJobPaymentState(verified);
+    if (state == null || !_currentLoad(epoch) ||
+        _job?['status']?.toString() != 'completed') {
+      return;
+    }
+    try {
+      await _localJobs.saveVerifiedPaymentState(
+        widget.businessId, widget.jobId, state,
+      );
+      if (!_currentLoad(epoch)) {
+        return;
+      }
+      setState(() {
+        _job = <String, dynamic>{..._job!, 'payment_state': state};
+      });
+    } catch (_) {
+      // Offline documents remain usable even if this summary cache fails.
+    }
+  }
+
   Future<void> _hydrateLocalLinkedExpenses() async {
     final epoch = _loadEpoch;
     try {
@@ -417,6 +484,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       }
       setState(() => _documents = documents);
       unawaited(_hydrateMileageOut(epoch, documents));
+      unawaited(_hydrateCachedFinancialStatus(epoch, documents));
       _modalRefresh?.call();
     } catch (_) {
       // Leave the locally rendered Job usable if links cannot be read.
@@ -1211,7 +1279,24 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   Future<Map<String, dynamic>?> _pickVehicleForCustomer(
     String customerId,
   ) async {
-    final detail = await _api.customerDetail(widget.businessId, customerId);
+    Map<String, dynamic>? detail;
+    if (!BriskersConnectionModeController.instance.forceOnline) {
+      detail = await LocalCustomerRepository().customerDetail(
+        widget.businessId, customerId,
+      );
+    }
+    if (detail == null &&
+        !BriskersConnectionModeController.instance.forceOffline) {
+      detail = await _api.customerDetail(widget.businessId, customerId);
+    }
+    if (detail == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Customer vehicles are not cached on this device.'),
+        ));
+      }
+      return null;
+    }
     final vehicles = List<dynamic>.from(detail['vehicles'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
@@ -1299,18 +1384,71 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }
 
   Future<void> _changeVehicle() async {
-    if (!_canManage || _job == null || _busy) return;
+    if ((!_canManage && !_canEditVehicleLocally) ||
+        _job == null || _busy) {
+      return;
+    }
     final customerId = _job!['customer_id']?.toString() ?? '';
-    if (customerId.isEmpty) return;
+    if (customerId.isEmpty) {
+      return;
+    }
     final vehicle = await _pickVehicleForCustomer(customerId);
-    if (vehicle == null) return;
-
-    await _run(() => _updateCore(
+    if (vehicle == null || !mounted) {
+      return;
+    }
+    final vehicleId = vehicle['id']?.toString();
+    final label = [
+      if (vehicle['year'] != null) vehicle['year'].toString(),
+      if ((vehicle['make']?.toString() ?? '').isNotEmpty)
+        vehicle['make'].toString(),
+      if ((vehicle['model']?.toString() ?? '').isNotEmpty)
+        vehicle['model'].toString(),
+    ].join(' ');
+    if (_canEditVehicleLocally) {
+      setState(() => _busy = true);
+      try {
+        await _offlineJobAdmin.queueCore(
+          widget.businessId, widget.jobId,
           customerId: customerId,
-          vehicleId: vehicle['id']?.toString(),
-          plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
-          requestedWork: _job!['requested_work']?.toString() ?? '',
-        ));
+          vehicleId: vehicleId,
+          replaceVehicle: true,
+          vehicleLabel: label,
+          vehicleVin: vehicle['vin']?.toString(),
+        );
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _job = {
+            ..._job!,
+            'vehicle_id': vehicleId,
+            'vehicle': label,
+            'vehicle_vin': vehicle['vin'],
+          };
+          _mileageOut = null;
+          _mileageOutVehicleId = null;
+          _busy = false;
+        });
+        if (!BriskersConnectionModeController.instance.forceOffline) {
+          unawaited(_offlineJobAdmin.flush(widget.businessId)
+              .catchError((Object _) {}));
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() {
+            _busy = false;
+            _error = error.toString();
+          });
+        }
+      }
+      return;
+    }
+    await _run(() => _updateCore(
+      customerId: customerId,
+      vehicleId: vehicleId,
+      plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
+      requestedWork: _job!['requested_work']?.toString() ?? '',
+    ));
   }
 
   Future<void> _changePlannedHours() async {
@@ -1521,43 +1659,66 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
     if (selectedStatus == null) return;
 
+    final original = Map<String, dynamic>.from(_job!);
+    final nextName = selectedStatus['name']?.toString() ?? code;
+    final nextColor = selectedStatus['color_hex']?.toString();
+    final nextIcon = selectedStatus['icon_key']?.toString();
+
+    // Discard any older in-flight remote response that could repaint the
+    // just-changed status from a stale server Job graph.
+    ++_loadEpoch;
+    // The Job header reflects the owner's selection immediately, while
+    // SQLite/outbox durability is established before background replay.
     setState(() {
       _busy = true;
       _error = null;
+      _job = <String, dynamic>{
+        ..._job!,
+        'status': code,
+        'status_name': nextName,
+        'status_color': nextColor,
+        'status_icon': nextIcon,
+      };
     });
     try {
       await _offlineJobAdmin.queueStatus(
         widget.businessId,
         widget.jobId,
         code: code,
-        name: selectedStatus['name']?.toString() ?? code,
-        colorHex: selectedStatus['color_hex']?.toString(),
-        iconKey: selectedStatus['icon_key']?.toString(),
+        name: nextName,
+        colorHex: nextColor,
+        iconKey: nextIcon,
         note: note,
       );
+      if (!mounted) return;
+      setState(() => _busy = false);
+      // Do not await HTTP, invoice closing or a full Job Detail graph to
+      // repaint the completed badge and remove this Job from Open.
       if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {}
+        unawaited(() async {
+          try {
+            await _offlineJobAdmin.flush(widget.businessId);
+            if (code == 'completed' && widget.roleCode == 'owner') {
+              await OwnerInvoiceAutoCloseService().closeEligible(
+                businessId: widget.businessId,
+                jobId: widget.jobId,
+                isOwner: true,
+              );
+            }
+            if (mounted && !_contentBlocked) unawaited(_load());
+          } catch (_) {
+            // The durable local status + outbox still own the UI.
+          }
+        }());
       }
-      if (code == 'completed' && widget.roleCode == 'owner' &&
-          !BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await OwnerInvoiceAutoCloseService().closeEligible(
-            businessId: widget.businessId,
-            jobId: widget.jobId,
-            isOwner: true,
-          );
-        } catch (_) {
-          // A failed close does not undo job completion or payment history.
-          // The owner may review the invoice later.
-        }
-      }
-      if (mounted) await _load();
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _job = original;
+          _error = error.toString();
+          _busy = false;
+        });
+      }
     }
   }
 
@@ -3150,7 +3311,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           num.tryParse(invoice['pending_payment']?.toString() ?? '') ?? 0;
     }
 
-    if (total <= 0 || paid >= total - 0.005) return 'Paid';
+    // No payment proof on a zero-total or malformed invoice.
+    if (total <= 0) return null;
+    if (paid >= total - 0.005) return 'Paid';
     if (pending > 0 && paid + pending >= total - 0.005) {
       return 'Awaiting payment clearance';
     }
@@ -3214,6 +3377,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       required String value,
       String? subtitle,
       bool problemFlag = false,
+      bool showChevron = false,
       VoidCallback? onTap,
     }) {
       final enabled = onTap != null && !_busy;
@@ -3268,7 +3432,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                 const SizedBox(width: 5),
                 const Icon(Icons.flag, color: Colors.red, size: 19),
               ],
-              if (enabled) const Icon(Icons.chevron_right, size: 22),
+              if (enabled || showChevron)
+                const Icon(Icons.chevron_right, size: 22),
             ],
           ),
         ),
@@ -3381,7 +3546,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   value: vehicle.isEmpty ? 'No vehicle' : vehicle,
                   subtitle:
                       vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin',
-                  onTap: _canManage ? _changeVehicle : null,
+                  onTap: _canManage || _canEditVehicleLocally
+                      ? _changeVehicle : null,
+                  showChevron: _showVehicleChevron,
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(52, 0, 8, 5),
