@@ -1697,6 +1697,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     );
   }
 
+  // ignore: unused_element
   String _labMoney(int cents) => NumberFormat.simpleCurrency(
     locale: 'en_US').format(cents / 100);
 
