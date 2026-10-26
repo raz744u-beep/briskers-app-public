@@ -354,6 +354,18 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     return "${_employeeName(task['employee_id']?.toString())} · ${task['payroll_hours'] ?? '—'} hrs";
   }
 
+  Widget _selectableHoursInput({
+    required TextEditingController controller,
+    required String label,
+  }) => TextField(
+    controller: controller,
+    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    decoration: InputDecoration(
+      labelText: label, border: const OutlineInputBorder()),
+    onTap: () => controller.selection = TextSelection(
+      baseOffset: 0, extentOffset: controller.text.length),
+  );
+
   Future<void> _editTestBilledLaborHours(Map<String, dynamic> task) async {
     final current = (task['billed_hours_override'] as num?)?.toDouble() ??
       (task['source_invoice_hours'] as num?)?.toDouble() ?? 0;
@@ -364,9 +376,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           const Text('This edits invoice Qty only. Mechanic payroll '
             'allocations will not change.'),
-          TextField(controller: controller, autofocus: true,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Customer hours')),
+          _selectableHoursInput(
+            controller: controller, label: 'Customer hours'),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogContext),
@@ -454,17 +465,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               const SizedBox(height: 12),
               choose('Mechanic 1', first, (v) => first = v),
               const SizedBox(height: 8),
-              TextField(controller: hoursA,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Hours 1',
-                  border: OutlineInputBorder())),
+              _selectableHoursInput(
+                controller: hoursA, label: 'Hours 1'),
               const SizedBox(height: 12),
               choose('Mechanic 2 (optional)', second, (v) => second = v),
               const SizedBox(height: 8),
-              TextField(controller: hoursB,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Hours 2',
-                  border: OutlineInputBorder())),
+              _selectableHoursInput(
+                controller: hoursB, label: 'Hours 2'),
               const SizedBox(height: 12),
               FilledButton(onPressed: () async {
                 final a = double.tryParse(hoursA.text);
