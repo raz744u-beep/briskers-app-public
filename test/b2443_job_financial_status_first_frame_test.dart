@@ -14,6 +14,26 @@ Widget _screen(String? status, {bool offline = false}) => MaterialApp(
 );
 
 void main() {
+  test('first-frame status comes from the existing saved payment state, not a network spinner', () {
+    expect(savedJobFinancialStatus('paid'), 'Paid');
+    expect(savedJobFinancialStatus('PAID'), 'Paid');
+    expect(savedJobFinancialStatus('awaiting_clearance'), 'Awaiting payment clearance');
+    expect(savedJobFinancialStatus('awaiting_payment'), 'Awaiting payment');
+    expect(savedJobFinancialStatus(null), isNull);
+    expect(savedJobFinancialStatus(''), isNull);
+    expect(savedJobFinancialStatus('bogus'), isNull);
+  });
+
+  testWidgets('completed paid Job paints the final label in the initial frame', (tester) async {
+    await tester.pumpWidget(_screen(savedJobFinancialStatus('paid')));
+    expect(find.text('Financial status'), findsOneWidget);
+    expect(find.text('Paid'), findsOneWidget);
+    expect(find.text('Checking payment status…'), findsNothing);
+    expect(find.text('Payment status not verified offline'), findsNothing);
+    final before = tester.getTopLeft(find.byKey(const ValueKey('job-tiles-start')));
+    await tester.pumpWidget(_screen('Paid'));
+    expect(tester.getTopLeft(find.byKey(const ValueKey('job-tiles-start'))).dy, before.dy);
+  });
   testWidgets('completed Job financial card reserves identical height before and after payment verification', (tester) async {
     await tester.pumpWidget(_screen(null));
     expect(find.text('Financial status'), findsOneWidget);
@@ -45,10 +65,18 @@ void main() {
   test('Job Detail includes the placeholder for authorized completed jobs before online hydration', () {
     final source = File('lib/screens/jobs/job_detail_screen.dart').readAsStringSync();
     expect(source, contains("if (_canSeeFinancial &&\n              _job?['status']?.toString() == 'completed')"));
-    expect(source, contains('final status = _onlineReady ? _completedPaymentLabel() : null;'));
+    expect(source, contains("savedJobFinancialStatus("));
+    expect(source, contains("_job?['payment_state'] ?? widget.initialJobSummary?['payment_state']"));
+    expect(source, contains('final status = _onlineReady ? (_completedPaymentLabel() ?? saved) : saved;'));
     expect(source, contains('return JobFinancialStatusCard('));
     expect(source, contains('offline: BriskersConnectionModeController.instance.forceOffline'));
     expect(source, contains("if (_job?['status']?.toString() != 'completed') return null;"));
+    final repository = File('lib/services/local_job_repository.dart').readAsStringSync();
+    final localDetail = repository.substring(
+      repository.indexOf('Future<LocalJobDetailSnapshot?> jobDetail('),
+      repository.indexOf('Map<String, dynamic> _jobListMap('),
+    );
+    expect(localDetail, contains("'payment_state': row.readNullable<String>('payment_state')"));
     expect(source, contains("row['kind']?.toString() == 'invoice'"));
     expect(source, contains('paid >= total - 0.005'));
   });
