@@ -24,7 +24,7 @@ void main() {
         .readAsStringSync();
     for (final label in [
       'Outstanding balance (all weeks)',
-      'Previous weeks', 'Selected week', 'Total amount owed',
+      'Previous weeks', 'Selected period', 'Total amount owed',
       'Review Weekly Labor',
       'Advances & Repayments',
       "Tab(text: 'Tasks')", "Tab(text: 'Payroll')",
@@ -34,6 +34,10 @@ void main() {
       expect(profile, contains(label), reason: label);
     }
     expect(profile, contains('bool _advanceExpanded = false'));
+    expect(profile, contains('embedded: true'));
+    expect(profile, contains('employee-payroll-period-dropdown'));
+    expect(profile, contains('DefaultTabController.of(tabContext).animateTo(0)'));
+    expect(profile, isNot(contains('Widget _weekPicker()')));
   });
 
   test('Owner reference image phone 3: week-based history under Reports', () {
