@@ -51,7 +51,7 @@ void main() {
     ]) {
       expect(report, contains(label), reason: label);
     }
-    expect(report, contains('onWeekTap:'));
+    expect(report, contains('widget.onWeekTap('));
   });
 
   test('Separate Weekly Labor Times has approved fixed 3-column footer', () {
