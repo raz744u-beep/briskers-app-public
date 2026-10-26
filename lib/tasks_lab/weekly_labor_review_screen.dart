@@ -1,5 +1,6 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:drift/drift.dart' show Variable;
@@ -32,9 +33,11 @@ class WeeklyLaborReviewLab extends StatefulWidget {
 
 class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   final Map<String, double> _selected = {};
-  final _override = TextEditingController();
+  final _notes = TextEditingController();
+  int? _savedOverrideCents;
+  bool _showTip = true;
+  Timer? _tipTimer;
   static final _date = DateFormat('MMM d');
-  static final _money = NumberFormat.simpleCurrency(locale: 'en_US');
   late DateTime _week;
   bool _loading = true;
   bool _saving = false;
@@ -56,23 +59,37 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   void initState() {
     super.initState();
     _week = widget.week;
+    _tipTimer = Timer(const Duration(seconds: 10), () {
+      if (mounted) setState(() => _showTip = false);
+    });
     _load();
   }
 
   @override
   void dispose() {
-    _override.dispose();
+    _tipTimer?.cancel();
+    _notes.dispose();
     super.dispose();
   }
 
-  Future<void> _ensure() => localDatabase.customStatement('''
-    CREATE TABLE IF NOT EXISTS lab_weekly_payroll_drafts (
-      business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
-      week_key TEXT NOT NULL, selected_json TEXT NOT NULL,
-      override_cents INTEGER, updated_at INTEGER NOT NULL,
-      PRIMARY KEY(business_id, employee_id, week_key)
-    )
-  ''');
+  Future<void> _ensure() async {
+    await localDatabase.customStatement('''
+      CREATE TABLE IF NOT EXISTS lab_weekly_payroll_drafts (
+        business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+        week_key TEXT NOT NULL, selected_json TEXT NOT NULL,
+        override_cents INTEGER, updated_at INTEGER NOT NULL,
+        PRIMARY KEY(business_id, employee_id, week_key)
+      )
+    ''');
+    await localDatabase.customStatement('''
+      CREATE TABLE IF NOT EXISTS lab_weekly_labor_notes (
+        business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
+        week_key TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY(business_id, employee_id, week_key)
+      )
+    ''');
+  }
 
   Future<void> _load() async {
     setState(() { _loading = true; _error = null; });
@@ -80,6 +97,15 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
       await _ensure();
       final row = await localDatabase.customSelect(
         'SELECT selected_json, override_cents FROM lab_weekly_payroll_drafts '
+        'WHERE business_id=? AND employee_id=? AND week_key=?',
+        variables: [
+          const Variable<String>('briskers-tasks-test-only'),
+          Variable<String>(widget.employeeId),
+          Variable<String>(_weekKey(_week)),
+        ],
+      ).getSingleOrNull();
+      final noteRow = await localDatabase.customSelect(
+        'SELECT note FROM lab_weekly_labor_notes '
         'WHERE business_id=? AND employee_id=? AND week_key=?',
         variables: [
           const Variable<String>('briskers-tasks-test-only'),
@@ -102,8 +128,8 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
       if (!mounted) { return; }
       setState(() {
         _selected..clear()..addAll(selections);
-        final cents = row?.readNullable<int>('override_cents');
-        _override.text = cents == null ? '' : (cents / 100).toStringAsFixed(2);
+        _savedOverrideCents = row?.readNullable<int>('override_cents');
+        _notes.text = noteRow?.read<String>('note') ?? '';
         _loading = false;
       });
     } catch (error) {
@@ -133,7 +159,6 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
       .fold<double>(0, (sum, x) => sum + x.value);
   }
 
-  int get _suggestedCents => (_totalHours * (widget.rateCents ?? 0)).round();
 
   void _selectAll() {
     final items = _eligible;
@@ -208,17 +233,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   }
 
   Future<void> _save() async {
-    if (_loading || _saving || _future) return;
-    int? cents;
-    if (_override.text.trim().isNotEmpty) {
-      final value = double.tryParse(_override.text.trim());
-      if (value == null || !value.isFinite || value < 0 ||
-          value > 1000000) {
-        setState(() => _error = 'Enter a valid final amount');
-        return;
-      }
-      cents = (value * 100).round();
-    }
+    if (_loading || _saving || _future) { return; }
     final valid = <String, double>{};
     for (final task in _eligible) {
       final key = _id(task), hours = _selected[key];
@@ -229,17 +244,29 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
     setState(() => _saving = true);
     try {
       await _ensure();
-      await localDatabase.customStatement(
-        'INSERT INTO lab_weekly_payroll_drafts '
-        '(business_id, employee_id, week_key, selected_json, '
-        'override_cents, updated_at) VALUES (?, ?, ?, ?, ?, ?) '
-        'ON CONFLICT(business_id,employee_id,week_key) DO UPDATE SET '
-        'selected_json=excluded.selected_json, '
-        'override_cents=excluded.override_cents, updated_at=excluded.updated_at',
-        ['briskers-tasks-test-only', widget.employeeId,
-         _weekKey(_week), jsonEncode(valid), cents,
-         DateTime.now().millisecondsSinceEpoch],
-      );
+      await localDatabase.transaction(() async {
+        await localDatabase.customStatement(
+          'INSERT INTO lab_weekly_payroll_drafts '
+          '(business_id, employee_id, week_key, selected_json, '
+          'override_cents, updated_at) VALUES (?, ?, ?, ?, ?, ?) '
+          'ON CONFLICT(business_id,employee_id,week_key) DO UPDATE SET '
+          'selected_json=excluded.selected_json, '
+          'override_cents=excluded.override_cents, updated_at=excluded.updated_at',
+          ['briskers-tasks-test-only', widget.employeeId,
+            _weekKey(_week), jsonEncode(valid), _savedOverrideCents,
+            DateTime.now().millisecondsSinceEpoch],
+        );
+        await localDatabase.customStatement(
+          'INSERT INTO lab_weekly_labor_notes '
+          '(business_id, employee_id, week_key, note, updated_at) '
+          'VALUES (?, ?, ?, ?, ?) '
+          'ON CONFLICT(business_id,employee_id,week_key) DO UPDATE SET '
+          'note=excluded.note, updated_at=excluded.updated_at',
+          ['briskers-tasks-test-only', widget.employeeId,
+            _weekKey(_week), _notes.text.trim(),
+            DateTime.now().millisecondsSinceEpoch],
+        );
+      });
       if (mounted) { Navigator.pop(context, true); }
     } catch (error) {
       if (mounted) {
@@ -285,34 +312,49 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   Widget build(BuildContext context) {
     final tasks = _eligible;
     return Scaffold(
-      appBar: AppBar(title: Text('Weekly Labor Times — ' + widget.employeeName,
-        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600))),
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
       body: SafeArea(child: Column(children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-          child: Row(children: [
-            const CircleAvatar(
-              backgroundColor: Color(0xFFDDECFD),
-              child: Icon(Icons.build_outlined)),
-            const SizedBox(width: 10),
-            Expanded(child: Text(widget.employeeName,
-              style: const TextStyle(fontWeight: FontWeight.bold))),
-            const Text('TEST ONLY', style: TextStyle(
-              color: Color(0xFF865A1E), fontWeight: FontWeight.bold)),
-          ]),
-        ),
         _weekSelector(),
-        Container(
-          width: double.infinity,
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFF2DE),
-            borderRadius: BorderRadius.circular(8)),
-          child: const Text(
-            'Offline draft · No real payroll posting or paid-once tracking.',
-            style: TextStyle(fontSize: 11.5, color: Color(0xFF80541A))),
-        ),
+ector(),
+        if (_showTip)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
         if (_error != null)
           Padding(padding: const EdgeInsets.all(6),
             child: Text(_error!, style: const TextStyle(color: Colors.red))),
@@ -380,44 +422,68 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                 style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
             ],
           )),
-        // Fixed footer: ONLY the task list above scrolls.
+        // Approved fixed footer: only the task-list above scrolls.
         Container(
           key: const Key('weekly-labor-fixed-footer'),
-          padding: const EdgeInsets.fromLTRB(14, 9, 14, 10),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
           decoration: const BoxDecoration(
             color: Colors.white,
             border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(_selected.length.toString() + ' tasks · ' +
-                  _totalHours.toStringAsFixed(1) + ' hrs',
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-                Text(widget.rateCents == null
-                  ? 'Rate not set'
-                  : 'Suggested ' + _money.format(_suggestedCents / 100),
-                  style: const TextStyle(fontWeight: FontWeight.w800)),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + widget.hoursOf(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
               ]),
+            ),
             const SizedBox(height: 8),
             TextField(
-              controller: _override,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              controller: _notes,
+              maxLines: 1,
               decoration: const InputDecoration(
                 isDense: true,
-                labelText: 'Final amount override (TEST)',
-                prefixText: r'$ ', border: OutlineInputBorder()),
-              onTap: () => _override.selection = TextSelection(
-                baseOffset: 0, extentOffset: _override.text.length),
+                labelText: 'Notes (optional)',
+                border: OutlineInputBorder()),
             ),
             const SizedBox(height: 9),
             Row(children: [
               Expanded(child: OutlinedButton(
                 onPressed: () => Navigator.pop(context, false),
                 child: const Text('Cancel'))),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(child: FilledButton(
                 onPressed: _loading || _saving || _future ? null : _save,
-                child: const Text('Save Draft (TEST)'))),
+                child: const Text('Save weekly hours'))),
             ]),
           ]),
         ),
