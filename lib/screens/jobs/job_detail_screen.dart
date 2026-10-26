@@ -347,7 +347,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         final cached = await _documentDetailCache.load(
           widget.businessId, invoiceId,
         );
-        if (cached == null || !_currentLoad(epoch)) return;
+        if (!_currentLoad(epoch)) return;
+        if (cached == null) continue;
         final projected = await _invoiceMileage.project(
           widget.businessId, invoiceId, cached,
         );
