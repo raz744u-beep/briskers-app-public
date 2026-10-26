@@ -1,3 +1,4 @@
+// ignore_for_file: prefer_interpolation_to_compose_strings
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -93,7 +94,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
           for (final item in data.entries) {
             if (item.key is String && item.value is num) {
               final n = (item.value as num).toDouble();
-              if (n > 0 && n.isFinite) selections[item.key as String] = n;
+              if (n > 0 && n.isFinite) { selections[item.key as String] = n; }
             }
           }
         }
@@ -142,7 +143,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
           _selected.remove(key);
         } else {
           final hours = widget.hoursOf(t);
-          if (hours > 0) _selected.putIfAbsent(key, () => hours);
+          if (hours > 0) { _selected.putIfAbsent(key, () => hours); }
         }
       }
     });
@@ -183,7 +184,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
       ),
     );
     input.dispose();
-    if (value == null || !mounted) return;
+    if (value == null || !mounted) { return; }
     setState(() {
       if (value == 0) { _selected.remove(key); }
       else { _selected[key] = value; }
@@ -199,7 +200,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
     final value = await showDatePicker(
       context: context, initialDate: _week,
       firstDate: DateTime(2020), lastDate: DateTime(2100));
-    if (value == null || !mounted) return;
+    if (value == null || !mounted) { return; }
     setState(() => _week = value);
     await _load();
   }
@@ -344,7 +345,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                       onChanged: (v) => setState(() {
                         if (v == true) {
                           final h = widget.hoursOf(task);
-                          if (h > 0) _selected[_id(task)] = h;
+                          if (h > 0) { _selected[_id(task)] = h; }
                         } else { _selected.remove(_id(task)); }
                       }),
                     ),
