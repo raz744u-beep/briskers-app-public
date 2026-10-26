@@ -749,6 +749,26 @@ class LocalJobRepository {
     });
   }
 
+  /// Cache only a verified, server-confirmed completed-Job payment status.
+  /// No invoice amount or financial record is changed; this is the same
+  /// read-only summary already displayed in the Jobs list. A later server
+  /// sync may replace this snapshot with a newer authoritative status.
+  Future<void> saveVerifiedPaymentState(
+    String businessId,
+    String jobId,
+    String state,
+  ) async {
+    if (!const {'paid', 'awaiting_clearance', 'awaiting_payment',
+                'invoice_needed'}.contains(state)) {
+      throw ArgumentError.value(state, 'state');
+    }
+    await _database.customStatement(
+      "UPDATE local_jobs SET payment_state = ? "
+      "WHERE business_id = ? AND id = ? AND status = 'completed'",
+      [state, businessId, jobId],
+    );
+  }
+
   Future<LocalJobDetailSnapshot?> jobDetail(
     String businessId,
     String jobId,
@@ -897,8 +917,11 @@ class LocalJobRepository {
       'status_name': row.readNullable<String>('status_name'),
       'status_color': row.readNullable<String>('status_color'),
       'status_icon': row.readNullable<String>('status_icon'),
+      'customer_id': row.readNullable<String>('customer_id'),
       'customer_name': row.readNullable<String>('customer_name'),
+      'customer_problem_flag': row.read<int>('customer_problem_flag') == 1,
       'vehicle_id': row.readNullable<String>('vehicle_id'),
+      'vehicle_vin': row.readNullable<String>('vehicle_vin'),
       'vehicle': row.readNullable<String>('vehicle_label'),
       'planned_hours': row.data['planned_hours'],
       'assigned_employee': row.readNullable<String>('assigned_employee_name'),

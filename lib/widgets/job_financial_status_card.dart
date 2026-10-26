@@ -9,6 +9,7 @@ String? savedJobFinancialStatus(Object? paymentState) {
     'paid' => 'Paid',
     'awaiting_clearance' => 'Awaiting payment clearance',
     'awaiting_payment' => 'Awaiting payment',
+    'invoice_needed' => 'Invoice needed',
     _ => null,
   };
 }
@@ -29,20 +30,21 @@ class JobFinancialStatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = status ??
-        (offline ? 'Payment status not verified offline'
-                 : 'Checking payment status…');
-    final checking = status == null;
+    // A compact, single-line status belongs next to its label, not in a
+    // second tall panel. Never display a loading spinner or fabricate Paid
+    // when no local/verified payment state is available.
+    final label = status ?? 'Not verified';
+    final unknown = status == null;
     final paid = status == 'Paid';
     final invoiceNeeded = status == 'Invoice needed';
-    final color = checking
+    final color = unknown
         ? const Color(0xFF697586)
         : paid
             ? const Color(0xFF169B62)
             : invoiceNeeded
                 ? const Color(0xFFC62828)
                 : const Color(0xFFE58A00);
-    final icon = checking
+    final icon = unknown
         ? Icons.info_outline
         : paid
             ? Icons.check_circle_outline
@@ -50,20 +52,42 @@ class JobFinancialStatusCard extends StatelessWidget {
                 ? Icons.receipt_long_outlined
                 : Icons.hourglass_bottom_outlined;
 
-    // Same height in loading, saved-offline and resolved states. Otherwise
-    // the tiles below jump after an async jobDocuments/payment refresh.
     return SizedBox(
-      height: 96,
+      height: 50,
       child: Card(
         margin: EdgeInsets.zero,
         color: color.withValues(alpha: 0.08),
-        child: ListTile(
-          leading: Icon(icon, color: color),
-          title: const Text(
-            'Financial status',
-            style: TextStyle(fontWeight: FontWeight.w700),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 13),
+          child: Row(
+            children: [
+              Icon(icon, color: color, size: 22),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Financial status',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  key: const ValueKey('job-financial-status-value'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w800,
+                    color: color,
+                  ),
+                ),
+              ),
+            ],
           ),
-          subtitle: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
         ),
       ),
     );
