@@ -15,16 +15,19 @@ void main() {
     expect(source, contains('WeeklyLaborReviewLab('));
     expect(source, contains('bool _advanceExpanded = false;'));
     expect(source, isNot(contains('_banner()')));
-    expect(source, contains('reports-fixed-payment-total'));
-    expect(source, contains("String _reportRange = 'Year to Date'"));
+    expect(File('lib/tasks_lab/payroll_history_panel.dart').readAsStringSync(),
+      contains('reports-fixed-payment-total'));
+    expect(File('lib/tasks_lab/payroll_history_panel.dart').readAsStringSync(),
+      contains("'Year to Date'"));
     final payroll = source.split('Widget _payrollTab() {').last
       .split('Widget _advancePanel() {').first;
     expect(payroll, isNot(contains('Payment History')));
     expect(payroll, contains('_advancePanel()'));
     final reports = source.split('Widget _reportsTab() {').last
       .split('Widget _taxesTab()').first;
-    expect(reports, contains('Payment History'));
-    expect(reports, contains('Total paid'));
+    expect(reports, contains('LabPayrollHistoryPanel('));
+    expect(File('lib/tasks_lab/payroll_history_panel.dart').readAsStringSync(),
+      contains('Total paid'));
   });
 
   test('Weekly Labor screen fixes summary/actions while only tasks scroll', () {
@@ -48,8 +51,8 @@ void main() {
   test('Legacy Payroll TEST ledger is no longer the employee landing', () {
     final source = File('lib/tasks_lab_main.dart').readAsStringSync();
     expect(source, isNot(contains("_sectionHeader('Payroll TEST ledger'")));
-    expect(source, contains('Review Weekly Labor'));
-    expect(source, contains('Open employee payroll'));
+    expect(source, contains('LabPayrollOverviewScreen('));
+    expect(source, contains('onOpenProfile:'));
     expect(source, contains('initialTab: 1'));
     expect(source, contains('BriskersColors.jobs'));
   });
