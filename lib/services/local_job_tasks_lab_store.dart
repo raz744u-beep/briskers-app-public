@@ -741,7 +741,7 @@ class LocalJobTasksLabStore {
     if (businessId.trim().isEmpty || employeeId.trim().isEmpty ||
         cents < 1 || cents > 100000000 ||
         !const {'pay', 'advance'}.contains(kind) ||
-        !const {'cash', 'check', 'zelle', 'card', 'other'}.contains(method)) {
+        !const {'cash', 'check', 'zelle', 'card', 'other', 'ach'}.contains(method)) {
       throw ArgumentError('Invalid test payment');
     }
     await db.customStatement(
