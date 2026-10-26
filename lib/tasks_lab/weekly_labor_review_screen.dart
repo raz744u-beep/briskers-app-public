@@ -107,10 +107,12 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
         _loading = false;
       });
     } catch (error) {
-      if (mounted) setState(() {
-        _loading = false;
-        _error = 'Unable to read test draft: ' + error.toString();
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Unable to read test draft: ' + error.toString();
+        });
+      }
     }
   }
 
@@ -240,8 +242,10 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
       );
       if (mounted) { Navigator.pop(context, true); }
     } catch (error) {
-      if (mounted) setState(() =>
-        _error = 'Unable to save test draft: ' + error.toString());
+      if (mounted) {
+        setState(() =>
+          _error = 'Unable to save test draft: ' + error.toString());
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
