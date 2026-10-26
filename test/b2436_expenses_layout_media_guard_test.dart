@@ -14,7 +14,7 @@ void main() {
     expect(block, contains('maxLines: 3'));
     expect(block, contains('TextOverflow.ellipsis'));
     expect(block, contains('_periodError ??'));
-    expect(block, contains('Posted totals for $_rangeLabel'));
+    expect(block, contains('Posted totals for \$_rangeLabel'));
     expect(source, contains('if (_showFinancialSummary)\n                    Card('),
         reason: 'Finance visibility and accounting verification remain unchanged.');
   });
