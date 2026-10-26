@@ -19,6 +19,7 @@ void main() {
     expect(savedJobFinancialStatus('PAID'), 'Paid');
     expect(savedJobFinancialStatus('awaiting_clearance'), 'Awaiting payment clearance');
     expect(savedJobFinancialStatus('awaiting_payment'), 'Awaiting payment');
+    expect(savedJobFinancialStatus('invoice_needed'), 'Invoice needed');
     expect(savedJobFinancialStatus(null), isNull);
     expect(savedJobFinancialStatus(''), isNull);
     expect(savedJobFinancialStatus('bogus'), isNull);
@@ -37,7 +38,7 @@ void main() {
   testWidgets('completed Job financial card reserves identical height before and after payment verification', (tester) async {
     await tester.pumpWidget(_screen(null));
     expect(find.text('Financial status'), findsOneWidget);
-    expect(find.text('Checking payment status…'), findsOneWidget);
+    expect(find.text('Not verified'), findsOneWidget);
     expect(find.text('Paid'), findsNothing);
     final before = tester.getTopLeft(find.byKey(const ValueKey('job-tiles-start')));
 
@@ -57,7 +58,7 @@ void main() {
 
   testWidgets('unverified offline payment never silently presents Paid or Invoice needed', (tester) async {
     await tester.pumpWidget(_screen(null, offline: true));
-    expect(find.text('Payment status not verified offline'), findsOneWidget);
+    expect(find.text('Not verified'), findsOneWidget);
     expect(find.text('Paid'), findsNothing);
     expect(find.text('Invoice needed'), findsNothing);
   });
