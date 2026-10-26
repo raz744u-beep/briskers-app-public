@@ -24,6 +24,9 @@ import '../../services/owner_job_retirement_service.dart';
 import '../../core/supabase_config.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
+import '../../core/job_mileage_summary.dart';
+import '../../services/offline_invoice_mileage_service.dart';
+import '../../widgets/job_mileage_row.dart';
 import '../../services/job_detail_first_frame.dart';
 import '../../services/local_job_access_history.dart';
 import '../../services/job_performance_metrics.dart';
@@ -96,6 +99,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   final OwnerJobRetirementService _jobRetirement = OwnerJobRetirementService();
   final OfflineDocumentDraftService _offlineDocumentDraft =
       OfflineDocumentDraftService();
+  final OfflineInvoiceMileageService _invoiceMileage =
+      OfflineInvoiceMileageService();
 
   Map<String, dynamic>? _job;
   Map<String, dynamic>? _profitability;
@@ -109,6 +114,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   Future<String>? _automaticInvoiceLabor;
   List<Map<String, dynamic>> _findings = const [];
   List<Map<String, dynamic>> _jobExpenses = const [];
+  num? _mileageOut;
+  String? _mileageOutVehicleId;
   bool _linkedExpensesCached = false;
   final ImagePicker _picker = ImagePicker();
 
@@ -143,6 +150,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       _documents = const [];
       _findings = const [];
       _jobExpenses = const [];
+      _mileageOut = null;
+      _mileageOutVehicleId = null;
       _linkedExpensesCached = false;
       _loading = false;
       _busy = false;
@@ -317,6 +326,65 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     });
   }
 
+  // Read a v2 invoice's departure reading only from a saved, same-Job,
+  // same-vehicle invoice detail. Never reinterpret an old ambiguous invoice
+  // odometer as Mileage Out. The row height is reserved on first paint, so
+  // a later cache lookup cannot move the tiles below the vehicle card.
+  Future<void> _hydrateMileageOut(
+    int epoch,
+    List<Map<String, dynamic>> documents,
+  ) async {
+    if (!_canSeeFinancial || !_currentLoad(epoch)) return;
+    final jobId = widget.jobId;
+    final vehicleId = _job?['vehicle_id']?.toString() ?? '';
+    if (vehicleId.isEmpty) return;
+    num? departure;
+    try {
+      for (final invoice in documents) {
+        if (invoice['kind']?.toString() != 'invoice') continue;
+        final invoiceId = invoice['id']?.toString() ?? '';
+        if (invoiceId.isEmpty) continue;
+        final cached = await _documentDetailCache.load(
+          widget.businessId, invoiceId,
+        );
+        if (!_currentLoad(epoch)) return;
+        if (cached == null) continue;
+        final projected = await _invoiceMileage.project(
+          widget.businessId, invoiceId, cached,
+        );
+        if (!_currentLoad(epoch)) return;
+        departure = JobMileageSummary.mileageOutFromInvoice(
+          projected, jobId: jobId, vehicleId: vehicleId,
+        );
+        if (departure != null) break;
+      }
+    } catch (_) {
+      // A missing cache or pending-outbox read must not fabricate a reading.
+      return;
+    }
+    if (!_currentLoad(epoch) ||
+        _job?['vehicle_id']?.toString() != vehicleId) {
+      return;
+    }
+    setState(() {
+      _mileageOut = departure;
+      _mileageOutVehicleId = vehicleId;
+    });
+  }
+
+  Future<void> _openMileageOutInvoice() async {
+    if (_busy || !_canSeeFinancial) return;
+    final invoices = _documents.where(
+      (row) => row['kind']?.toString() == 'invoice',
+    ).toList();
+    if (invoices.isEmpty) {
+      await _openSectionModal('documents');
+      return;
+    }
+    final id = invoices.first['id']?.toString() ?? '';
+    if (id.isNotEmpty) await _openDocument(id);
+  }
+
   Future<void> _hydrateLocalLinkedExpenses() async {
     final epoch = _loadEpoch;
     try {
@@ -348,6 +416,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         return;
       }
       setState(() => _documents = documents);
+      unawaited(_hydrateMileageOut(epoch, documents));
       _modalRefresh?.call();
     } catch (_) {
       // Leave the locally rendered Job usable if links cannot be read.
@@ -741,6 +810,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           ).catchError((Object _) {}));
         }
       }
+      if (canSeeFinancial) unawaited(_hydrateMileageOut(epoch, documents));
       _modalRefresh?.call();
       _scheduleInitialAction();
       unawaited(_prefetchFindingPhotos(findings));
@@ -3312,6 +3382,20 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   subtitle:
                       vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin',
                   onTap: _canManage ? _changeVehicle : null,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(52, 0, 8, 5),
+                  child: JobMileageRow(
+                    mileageIn: JobMileageSummary.mileageIn(_job, _preInspection),
+                    mileageOut: _mileageOutVehicleId ==
+                            _job?['vehicle_id']?.toString()
+                        ? _mileageOut : null,
+                    onEditIn: _canEditInspection && !_busy
+                        ? _editMileageIn : null,
+                    onOpenOut: _canSeeFinancial && !_busy &&
+                            _job?['_first_frame_only'] != true
+                        ? _openMileageOutInvoice : null,
+                  ),
                 ),
                 Divider(
                   height: 1,
