@@ -109,6 +109,11 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
     ]));
 
   Future<void> _showTaskHistory(LabPayrollWeek week) async {
+    await localDatabase.customStatement('CREATE TABLE IF NOT EXISTS lab_payroll_task_payments ('
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, employee_id TEXT NOT NULL, '
+      'document_id TEXT NOT NULL, line_id TEXT NOT NULL, week_key TEXT NOT NULL, '
+      'description TEXT NOT NULL, hours REAL NOT NULL, cents INTEGER NOT NULL, '
+      "method TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', paid_at INTEGER NOT NULL)");
     final rows = await localDatabase.customSelect(
       'SELECT description, hours, cents, method, note, paid_at, '
       'document_id, line_id FROM lab_payroll_task_payments '
