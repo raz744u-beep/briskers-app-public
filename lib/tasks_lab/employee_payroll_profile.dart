@@ -199,7 +199,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
               onPressed: () {
                 final dollars = double.tryParse(amount.text.trim());
                 if (dollars == null || !dollars.isFinite ||
-                    dollars <= 0 || dollars > 1000000) return;
+                    dollars <= 0 || dollars > 1000000) { return; }
                 Navigator.pop(dialog, true);
               },
               child: const Text('Save TEST Payment')),
@@ -339,20 +339,6 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
       widget.tasks.where((task) =>
           _assignmentFor(task) != null &&
           task['source_missing'] != 1).toList();
-
-  List<Map<String, dynamic>> get _weekDone {
-    final begin = _start(_week);
-    final end = _end(_week);
-    return _employeeTasks.where((task) {
-      if (task['status'] != 'done') return false;
-      final timestamp = task['completed_at'];
-      if (timestamp is! int || timestamp <= 0) return false;
-      final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
-      return !date.isBefore(begin) && date.isBefore(end);
-    }).toList();
-  }
-
-
 
   Widget _panel(Widget child) => Card(
     margin: const EdgeInsets.symmetric(vertical: 6),
