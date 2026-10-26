@@ -107,7 +107,7 @@ class _CustomerFindingsOverviewRowState
       vehicles: vehicles,
       localOnly: localFirst,
     );
-    setState(() => _counts = first);
+    setState(() { _counts = first; });
 
     if (!localFirst) return;
     unawaited(() async {
