@@ -153,7 +153,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
           if (remaining > 0) {
             final requested = selections[key];
             _selected[key] = requested == null ? remaining :
-              requested.clamp(0.0, remaining);
+              requested.clamp(0.0, remaining).toDouble();
           }
         }
         _loading = false;
@@ -180,7 +180,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   }
 
   double _available(Map<String, dynamic> task) =>
-    (widget.hoursOf(task) - (_paidHours[_id(task)] ?? 0)).clamp(0.0, double.infinity);
+    (widget.hoursOf(task) - (_paidHours[_id(task)] ?? 0)).clamp(0.0, double.infinity).toDouble();
 
   double get _totalHours {
     final ids = _eligible.map(_id).toSet();
@@ -399,7 +399,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
             );
           }
         });
-        if (mounted) Navigator.pop(context, true);
+        if (mounted) { Navigator.pop(context, true); }
       } catch (error) {
         if (mounted) {
           setState(() => _error = 'Payment not saved: ' + error.toString());
