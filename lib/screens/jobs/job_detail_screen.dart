@@ -29,6 +29,7 @@ import '../../services/job_performance_metrics.dart';
 import '../../services/job_profitability_summary.dart';
 import '../../services/owner_job_profitability_cache.dart';
 import '../../widgets/job_profitability_summary_view.dart';
+import '../../widgets/job_financial_status_card.dart';
 import '../../widgets/work_performed_editor_sheet.dart';
 import '../../services/invoice_labor_work_summary.dart';
 import 'invoice_payment_navigation.dart';
@@ -3039,33 +3040,14 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }
 
   Widget _completedPaymentBanner() {
-    final label = _completedPaymentLabel();
-    if (label == null) return const SizedBox.shrink();
-
-    final paid = label == 'Paid';
-    final invoiceNeeded = label == 'Invoice needed';
-    final color = paid
-        ? const Color(0xFF169B62)
-        : invoiceNeeded
-            ? const Color(0xFFC62828)
-            : const Color(0xFFE58A00);
-    final icon = paid
-        ? Icons.check_circle_outline
-        : invoiceNeeded
-            ? Icons.receipt_long_outlined
-            : Icons.hourglass_bottom_outlined;
-
-    return Card(
-      margin: EdgeInsets.zero,
-      color: color.withValues(alpha: 0.08),
-      child: ListTile(
-        leading: Icon(icon, color: color),
-        title: const Text(
-          'Financial status',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-        subtitle: Text(label),
-      ),
+    // The local-first Job paints before invoice links and payment totals have
+    // been verified. Display a neutral placeholder in the *same footprint*
+    // rather than inserting the whole card a second later. Never interpret
+    // a not-yet-loaded invoice list as paid or needing an invoice.
+    final status = _onlineReady ? _completedPaymentLabel() : null;
+    return JobFinancialStatusCard(
+      status: status,
+      offline: BriskersConnectionModeController.instance.forceOffline,
     );
   }
 
@@ -5523,7 +5505,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
             jobTitle: jobTitle,
             assignment: assignment,
           ),
-          if (_onlineReady &&
+          if (_canSeeFinancial &&
               _job?['status']?.toString() == 'completed') ...[
             const SizedBox(height: 8),
             _completedPaymentBanner(),
