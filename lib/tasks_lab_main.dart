@@ -1930,7 +1930,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       context,
       MaterialPageRoute(builder: (_) => WeeklyLaborReviewLab(
         employeeId: employeeId,
-        employeeName: fullNames[employeeId] ?? emp['name']!,
+        employeeName: nicknames[employeeId] ?? emp['nickname'] ?? emp['name']!,
         tasks: employeeTasks,
         hoursOf: hoursFor,
         rateCents: testHourlyRates[employeeId],
