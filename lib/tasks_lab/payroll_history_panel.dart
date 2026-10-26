@@ -33,11 +33,6 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
   String _money(int? value) =>
       value == null ? '—' : _currency.format(value / 100);
 
-  DateTimeRange _monthRange(DateTime month) =>
-    DateTimeRange(start: DateTime(month.year, month.month),
-      end: DateTime(month.year, month.month + 1)
-        .subtract(const Duration(days: 1)));
-
   bool _matches(DateTime week) {
     final today = DateTime.now();
     switch (_period) {
