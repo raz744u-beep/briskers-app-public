@@ -24,6 +24,7 @@ import '../../services/owner_job_retirement_service.dart';
 import '../../core/supabase_config.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
+import '../../services/job_detail_first_frame.dart';
 import '../../services/local_job_access_history.dart';
 import '../../services/job_performance_metrics.dart';
 import '../../services/job_profitability_summary.dart';
@@ -192,6 +193,19 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   @override
   void initState() {
     super.initState();
+    // The selected row was already authorized by the Jobs list. Render its
+    // customer, vehicle, mechanic and saved financial state in the *actual*
+    // Job Detail layout before awaiting the more expensive inspection,
+    // findings, visits and network hydrations. Edits still require the
+    // separately verified Job Detail capabilities.
+    final firstFrame = JobDetailFirstFrame.fromSelectedRow(
+      widget.initialJobSummary, expectedJobId: widget.jobId,
+    );
+    if (firstFrame != null) {
+      _job = firstFrame;
+      _loading = false;
+      _showingLocal = true;
+    }
     _findingChanges = VehicleFindingActionsService.changes.listen((businessId) {
       if (businessId == widget.businessId && mounted && !_contentBlocked) {
         unawaited(_refreshLocalWorkFindings());
