@@ -66,12 +66,6 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
 
   static final _currency = NumberFormat.simpleCurrency(locale: 'en_US');
   String _money(int cents) => _currency.format(cents / 100);
-  static DateTime _day(DateTime date) =>
-      DateTime(date.year, date.month, date.day);
-  static DateTime _start(DateTime date) =>
-      _day(date).subtract(Duration(days: date.weekday - 1));
-  static DateTime _end(DateTime date) =>
-      _start(date).add(const Duration(days: 7));
   static final _date = DateFormat('MMM d, yyyy');
 
   @override
@@ -507,7 +501,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
               const Expanded(child: Text('Payroll summary',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
               SizedBox(width: 166, child: DropdownButtonFormField<String>(
-                key: const Key('employee-payroll-period-dropdown'),
+                key: ValueKey('employee-payroll-period-dropdown-$_payrollPeriod'),
                 initialValue: _payrollPeriod,
                 isExpanded: true,
                 decoration: const InputDecoration(
