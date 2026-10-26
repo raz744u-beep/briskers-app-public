@@ -3040,11 +3040,14 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }
 
   Widget _completedPaymentBanner() {
-    // The local-first Job paints before invoice links and payment totals have
-    // been verified. Display a neutral placeholder in the *same footprint*
-    // rather than inserting the whole card a second later. Never interpret
-    // a not-yet-loaded invoice list as paid or needing an invoice.
-    final status = _onlineReady ? _completedPaymentLabel() : null;
+    // Use the already synchronized Jobs-list payment state during local-first
+    // paint, so "Paid" is visible immediately for a saved paid Job (J-30).
+    // The online invoice graph can subsequently correct a genuinely changed
+    // status, but the initial render never invents one from empty documents.
+    final saved = savedJobFinancialStatus(
+      _job?['payment_state'] ?? widget.initialJobSummary?['payment_state'],
+    );
+    final status = _onlineReady ? (_completedPaymentLabel() ?? saved) : saved;
     return JobFinancialStatusCard(
       status: status,
       offline: BriskersConnectionModeController.instance.forceOffline,
