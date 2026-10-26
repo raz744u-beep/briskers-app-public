@@ -23,27 +23,37 @@ String? cachedVerifiedJobPaymentState(
   final invoices = savedInvoiceDetails.where(
     (document) => document['kind']?.toString() == 'invoice',
   ).toList();
-  if (invoices.isEmpty) return null;
+  if (invoices.isEmpty) {
+    return null;
+  }
   num total = 0;
   num paid = 0;
   num pending = 0;
   for (final invoice in invoices) {
     if (!invoice.containsKey('total_amount') ||
-        !invoice.containsKey('paid_amount')) return null;
+        !invoice.containsKey('paid_amount')) {
+      return null;
+    }
     final amount = num.tryParse(invoice['total_amount']?.toString() ?? '');
     final receipt = num.tryParse(invoice['paid_amount']?.toString() ?? '');
     if (amount == null || receipt == null ||
         !amount.isFinite || !receipt.isFinite ||
-        amount <= 0 || receipt < 0) return null;
+        amount <= 0 || receipt < 0) {
+      return null;
+    }
     final awaiting = num.tryParse(
       invoice['pending_payment']?.toString() ?? '0',
     );
-    if (awaiting == null || !awaiting.isFinite || awaiting < 0) return null;
+    if (awaiting == null || !awaiting.isFinite || awaiting < 0) {
+      return null;
+    }
     total += amount;
     paid += receipt;
     pending += awaiting;
   }
-  if (paid >= total - 0.005) return 'paid';
+  if (paid >= total - 0.005) {
+    return 'paid';
+  }
   if (pending > 0 && paid + pending >= total - 0.005) {
     return 'awaiting_clearance';
   }
