@@ -24,10 +24,8 @@ void main() {
         .readAsStringSync();
     for (final label in [
       'Outstanding balance (all weeks)',
-      'Outstanding from previous weeks',
-      'Selected week balance', 'Total amount owed',
-      'Recent payroll payments', 'View all',
-      'Add Payment (TEST)', 'Review Weekly Labor',
+      'Previous weeks', 'Selected week', 'Total amount owed',
+      'Review Weekly Labor',
       'Advances & Repayments',
       "Tab(text: 'Tasks')", "Tab(text: 'Payroll')",
       "Tab(text: 'Reports')", "Tab(text: 'Taxes')",
@@ -51,7 +49,7 @@ void main() {
     ]) {
       expect(report, contains(label), reason: label);
     }
-    expect(report, contains('widget.onWeekTap('));
+    expect(report, contains('_showTaskHistory(week)'));
   });
 
   test('Separate Weekly Labor Times has approved fixed 3-column footer', () {
@@ -60,8 +58,8 @@ void main() {
     expect(review, contains('Tasks selected'));
     expect(review, contains('Selected this week'));
     expect(review, contains('Available hours'));
-    expect(review, contains('Notes (optional)'));
-    expect(review, contains('Save weekly hours'));
+    expect(review, contains('Payment note (optional)'));
+    expect(review, contains('Verify Payment'));
     expect(review, contains('weekly-labor-tasks-scroll-only'));
     expect(review, contains('weekly-labor-fixed-footer'));
     expect(review, contains('Timer(const Duration(seconds: 10)'));
