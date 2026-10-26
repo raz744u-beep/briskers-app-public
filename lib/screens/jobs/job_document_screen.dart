@@ -5210,14 +5210,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
        _detail!['mileage_schema_version'] == 2 ||
        _detail!.containsKey('mileage_out'));
 
-  String get _visibleInvoiceMileage =>
-      (_usesInvoiceMileageOut
-          ? _detail?['mileage_out']
-          : _detail?['odometer_in'])?.toString().trim() ?? '';
+  String get _visibleInvoiceMileage {
+    final detail = _detail;
+    if (detail == null) return '';
+    final raw = _usesInvoiceMileageOut
+        ? detail['mileage_out'] : detail['odometer_in'];
+    return raw?.toString().trim() ?? '';
+  }
 
   Future<void> _editInvoiceMileage() async {
+    final vehicleId = _detail?['vehicle_id']?.toString() ?? '';
     if (_estimate || _readOnly || _busy || _detail == null ||
-        (_detail!['vehicle_id']?.toString().isNotEmpty != true)) return;
+        vehicleId.isEmpty) {
+      return;
+    }
     final usesMileageOut = _usesInvoiceMileageOut;
     final existing = _visibleInvoiceMileage.replaceAll(',', '').trim();
     final controller = TextEditingController(text: existing);
@@ -5261,7 +5267,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     await mileageDialogRoute?.completed;
     controller.dispose();
     if (changed == null || !mounted || _detail == null ||
-        changed == existing) return;
+        changed == existing) {
+      return;
+    }
     final reading = changed.isEmpty ? null
         : (usesMileageOut ? MileageWorkflow.parse(changed)
                           : num.tryParse(changed));
