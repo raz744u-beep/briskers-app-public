@@ -134,7 +134,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   Future<void> _recordTestPayment() async {
     final amount = TextEditingController();
     final note = TextEditingController();
-    var method = 'Zelle';
+    var method = 'zelle';
     var paymentDate = DateTime.now();
     final chosen = await showDialog<bool>(
       context: context,
