@@ -330,7 +330,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     }
     if (!_estimate) {
       _invoiceCloseEvents = VerifiedInvoiceCloseEvents.changes.listen((event) {
-        if (!mounted || event.businessId != widget.businessId) return;
+        if (!mounted || event.businessId != widget.businessId) {
+          return;
+        }
         // Do not create a card for a different customer or a hidden invoice:
         // patch only the matching existing row. Preserve all amount/receipt
         // fields, and invalidate any remote read begun before this closure.
