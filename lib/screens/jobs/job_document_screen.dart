@@ -43,6 +43,7 @@ import '../settings/catalog_settings_screen.dart';
 import '../../services/local_catalog_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_document_repository.dart';
+import '../../services/verified_invoice_close_events.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
@@ -3070,6 +3071,20 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       action: () => _api.closeInvoice(
         widget.businessId, widget.documentId),
     );
+    // The close RPC has returned successfully. Inform the retained invoice
+    // list without waiting for its next full refresh or payment-feed query.
+    try {
+      await _localDocuments.recordServerConfirmedClosed(
+        widget.businessId, widget.documentId,
+      );
+    } catch (_) {
+      // Never turn a verified close into a failed payment simply because a
+      // local presentation-index refresh could not be written.
+    }
+    VerifiedInvoiceCloseEvents.serverConfirmed(VerifiedInvoiceClosed(
+      businessId: widget.businessId,
+      invoiceId: widget.documentId,
+    ));
   }
 
   Future<void> _finalizeEnteredPayments() async {

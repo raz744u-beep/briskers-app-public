@@ -1,6 +1,8 @@
 import '../core/connection_mode.dart';
 import 'briskers_api.dart';
 import 'invoice_finalization_guard.dart';
+import 'local_document_repository.dart';
+import 'verified_invoice_close_events.dart';
 
 /// Safe owner closeout after either independent action: completion or
 /// payment finalization. Does not receive or finalize money.
@@ -8,11 +10,16 @@ class OwnerInvoiceAutoCloseService {
   OwnerInvoiceAutoCloseService({
     BriskersApi? api,
     InvoiceFinalizationGuard? guard,
+    LocalDocumentRepository? localDocuments,
   }) : _api = api ?? const BriskersApi(),
-       _guard = guard ?? InvoiceFinalizationGuard();
+       _guard = guard ?? InvoiceFinalizationGuard(),
+       _localDocuments = localDocuments;
 
   final BriskersApi _api;
   final InvoiceFinalizationGuard _guard;
+  // Lazily resolve only after a server close is confirmed. Read-only roles,
+  // ineligible invoices and permission-denied paths never open SQLite.
+  final LocalDocumentRepository? _localDocuments;
 
   Future<int> closeEligible({
     required String businessId,
@@ -76,6 +83,19 @@ class OwnerInvoiceAutoCloseService {
         isOwner: isOwner,
         action: () => _api.closeInvoice(businessId, id),
       );
+      // Only an acknowledged close RPC may mark the list Closed. Never do
+      // so merely because the Job became Completed or a payment was queued.
+      try {
+        await (_localDocuments ?? LocalDocumentRepository())
+            .recordServerConfirmedClosed(businessId, id);
+      } catch (_) {
+        // The verified server closure still deserves a retained UI update.
+        // Another index refresh can repair its read-only local projection.
+      }
+      VerifiedInvoiceCloseEvents.serverConfirmed(VerifiedInvoiceClosed(
+        businessId: businessId,
+        invoiceId: id,
+      ));
       closed++;
     }
     return closed;
