@@ -363,7 +363,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       return;
     }
     if (!_currentLoad(epoch) ||
-        _job?['vehicle_id']?.toString() != vehicleId) return;
+        _job?['vehicle_id']?.toString() != vehicleId) {
+      return;
+    }
     setState(() {
       _mileageOut = departure;
       _mileageOutVehicleId = vehicleId;
