@@ -81,9 +81,9 @@ class LabPayrollPeriodProjection {
     var paid = 0;
     for (final row in payments) {
       if (row['employee_id'] != employeeId || row['kind'] != 'pay' ||
-          row['paid_at'] is! int || row['cents'] is! int) continue;
+          row['paid_at'] is! int || row['cents'] is! int) { continue; }
       final date = DateTime.fromMillisecondsSinceEpoch(row['paid_at'] as int);
-      if (inPeriod(date)) paid += row['cents'] as int;
+      if (inPeriod(date)) { paid += row['cents'] as int; }
     }
     if (weeks.isEmpty) {
       return LabPayrollPeriodProjection(
