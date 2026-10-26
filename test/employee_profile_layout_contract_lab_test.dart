@@ -13,6 +13,11 @@ void main() {
     expect(source, contains('isScrollable: true'));
     expect(source, contains("'Details'"));
     expect(source, contains('WeeklyLaborReviewLab('));
+    expect(source, contains('embedded: true'));
+    expect(source, contains('onCancel: () => Navigator.of(context).pop()'));
+    expect(source, contains('onPaymentSaved: _refreshPayrollData'));
+    expect(source, contains('employee-payroll-period-dropdown'));
+    expect(source, isNot(contains('Widget _weekPicker()')));
     expect(source, contains('bool _advanceExpanded = false;'));
     expect(source, isNot(contains('_banner()')));
     expect(File('lib/tasks_lab/payroll_history_panel.dart').readAsStringSync(),
@@ -37,6 +42,9 @@ void main() {
     expect(source, contains('Select All'));
     expect(source, contains('weekly-labor-tasks-scroll-only'));
     expect(source, contains('weekly-labor-fixed-footer'));
+    expect(source, contains('_compactWeekSelector()'));
+    expect(source, contains('height: 43'));
+    expect(source, contains('widget.embedded ? null : AppBar('));
     expect(source, contains('Timer(const Duration(seconds: 10)'));
     expect(source, contains('lab_weekly_labor_notes'));
     expect(source, contains('Widget build(BuildContext context)'));
@@ -62,7 +70,7 @@ void main() {
     expect(source, isNot(contains("_sectionHeader('Payroll TEST ledger'")));
     expect(source, contains('LabPayrollOverviewScreen('));
     expect(source, contains('onOpenProfile:'));
-    expect(source, contains('initialTab: 1'));
+    expect(source, contains('initialTab: 0'));
     expect(source, contains('BriskersColors.jobs'));
   });
 }
