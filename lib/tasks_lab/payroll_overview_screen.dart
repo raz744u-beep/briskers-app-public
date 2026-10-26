@@ -155,8 +155,10 @@ class _LabPayrollOverviewScreenState extends State<LabPayrollOverviewScreen> {
     final rate = widget.rates[id];
     final rateLabel = rate == null ? 'Rate unset'
       : _money(rate) + '/hr';
-    final name = widget.nicknames[id] ?? employee['nickname'] ??
-      employee['name'] ?? 'Employee';
+    final name = employee['role'] == 'secretary'
+      ? 'Karol (TEST)'
+      : widget.nicknames[id] ?? employee['nickname'] ??
+        employee['name'] ?? 'Employee';
     final role = employee['role'];
     final icon = role == 'secretary'
       ? Icons.headset_mic_outlined
@@ -258,7 +260,8 @@ class _LabPayrollOverviewScreenState extends State<LabPayrollOverviewScreen> {
   }
 
   Widget _footer() {
-    final summaries = widget.employees.map((employee) =>
+    final summaries = widget.employees.where((e) =>
+      e['role'] != 'owner').map((employee) =>
       _summary(employee['id']!)).toList();
     double hours = 0;
     int gross = 0, paid = 0, balance = 0;
@@ -329,7 +332,8 @@ class _LabPayrollOverviewScreenState extends State<LabPayrollOverviewScreen> {
       ? const Center(child: CircularProgressIndicator())
       : ListView(
           padding: const EdgeInsets.fromLTRB(10, 3, 10, 6),
-          children: widget.employees.map(_employeeCard).toList(),
+          children: widget.employees.where((e) =>
+            e['role'] != 'owner').map(_employeeCard).toList(),
         )),
     _footer(),
   ]);
