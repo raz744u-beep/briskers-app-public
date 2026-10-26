@@ -38,9 +38,19 @@ void main() {
     expect(source, contains('Select All'));
     expect(source, contains('weekly-labor-tasks-scroll-only'));
     expect(source, contains('weekly-labor-fixed-footer'));
+    expect(source, contains('Timer(const Duration(seconds: 10)'));
+    expect(source, contains('lab_weekly_labor_notes'));
+    expect(source, contains('Widget build(BuildContext context)'));
+    expect(source, contains('Weekly labor times'));
+    expect(source, contains('Icons.engineering_outlined'));
+
     expect(source, contains("Text('Cancel')"));
-    expect(source, contains("Text('Save Draft (TEST)')"));
-    expect(source, contains('Final amount override'));
+    expect(source, contains("Text('Save weekly hours')"));
+    expect(source, contains('Tasks selected'));
+    expect(source, contains('Selected this week'));
+    expect(source, contains('Available hours'));
+    expect(source, contains('Notes (optional)'));
+    expect(source, isNot(contains('Final amount override (TEST)')));
     expect(source, contains('hours > 0 && hours <= widget.hoursOf(task)'));
     expect(source, contains('lab_weekly_payroll_drafts'));
     expect(source, contains('ON CONFLICT'));
