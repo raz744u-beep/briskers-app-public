@@ -19,6 +19,10 @@ class WeeklyLaborReviewLab extends StatefulWidget {
     required this.hoursOf,
     required this.rateCents,
     required this.week,
+    this.embedded = false,
+    this.onCancel,
+    this.onPaymentSaved,
+    this.onWeekChanged,
   });
 
   final String employeeId;
@@ -27,6 +31,10 @@ class WeeklyLaborReviewLab extends StatefulWidget {
   final double Function(Map<String, dynamic>) hoursOf;
   final int? rateCents;
   final DateTime week;
+  final bool embedded;
+  final VoidCallback? onCancel;
+  final Future<void> Function()? onPaymentSaved;
+  final ValueChanged<DateTime>? onWeekChanged;
 
   @override
   State<WeeklyLaborReviewLab> createState() => _WeeklyLaborReviewLabState();
@@ -249,6 +257,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
 
   Future<void> _moveWeek(int weeks) async {
     setState(() => _week = _week.add(Duration(days: weeks * 7)));
+    widget.onWeekChanged?.call(_week);
     await _load();
   }
 
@@ -258,6 +267,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
       firstDate: DateTime(2020), lastDate: DateTime(2100));
     if (value == null || !mounted) { return; }
     setState(() => _week = value);
+    widget.onWeekChanged?.call(_week);
     await _load();
   }
 
@@ -399,7 +409,14 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
             );
           }
         });
-        if (mounted) { Navigator.pop(context, true); }
+        if (mounted) {
+          if (widget.embedded) {
+            await _load();
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
       } catch (error) {
         if (mounted) {
           setState(() => _error = 'Payment not saved: ' + error.toString());
@@ -437,16 +454,58 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
         tooltip: 'Current week',
         onPressed: () async {
           setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
           await _load();
         }),
     ]);
+  }
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final tasks = _eligible;
     return Scaffold(
-      appBar: AppBar(
+      appBar: widget.embedded ? null : AppBar(
         leading: IconButton(
           icon: const Icon(Icons.close),
           tooltip: 'Close weekly labor',
@@ -472,8 +531,8 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
         ]),
       ),
       body: SafeArea(child: Column(children: [
-        _weekSelector(),
-        if (_showTip)
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
           Container(
             width: double.infinity,
             margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -550,9 +609,10 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                       onPressed: () => _editHours(task)),
                   ]),
                 ),
-              const Text('Unfinished tasks can be selected, but '
-                'this test cannot verify or mark previously paid labor.',
-                style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
             ],
           )),
         // Approved fixed footer: only the task-list above scrolls.
@@ -602,7 +662,9 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
             const SizedBox(height: 9),
             Row(children: [
               Expanded(child: OutlinedButton(
-                onPressed: () => Navigator.pop(context, false),
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
                 child: const Text('Cancel'))),
               const SizedBox(width: 10),
               Expanded(child: FilledButton(
