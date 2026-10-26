@@ -1304,7 +1304,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
           ],
         ),
       ),
-        ],
+      ),
+      ],
     );
   }
 }
