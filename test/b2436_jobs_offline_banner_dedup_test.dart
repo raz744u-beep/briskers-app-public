@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('Jobs uses only global mode/sync status, not a repeated page banner', () {
     final jobs = File('lib/screens/jobs_screen.dart').readAsStringSync();
+    final detail =
+        File('lib/screens/jobs/job_detail_screen.dart').readAsStringSync();
     final header =
         File('lib/widgets/connection_header_toggle.dart').readAsStringSync();
 
@@ -19,6 +21,12 @@ void main() {
     expect(jobs, isNot(contains('Offline · showing saved jobs')));
     expect(jobs, isNot(contains('Showing saved jobs · refresh needs attention')));
     expect(jobs, isNot(contains("if (_showingLocal &&\n")));
+    // The old transient Job Detail overlay also appeared every time an
+    // already-cached Job was opened, even in Auto mode.
+    expect(detail, isNot(contains('_cachedNoticeVisible')));
+    expect(detail, isNot(contains('_showCachedDataNotice')));
+    expect(detail, isNot(contains('Showing saved job data. Offline edits sync later.')));
+    expect(detail, contains('_showingLocal = true;'));
 
     // Real sync problems and pending uploads remain visible and navigable.
     expect(header, contains("key: const ValueKey('sync-header-attention')"));
