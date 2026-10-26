@@ -25,7 +25,7 @@ class BriskersTasksLabApp extends StatelessWidget {
     title: 'Briskers Tasks TEST',
     theme: ThemeData(
       useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF007F79)),
+      colorScheme: ColorScheme.fromSeed(seedColor: BriskersColors.jobs),
       scaffoldBackgroundColor: const Color(0xFFF8FAFC),
     ),
     home: const TasksLabHome(),
