@@ -5221,9 +5221,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     final usesMileageOut = _usesInvoiceMileageOut;
     final existing = _visibleInvoiceMileage.replaceAll(',', '').trim();
     final controller = TextEditingController(text: existing);
+    ModalRoute<dynamic>? mileageDialogRoute;
     final changed = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      builder: (dialogContext) {
+        mileageDialogRoute ??= ModalRoute.of(dialogContext);
+        return AlertDialog(
         title: Text(usesMileageOut ? 'Mileage Out' : 'Mileage'),
         content: TextField(
           controller: controller,
@@ -5251,10 +5254,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             child: const Text('Save'),
           ),
         ],
-      ),
+      );
+      },
     );
-    // The dialog's exit transition may still own the controller briefly.
-    WidgetsBinding.instance.addPostFrameCallback((_) => controller.dispose());
+    // Let the closing route finish before disposing its TextField controller.
+    await mileageDialogRoute?.completed;
+    controller.dispose();
     if (changed == null || !mounted || _detail == null ||
         changed == existing) return;
     final reading = changed.isEmpty ? null
