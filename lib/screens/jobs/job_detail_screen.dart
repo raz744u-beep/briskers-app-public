@@ -24,6 +24,7 @@ import '../../services/owner_job_retirement_service.dart';
 import '../../core/supabase_config.dart';
 import '../../services/local_attachment_cache.dart';
 import '../../services/local_job_repository.dart';
+import '../../services/local_customer_repository.dart';
 import '../../core/job_mileage_summary.dart';
 import '../../services/offline_invoice_mileage_service.dart';
 import '../../widgets/job_mileage_row.dart';
@@ -176,6 +177,17 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       (widget.roleCode == 'owner' ||
        widget.roleCode == 'manager' ||
        widget.roleCode == 'office');
+
+  // Only a verified local Job can initiate a queued vehicle change.
+  // Server-only Job actions must remain disabled while offline.
+  bool get _canEditVehicleLocally =>
+      !_onlineReady && _canQuickAdmin && !_contentBlocked &&
+      _job?['_local_snapshot'] == true;
+
+  bool get _showVehicleChevron =>
+      _canManage || _canEditVehicleLocally ||
+      (_job?['_first_frame_only'] == true &&
+       const {'owner', 'manager', 'office'}.contains(widget.roleCode));
 
   bool get _canManage {
     if (!_onlineReady) return false;
@@ -1211,7 +1223,24 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   Future<Map<String, dynamic>?> _pickVehicleForCustomer(
     String customerId,
   ) async {
-    final detail = await _api.customerDetail(widget.businessId, customerId);
+    Map<String, dynamic>? detail;
+    if (!BriskersConnectionModeController.instance.forceOnline) {
+      detail = await LocalCustomerRepository().customerDetail(
+        widget.businessId, customerId,
+      );
+    }
+    if (detail == null &&
+        !BriskersConnectionModeController.instance.forceOffline) {
+      detail = await _api.customerDetail(widget.businessId, customerId);
+    }
+    if (detail == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Customer vehicles are not cached on this device.'),
+        ));
+      }
+      return null;
+    }
     final vehicles = List<dynamic>.from(detail['vehicles'] ?? const [])
         .map((raw) => Map<String, dynamic>.from(raw as Map))
         .toList();
@@ -1299,18 +1328,61 @@ class _JobDetailScreenState extends State<JobDetailScreen>
   }
 
   Future<void> _changeVehicle() async {
-    if (!_canManage || _job == null || _busy) return;
+    if ((!_canManage && !_canEditVehicleLocally) ||
+        _job == null || _busy) return;
     final customerId = _job!['customer_id']?.toString() ?? '';
     if (customerId.isEmpty) return;
     final vehicle = await _pickVehicleForCustomer(customerId);
-    if (vehicle == null) return;
-
-    await _run(() => _updateCore(
+    if (vehicle == null || !mounted) return;
+    final vehicleId = vehicle['id']?.toString();
+    final label = [
+      if (vehicle['year'] != null) vehicle['year'].toString(),
+      if ((vehicle['make']?.toString() ?? '').isNotEmpty)
+        vehicle['make'].toString(),
+      if ((vehicle['model']?.toString() ?? '').isNotEmpty)
+        vehicle['model'].toString(),
+    ].join(' ');
+    if (_canEditVehicleLocally) {
+      setState(() => _busy = true);
+      try {
+        await _offlineJobAdmin.queueCore(
+          widget.businessId, widget.jobId,
           customerId: customerId,
-          vehicleId: vehicle['id']?.toString(),
-          plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
-          requestedWork: _job!['requested_work']?.toString() ?? '',
-        ));
+          vehicleId: vehicleId,
+          replaceVehicle: true,
+          vehicleLabel: label,
+          vehicleVin: vehicle['vin']?.toString(),
+        );
+        if (!mounted) return;
+        setState(() {
+          _job = {
+            ..._job!,
+            'vehicle_id': vehicleId,
+            'vehicle': label,
+            'vehicle_vin': vehicle['vin'],
+          };
+          _mileageOut = null;
+          _mileageOutVehicleId = null;
+          _busy = false;
+        });
+        if (!BriskersConnectionModeController.instance.forceOffline) {
+          unawaited(_offlineJobAdmin.flush(widget.businessId)
+              .catchError((Object _) {}));
+        }
+      } catch (error) {
+        if (mounted) setState(() {
+          _busy = false;
+          _error = error.toString();
+        });
+      }
+      return;
+    }
+    await _run(() => _updateCore(
+      customerId: customerId,
+      vehicleId: vehicleId,
+      plannedHours: num.tryParse(_job!['planned_hours']?.toString() ?? '') ?? 0,
+      requestedWork: _job!['requested_work']?.toString() ?? '',
+    ));
   }
 
   Future<void> _changePlannedHours() async {
@@ -3234,6 +3306,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       required String value,
       String? subtitle,
       bool problemFlag = false,
+      bool showChevron = false,
       VoidCallback? onTap,
     }) {
       final enabled = onTap != null && !_busy;
@@ -3288,7 +3361,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                 const SizedBox(width: 5),
                 const Icon(Icons.flag, color: Colors.red, size: 19),
               ],
-              if (enabled) const Icon(Icons.chevron_right, size: 22),
+              if (enabled || showChevron)
+                const Icon(Icons.chevron_right, size: 22),
             ],
           ),
         ),
@@ -3401,7 +3475,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                   value: vehicle.isEmpty ? 'No vehicle' : vehicle,
                   subtitle:
                       vin.isEmpty ? 'VIN: Not entered' : 'VIN: $vin',
-                  onTap: _canManage ? _changeVehicle : null,
+                  onTap: _canManage || _canEditVehicleLocally
+                      ? _changeVehicle : null,
+                  showChevron: _showVehicleChevron,
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(52, 0, 8, 5),
