@@ -36,7 +36,7 @@ class LabPayrollPeriodProjection {
     bool inPeriod(DateTime t) => !t.isBefore(from) && t.isBefore(until);
     final weeks = <String, ({double hours, int? gross})>{};
     for (final row in drafts) {
-      if (row['employee_id'] != employeeId) continue;
+      if (row['employee_id'] != employeeId) { continue; }
       final key = row['week_key']?.toString() ?? '';
       final week = DateTime.tryParse(key);
       if (week == null || !inPeriod(week)) continue;
@@ -55,24 +55,28 @@ class LabPayrollPeriodProjection {
         : (hrs * hourlyRateCents).round();
       weeks[key] = (hours:hrs,gross:gross);
     }
+    final linkedHours = <String,double>{};
     for (final task in taskPayments) {
-      if (task['employee_id'] != employeeId) continue;
+      if (task['employee_id'] != employeeId) { continue; }
       final key = task['week_key']?.toString() ?? '';
       final week = DateTime.tryParse(key);
       final value = task['hours'];
       if (week == null || !inPeriod(week) ||
-          value is! num || !value.isFinite || value <= 0) continue;
-      final current = weeks[key];
-      final hours = (current?.hours ?? 0) + value.toDouble();
-      final grossFromTasks = hourlyRateCents == null
-        ? null : (hours * hourlyRateCents).round();
-      // A saved draft may overlap task-linked payments; do not double-count.
-      weeks[key] = (hours: current == null
-          ? hours : hours > current.hours ? hours : current.hours,
-        gross: current?.gross == null ? grossFromTasks
-          : grossFromTasks == null ? current!.gross
-          : grossFromTasks > current!.gross! ? grossFromTasks
-          : current.gross);
+          value is! num || !value.isFinite || value <= 0) { continue; }
+      linkedHours[key] = (linkedHours[key] ?? 0) + value.toDouble();
+    }
+    for (final item in linkedHours.entries) {
+      final current = weeks[item.key];
+      final linked = item.value;
+      final hours = current == null || current.hours < linked
+        ? linked : current.hours;
+      final linkedGross = hourlyRateCents == null
+        ? null : (linked * hourlyRateCents).round();
+      final draftGross = current?.gross;
+      final gross = draftGross == null ? linkedGross
+        : linkedGross == null ? draftGross
+        : draftGross > linkedGross ? draftGross : linkedGross;
+      weeks[item.key] = (hours:hours,gross:gross);
     }
     var paid = 0;
     for (final row in payments) {
