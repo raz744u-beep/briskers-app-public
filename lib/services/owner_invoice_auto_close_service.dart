@@ -13,11 +13,13 @@ class OwnerInvoiceAutoCloseService {
     LocalDocumentRepository? localDocuments,
   }) : _api = api ?? const BriskersApi(),
        _guard = guard ?? InvoiceFinalizationGuard(),
-       _localDocuments = localDocuments ?? LocalDocumentRepository();
+       _localDocuments = localDocuments;
 
   final BriskersApi _api;
   final InvoiceFinalizationGuard _guard;
-  final LocalDocumentRepository _localDocuments;
+  // Lazily resolve only after a server close is confirmed. Read-only roles,
+  // ineligible invoices and permission-denied paths never open SQLite.
+  final LocalDocumentRepository? _localDocuments;
 
   Future<int> closeEligible({
     required String businessId,
@@ -84,7 +86,8 @@ class OwnerInvoiceAutoCloseService {
       // Only an acknowledged close RPC may mark the list Closed. Never do
       // so merely because the Job became Completed or a payment was queued.
       try {
-        await _localDocuments.recordServerConfirmedClosed(businessId, id);
+        await (_localDocuments ?? LocalDocumentRepository())
+            .recordServerConfirmedClosed(businessId, id);
       } catch (_) {
         // The verified server closure still deserves a retained UI update.
         // Another index refresh can repair its read-only local projection.
