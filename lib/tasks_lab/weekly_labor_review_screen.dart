@@ -34,9 +34,7 @@ class WeeklyLaborReviewLab extends StatefulWidget {
 
 class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   final Map<String, double> _selected = {};
-  final _notes = TextEditingController();
   final Map<String, double> _paidHours = {};
-  int? _savedOverrideCents;
   bool _showTip = true;
   Timer? _tipTimer;
   static final _date = DateFormat('MMM d');
@@ -70,7 +68,6 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   @override
   void dispose() {
     _tipTimer?.cancel();
-    _notes.dispose();
     super.dispose();
   }
 
@@ -129,15 +126,6 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
         variables: [const Variable<String>('briskers-tasks-test-only'),
           Variable<String>(widget.employeeId)],
       ).get();
-      final noteRow = await localDatabase.customSelect(
-        'SELECT note FROM lab_weekly_labor_notes '
-        'WHERE business_id=? AND employee_id=? AND week_key=?',
-        variables: [
-          const Variable<String>('briskers-tasks-test-only'),
-          Variable<String>(widget.employeeId),
-          Variable<String>(_weekKey(_week)),
-        ],
-      ).getSingleOrNull();
       final selections = <String, double>{};
       if (row != null) {
         final data = jsonDecode(row.read<String>('selected_json'));
@@ -168,8 +156,6 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
               requested.clamp(0.0, remaining);
           }
         }
-        _savedOverrideCents = row?.readNullable<int>('override_cents');
-        _notes.text = noteRow?.read<String>('note') ?? '';
         _loading = false;
       });
     } catch (error) {
