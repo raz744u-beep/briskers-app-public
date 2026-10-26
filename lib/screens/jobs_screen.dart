@@ -130,7 +130,6 @@ class _JobsScreenState extends State<JobsScreen>
   bool _jobsRemoteRefreshRunning = false;
   DateTime? _lastDockLocalRefreshAt;
   bool _showingLocal = false;
-  bool _refreshFailed = false;
 
   bool get _canManage =>
       widget.roleCode == 'owner' ||
@@ -414,7 +413,6 @@ class _JobsScreenState extends State<JobsScreen>
         _rows = visibleRows;
         _showingLocal = !online;
         _onlineReady = online;
-        if (online) _refreshFailed = false;
         _error = null;
       });
     }
@@ -464,7 +462,6 @@ class _JobsScreenState extends State<JobsScreen>
         if (!mounted || !visibility.isCurrent(generation)) return;
         setState(() {
           _onlineReady = false;
-          _refreshFailed = true;
           _showingLocal = localAvailable && !mode.forceOnline;
           if (_showingLocal || (_rows?.isNotEmpty ?? false)) {
             _showingLocal = true;
