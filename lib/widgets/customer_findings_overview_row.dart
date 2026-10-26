@@ -37,6 +37,7 @@ class _CustomerFindingsOverviewRowState
   late Future<CustomerFindingCounts> _counts;
   CustomerFindingCounts? _lastCounts;
   int _refreshEpoch = 0;
+  int _visibilityEpoch = 0;
   StreamSubscription<String>? _changes;
   StreamSubscription<({String businessId, Set<String> jobIds})>?
       _quarantine;
@@ -60,10 +61,18 @@ class _CustomerFindingsOverviewRowState
     // A revoked Job or finding identity must be removed from the summary,
     // even if it was visible in an earlier cached customer snapshot.
     _quarantine = LocalJobQuarantine.events.listen((event) {
-      if (event.businessId == widget.businessId && mounted) _refresh();
+      if (event.businessId == widget.businessId && mounted) {
+        _lastCounts = null;
+        ++_visibilityEpoch;
+        _refresh();
+      }
     });
     _retirements = LocalJobRetirement.events.listen((event) {
-      if (event.businessId == widget.businessId && mounted) _refresh();
+      if (event.businessId == widget.businessId && mounted) {
+        _lastCounts = null;
+        ++_visibilityEpoch;
+        _refresh();
+      }
     });
   }
 
@@ -76,6 +85,7 @@ class _CustomerFindingsOverviewRowState
       // Counts from a different customer/vehicle scope must never flash while
       // the replacement authorization-filtered local lookup is pending.
       _lastCounts = null;
+      ++_visibilityEpoch;
       _refresh();
     }
   }
@@ -149,6 +159,11 @@ class _CustomerFindingsOverviewRowState
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<CustomerFindingCounts>(
+      // A FutureBuilder ordinarily retains prior data when its Future changes.
+      // Reset across account, vehicle scope or quarantine changes rather than
+      // flashing a now-inaccessible customer's finding counts.
+      key: ValueKey((widget.businessId, widget.customerId,
+          _vehicleIds(widget.vehicles), _visibilityEpoch)),
       future: _counts,
       builder: (context, snapshot) {
         final counts = snapshot.data ?? _lastCounts;
