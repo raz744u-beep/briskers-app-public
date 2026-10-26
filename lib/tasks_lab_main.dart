@@ -11,6 +11,8 @@ import 'local/local_database_provider.dart';
 import 'services/local_job_tasks_lab_store.dart';
 import 'tasks_lab/fixture.dart';
 import 'tasks_lab/employee_payroll_profile.dart';
+import 'tasks_lab/payroll_overview_screen.dart';
+import 'tasks_lab/weekly_labor_review_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1877,7 +1879,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (saved == true) await _refresh();
   }
 
-  Future<void> _openEmployeeProfile(String employeeId) async {
+  Future<void> _openEmployeeProfile(String employeeId, [DateTime? week]) async {
     final employee = BriskersLabFixture.employees.firstWhere(
       (value) => value['id'] == employeeId,
     );
@@ -1893,132 +1895,60 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           payments: testPayrollPayments,
           rateCents: testHourlyRates[employeeId],
           initialTab: 1,
+          initialWeek: week,
         ),
       ),
     );
     if (mounted) await _refresh();
   }
 
-  Widget _payrollPage() {
-    // TEST-only overview; no paid-once ledger or production payroll.
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(10, 12, 10, 24),
-      children: [
-        Row(children: [
-          const Icon(Icons.account_balance_wallet_outlined,
-            color: BriskersColors.jobs, size: 24),
-          const SizedBox(width: 9),
-          const Expanded(child: Text('Payroll',
-            style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800))),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF2DE),
-              borderRadius: BorderRadius.circular(12)),
-            child: const Text('OFFLINE TEST',
-              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold,
-                color: Color(0xFF886329))),
-          ),
-        ]),
-        const Padding(
-          padding: EdgeInsets.only(top: 6, bottom: 12),
-          child: Text('Select an employee to review their week, tasks, '
-            'draft payroll, and reports. This app never posts real payments.',
-            style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-        ),
-        for (final employee in BriskersLabFixture.employees)
-          Builder(builder: (_) {
-            final id = employee['id']!;
-            final hours = earnedPayrollPreviewHours[id] ?? 0;
-            final rate = testHourlyRates[id];
-            final earned = rate == null ? null : (hours * rate).round();
-            final rows = testPayrollPayments.where(
-              (payment) => payment['employee_id'] == id).toList();
-            final paid = rows.fold<int>(0, (sum, payment) =>
-              sum + (payment['cents'] as int));
-            return Card(
-              margin: const EdgeInsets.only(bottom: 7),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(children: [
-                      CircleAvatar(
-                        radius: 21,
-                        backgroundColor: const Color(0xFFDDECFD),
-                        child: Icon(employee['role'] == 'secretary'
-                          ? Icons.headset_mic_outlined
-                          : employee['role'] == 'owner'
-                            ? Icons.shield_outlined
-                            : Icons.build_outlined,
-                          color: BriskersColors.jobs),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(_employeeName(id),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800, fontSize: 17)),
-                          Text(employee['role'] == 'secretary'
-                            ? 'Secretary' : employee['role'] == 'owner'
-                              ? 'Owner' : 'Mechanic',
-                            style: const TextStyle(
-                              fontSize: 12, color: Color(0xFF64748B))),
-                        ],
-                      )),
-                      IconButton(
-                        tooltip: 'Open employee payroll',
-                        onPressed: () => _openEmployeeProfile(id),
-                        icon: const Icon(Icons.chevron_right)),
-                    ]),
-                    const SizedBox(height: 7),
-                    Row(children: [
-                      Expanded(child: Text(
-                        'Earned (TEST) ' +
-                          (earned == null ? '—' : _labMoney(earned)),
-                        style: const TextStyle(fontWeight: FontWeight.w700))),
-                      Text(hours.toStringAsFixed(1) + ' hrs',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: BriskersColors.jobs)),
-                    ]),
-                    const SizedBox(height: 4),
-                    Text('Recorded TEST payments ' + _labMoney(paid),
-                      style: const TextStyle(
-                        color: Color(0xFF64748B), fontSize: 12)),
-                    const SizedBox(height: 9),
-                    OutlinedButton.icon(
-                      onPressed: () => _openEmployeeProfile(id),
-                      icon: const Icon(Icons.checklist, size: 18),
-                      label: const Text('Review Weekly Labor'),
-                    ),
-                    Row(children: [
-                      TextButton(
-                        onPressed: () => _setTestPayrollRate(id),
-                        child: const Text('Set test rate')),
-                      const SizedBox(width: 5),
-                      TextButton(
-                        onPressed: () => _recordTestPayrollPayment(id),
-                        child: const Text('Simulate payment')),
-                    ]),
-                  ],
-                ),
-              ),
-            );
-          }),
-        const Padding(
-          padding: EdgeInsets.all(8),
-          child: Text('These figures are lifetime TEST snapshots, not '
-            'week-filtered shop payroll. Open an employee to select a '
-            'specific week. Real payment reconciliation is disabled.',
-            style: TextStyle(fontSize: 11,
-              color: Color(0xFF64748B))),
-        ),
-      ],
+  Future<void> _reviewEmployeeWeek(String employeeId, DateTime week) async {
+    final emp = BriskersLabFixture.employees.firstWhere(
+      (e) => e['id'] == employeeId);
+    final employeeTasks = tasks.where((task) {
+      final line = task['line_id']?.toString() ?? '';
+      final allocations = allocationsByLine[line] ?? const [];
+      return task['source_missing'] != 1 && (allocations.isNotEmpty
+        ? allocations.any((a) => a['employee_id'] == employeeId)
+        : task['employee_id'] == employeeId);
+    }).toList();
+    double hoursFor(Map<String, dynamic> task) {
+      final line = task['line_id']?.toString() ?? '';
+      final allocations = allocationsByLine[line] ?? const [];
+      if (allocations.isNotEmpty) {
+        final matches = allocations.where(
+          (a) => a['employee_id'] == employeeId);
+        if (matches.isEmpty) return 0;
+        final raw = matches.first['hours'];
+        return raw is num ? raw.toDouble() : 0;
+      }
+      final raw = task['payroll_hours'];
+      return raw is num ? raw.toDouble() : 0;
+    }
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => WeeklyLaborReviewLab(
+        employeeId: employeeId,
+        employeeName: fullNames[employeeId] ?? emp['name']!,
+        tasks: employeeTasks,
+        hoursOf: hoursFor,
+        rateCents: testHourlyRates[employeeId],
+        week: week,
+      )),
     );
+    if (mounted) await _refresh();
   }
+
+  Widget _payrollPage() => LabPayrollOverviewScreen(
+    employees: BriskersLabFixture.employees,
+    nicknames: nicknames,
+    rates: testHourlyRates,
+    payments: testPayrollPayments,
+    tasks: tasks,
+    allocationsByLine: allocationsByLine,
+    onOpenProfile: (id, week) => _openEmployeeProfile(id, week),
+    onReviewWeek: _reviewEmployeeWeek,
+  );
 
   Widget _settingsPage() => ListView(
     children: [
