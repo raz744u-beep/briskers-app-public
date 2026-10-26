@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
+import '../local/local_database_provider.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'payroll_week_projection.dart';
 
 /// Owner-approved Payroll History visual: grouped week cards in Reports.
@@ -106,6 +108,57 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
           color: color))),
     ]));
 
+  Future<void> _showTaskHistory(LabPayrollWeek week) async {
+    final rows = await localDatabase.customSelect(
+      'SELECT description, hours, cents, method, note, paid_at, '
+      'document_id, line_id FROM lab_payroll_task_payments '
+      'WHERE business_id=? AND employee_id=? AND week_key=? '
+      'ORDER BY paid_at DESC',
+      variables: [
+        const Variable<String>('briskers-tasks-test-only'),
+        Variable<String>(widget.employeeId),
+        Variable<String>(week.weekKey),
+      ],
+    ).get();
+    if (!mounted) { return; }
+    await showDialog<void>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text('Week of ' +
+          _date.format(LabPayrollWeekSource.dateForKey(week.weekKey))),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              if (rows.isEmpty)
+                const Text('No task-linked TEST payments for this week.'),
+              for (final row in rows)
+                ListTile(
+                  isThreeLine: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(row.read<String>('description'),
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                  subtitle: Text('J-24 · ' +
+                    row.read<double>('hours').toStringAsFixed(2) + ' hrs · ' +
+                    row.read<String>('method').toUpperCase() + '\n' +
+                    _date.format(DateTime.fromMillisecondsSinceEpoch(
+                      row.read<int>('paid_at'))) +
+                    (row.read<String>('note').isEmpty ? '' :
+                      '\n' + row.read<String>('note'))),
+                  trailing: Text(_money(row.read<int>('cents'))),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialog),
+            child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
   Widget _card(LabPayrollWeek week) {
     final paid = week.isPaid;
     final partial = week.isPartial ||
@@ -120,8 +173,7 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
       color: bg, elevation: 0.6,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () =>
-          widget.onWeekTap(LabPayrollWeekSource.dateForKey(week.weekKey)),
+        onTap: () => _showTaskHistory(week),
         child: Padding(
           padding: const EdgeInsets.all(11),
           child: Column(children: [
