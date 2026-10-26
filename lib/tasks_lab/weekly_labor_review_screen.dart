@@ -60,7 +60,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
     super.initState();
     _week = widget.week;
     _tipTimer = Timer(const Duration(seconds: 10), () {
-      if (mounted) setState(() => _showTip = false);
+      if (mounted) { setState(() => _showTip = false); }
     });
     _load();
   }
@@ -339,7 +339,6 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
       ),
       body: SafeArea(child: Column(children: [
         _weekSelector(),
-ector(),
         if (_showTip)
           Container(
             width: double.infinity,
