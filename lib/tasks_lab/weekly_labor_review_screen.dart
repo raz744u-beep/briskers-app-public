@@ -99,7 +99,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
           }
         }
       }
-      if (!mounted) return;
+      if (!mounted) { return; }
       setState(() {
         _selected..clear()..addAll(selections);
         final cents = row?.readNullable<int>('override_cents');
@@ -177,7 +177,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
           FilledButton(onPressed: () {
             final parsed = double.tryParse(input.text);
             if (parsed == null || !parsed.isFinite || parsed < 0 ||
-                parsed > maxHours) return;
+                parsed > maxHours) { return; }
             Navigator.pop(context, parsed);
           }, child: const Text('Apply')),
         ],
@@ -238,7 +238,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
          _weekKey(_week), jsonEncode(valid), cents,
          DateTime.now().millisecondsSinceEpoch],
       );
-      if (mounted) Navigator.pop(context, true);
+      if (mounted) { Navigator.pop(context, true); }
     } catch (error) {
       if (mounted) setState(() =>
         _error = 'Unable to save test draft: ' + error.toString());
