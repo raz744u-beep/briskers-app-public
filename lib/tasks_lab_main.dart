@@ -1886,7 +1886,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       MaterialPageRoute(
         builder: (_) => EmployeePayrollProfileLab(
           employeeId: employeeId,
-          name: _employeeName(employeeId),
+          name: fullNames[employeeId] ?? employee['name']!,
           role: employee['role']!,
           tasks: tasks,
           allocationsByLine: allocationsByLine,
