@@ -65,6 +65,9 @@ class CustomerFindingOverviewService {
     required String businessId,
     required String customerId,
     required List<dynamic> vehicles,
+    // Render local/cache findings before any optional Auto-mode server lookup.
+    // Counts never depend on per-vehicle network requests for first paint.
+    bool localOnly = false,
   }) async {
     final ids = <String>{};
     for (final vehicle in vehicles.whereType<Map>()) {
@@ -105,7 +108,7 @@ class CustomerFindingOverviewService {
 
       List<Map<String, dynamic>> serverOrCache = cachedVisible;
       var fetchedServer = false;
-      if (!BriskersConnectionModeController.instance.forceOffline) {
+      if (!localOnly && !BriskersConnectionModeController.instance.forceOffline) {
         try {
           final server = <Map<String, dynamic>>[];
           for (final vehicleId in ids) {

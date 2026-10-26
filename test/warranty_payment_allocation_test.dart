@@ -182,9 +182,9 @@ void main() {
 
   testWidgets('saved customer allocation remains 900 before and after receipt lifecycle', (tester) async {
     await tester.pumpWidget(_panel(payments: []));
-    expect(find.text('Approved \$103.00 • Customer allocation \$900.00'), findsOneWidget);
-    await tester.tap(find.byType(ListTile));
+    await tester.tap(find.byKey(const ValueKey('warranty-job-expand')));
     await tester.pumpAndSettle();
+    expect(find.text('Approved \$103.00 • Customer allocation \$900.00'), findsOneWidget);
     expect(find.text('Customer responsibility allocation'), findsOneWidget);
     expect(find.text('\$900.00'), findsOneWidget);
     for (final payment in [
@@ -218,9 +218,9 @@ void main() {
       'pending_payment': 0, 'payments': payments};
     expect(DocumentPdfService.invoicePaymentAmounts(invoice)['remaining'], 0);
     await tester.pumpWidget(_panel(payments: payments, detail: warranty, total: 3972.97));
-    expect(find.textContaining('Customer allocation \$3,307.95'), findsOneWidget);
-    await tester.tap(find.byType(ListTile));
+    await tester.tap(find.byKey(const ValueKey('warranty-job-expand')));
     await tester.pumpAndSettle();
+    expect(find.textContaining('Customer allocation \$3,307.95'), findsOneWidget);
     expect(find.text('Customer responsibility allocation'), findsOneWidget);
     expect(find.textContaining('see invoice balance for amount due'), findsOneWidget);
     expect(find.textContaining('Balance Due'), findsNothing);
@@ -236,9 +236,9 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(_panel(payments: [],
       detail: {..._plan, 'customer_responsibility': 0}));
-    expect(find.textContaining('Customer allocation Review required'), findsOneWidget);
-    await tester.tap(find.byType(ListTile));
+    await tester.tap(find.byKey(const ValueKey('warranty-job-expand')));
     await tester.pumpAndSettle();
+    expect(find.textContaining('Customer allocation Review required'), findsOneWidget);
     expect(find.text('Review required'), findsNWidgets(2));
     expect(find.text('The saved allocation needs review before use.'), findsOneWidget);
     expect(find.text('\$0.00'), findsNothing);
@@ -251,7 +251,7 @@ void main() {
       final payment = _receipt('posted');
       await tester.pumpWidget(_panel(payments: [payment],
         save: (values) async { saved = values; }));
-      await tester.tap(find.byType(ListTile));
+      await tester.tap(find.byKey(const ValueKey('warranty-job-expand')));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Edit'));
       await tester.tap(find.text('Edit'));

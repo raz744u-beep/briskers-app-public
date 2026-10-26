@@ -7,18 +7,21 @@ import 'package:briskers_app/widgets/customer_findings_overview_row.dart';
 
 class _FakeOverview extends CustomerFindingOverviewService {
   int reads = 0;
+  int localReads = 0;
 
   @override
   Future<CustomerFindingCounts> load({
     required String businessId,
     required String customerId,
     required List<dynamic> vehicles,
+    bool localOnly = false,
   }) async {
     reads++;
+    if (localOnly) localReads++;
     expect(businessId, 'shop');
     expect(customerId, 'customer');
     expect(vehicles.length, 2);
-    return reads == 1
+    return localReads <= 1
         ? const CustomerFindingCounts(open: 2, inJob: 1, resolved: 3)
         : const CustomerFindingCounts(open: 1, inJob: 1, resolved: 4);
   }
@@ -68,7 +71,8 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(opened, 1);
-    expect(reader.reads, 2);
+    expect(reader.reads, 4);
+    expect(reader.localReads, 2);
     expect(find.text('Open 1 • In Job 1 • Resolved 4'), findsOneWidget);
     expect(find.text('6'), findsOneWidget);
   });

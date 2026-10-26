@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/connection_mode.dart';
 import '../services/customer_finding_overview_service.dart';
 import '../services/vehicle_finding_actions_service.dart';
 import '../services/local_job_quarantine.dart';
@@ -34,6 +35,9 @@ class CustomerFindingsOverviewRow extends StatefulWidget {
 class _CustomerFindingsOverviewRowState
     extends State<CustomerFindingsOverviewRow> {
   late Future<CustomerFindingCounts> _counts;
+  CustomerFindingCounts? _lastCounts;
+  int _refreshEpoch = 0;
+  int _visibilityEpoch = 0;
   StreamSubscription<String>? _changes;
   StreamSubscription<({String businessId, Set<String> jobIds})>?
       _quarantine;
@@ -57,10 +61,18 @@ class _CustomerFindingsOverviewRowState
     // A revoked Job or finding identity must be removed from the summary,
     // even if it was visible in an earlier cached customer snapshot.
     _quarantine = LocalJobQuarantine.events.listen((event) {
-      if (event.businessId == widget.businessId && mounted) _refresh();
+      if (event.businessId == widget.businessId && mounted) {
+        _lastCounts = null;
+        ++_visibilityEpoch;
+        _refresh();
+      }
     });
     _retirements = LocalJobRetirement.events.listen((event) {
-      if (event.businessId == widget.businessId && mounted) _refresh();
+      if (event.businessId == widget.businessId && mounted) {
+        _lastCounts = null;
+        ++_visibilityEpoch;
+        _refresh();
+      }
     });
   }
 
@@ -70,25 +82,69 @@ class _CustomerFindingsOverviewRowState
     if (oldWidget.businessId != widget.businessId ||
         oldWidget.customerId != widget.customerId ||
         _vehicleIds(oldWidget.vehicles) != _vehicleIds(widget.vehicles)) {
+      // Counts from a different customer/vehicle scope must never flash while
+      // the replacement authorization-filtered local lookup is pending.
+      _lastCounts = null;
+      ++_visibilityEpoch;
       _refresh();
     }
   }
 
   void _refresh() {
-    final work = (widget.service ?? CustomerFindingOverviewService()).load(
-      businessId: widget.businessId,
-      customerId: widget.customerId,
-      vehicles: widget.vehicles,
+    final epoch = ++_refreshEpoch;
+    final service = widget.service ?? CustomerFindingOverviewService();
+    final businessId = widget.businessId;
+    final customerId = widget.customerId;
+    final vehicles = widget.vehicles;
+
+    // Force Online is an explicit diagnostic choice. In ordinary Auto and
+    // Force Offline, never bind the first-frame count to a network request.
+    final localFirst =
+        !BriskersConnectionModeController.instance.forceOnline;
+    final first = service.load(
+      businessId: businessId,
+      customerId: customerId,
+      vehicles: vehicles,
+      localOnly: localFirst,
     );
-    if (mounted) {
-      setState(() {
-        _counts = work;
-      });
-    }
+    setState(() { _counts = first; });
+
+    if (!localFirst) return;
+    unawaited(() async {
+      try {
+        final local = await first;
+        if (!mounted || epoch != _refreshEpoch) return;
+        setState(() => _lastCounts = local);
+      } catch (_) {
+        // A missing trusted local snapshot is unknown, not a count of zero.
+        // Continue best-effort Auto refresh without erasing prior values.
+      }
+      if (!mounted || epoch != _refreshEpoch ||
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
+
+      try {
+        final updated = await service.load(
+          businessId: businessId,
+          customerId: customerId,
+          vehicles: vehicles,
+        );
+        if (!mounted || epoch != _refreshEpoch) return;
+        setState(() {
+          _lastCounts = updated;
+          _counts = Future<CustomerFindingCounts>.value(updated);
+        });
+      } catch (_) {
+        // Keep verified local/previous counts and a tappable retry path.
+        // Never replace a useful count with a failed remote Future.
+      }
+    }());
   }
 
   @override
   void dispose() {
+    ++_refreshEpoch;
     _changes?.cancel();
     _quarantine?.cancel();
     _retirements?.cancel();
@@ -103,13 +159,18 @@ class _CustomerFindingsOverviewRowState
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<CustomerFindingCounts>(
+      // A FutureBuilder ordinarily retains prior data when its Future changes.
+      // Reset across account, vehicle scope or quarantine changes rather than
+      // flashing a now-inaccessible customer's finding counts.
+      key: ValueKey((widget.businessId, widget.customerId,
+          _vehicleIds(widget.vehicles), _visibilityEpoch)),
       future: _counts,
       builder: (context, snapshot) {
-        final counts = snapshot.data;
+        final counts = snapshot.data ?? _lastCounts;
         final subtitle = counts == null
             ? (snapshot.hasError
                 ? 'Counts unavailable — tap to view'
-                : 'Checking all customer vehicles...')
+                : 'Checking saved vehicle findings...')
             : 'Open ${counts.open} • In Job ${counts.inJob} '
                 '• Resolved ${counts.resolved}';
         return ListTile(
@@ -131,12 +192,6 @@ class _CustomerFindingsOverviewRowState
                     key: const ValueKey('customer-findings-total'),
                     style: const TextStyle(
                         fontSize: 17, fontWeight: FontWeight.w800))
-              else if (!snapshot.hasError)
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
               else
                 const Text('—'),
               const SizedBox(width: 6),

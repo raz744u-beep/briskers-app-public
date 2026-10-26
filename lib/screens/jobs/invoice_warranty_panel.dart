@@ -999,46 +999,96 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (!_enabled) {
-      return Container(
-        color: Colors.white,
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Row(
-            children: [
-              Checkbox(
-                value: false,
-                onChanged: widget.readOnly || _busy
-                    ? null
-                    : (value) {
-                        if (value == true) _enableWarranty();
-                      },
-                activeColor: BriskersColors.invoices,
-                visualDensity: VisualDensity.compact,
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  tr('extendedWarrantyJob'),
-                  style: const TextStyle(
-                    fontSize: 15.5,
-                    fontWeight: FontWeight.w800,
-                  ),
+  Future<void> _onWarrantyChecked(bool selected) async {
+    try {
+      if (selected) {
+        await _enableWarranty();
+        // Reuse the existing validated data-entry form, rather than making
+        // the owner search for an Edit action after checking Warranty Job.
+        if (mounted && _enabled) await _editWarranty();
+      } else {
+        // Existing details/payment allocations may be present. The original
+        // confirmation and server/local safety checks are intentionally kept.
+        await _disableWarranty();
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not update warranty: $error')),
+        );
+      }
+    }
+  }
+
+  Widget _warrantyToggle() {
+    final enabled = _enabled;
+    final company = widget.detail['warranty_company_name']?.toString() ?? '';
+    final canChange = !widget.readOnly && !_busy;
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 0, 12, 6),
+      child: Row(
+        children: [
+          Checkbox(
+            key: const ValueKey('warranty-job-checkbox'),
+            value: enabled,
+            onChanged: canChange
+                ? (value) => _onWarrantyChecked(value == true)
+                : null,
+            activeColor: BriskersColors.invoices,
+            visualDensity: VisualDensity.compact,
+          ),
+          Expanded(
+            child: InkWell(
+              onTap: canChange
+                  ? () => _onWarrantyChecked(!enabled)
+                  : null,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      BriskersLanguageController.instance.isSpanish
+                          ? 'Trabajo de garantía'
+                          : 'Warranty Job',
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (enabled && company.isNotEmpty)
+                      Text(
+                        company,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 12, color: Color(0xFF667085)),
+                      ),
+                  ],
                 ),
               ),
-              const Icon(
-                Icons.settings_outlined,
-                size: 20,
-                color: Color(0xFFB0B7C3),
-              ),
-            ],
+            ),
           ),
-        ),
-      );
-    }
+          if (enabled)
+            IconButton(
+              key: const ValueKey('warranty-job-expand'),
+              tooltip: _expanded
+                  ? 'Collapse warranty information'
+                  : 'Expand warranty information',
+              icon: Icon(_expanded ? Icons.expand_less : Icons.expand_more),
+              onPressed: () => setState(() => _expanded = !_expanded),
+            ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final header = _warrantyToggle();
+    if (!_enabled) return header;
 
     final company = widget.detail['warranty_company_name']?.toString() ?? '';
     final auth = widget.detail['authorization_number']?.toString() ?? '';
@@ -1062,7 +1112,11 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
       if (approved <= 0) tr('approvedAmountLower'),
     ];
 
-    return Container(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        header,
+        if (_expanded) Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       decoration: BoxDecoration(
         color: BriskersColors.invoices.withValues(alpha: 0.07),
@@ -1164,10 +1218,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
                 fontWeight: FontWeight.w700,
               ),
             ),
-            trailing: Icon(
-              _expanded ? Icons.expand_less : Icons.expand_more,
-            ),
-            onTap: () => setState(() => _expanded = !_expanded),
+            // The compact Warranty Job header owns the expand/collapse
+            // control, keeping the checked state distinct from visibility.
           ),
           if (_expanded) ...[
             const Divider(height: 1),
@@ -1252,6 +1304,8 @@ class _InvoiceWarrantyPanelState extends State<InvoiceWarrantyPanel>
           ],
         ),
       ),
+      ),
+      ],
     );
   }
 }
