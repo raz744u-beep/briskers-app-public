@@ -240,6 +240,8 @@ class OfflineJobAdminService {
     String? customerId,
     String? vehicleId,
     bool replaceVehicle = false,
+    String? vehicleLabel,
+    String? vehicleVin,
     String? title,
     String? requestedWork,
     bool replaceRequestedWork = false,
@@ -248,7 +250,8 @@ class OfflineJobAdminService {
     final rows = await _database
         .customSelect(
           '''
-      SELECT customer_id, vehicle_id, title, requested_work, planned_hours
+      SELECT customer_id, vehicle_id, vehicle_label, vehicle_vin,
+             title, requested_work, planned_hours
       FROM local_jobs
       WHERE business_id = ? AND id = ?
       LIMIT 1
@@ -280,6 +283,8 @@ class OfflineJobAdminService {
         UPDATE local_jobs
         SET customer_id = ?,
             vehicle_id = ?,
+            vehicle_label = CASE WHEN ? THEN ? ELSE vehicle_label END,
+            vehicle_vin = CASE WHEN ? THEN ? ELSE vehicle_vin END,
             title = ?,
             requested_work = ?,
             planned_hours = ?,
@@ -289,6 +294,10 @@ class OfflineJobAdminService {
         [
           nextCustomerId,
           nextVehicleId,
+          replaceVehicle ? 1 : 0,
+          replaceVehicle ? vehicleLabel : null,
+          replaceVehicle ? 1 : 0,
+          replaceVehicle ? vehicleVin : null,
           nextTitle,
           nextRequestedWork,
           nextPlannedHours.toDouble(),
