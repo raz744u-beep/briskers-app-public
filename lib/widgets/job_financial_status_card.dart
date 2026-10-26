@@ -1,5 +1,18 @@
 import 'package:flutter/material.dart';
 
+/// Convert the last synchronized payment state already shown on the Jobs list
+/// into the first-frame Financial status label. Unknown must stay unknown;
+/// never infer "Paid" from an empty, unhydrated invoice list.
+String? savedJobFinancialStatus(Object? paymentState) {
+  final value = paymentState?.toString().trim().toLowerCase() ?? '';
+  return switch (value) {
+    'paid' => 'Paid',
+    'awaiting_clearance' => 'Awaiting payment clearance',
+    'awaiting_payment' => 'Awaiting payment',
+    _ => null,
+  };
+}
+
 /// Keeps a completed Job's financial-status footprint stable while its linked
 /// invoice/payment data is being verified. Never infer a paid/unpaid state from
 /// an empty or not-yet-loaded document list.
