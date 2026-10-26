@@ -1,4 +1,8 @@
 import 'dart:async';
+import 'dart:io';
+
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -8,7 +12,11 @@ import 'widgets/briskers_module_dock.dart';
 
 import 'local/local_database_provider.dart';
 import 'services/local_job_tasks_lab_store.dart';
+import 'services/task_assignment_policy.dart';
+import 'services/test_payroll_payment_policy.dart';
+import 'services/test_payroll_balance.dart';
 import 'tasks_lab/fixture.dart';
+import 'tasks_lab/weekly_hours_text_field.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -41,6 +49,9 @@ class TasksLabHome extends StatefulWidget {
 class _TasksLabHomeState extends State<TasksLabHome> {
   final LocalJobTasksLabStore store = LocalJobTasksLabStore(localDatabase);
   List<Map<String, dynamic>> tasks = const [];
+  List<Map<String, dynamic>> allJobTasks = const [];
+  List<Map<String, dynamic>> testCreatedJobs = const [];
+  List<Map<String, dynamic>> shopTasks = const [];
   Map<String, String> nicknames = const {};
   Map<String, String> fullNames = const {};
   String? leadMechanicId;
@@ -51,12 +62,16 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Map<String, double> earnedPayrollPreviewHours = {};
   Map<String, int> testHourlyRates = {};
   List<Map<String, dynamic>> testPayrollPayments = const [];
+  List<Map<String, dynamic>> testTaskCredits = const [];
+  List<Map<String, dynamic>> testPayrollApprovals = const [];
+  List<Map<String, dynamic>> testPayrollAdjustments = const [];
   List<Map<String, dynamic>> earnedCorrections = const [];
   int invoiceTestTab = 0;
   int page = 0;
   int? expandedMenu;
   double menuAnchorX = 180;
   int selectedVehicle = 0;
+  String? selectedEmployeeWorkId;
   bool jobDetailsOpen = false;
   bool loading = true;
   String? error;
@@ -103,15 +118,21 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final rows = await store.list(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId,
     );
+    final independent = await store.shopTasks(BriskersLabFixture.businessId);
+    final allRows = await store.allTasks(BriskersLabFixture.businessId);
+    final newJobs = await store.syntheticJobs(BriskersLabFixture.businessId);
     final aliases = await store.nicknames(BriskersLabFixture.businessId);
     final names = await store.fullNames(BriskersLabFixture.businessId);
-    final allocations = await Future.wait(rows.map((task) => store.allocations(
+    final allocations = await Future.wait(allRows.map((task) => store.allocations(
       businessId: BriskersLabFixture.businessId,
-      jobId: BriskersLabFixture.jobId,
+      jobId: task['job_id'].toString(),
       documentId: task['document_id'].toString(),
       lineId: task['line_id'].toString())));
     final rates = await store.payrollRates(BriskersLabFixture.businessId);
     final payments = await store.payrollTestPayments(BriskersLabFixture.businessId);
+    final credits = await store.testTaskHourCredits(BriskersLabFixture.businessId);
+    final approvals = await store.testWeeklyPayrollApprovals(BriskersLabFixture.businessId);
+    final adjustments = await store.testPayrollAdjustments(BriskersLabFixture.businessId);
     final corrections = await store.earnedHourCorrections(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final earnedHours = await store.earnedHoursPreview(
@@ -125,6 +146,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (!mounted) return;
     setState(() {
       tasks = rows;
+      allJobTasks = allRows;
+      testCreatedJobs = newJobs;
+      shopTasks = independent;
       nicknames = aliases;
       fullNames = names;
       leadMechanicId = lead;
@@ -133,12 +157,18 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       earnedPayrollPreviewHours = earnedHours;
       testHourlyRates = rates;
       testPayrollPayments = payments;
+      testTaskCredits = credits;
+      testPayrollApprovals = approvals;
+      testPayrollAdjustments = adjustments;
       earnedCorrections = corrections;
-      allocationsByLine = {for (var i = 0; i < rows.length; i++)
-        rows[i]['line_id'].toString(): allocations[i]};
+      allocationsByLine = {for (var i = 0; i < allRows.length; i++)
+        _allocationKey(allRows[i]): allocations[i]};
       loading = false;
     });
   }
+
+  String _allocationKey(Map<String, dynamic> task) =>
+      '${task['job_id']}|${task['document_id']}|${task['line_id']}';
 
   String _employeeName(String? id) {
     if (id == null || id.isEmpty) return 'Unassigned';
@@ -313,7 +343,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   String _laborAssignment(Map<String, dynamic> task) {
-    final allocations = allocationsByLine[task['line_id'].toString()] ?? [];
+    final allocations = allocationsByLine[_allocationKey(task)] ?? [];
     if (allocations.isNotEmpty) {
       return allocations.map((a) => "${_employeeName(a['employee_id'].toString())}: ${a['hours']} hrs").join(' · ');
     }
@@ -324,9 +354,54 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     return "${_employeeName(task['employee_id']?.toString())} · ${task['payroll_hours'] ?? '—'} hrs";
   }
 
+  Widget _selectableHoursInput({
+    required TextEditingController controller,
+    required String label,
+  }) => TextField(
+    controller: controller,
+    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    decoration: InputDecoration(
+      labelText: label, border: const OutlineInputBorder()),
+    onTap: () => controller.selection = TextSelection(
+      baseOffset: 0, extentOffset: controller.text.length),
+  );
+
+  Future<void> _editTestBilledLaborHours(Map<String, dynamic> task) async {
+    final current = (task['billed_hours_override'] as num?)?.toDouble() ??
+      (task['source_invoice_hours'] as num?)?.toDouble() ?? 0;
+    final controller = TextEditingController(text: current.toString());
+    final value = await showDialog<double>(context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit customer-billed labor hours · TEST'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('This edits invoice Qty only. Mechanic payroll '
+            'allocations will not change.'),
+          _selectableHoursInput(
+            controller: controller, label: 'Customer hours'),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () {
+            final hours = double.tryParse(controller.text.trim());
+            if (hours == null || !hours.isFinite || hours < 0) { return; }
+            Navigator.pop(dialogContext, hours);
+          }, child: const Text('Save Qty')),
+        ],
+      ));
+    controller.dispose();
+    if (value == null || !mounted) return;
+    await store.saveTestBilledLaborHours(
+      businessId: BriskersLabFixture.businessId,
+      jobId: task['job_id'].toString(),
+      documentId: task['document_id'].toString(),
+      lineId: task['line_id'].toString(), hours: value);
+    await _refresh();
+  }
+
   Future<void> _editInvoiceLabor(Map<String, dynamic> task) async {
     if (_firstCompletion(task) != null) return;
-    final existing = allocationsByLine[task['line_id'].toString()] ?? [];
+    final existing = allocationsByLine[_allocationKey(task)] ?? [];
     final notOnInvoice = task['document_id'] ==
       LocalJobTasksLabStore.recheckDocumentId;
     String first = existing.isNotEmpty ? existing.first['employee_id'].toString()
@@ -352,11 +427,24 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   DropdownMenuItem(value: e['id']!,
                     child: Text(_employeeName(e['id']))),
             ],
-            onChanged: (v) => update(() => set(v ?? '')),
+            onChanged: (v) => update(() {
+              set(v ?? '');
+              if (label == 'Mechanic 1' && (v ?? '').isEmpty &&
+                  second.isNotEmpty) {
+                first = second;
+                hoursA.text = hoursB.text;
+                second = '';
+                hoursB.clear();
+              }
+              if (label.startsWith('Mechanic 2') && (v ?? '').isEmpty) {
+                hoursB.clear();
+              }
+            }),
           );
         return Padding(
           padding: EdgeInsets.fromLTRB(16, 12, 16,
-            MediaQuery.viewInsetsOf(sheet).bottom + 16),
+            MediaQuery.viewInsetsOf(sheet).bottom +
+              MediaQuery.viewPaddingOf(sheet).bottom + 42),
           child: SingleChildScrollView(child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -377,17 +465,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               const SizedBox(height: 12),
               choose('Mechanic 1', first, (v) => first = v),
               const SizedBox(height: 8),
-              TextField(controller: hoursA,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Hours 1',
-                  border: OutlineInputBorder())),
+              _selectableHoursInput(
+                controller: hoursA, label: 'Hours 1'),
               const SizedBox(height: 12),
               choose('Mechanic 2 (optional)', second, (v) => second = v),
               const SizedBox(height: 8),
-              TextField(controller: hoursB,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Hours 2',
-                  border: OutlineInputBorder())),
+              _selectableHoursInput(
+                controller: hoursB, label: 'Hours 2'),
               const SizedBox(height: 12),
               FilledButton(onPressed: () async {
                 final a = double.tryParse(hoursA.text);
@@ -426,17 +510,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     hoursA.dispose();
     hoursB.dispose();
     if (saved == true) await _refresh();
-  }
-
-  Widget _statusChip(String value) {
-    final done = value == 'done';
-    final label = done ? 'Done'
-      : value == 'in_progress' ? 'In progress' : 'Planned';
-    return Text(label, style: TextStyle(
-      fontSize: 12, fontWeight: FontWeight.w700,
-      color: done ? const Color(0xFF168058)
-        : const Color(0xFF3570B6),
-    ));
   }
 
   List<Map<String, dynamic>> _taskCorrections(
@@ -567,7 +640,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final splits = completed != null
       ? (completed['payroll_allocations'] as List?)
           ?.whereType<Map<String, dynamic>>().toList() ?? []
-      : allocationsByLine[task['line_id'].toString()] ?? [];
+      : allocationsByLine[_allocationKey(task)] ?? [];
     if (splits.isNotEmpty) {
       final mechanics = splits.map((row) =>
         _employeeName(row['employee_id']?.toString())).join(' + ');
@@ -605,7 +678,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final corrections = _taskCorrections(task);
     final splitCount = record != null
       ? (record['payroll_allocations'] as List?)?.length ?? 0
-      : allocationsByLine[task['line_id'].toString()]?.length ?? 0;
+      : allocationsByLine[_allocationKey(task)]?.length ?? 0;
     return Card(
       margin: const EdgeInsets.fromLTRB(10, 2, 10, 2),
       elevation: 0,
@@ -1640,6 +1713,136 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (added == true) await _refresh();
   }
 
+  Future<void> _createTestTask({String? employeeId}) async {
+    final description = TextEditingController();
+    final hours = TextEditingController(text: '0.5');
+    var mechanic = employeeId ?? '';
+    // The isolated fixture only contains one customer job. Still apply the
+    // exact customer/vehicle open-job policy rather than implicitly attaching
+    // tasks to any job or creating an invoice.
+    final eligibleJobs = TaskJobChooser.eligible(
+      customerId: 'lab-customer-richard',
+      vehicleId: BriskersLabFixture.vehicles[selectedVehicle]['id']!,
+      jobs: const [OpenJobChoice(
+        jobId: BriskersLabFixture.jobId,
+        customerId: 'lab-customer-richard',
+        vehicleId: 'lab-equus', isOpen: true,
+      )],
+    );
+    String? selectedJobId;
+    var createNewJob = eligibleJobs.isEmpty;
+    var shopInternal = false;
+    final added = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('New task · TEST'),
+          content: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Choose an existing open job or request a new job. '
+                'No customer invoice is created by assigning a task.'),
+              OutlinedButton.icon(
+                onPressed: () => update(() => shopInternal = !shopInternal),
+                icon: Icon(shopInternal ? Icons.check_box : Icons.check_box_outline_blank),
+                label: const Text('Independent shop task (no customer/job)')),
+              if (!shopInternal) ...[
+
+              if (eligibleJobs.isNotEmpty)
+                OutlinedButton.icon(
+                  onPressed: () => update(() => createNewJob = false),
+                  icon: Icon(createNewJob
+                    ? Icons.radio_button_unchecked
+                    : Icons.radio_button_checked),
+                  label: const Text('Existing open job')),
+              if (!createNewJob && eligibleJobs.isNotEmpty)
+                DropdownButtonFormField<String>(
+                  initialValue: selectedJobId,
+                  decoration: const InputDecoration(
+                    labelText: 'Select open job'),
+                  items: [for (final job in eligibleJobs)
+                    DropdownMenuItem(value: job.jobId,
+                      child: const Text('J-24 · Equus (TEST)'))],
+                  onChanged: (value) => update(() => selectedJobId = value)),
+              OutlinedButton.icon(
+                onPressed: () => update(() => createNewJob = true),
+                icon: Icon(createNewJob
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked),
+                label: const Text('Create new job')),
+              if (createNewJob)
+                const Text('A new isolated TEST job will be created for '
+                  'this sample customer and vehicle. No invoice is created.'),
+              ],
+              const SizedBox(height: 10),
+              TextField(controller: description, decoration:
+                const InputDecoration(labelText: 'Task description')),
+              TextField(controller: hours, keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Mechanic hours')),
+              DropdownButtonFormField<String>(
+                initialValue: mechanic,
+                decoration: const InputDecoration(labelText: 'Mechanic'),
+                items: [const DropdownMenuItem(value: '',
+                  child: Text('Unassigned')),
+                  for (final e in BriskersLabFixture.employees)
+                    DropdownMenuItem(value: e['id']!,
+                      child: Text(_employeeName(e['id']!)))],
+                onChanged: (value) => update(() => mechanic = value ?? ''),
+              ),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: (!shopInternal &&
+              !createNewJob && selectedJobId == null)
+              ? null : () async {
+              final value = double.tryParse(hours.text.trim());
+              if (description.text.trim().isEmpty || value == null ||
+                  !value.isFinite || value < 0) { return; }
+              if (!shopInternal && !createNewJob && selectedJobId == null) { return; }
+              try {
+                if (shopInternal) {
+                  await store.addShopTask(
+                    businessId: BriskersLabFixture.businessId,
+                    description: description.text.trim(),
+                    employeeId: mechanic.isEmpty ? null : mechanic,
+                    estimatedMinutes: (value * 60).round());
+                } else {
+                  if (createNewJob) {
+                    await store.createSyntheticJobWithTask(
+                      businessId: BriskersLabFixture.businessId,
+                      customerId: 'lab-customer-richard',
+                      vehicleId: BriskersLabFixture.vehicles[selectedVehicle]['id']!,
+                      description: description.text.trim(), hours: value,
+                      employeeId: mechanic.isEmpty ? null : mechanic,
+                    );
+                  } else {
+                    await store.addRecheckTask(
+                      businessId: BriskersLabFixture.businessId,
+                      jobId: selectedJobId!,
+                      description: description.text.trim(), hours: value,
+                      employeeId: mechanic.isEmpty ? null : mechanic,
+                    );
+                  }
+                }
+                if (context.mounted) Navigator.pop(context, true);
+              } catch (error) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('$error')));
+                }
+              }
+            }, child: const Text('Create task')),
+          ],
+        ),
+      ),
+    );
+    description.dispose();
+    hours.dispose();
+    if (added == true) await _refresh();
+  }
+
   Widget _taskList() {
     final original = tasks.where((task) =>
       task['source_missing'] != 1 &&
@@ -1653,7 +1856,33 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: [
-        _sectionHeader('Job tasks & completed work',
+        Padding(padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        child: FilledButton.icon(onPressed: _createTestTask,
+          icon: const Icon(Icons.add), label: const Text('New task · TEST'))),
+      if (shopTasks.isNotEmpty) ...[
+        _sectionHeader('Independent shop tasks',
+          subtitle: 'Not linked to customers, jobs or invoices'),
+        for (final task in shopTasks)
+          ListTile(
+            title: Text(task['description'].toString()),
+            subtitle: Text('${_employeeName(task['employee_id']?.toString())} · '
+              '${task['estimated_minutes']} min · ${task['status']}'),
+          ),
+      ],
+      if (testCreatedJobs.isNotEmpty) ...[
+        _sectionHeader('New test jobs & tasks',
+          subtitle: 'Synthetic local jobs only · no real invoices'),
+        for (final job in testCreatedJobs) ...[
+          ListTile(title: Text(job['description'].toString()),
+            subtitle: Text('Job ${job['job_id']} · ${job['status']}')),
+          for (final task in allJobTasks.where((task) =>
+              task['job_id'] == job['job_id']))
+            ListTile(title: Text(_description(task)),
+              subtitle: Text('${_employeeName(task['employee_id']?.toString())} · '
+                '${task['payroll_hours']} hrs · ${task['status']}')),
+        ],
+      ],
+      _sectionHeader('Job tasks & completed work',
           subtitle: 'One entry per task · Original work stays preserved'),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -1770,7 +1999,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Future<void> _recordTestPayrollPayment(String employeeId) async {
     final amount = TextEditingController();
     final notes = TextEditingController();
-    String kind = 'pay';
+    final checkProof = TextEditingController();
+    const kind = 'advance';
     String method = 'cash';
     DateTime paidAt = DateTime.now();
     final saved = await showModalBottomSheet<bool>(
@@ -1779,12 +2009,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       builder: (sheet) => StatefulBuilder(
         builder: (sheet, update) => Padding(
           padding: EdgeInsets.fromLTRB(16, 12, 16,
-            MediaQuery.viewInsetsOf(sheet).bottom + 20),
+            MediaQuery.viewInsetsOf(sheet).bottom +
+              MediaQuery.viewPaddingOf(sheet).bottom + 42),
           child: SingleChildScrollView(child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Record TEST payment · ${_employeeName(employeeId)}',
+              Text('Record TEST advance · ${_employeeName(employeeId)}',
                 style: const TextStyle(fontSize: 19,
                   fontWeight: FontWeight.w800)),
               const SizedBox(height: 6),
@@ -1801,18 +2032,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   labelText: 'Amount paid',
                   border: OutlineInputBorder())),
               const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: kind,
-                decoration: const InputDecoration(
-                  labelText: 'Payment type',
-                  border: OutlineInputBorder()),
-                items: const [
-                  DropdownMenuItem(value: 'pay',
-                    child: Text('Partial / full payment')),
-                  DropdownMenuItem(value: 'advance',
-                    child: Text('Advance / unfinished work')),
-                ],
-                onChanged: (v) => update(() => kind = v ?? 'pay')),
+              const Text('Advance only. To pay approved weekly work, '
+                'use its Approved weekly payroll record.'),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: method,
@@ -1823,6 +2044,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   DropdownMenuItem(value: 'cash', child: Text('Cash')),
                   DropdownMenuItem(value: 'check', child: Text('Check')),
                   DropdownMenuItem(value: 'zelle', child: Text('Zelle')),
+                  DropdownMenuItem(value: 'ach', child: Text('ACH / Bank transfer')),
                   DropdownMenuItem(value: 'card', child: Text('Card')),
                   DropdownMenuItem(value: 'other', child: Text('Other')),
                 ],
@@ -1841,6 +2063,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 label: Text('Payment date: '
                   "${DateFormat('MMM d, yyyy').format(paidAt)}"),
               ),
+              if (method == 'check') ...[
+                const SizedBox(height: 9),
+                TextField(controller: checkProof,
+                  decoration: const InputDecoration(
+                    labelText: 'Check photo proof reference (TEST)',
+                    helperText: 'Reference only; photo capture is not implemented',
+                    border: OutlineInputBorder())),
+              ],
               const SizedBox(height: 9),
               TextField(
                 controller: notes,
@@ -1858,6 +2088,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     return;
                   }
                   try {
+                    TestPayrollPaymentPolicy.validate(
+                      cents: (dollars * 100).round(),
+                      method: method, kind: kind,
+                      checkProofReference: checkProof.text,
+                    );
                     await store.recordLabPayrollPayment(
                       businessId: BriskersLabFixture.businessId,
                       employeeId: employeeId,
@@ -1874,7 +2109,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   }
                 },
                 icon: const Icon(Icons.save_outlined),
-                label: const Text('Save TEST payment'),
+                label: const Text('Save TEST advance'),
               ),
             ],
           )),
@@ -1883,6 +2118,585 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     );
     amount.dispose();
     notes.dispose();
+    checkProof.dispose();
+    if (saved == true) await _refresh();
+  }
+
+  Future<void> _creditTestPayrollHours(String employeeId) async {
+    final credits = await store.testTaskHourCredits(
+      BriskersLabFixture.businessId);
+    if (!mounted) return;
+    final now = DateTime.now();
+    var selectedWeek = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: now.weekday - 1));
+    final selectedKeys = <String>{};
+    final hourInputs = <String, String>{};
+
+    List<({
+      Map<String, dynamic> task,
+      int eligible, int available, int current,
+    })> choicesForWeek(DateTime week) {
+      final weekText = DateFormat('yyyy-MM-dd').format(week);
+      final choices = <({
+        Map<String, dynamic> task,
+        int eligible, int available, int current,
+      })>[];
+      for (final task in allJobTasks) {
+        final allocations = allocationsByLine[_allocationKey(task)] ?? [];
+        final matching = allocations.where((allocation) =>
+          allocation['employee_id']?.toString() == employeeId).toList();
+        final fallback = matching.isEmpty && allocations.isEmpty &&
+            task['employee_id']?.toString() == employeeId;
+        final hours = matching.isNotEmpty
+          ? (matching.first['hours'] as num).toDouble()
+          : fallback ? ((task['payroll_hours'] as num?)?.toDouble() ?? 0) : 0.0;
+        final eligible = (hours * 60).round();
+        if (eligible <= 0) continue;
+        final taskCredits = credits.where((credit) =>
+          credit['employee_id'] == employeeId &&
+          credit['job_id'] == task['job_id'] &&
+          credit['document_id'] == task['document_id'] &&
+          credit['line_id'] == task['line_id']);
+        final priorOther = taskCredits.where((credit) =>
+          credit['week_start'] != weekText).fold<int>(0,
+            (sum, credit) => sum + (credit['paid_minutes'] as int));
+        final current = taskCredits.where((credit) =>
+          credit['week_start'] == weekText).fold<int>(0,
+            (sum, credit) => sum + (credit['paid_minutes'] as int));
+        final available = eligible - priorOther;
+        if (available > 0) {
+          choices.add((task: task, eligible: eligible,
+            available: available, current: current));
+        }
+      }
+      return choices;
+    }
+
+    var choices = choicesForWeek(selectedWeek);
+    void resetSelection() {
+      selectedKeys.clear();
+      hourInputs.clear();
+      for (final choice in choices) {
+        final key = _allocationKey(choice.task);
+        if (choice.current > 0) selectedKeys.add(key);
+        final minutes = choice.current > 0
+          ? choice.current : choice.available;
+        hourInputs[key] = (minutes / 60).toStringAsFixed(2);
+      }
+    }
+    resetSelection();
+    final result = await showDialog<({
+      DateTime week,
+      List<({
+        String jobId, String documentId, String lineId,
+        int minutes, int eligibleMinutes,
+      })> selections,
+    })>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, update) {
+          final weekText = DateFormat('MMM d, yyyy').format(selectedWeek);
+          final locked = testPayrollApprovals.any((approval) =>
+            approval['employee_id'] == employeeId &&
+            approval['week_start'] ==
+                DateFormat('yyyy-MM-dd').format(selectedWeek) &&
+            approval['state'] != 'draft');
+          var selectedMinutes = 0;
+          var valid = true;
+          final selections = <({
+            String jobId, String documentId, String lineId,
+            int minutes, int eligibleMinutes,
+          })>[];
+          for (final choice in choices) {
+            final key = _allocationKey(choice.task);
+            if (!selectedKeys.contains(key)) continue;
+            final hours = double.tryParse((hourInputs[key] ?? '').trim());
+            final minutes = hours == null || !hours.isFinite
+              ? 0 : (hours * 60).round();
+            if (minutes < 1 || minutes > choice.available) {
+              valid = false;
+              continue;
+            }
+            selectedMinutes += minutes;
+            selections.add((
+              jobId: choice.task['job_id'].toString(),
+              documentId: choice.task['document_id'].toString(),
+              lineId: choice.task['line_id'].toString(),
+              minutes: minutes,
+              eligibleMinutes: choice.eligible,
+            ));
+          }
+          return Dialog.fullscreen(
+            child: Scaffold(
+              appBar: AppBar(
+                title: Row(children: [
+                  const Expanded(child: Text('Weekly labor times',
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 18,
+                      fontWeight: FontWeight.w400))),
+                  const Icon(Icons.engineering_outlined,
+                    color: BriskersColors.jobs, size: 23),
+                  const SizedBox(width: 8),
+                  Container(width: 1, height: 25,
+                    color: const Color(0xFFCBD5E1)),
+                  const SizedBox(width: 8),
+                  Text(_employeeName(employeeId),
+                    style: const TextStyle(fontSize: 19,
+                      fontWeight: FontWeight.w800)),
+                ]),
+                leading: IconButton(
+                  tooltip: 'Close weekly payroll',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(dialogContext),
+                ),
+              ),
+              body: SafeArea(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+                  children: [
+                    const SizedBox(height: 2),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final day = await showDatePicker(
+                      context: dialogContext,
+                      initialDate: selectedWeek,
+                      firstDate: DateTime(2020), lastDate: DateTime(2100));
+                    if (day == null) return;
+                    update(() {
+                      selectedWeek = DateTime(day.year, day.month, day.day)
+                        .subtract(Duration(days: day.weekday - 1));
+                      choices = choicesForWeek(selectedWeek);
+                      resetSelection();
+                    });
+                  },
+                  icon: const Icon(Icons.calendar_month_outlined),
+                  label: Text('Week of $weekText',
+                    style: const TextStyle(fontSize: 19,
+                      fontWeight: FontWeight.w700)),
+                ),
+                if (locked)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.lock_outline, size: 23,
+                          color: Color(0xFF9A3412)),
+                        SizedBox(width: 10),
+                        Expanded(child: Text(
+                          'Approved or Paid · read-only. You can review '
+                          'every task and its saved hours here. Choose '
+                          'another week or make an audited correction to '
+                          'change payroll.',
+                          style: TextStyle(fontSize: 16, height: 1.3,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF9A3412)),
+                        )),
+                      ],
+                    ),
+                  ),
+                if (choices.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text('No task hours available to select '
+                      'for this week.'),
+                  ),
+                if (choices.isNotEmpty)
+                  CheckboxListTile(
+                    key: const ValueKey('weekly-select-all'),
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Select all',
+                      style: TextStyle(color: Color(0xFF17212B),
+                        fontSize: 16, fontWeight: FontWeight.w700)),
+                    subtitle: Text('${selectedKeys.length} of '
+                      '${choices.length} tasks selected',
+                      style: const TextStyle(color: Color(0xFF475569),
+                        fontSize: 13)),
+                    value: selectedKeys.length == choices.length,
+                    onChanged: locked ? null : (checked) => update(() {
+                      selectedKeys.clear();
+                      if (checked == true) {
+                        selectedKeys.addAll(choices.map(
+                          (choice) => _allocationKey(choice.task)));
+                      }
+                    }),
+                  ),
+                for (final choice in choices) ...[
+                  CheckboxListTile(
+                    key: ValueKey('weekly-select-${_allocationKey(choice.task)}'),
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(_description(choice.task),
+                      style: const TextStyle(fontSize: 16, height: 1.25,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF17212B))),
+                    subtitle: Text(
+                      '${choice.task['job_id']} · '
+                      '${(choice.available / 60).toStringAsFixed(2)} hrs '
+                      'available · ${(choice.current / 60).toStringAsFixed(2)} '
+                      'hrs saved for this week',
+                      style: const TextStyle(fontSize: 13, height: 1.3,
+                        color: Color(0xFF475569))),
+                    value: selectedKeys.contains(_allocationKey(choice.task)),
+                    onChanged: locked ? null : (checked) => update(() {
+                      final key = _allocationKey(choice.task);
+                      if (checked == true) {
+                        selectedKeys.add(key);
+                      } else {
+                        selectedKeys.remove(key);
+                      }
+                    }),
+                  ),
+                  if (selectedKeys.contains(_allocationKey(choice.task)))
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                      child: locked
+                        ? InputDecorator(
+                            decoration: const InputDecoration(
+                              labelText: 'Hours saved this week · read-only',
+                              border: OutlineInputBorder()),
+                            child: Text(
+                              hourInputs[_allocationKey(choice.task)] ?? '—',
+                              style: const TextStyle(fontSize: 18,
+                                color: Color(0xFF17212B),
+                                fontWeight: FontWeight.w700)),
+                          )
+                        : WeeklyHoursTextField(
+                            key: ValueKey('weekly-hours-${DateFormat('yyyy-MM-dd').format(selectedWeek)}-${_allocationKey(choice.task)}'),
+                            initialHours: hourInputs[_allocationKey(choice.task)] ?? '',
+                            enabled: true,
+                            onChanged: (value) => update(() {
+                              hourInputs[_allocationKey(choice.task)] = value;
+                            }),
+                          ),
+                    ),
+                ],
+                const SizedBox(height: 12),
+                if (!valid)
+                  const Text('Enter positive hours not exceeding the '
+                    'available amount for each selected task.',
+                    style: TextStyle(color: Colors.deepOrange)),
+                const Text('Saving this selection does not pay anyone. '
+                  'You can revise it until weekly payroll is approved.',
+                  style: TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ),
+              bottomNavigationBar: SafeArea(
+                minimum: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Container(
+                    key: const ValueKey('weekly-sticky-summary'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0F6F7),
+                      borderRadius: BorderRadius.circular(12)),
+                    child: Row(children: [
+                      Expanded(child: Column(children: [
+                        const Text('Tasks selected',
+                          style: TextStyle(fontSize: 11,
+                            color: Color(0xFF475569))),
+                        Text('${selectedKeys.length} of ${choices.length}',
+                          style: const TextStyle(fontSize: 18,
+                            fontWeight: FontWeight.w800)),
+                      ])),
+                      Expanded(child: Column(children: [
+                        const Text('Selected this week',
+                          style: TextStyle(fontSize: 11,
+                            color: Color(0xFF475569))),
+                        Text('${(selectedMinutes / 60).toStringAsFixed(2)} hrs',
+                          style: const TextStyle(fontSize: 18,
+                            color: BriskersColors.jobs,
+                            fontWeight: FontWeight.w800)),
+                      ])),
+                      Expanded(child: Column(children: [
+                        const Text('Available hours',
+                          style: TextStyle(fontSize: 11,
+                            color: Color(0xFF475569))),
+                        Text('${(choices.fold<int>(0,
+                          (sum, choice) => sum + choice.available) / 60).toStringAsFixed(2)} hrs',
+                          style: const TextStyle(fontSize: 18,
+                            fontWeight: FontWeight.w800)),
+                      ])),
+                    ]),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(child: OutlinedButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('Cancel'))),
+                    const SizedBox(width: 8),
+                    Expanded(child: FilledButton(
+                      onPressed: locked || !valid ? null : () =>
+                        Navigator.pop(dialogContext,
+                          (week: selectedWeek, selections: selections)),
+                      child: Text(locked ? 'Read-only'
+                        : 'Save weekly hours · TEST'),
+                    )),
+                  ]),
+                ]),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    if (result == null || !mounted) return;
+    try {
+      final saved = await store.saveTestWeeklyTaskSelection(
+        businessId: BriskersLabFixture.businessId,
+        employeeId: employeeId,
+        weekStart: result.week,
+        selections: result.selections);
+      await _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Saved ${(saved / 60).toStringAsFixed(2)} '
+            'TEST hours for week of '
+            '${DateFormat('MMM d').format(result.week)}. '
+            'No payment recorded.')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Hours not saved: $error')));
+      }
+    }
+  }
+
+  Future<void> _approveTestPayroll(String employeeId) async {
+    final availableWeeks = testTaskCredits.where((credit) =>
+      credit['employee_id'] == employeeId &&
+      !testPayrollApprovals.any((approval) =>
+        approval['employee_id'] == employeeId &&
+        approval['week_start'] == credit['week_start'] &&
+        approval['state'] != 'draft'))
+      .map((credit) => credit['week_start'].toString()).toSet().toList()
+        ..sort((a, b) => b.compareTo(a));
+    if (availableWeeks.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Select weekly task hours before approval.')));
+      return;
+    }
+    final week = availableWeeks.length == 1
+      ? availableWeeks.single
+      : await showDialog<String>(context: context,
+          builder: (dialogContext) => SimpleDialog(
+            title: const Text('Choose payroll week to approve'),
+            children: [for (final candidate in availableWeeks)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialogContext, candidate),
+                child: Text('Week of $candidate'))],
+          ));
+    if (week == null || !mounted) return;
+    final selected = testTaskCredits.where((credit) =>
+      credit['employee_id'] == employeeId &&
+      credit['week_start'] == week).fold<int>(0,
+        (sum, credit) => sum + (credit['paid_minutes'] as int));
+    if (selected <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('First select task hours for this week.')));
+      return;
+    }
+    try {
+      await store.saveTestWeeklyPayrollDraft(
+        businessId: BriskersLabFixture.businessId,
+        employeeId: employeeId, weekStart: week, selectedMinutes: selected);
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Approve weekly TEST payroll?'),
+          content: Text('${_employeeName(employeeId)} · ${(selected / 60).toStringAsFixed(2)} hours. '
+            'This does not send any money.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Keep draft')),
+            FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Approve TEST')),
+          ],
+        ));
+      if (confirmed == true) {
+        final ok = await store.approveTestWeeklyPayroll(
+          businessId: BriskersLabFixture.businessId,
+          employeeId: employeeId, weekStart: week,
+          approvedBy: 'lab-owner');
+        if (!ok) throw StateError('Payroll draft was already approved');
+      }
+      await _refresh();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')));
+      }
+    }
+  }
+
+  Future<void> _markTestPayrollPaid(Map<String, dynamic> approval) async {
+    if (approval['state'] != 'approved') return;
+    final employeeId = approval['employee_id'].toString();
+    final rate = testHourlyRates[employeeId];
+    final selectedMinutes = approval['selected_minutes'] as int;
+    final expectedCents = rate == null
+      ? null : (selectedMinutes * rate / 60).round();
+    final amount = TextEditingController(
+      text: expectedCents == null ? '' : (expectedCents / 100).toStringAsFixed(2));
+    String? proofPhotoPath;
+    var method = 'cash';
+    final payment = await showDialog<({int cents, String method, String proof})>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, update) => AlertDialog(
+          title: const Text('Record approved TEST payroll payment'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('SIMULATION ONLY. No actual money or shop expenses '
+              'will be posted.'),
+            Text('${(selectedMinutes / 60).toStringAsFixed(2)} selected hours'
+              '${expectedCents == null ? '' : ' · ${_labMoney(expectedCents)} at current rate'}'
+              ' · week ${approval['week_start']}'),
+            const Text('Recording a payment marks this entire weekly '
+              'approval Paid. Do not use this for partial payments.'),
+            TextField(controller: amount,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Amount paid')),
+            DropdownButtonFormField<String>(
+              initialValue: method,
+              items: const [
+                DropdownMenuItem(value: 'cash', child: Text('Cash')),
+                DropdownMenuItem(value: 'zelle', child: Text('Zelle')),
+                DropdownMenuItem(value: 'ach', child: Text('ACH')),
+                DropdownMenuItem(value: 'check', child: Text('Check')),
+              ],
+              onChanged: (value) => update(() => method = value ?? 'cash'),
+            ),
+            if (method == 'check')
+              Column(mainAxisSize: MainAxisSize.min, children: [
+                Text(proofPhotoPath == null
+                  ? 'Check photo required' : 'Check photo captured · TEST'),
+                TextButton.icon(
+                  onPressed: () async {
+                    final shot = await ImagePicker().pickImage(
+                      source: ImageSource.camera, imageQuality: 100);
+                    if (shot == null) return;
+                    final directory = await getApplicationSupportDirectory();
+                    final folder = Directory('${directory.path}/tasks_lab_check_proofs');
+                    await folder.create(recursive: true);
+                    final filename = 'check_${DateTime.now().microsecondsSinceEpoch}.jpg';
+                    final saved = await File(shot.path)
+                      .copy('${folder.path}/$filename');
+                    update(() => proofPhotoPath = saved.path);
+                  },
+                  icon: const Icon(Icons.photo_camera),
+                  label: const Text('Photograph check'),
+                ),
+              ]),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              if (method == 'check' && proofPhotoPath == null) { return; }
+              if (expectedCents != null &&
+                  (dollars * 100).round() < expectedCents) {
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(content: Text(
+                    'This would leave weekly pay unpaid. '
+                    'The Paid action requires the full selected amount.')));
+                return;
+              }
+              Navigator.pop(dialogContext,
+                (cents: (dollars * 100).round(), method: method,
+                 proof: proofPhotoPath ?? ''));
+            }, child: const Text('Record TEST payment')),
+          ],
+        ),
+      ),
+    );
+    amount.dispose();
+    if (payment == null || !mounted) return;
+    try {
+      final changed = await store.finalizeTestWeeklyPayrollPayment(
+        businessId: BriskersLabFixture.businessId,
+        employeeId: approval['employee_id'].toString(),
+        weekStart: approval['week_start'].toString(),
+        cents: payment.cents, method: payment.method,
+        paidAt: DateTime.now(), note: 'Approved TEST weekly payroll',
+        checkProofReference: payment.proof.isEmpty ? null : payment.proof,
+      );
+      if (!changed) throw StateError('Already paid or not approved');
+      await _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('TEST payroll recorded: ${_labMoney(payment.cents)} '
+            'via ${payment.method}. See ${_employeeName(employeeId)} weekly record.')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')));
+      }
+    }
+  }
+
+  Future<void> _addTestPayrollAdjustment(String employeeId) async {
+    final amount = TextEditingController();
+    final reason = TextEditingController();
+    var kind = 'bonus';
+    final saved = await showDialog<bool>(context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, update) => AlertDialog(
+          title: const Text('Payroll adjustment · TEST'),
+          content: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min, children: [
+              DropdownButtonFormField<String>(
+                initialValue: kind,
+                items: const [
+                  DropdownMenuItem(value: 'bonus', child: Text('Bonus')),
+                  DropdownMenuItem(value: 'correction', child: Text('Correction')),
+                ],
+                onChanged: (value) => update(() => kind = value ?? 'bonus')),
+              TextField(controller: amount,
+                keyboardType: const TextInputType.numberWithOptions(
+                  signed: true, decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Amount in dollars (+ or -)')),
+              TextField(controller: reason,
+                decoration: const InputDecoration(labelText: 'Reason')),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () async {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite) { return; }
+              final cents = (dollars * 100).round();
+              final now = DateTime.now();
+              final monday = DateTime(now.year, now.month, now.day)
+                  .subtract(Duration(days: now.weekday - 1));
+              try {
+                await store.recordTestPayrollAdjustment(
+                  businessId: BriskersLabFixture.businessId,
+                  employeeId: employeeId,
+                  weekStart: DateFormat('yyyy-MM-dd').format(monday),
+                  kind: kind, signedCents: cents,
+                  reason: reason.text, approvedBy: 'lab-owner');
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext, true);
+                }
+              } catch (error) {
+                if (dialogContext.mounted) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    SnackBar(content: Text('$error')));
+                }
+              }
+            }, child: const Text('Save TEST adjustment')),
+          ],
+        )));
+    amount.dispose();
+    reason.dispose();
     if (saved == true) await _refresh();
   }
 
@@ -1904,15 +2718,35 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           if (employee['role'] != 'secretary')
             Builder(builder: (_) {
               final id = employee['id']!;
-              final hours = earnedPayrollPreviewHours[id] ?? 0;
+              final completedHours = earnedPayrollPreviewHours[id] ?? 0;
               final rate = testHourlyRates[id];
-              final earnedCents = rate == null
-                ? null : (hours * rate).round();
+              final completedEarnedCents = rate == null
+                ? null : (completedHours * rate).round();
               final payments = testPayrollPayments.where(
                 (payment) => payment['employee_id'] == id).toList();
               final paidCents = payments.fold<int>(0,
                 (sum, payment) => sum + (payment['cents'] as int));
-              final owing = (earnedCents ?? 0) - paidCents;
+              final creditedMinutes = testTaskCredits.where(
+                (credit) => credit['employee_id'] == id).fold<int>(0,
+                  (sum, credit) => sum + (credit['paid_minutes'] as int));
+              final adjustmentCents = testPayrollAdjustments.where(
+                (adjustment) => adjustment['employee_id'] == id)
+                  .fold<int>(0, (sum, adjustment) =>
+                    sum + (adjustment['signed_cents'] as int));
+              // Selected task credits are the weekly payroll basis.
+              // Completed work is displayed separately; it is not added a
+              // second time to selected credits.
+              final selectedCents = rate == null
+                ? null : (creditedMinutes * rate / 60).round();
+              final owing = TestPayrollBalance.remainingCents(
+                earnedCents: selectedCents ?? 0,
+                adjustmentCents: adjustmentCents,
+                paidCents: paidCents,
+              );
+              final employeeApprovals = testPayrollApprovals.where(
+                (approval) => approval['employee_id'] == id).toList();
+              final employeeCredits = testTaskCredits.where(
+                (credit) => credit['employee_id'] == id).toList();
               return Card(
                 margin: const EdgeInsets.fromLTRB(10, 4, 10, 5),
                 child: Padding(
@@ -1924,7 +2758,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         Expanded(child: Text(_employeeName(id),
                           style: const TextStyle(
                             fontSize: 17, fontWeight: FontWeight.w700))),
-                        Text('${hours.toStringAsFixed(1)} hrs',
+                        Text('${(creditedMinutes / 60).toStringAsFixed(2)} hrs selected',
                           style: const TextStyle(fontSize: 22,
                             fontWeight: FontWeight.w800,
                             color: BriskersColors.jobs)),
@@ -1934,7 +2768,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         Expanded(child: Text(rate == null
                           ? 'Test rate not set'
                           : 'Rate ${_labMoney(rate)}/hr · '
-                            'Earned ${_labMoney(earnedCents!)}',
+                            'Selected ${_labMoney(selectedCents!)}',
                           style: const TextStyle(fontSize: 12.5))),
                         TextButton.icon(
                           onPressed: () => _setTestPayrollRate(id),
@@ -1942,27 +2776,177 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                           label: const Text('Rate'),
                         ),
                       ]),
-                      Text('Recorded test payments: ${_labMoney(paidCents)}',
+                      Text('Completed work: ${completedHours.toStringAsFixed(2)} hrs'
+                        '${completedEarnedCents == null ? '' : ' · ${_labMoney(completedEarnedCents)}'}'
+                        ' (not added twice to selected payroll)',
+                        style: const TextStyle(fontSize: 12.5)),
+                      Text('Payroll-selected task hours: '
+                        '${(creditedMinutes / 60).toStringAsFixed(2)} hrs '
+                        '${selectedCents == null ? '' : '· ${_labMoney(selectedCents)}'}',
+                        style: const TextStyle(fontSize: 12.5)),
+                      if (employeeCredits.isNotEmpty)
+                        for (final credit in employeeCredits)
+                          Builder(builder: (_) {
+                            final matchingTask = allJobTasks.where((task) =>
+                              task['job_id'] == credit['job_id'] &&
+                              task['document_id'] == credit['document_id'] &&
+                              task['line_id'] == credit['line_id']);
+                            final description = matchingTask.isEmpty
+                              ? 'Task ${credit['line_id']}'
+                              : _description(matchingTask.first);
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 3, left: 8),
+                              child: Text('${credit['job_id']} · $description · '
+                                '${((credit['paid_minutes'] as int) / 60).toStringAsFixed(2)} hrs '
+                                '· week ${credit['week_start']}',
+                                style: const TextStyle(fontSize: 12,
+                                  color: Color(0xFF405064))),
+                            );
+                          }),
+                      Text('Bonuses and corrections: ${_labMoney(adjustmentCents)}',
+                        style: const TextStyle(fontSize: 12.5)),
+                      Text('Recorded payments and advances: ${_labMoney(paidCents)}',
                         style: const TextStyle(fontSize: 12.5)),
                       if (rate != null)
                         Text(owing >= 0
-                          ? 'Remaining to pay: ${_labMoney(owing)}'
-                          : 'Advance / credit: ${_labMoney(-owing)}',
+                          ? 'Selected payroll balance: ${_labMoney(owing)}'
+                          : 'Advance / credit against selection: ${_labMoney(-owing)}',
                           style: TextStyle(fontWeight: FontWeight.w800,
                             color: owing > 0
                               ? BriskersColors.jobs
                               : const Color(0xFF546E7A))),
+                      if (employeeApprovals.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        const Text('Weekly payroll records',
+                          style: TextStyle(fontSize: 13.5,
+                            fontWeight: FontWeight.w800)),
+                        for (final approval in employeeApprovals) ...[
+                          Builder(builder: (_) {
+                            final linked = payments.where((payment) =>
+                              payment['approval_week_start'] ==
+                                approval['week_start']).toList();
+                            final linkedCents = linked.fold<int>(0,
+                              (sum, payment) =>
+                                sum + (payment['cents'] as int));
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Week ${approval['week_start']} · '
+                                    '${approval['state'].toString().toUpperCase()}'
+                                    ' · ${((approval['selected_minutes'] as int) / 60).toStringAsFixed(2)} hrs',
+                                    style: const TextStyle(fontSize: 12.5,
+                                      fontWeight: FontWeight.w700)),
+                                  if (approval['state'] == 'approved')
+                                    TextButton.icon(
+                                      onPressed: () => _markTestPayrollPaid(approval),
+                                      icon: const Icon(Icons.payments_outlined),
+                                      label: const Text('Record approved TEST payroll'),
+                                    ),
+                                  if (linked.isNotEmpty)
+                                    for (final payment in linked)
+                                      Text('Recorded ${_labMoney(payment['cents'] as int)} '
+                                        '· ${payment['method']} · '
+                                        '${DateFormat('MMM d, yyyy').format(
+                                          DateTime.fromMillisecondsSinceEpoch(
+                                            payment['paid_at'] as int))}',
+                                        style: const TextStyle(fontSize: 12.5)),
+                                  if (approval['state'] == 'paid' &&
+                                      linked.isEmpty)
+                                    const Text(
+                                      'REVIEW: Marked Paid, but no linked payment '
+                                      'was found. Do not pay again until reconciled.',
+                                      style: TextStyle(fontSize: 12.5,
+                                        color: Colors.deepOrange)),
+                                  if (approval['state'] == 'paid' &&
+                                      linked.isNotEmpty && rate != null &&
+                                      linkedCents <
+                                        ((approval['selected_minutes'] as int) *
+                                            rate / 60).round())
+                                    const Text(
+                                      'REVIEW: Paid amount is below selected hours '
+                                      'at the current rate.',
+                                      style: TextStyle(fontSize: 12.5,
+                                        color: Colors.deepOrange)),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                      ],
                       const SizedBox(height: 6),
+                      OutlinedButton.icon(
+                        onPressed: () => _creditTestPayrollHours(id),
+                        icon: const Icon(Icons.task_alt),
+                        label: const Text('Credit task hours · TEST'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => _addTestPayrollAdjustment(id),
+                        icon: const Icon(Icons.tune),
+                        label: const Text('Bonus / correction · TEST'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => _approveTestPayroll(id),
+                        icon: const Icon(Icons.verified_user_outlined),
+                        label: const Text('Review / approve weekly TEST payroll'),
+                      ),
                       OutlinedButton.icon(
                         onPressed: () => _recordTestPayrollPayment(id),
                         icon: const Icon(Icons.payments_outlined),
-                        label: const Text('Record TEST payment / advance'),
+                        label: const Text('Record TEST advance'),
                       ),
                     ],
                   ),
                 ),
               );
             }),
+        if (testPayrollAdjustments.isNotEmpty) ...[
+          const Padding(padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
+            child: Text('Audited adjustments · TEST',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
+          for (final adjustment in testPayrollAdjustments)
+            ListTile(
+              title: Text('${_employeeName(adjustment['employee_id']?.toString())} '
+                '· ${_labMoney(adjustment['signed_cents'] as int)}'),
+              subtitle: Text('${adjustment['kind']} · ${adjustment['reason']} '
+                '· ${adjustment['week_start']}'),
+            ),
+        ],
+        if (testPayrollApprovals.isNotEmpty) ...[
+          const Padding(padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
+            child: Text('Weekly payroll approvals · TEST',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
+          for (final approval in testPayrollApprovals)
+            ListTile(
+              title: Text('${_employeeName(approval['employee_id']?.toString())} · '
+                '${approval['state']}'),
+              subtitle: Text('Week ${approval['week_start']} · '
+                '${(approval['selected_minutes'] as int) / 60} hrs · '
+                'approved by ${approval['approved_by'] ?? '—'}'),
+              trailing: approval['state'] == 'approved'
+                ? IconButton(
+                    tooltip: 'Mark Paid · TEST only',
+                    onPressed: () => _markTestPayrollPaid(approval),
+                    icon: const Icon(Icons.verified_outlined),
+                  ) : null,
+            ),
+        ],
+        if (testTaskCredits.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
+            child: Text('Weekly task-hour credits · TEST',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
+          for (final credit in testTaskCredits)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.task_alt, color: BriskersColors.jobs),
+              title: Text('${_employeeName(credit['employee_id']?.toString())} · '
+                '${((credit['paid_minutes'] as int) / 60).toStringAsFixed(2)} hours'),
+              subtitle: Text('Week of ${credit['week_start']} · '
+                'Task ${credit['line_id']} · simulated only'),
+            ),
+        ],
         if (testPayrollPayments.isNotEmpty) ...[
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
@@ -1986,8 +2970,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         const Padding(
           padding: EdgeInsets.all(16),
           child: Text('This test ledger cannot pay mechanics, issue checks, '
-            'or update actual shop expenses. Weekly paid-task selection '
-            'and production payroll approval are not connected.',
+            'or update actual shop expenses. Task-hour credits are '
+            'test-only; real payroll approval and posting are not connected.',
             style: TextStyle(fontSize: 12,
               color: Color(0xFF64748B))),
         ),
@@ -2164,7 +3148,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           '${hours.toStringAsFixed(1)}h';
       }).join(' · ');
     }
-    final rows = allocationsByLine[task['line_id'].toString()] ?? const [];
+    final rows = allocationsByLine[_allocationKey(task)] ?? const [];
     if (rows.isNotEmpty) {
       return rows.map((a) {
         final hours = (a['hours'] as num?)?.toDouble() ?? 0;
@@ -2179,7 +3163,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
 
   Widget _testInvoiceLaborRow(Map<String, dynamic> task) {
     final locked = _firstCompletion(task) != null;
-    final book = (task['source_invoice_hours'] as num?)?.toDouble();
+    final book = (task['billed_hours_override'] as num?)?.toDouble() ??
+      (task['source_invoice_hours'] as num?)?.toDouble();
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 11),
       decoration: const BoxDecoration(
@@ -2232,11 +3217,17 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 style: const TextStyle(
                   fontSize: 13.5, height: 1.25,
                   color: Color(0xFF405064)))),
-              SizedBox(width: 58, child: Text(
-                book == null ? '—' : book.toStringAsFixed(1),
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 15.5, color: Color(0xFF182239)))),
+              SizedBox(width: 58, child: InkWell(
+                onTap: () => _editTestBilledLaborHours(task),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(book == null ? '—' : book.toStringAsFixed(1),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 15.5,
+                      color: Color(0xFF182239))),
+                  const Icon(Icons.edit_outlined, size: 13,
+                    color: BriskersColors.invoices),
+                ]),
+              )),
               const SizedBox(width: 92, child: Text('—',
                 textAlign: TextAlign.right,
                 style: TextStyle(
@@ -2337,8 +3328,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             child: Text(
               'Financial amounts are intentionally redacted (—), not zero. '
               'Tap the small pencil beside a labor item to edit ONLY the '
-              'test mechanic hours and assignments. The invoice Qty '
-              'stays at billed book time. No live invoice is changed.',
+              'test mechanic hours and assignments. Tap Qty to edit '
+              'customer-billed hours separately. No live invoice is changed.',
               style: TextStyle(fontSize: 12,
                 color: Color(0xFF667085))),
           ),
@@ -2355,8 +3346,117 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     );
   }
 
+  Future<void> _assignExistingTaskFromEmployee() async {
+    final employeeId = selectedEmployeeWorkId;
+    if (employeeId == null) return;
+    final available = tasks.where((task) =>
+      _firstCompletion(task) == null && task['status'] != 'done').toList();
+    if (available.isEmpty) return;
+    final picked = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Choose task for ${_employeeName(employeeId)}'),
+        content: SizedBox(width: 370, child: ListView(
+          shrinkWrap: true,
+          children: [for (final task in available)
+            ListTile(
+              title: Text(_description(task)),
+              subtitle: const Text('Existing test job · edit mechanic allocation'),
+              onTap: () => Navigator.pop(dialogContext, task),
+            ),
+          ],
+        )),
+        actions: [TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text('Cancel'),
+        )],
+      ),
+    );
+    if (picked == null || !mounted) return;
+    // Use the existing split-mechanic editor. It enforces the same allocation
+    // rules and persistence as invoice-labor assignment in the test lab.
+    await _editInvoiceLabor(picked);
+  }
+
+  // Isolated, read-only employee work queue using existing per-labor
+  // allocations. Nothing here posts payroll or touches production data.
+  Widget _employeeWorkPage() {
+    final employeeId = selectedEmployeeWorkId;
+    final assigned = allJobTasks.where((task) {
+      final allocations = allocationsByLine[_allocationKey(task)] ?? [];
+      return allocations.any((allocation) =>
+          allocation['employee_id']?.toString() == employeeId) ||
+          (allocations.isEmpty &&
+           task['employee_id']?.toString() == employeeId);
+    }).toList();
+    final active = assigned.where((task) =>
+        _firstCompletion(task) == null && task['status'] != 'done').toList();
+    final completed = assigned.where((task) =>
+        _firstCompletion(task) != null || task['status'] == 'done').toList();
+    return ListView(padding: const EdgeInsets.only(bottom: 24), children: [
+      _sectionHeader('Employee work · TEST',
+        subtitle: 'Local assignments only · No real payroll'),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: DropdownButtonFormField<String>(
+          initialValue: employeeId,
+          decoration: const InputDecoration(
+            labelText: 'Employee', border: OutlineInputBorder()),
+          items: [for (final e in BriskersLabFixture.employees)
+            DropdownMenuItem(value: e['id']!,
+              child: Text(_employeeName(e['id']!)))],
+          onChanged: (id) => setState(() => selectedEmployeeWorkId = id),
+        ),
+      ),
+      if (employeeId == null)
+        const ListTile(title: Text('Choose an employee to view their work')),
+      if (employeeId != null) ...[
+        const ListTile(
+          title: Text('Independent shop tasks',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+          subtitle: Text('Not billed to a customer')),
+        ...shopTasks.where((task) =>
+          task['employee_id']?.toString() == employeeId).map((task) =>
+          ListTile(
+            leading: const Icon(Icons.build_outlined),
+            title: Text(task['description'].toString()),
+            subtitle: Text('${task['estimated_minutes']} min · '
+              '${task['status']} · shop work'),
+          )),
+        Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+          child: FilledButton.icon(onPressed: () =>
+            _createTestTask(employeeId: employeeId),
+            icon: const Icon(Icons.add), label: const Text('New task'))),
+        Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+          child: OutlinedButton.icon(
+            onPressed: _assignExistingTaskFromEmployee,
+            icon: const Icon(Icons.add_task),
+            label: const Text('Assign existing task'),
+          )),
+        ListTile(title: Text('Current · ${active.length}',
+          style: const TextStyle(fontWeight: FontWeight.w800)),
+          subtitle: const Text('Assigned tasks on the test job')),
+        if (active.isEmpty)
+          const ListTile(title: Text('No current assignments')),
+        ...active.map(_taskCard),
+        ListTile(title: Text('Completed · ${completed.length}',
+          style: const TextStyle(fontWeight: FontWeight.w800))),
+        if (completed.isEmpty)
+          const ListTile(title: Text('No completed assignments')),
+        ...completed.map(_taskCard),
+      ],
+    ]);
+  }
+
   Widget _morePage() => ListView(children: [
     _sectionHeader('More', subtitle: 'Tasks TEST features'),
+    ListTile(
+      leading: const Icon(Icons.assignment_ind_outlined,
+        color: BriskersColors.jobs),
+      title: const Text('Employee work · current tasks'),
+      onTap: () => _navigate(12),
+      trailing: const Icon(Icons.chevron_right),
+    ),
     ListTile(
       leading: const Icon(Icons.account_balance_wallet_outlined,
         color: BriskersColors.invoices),
@@ -2403,6 +3503,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       case 9: return _readOnlyModule('Schedule',
         'Appointments were not included in this test copy.',
         Icons.calendar_month_outlined, BriskersColors.appointments);
+      case 12: return _employeeWorkPage();
       case 10: return _readOnlyModule('Expenses',
         'No expenses or payments have been copied.',
         Icons.payments_outlined, BriskersColors.expenses);

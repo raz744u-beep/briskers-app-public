@@ -59,9 +59,43 @@ void main() {
     expect(main, isNot(contains('Assigned hours cannot exceed')));
 
     expect(main, contains('_addRecheckWork'));
-    expect(main, contains('Record TEST payment / advance'));
+    expect(main, contains('Record TEST advance'));
+    expect(main, contains('Selected payroll balance:'));
+    expect(main, contains('Weekly payroll records'));
+    expect(main, contains('REVIEW: Marked Paid, but no linked payment'));
+    expect(main, contains('ImagePicker().pickImage('));
+    expect(main, contains('ImageSource.camera'));
+    expect(main, contains('tasks_lab_check_proofs'));
+    expect(main, contains('proofPhotoPath == null'));
+
     expect(main, contains('store.payrollTestPayments('));
     expect(main, contains('store.recordLabPayrollPayment('));
+    expect(main, contains('weekly-select-all'));
+    expect(main, contains('CheckboxListTile('));
+    // Full-screen weekly review keeps approved task labels legible while
+    // retaining the audit lock on previously approved hours.
+    final weeklyScreen = main.split('Future<void> _creditTestPayrollHours(')
+        .last.split('Future<void> _approveTestPayroll(').first;
+    expect(weeklyScreen, contains('Dialog.fullscreen('));
+    expect(weeklyScreen, contains('bottomNavigationBar: SafeArea('));
+    expect(weeklyScreen, contains('weekly-sticky-summary'));
+    expect(weeklyScreen, contains('Weekly labor times'));
+    expect(weeklyScreen, contains('Icons.engineering_outlined'));
+    expect(weeklyScreen, contains('Selected this week'));
+    expect(weeklyScreen, contains('Available hours'));
+    expect(weeklyScreen, contains('child: locked'));
+    expect(weeklyScreen, contains('Hours saved this week · read-only'));
+    expect(weeklyScreen, contains('color: Color(0xFF17212B)'));
+    // The field was extracted into a reusable widget so all existing
+    // hours are selected only when the owner taps inside the input.
+    expect(main, contains('WeeklyHoursTextField('));
+    final hoursWidget = File('lib/tasks_lab/weekly_hours_text_field.dart')
+        .readAsStringSync();
+    expect(hoursWidget, contains('Hours to credit this week'));
+    expect(hoursWidget, contains('onTap: () {'));
+    expect(hoursWidget, contains('baseOffset: 0'));
+    expect(main, contains('Save weekly hours · TEST'));
+    expect(main, contains(r'Week of $weekText'));
     expect(main, contains('earnedPayrollPreviewHours'));
 
     expect(main, contains('Mark all active tasks Done'));
