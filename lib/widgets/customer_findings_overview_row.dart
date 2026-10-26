@@ -110,7 +110,9 @@ class _CustomerFindingsOverviewRowState
         // Continue best-effort Auto refresh without erasing prior values.
       }
       if (!mounted || epoch != _refreshEpoch ||
-          BriskersConnectionModeController.instance.forceOffline) return;
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
 
       try {
         final updated = await service.load(
