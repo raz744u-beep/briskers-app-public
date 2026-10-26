@@ -397,6 +397,45 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (id.isNotEmpty) await _openDocument(id);
   }
 
+  // Reuse last verified invoice details saved on this device when the
+  // Job's payment-state index is missing. Do not classify bare index rows as
+  // paid: they contain no confirmed payment receipts.
+  Future<void> _hydrateCachedFinancialStatus(
+    int epoch,
+    List<Map<String, dynamic>> documents,
+  ) async {
+    if (!_currentLoad(epoch) || !_canSeeFinancial ||
+        _job?['status']?.toString() != 'completed') return;
+    if (savedJobFinancialStatus(_job?['payment_state']) != null) return;
+    final verified = <Map<String, dynamic>>[];
+    for (final document in documents) {
+      if (document['kind']?.toString() != 'invoice') continue;
+      final id = document['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+      final cached = await _documentDetailCache.load(
+        widget.businessId, id,
+      );
+      if (!_currentLoad(epoch)) return;
+      if (cached == null || cached['kind'] != 'invoice' ||
+          cached['job_id']?.toString() != widget.jobId) return;
+      verified.add(cached);
+    }
+    final state = cachedVerifiedJobPaymentState(verified);
+    if (state == null || !_currentLoad(epoch) ||
+        _job?['status']?.toString() != 'completed') return;
+    try {
+      await _localJobs.saveVerifiedPaymentState(
+        widget.businessId, widget.jobId, state,
+      );
+      if (!_currentLoad(epoch)) return;
+      setState(() {
+        _job = <String, dynamic>{..._job!, 'payment_state': state};
+      });
+    } catch (_) {
+      // Offline documents remain usable even if this summary cache fails.
+    }
+  }
+
   Future<void> _hydrateLocalLinkedExpenses() async {
     final epoch = _loadEpoch;
     try {
@@ -429,6 +468,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       }
       setState(() => _documents = documents);
       unawaited(_hydrateMileageOut(epoch, documents));
+      unawaited(_hydrateCachedFinancialStatus(epoch, documents));
       _modalRefresh?.call();
     } catch (_) {
       // Leave the locally rendered Job usable if links cannot be read.
@@ -1598,6 +1638,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final nextColor = selectedStatus['color_hex']?.toString();
     final nextIcon = selectedStatus['icon_key']?.toString();
 
+    // Discard any older in-flight remote response that could repaint the
+    // just-changed status from a stale server Job graph.
+    ++_loadEpoch;
     // The Job header reflects the owner's selection immediately, while
     // SQLite/outbox durability is established before background replay.
     setState(() {
@@ -3242,7 +3285,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           num.tryParse(invoice['pending_payment']?.toString() ?? '') ?? 0;
     }
 
-    if (total <= 0 || paid >= total - 0.005) return 'Paid';
+    // No payment proof on a zero-total or malformed invoice.
+    if (total <= 0) return null;
+    if (paid >= total - 0.005) return 'Paid';
     if (pending > 0 && paid + pending >= total - 0.005) {
       return 'Awaiting payment clearance';
     }
