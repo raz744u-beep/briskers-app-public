@@ -405,29 +405,45 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     List<Map<String, dynamic>> documents,
   ) async {
     if (!_currentLoad(epoch) || !_canSeeFinancial ||
-        _job?['status']?.toString() != 'completed') return;
-    if (savedJobFinancialStatus(_job?['payment_state']) != null) return;
+        _job?['status']?.toString() != 'completed') {
+      return;
+    }
+    if (savedJobFinancialStatus(_job?['payment_state']) != null) {
+      return;
+    }
     final verified = <Map<String, dynamic>>[];
     for (final document in documents) {
-      if (document['kind']?.toString() != 'invoice') continue;
+      if (document['kind']?.toString() != 'invoice') {
+        continue;
+      }
       final id = document['id']?.toString() ?? '';
-      if (id.isEmpty) continue;
+      if (id.isEmpty) {
+        continue;
+      }
       final cached = await _documentDetailCache.load(
         widget.businessId, id,
       );
-      if (!_currentLoad(epoch)) return;
+      if (!_currentLoad(epoch)) {
+        return;
+      }
       if (cached == null || cached['kind'] != 'invoice' ||
-          cached['job_id']?.toString() != widget.jobId) return;
+          cached['job_id']?.toString() != widget.jobId) {
+        return;
+      }
       verified.add(cached);
     }
     final state = cachedVerifiedJobPaymentState(verified);
     if (state == null || !_currentLoad(epoch) ||
-        _job?['status']?.toString() != 'completed') return;
+        _job?['status']?.toString() != 'completed') {
+      return;
+    }
     try {
       await _localJobs.saveVerifiedPaymentState(
         widget.businessId, widget.jobId, state,
       );
-      if (!_currentLoad(epoch)) return;
+      if (!_currentLoad(epoch)) {
+        return;
+      }
       setState(() {
         _job = <String, dynamic>{..._job!, 'payment_state': state};
       });
@@ -1369,11 +1385,17 @@ class _JobDetailScreenState extends State<JobDetailScreen>
 
   Future<void> _changeVehicle() async {
     if ((!_canManage && !_canEditVehicleLocally) ||
-        _job == null || _busy) return;
+        _job == null || _busy) {
+      return;
+    }
     final customerId = _job!['customer_id']?.toString() ?? '';
-    if (customerId.isEmpty) return;
+    if (customerId.isEmpty) {
+      return;
+    }
     final vehicle = await _pickVehicleForCustomer(customerId);
-    if (vehicle == null || !mounted) return;
+    if (vehicle == null || !mounted) {
+      return;
+    }
     final vehicleId = vehicle['id']?.toString();
     final label = [
       if (vehicle['year'] != null) vehicle['year'].toString(),
@@ -1393,7 +1415,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           vehicleLabel: label,
           vehicleVin: vehicle['vin']?.toString(),
         );
-        if (!mounted) return;
+        if (!mounted) {
+          return;
+        }
         setState(() {
           _job = {
             ..._job!,
