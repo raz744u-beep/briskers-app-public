@@ -42,6 +42,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   DateTime _repaymentDate = DateTime.now();
   String _repaymentMethod = 'Payroll deduction';
   String _reportRange = 'Year to Date';
+  DateTimeRange? _customRange;
   bool _advanceExpanded = false;
   bool _outstandingExpanded = false;
   bool _editingOpening = false;
@@ -593,18 +594,27 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     switch (_reportRange) {
       case 'This Month':
         start = DateTime(today.year, today.month);
+        break;
       case 'Last Month':
         start = DateTime(today.year, today.month - 1);
         end = DateTime(today.year, today.month);
+        break;
       case 'Last 3 Months':
         start = DateTime(today.year, today.month - 2);
+        break;
       case 'Last 6 Months':
         start = DateTime(today.year, today.month - 5);
+        break;
       case 'All':
         start = DateTime(2000);
+        break;
+      case 'Custom':
+        start = _customRange?.start ?? DateTime(today.year);
+        end = _customRange == null
+          ? end : _customRange!.end.add(const Duration(days: 1));
+        break;
       default:
-        start = DateTime(today.year);
-    }
+        start = DateTime(today.year);    }
     return widget.payments.where((p) {
       if (p['employee_id'] != widget.employeeId || p['kind'] != 'pay') {
         return false;
@@ -636,9 +646,22 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
             DropdownMenuItem(value: 'Last 6 Months', child: Text('Last 6 Months')),
             DropdownMenuItem(value: 'Year to Date', child: Text('Year to Date')),
             DropdownMenuItem(value: 'All', child: Text('All Time')),
+            DropdownMenuItem(value: 'Custom', child: Text('Custom dates')),
           ],
-          onChanged: (value) =>
-            setState(() => _reportRange = value ?? 'Year to Date'),
+          onChanged: (value) async {
+            if (value == 'Custom') {
+              final range = await showDateRangePicker(
+                context: context,
+                firstDate: DateTime(2020),
+                lastDate: DateTime(2100),
+                initialDateRange: _customRange,
+              );
+              if (!mounted || range == null) return;
+              setState(() { _reportRange = 'Custom'; _customRange = range; });
+            } else {
+              setState(() => _reportRange = value ?? 'Year to Date');
+            }
+          },
         ),
         const SizedBox(height: 12),
         if (history.isEmpty)
