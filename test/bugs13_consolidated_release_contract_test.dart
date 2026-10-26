@@ -15,10 +15,14 @@ void main() {
     expect(read, contains('unawaited(metadata);'));
     expect(read, contains('visibility.blockedJobIds()'));
     expect(read, contains('visibility.isCurrent(generation)'));
-    // Metadata is intentionally started and detached before the primary
-    // awaited rows query completes; current-load guards apply to both.
-    expect(read.indexOf('unawaited(metadata);'),
-        lessThan(read.indexOf('final rows = await _localJobs.listJobs(')));
+    // Heavy metadata must not compete for SQLite before the complete Job
+    // card, including vehicle/description, reaches its first visible frame.
+    expect(read.indexOf('final rows = await _localJobs.listJobs('),
+        lessThan(read.indexOf('unawaited(metadata);')));
+    expect(read.indexOf('_rows = visibleRows;'),
+        lessThan(read.indexOf('WidgetsBinding.instance.addPostFrameCallback')));
+    expect(read.indexOf('WidgetsBinding.instance.addPostFrameCallback'),
+        lessThan(read.indexOf('unawaited(metadata);')));
   });
 
   test('Jobs offline state uses global status without repeat list banner', () {
