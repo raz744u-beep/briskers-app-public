@@ -134,6 +134,23 @@ class LocalDocumentRepository {
     });
   }
 
+  /// Record a closure already acknowledged by briskers_close_invoice.
+  /// This updates only the cached presentation index, not payments, totals,
+  /// closure timestamps or pending offline invoice edits. Never call after
+  /// Job completion alone or a failed/unconfirmed close request.
+  Future<void> recordServerConfirmedClosed(
+    String businessId,
+    String invoiceId,
+  ) async {
+    await _database.customStatement(
+      """UPDATE local_documents
+         SET status = 'closed', display_status_code = 'closed'
+         WHERE business_id = ? AND id = ? AND kind = 'invoice'
+           AND sync_state = 'synced'""",
+      [businessId, invoiceId],
+    );
+  }
+
   Future<void> upsertFromServer(
     String businessId,
     List<Map<String, dynamic>> documents,
