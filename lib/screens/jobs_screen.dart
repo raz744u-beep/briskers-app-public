@@ -1249,39 +1249,10 @@ class _JobsScreenState extends State<JobsScreen>
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 100),
               children: [
-                if (_showingLocal &&
-                    (BriskersConnectionModeController.instance.forceOffline ||
-                     _refreshFailed))
-                  Container(
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: BriskersColors.jobs.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.cloud_off_outlined, size: 18),
-                        const SizedBox(width: 7),
-                        Expanded(
-                          child: Text(
-                            _text(
-                              _refreshFailed
-                                  ? 'Showing saved jobs · refresh needs attention'
-                                  : 'Offline · showing saved jobs',
-                              _refreshFailed
-                                  ? 'Trabajos guardados · revisar actualización'
-                                  : 'Sin conexión · mostrando trabajos guardados',
-                            ),
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                // No redundant offline/refresh-failure banner here. Briskers'
+                // global connection header shows actual mode, last sync and
+                // pending/error status. Cached Jobs remain fully usable in
+                // Auto or Force Offline without an extra page-width warning.
                 if (_error != null)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
