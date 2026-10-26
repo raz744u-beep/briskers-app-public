@@ -1810,9 +1810,17 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                       ),
                     ),
                   if (_showFinancialSummary)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 2),
-                      child: Text(
+                    SizedBox(
+                      // The accounting truth may arrive after the first local
+                      // frame or after returning from a transaction. Reserve
+                      // the same space for pending/verified/error states so
+                      // rows below never jump when status text changes.
+                      height: 54,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 4, 8, 2),
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: Text(
                         _periodError ??
                             (_periodCalculating
                                 ? _periodTotals == null
@@ -1823,9 +1831,14 @@ class _ExpensesScreenState extends State<ExpensesScreen>
                                     : _lastPeriodAt == null
                                         ? 'Complete posted totals · pending offline entries excluded'
                                         : 'Posted totals for $_rangeLabel · verified ${DateFormat('h:mm a').format(_lastPeriodAt!)} · pending offline entries excluded'),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 12,
+                          height: 1.25,
                           color: Color(0xFF667085),
+                        ),
+                          ),
                         ),
                       ),
                     ),
