@@ -126,7 +126,7 @@ void main() {
     expect(jobDetailSection, contains("'Tasks (TEST)'"));
     expect(jobDetailSection, isNot(contains("title: const Text('Work Log'")));
     expect(taskListSection, contains('Original work · Invoice #6342'));
-    expect(taskListSection, contains('Additional / recheck work'));
+    expect(taskListSection, contains('Additional job work / rechecks'));
     expect(taskListSection, contains('...original.map(_taskCard)'));
     expect(taskListSection, contains('...additional.map(_taskCard)'));
     expect(taskListSection, contains('Mark all active tasks Done'));
