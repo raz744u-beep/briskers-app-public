@@ -193,6 +193,83 @@ class LocalFinancialTotalsJournal {
       search: search, accountId: accountId, categoryId: categoryId,
       counterpartyId: counterpartyId);
 
+  String _baselineKey(String scope) => 'financial_baseline_v1_$scope';
+
+  /// Durable, full-scope last-verified baseline in the SAME local SQLite
+  /// database as the pending financial journal.
+  Future<({ExpensesPeriodTotals totals, DateTime at})?> loadBaseline(
+      String businessId, String scope) async {
+    final rows = await _database.customSelect(
+      'SELECT payload_json FROM local_financial_cache '
+      'WHERE business_id=? AND cache_key=? LIMIT 1',
+      variables: [Variable<String>(businessId),
+        Variable<String>(_baselineKey(scope))],
+    ).get();
+    if (rows.isEmpty) return null;
+    try {
+      final saved = Map<String, dynamic>.from(
+        jsonDecode(rows.single.read<String>('payload_json')) as Map);
+      final income = (saved['income'] as num).toDouble();
+      final expenses = (saved['expenses'] as num).toDouble();
+      final transactions = saved['transactions'] as int;
+      final at = DateTime.parse(saved['verifiedAt'] as String).toLocal();
+      if (!income.isFinite || income < 0 ||
+          !expenses.isFinite || expenses < 0 ||
+          transactions < 0 || at.isAfter(DateTime.now())) {
+        throw StateError('Invalid saved verified baseline.');
+      }
+      return (totals: ExpensesPeriodTotals(
+        income: income, expenses: expenses, transactions: transactions,
+        feesUnverified: saved['feesUnverified'] == true,
+        unverifiedIncomeReceipts: saved['unverifiedIncomeReceipts'] is int
+            ? saved['unverifiedIncomeReceipts'] as int : null,
+      ), at: at);
+    } catch (_) {
+      // Never publish a corrupted local accounting snapshot as verified.
+      throw StateError('Local verified financial baseline needs repair.');
+    }
+  }
+
+  Future<void> _writeBaseline(String businessId, String scope,
+      ExpensesPeriodTotals totals, DateTime at) async {
+    await _database.customStatement('''
+      INSERT INTO local_financial_cache
+        (business_id,cache_key,payload_json,updated_at) VALUES (?,?,?,?)
+      ON CONFLICT(business_id,cache_key) DO UPDATE SET
+        payload_json=excluded.payload_json,updated_at=excluded.updated_at
+      ''', [
+      businessId, _baselineKey(scope),
+      jsonEncode({
+        'income': totals.income, 'expenses': totals.expenses,
+        'transactions': totals.transactions,
+        'feesUnverified': totals.feesUnverified,
+        'unverifiedIncomeReceipts': totals.unverifiedIncomeReceipts,
+        'verifiedAt': at.toUtc().toIso8601String(),
+      }), DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+    ]);
+  }
+
+  Future<void> saveBaseline(String businessId, String scope,
+      ExpensesPeriodTotals totals, DateTime at) async {
+    await _database.transaction(
+      () async => _writeBaseline(businessId, scope, totals, at),
+    );
+  }
+
+  /// Server proof + journal retirement + the replacement baseline succeed
+  /// or roll back as ONE local transaction. A crash never drops a delta while
+  /// leaving the old server total behind.
+  Future<void> reconcileAndSaveBaseline(
+    String businessId, String scope, ExpensesPeriodTotals totals, DateTime at,
+    List<Map<String, dynamic>> canonicalRows, {
+    List<Map<String, dynamic>> receipts = const [],
+  }) async {
+    await _database.transaction(() async {
+      await reconcile(businessId, canonicalRows, receipts: receipts);
+      await _writeBaseline(businessId, scope, totals, at);
+    });
+  }
+
   Future<int> pendingCount(String businessId) async =>
       (await _read(businessId)).length;
 
