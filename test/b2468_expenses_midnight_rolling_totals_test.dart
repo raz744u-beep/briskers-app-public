@@ -13,7 +13,7 @@ Map<String, dynamic> row(String id, String day, String direction, num amount,
   'direction': direction,
   'amount': amount,
   'reporting_status': verified ? 'verified' : 'unverified',
-  if (reportingAmount != null) 'reporting_amount': reportingAmount,
+  'reporting_amount': reportingAmount,
 };
 
 void main() {
