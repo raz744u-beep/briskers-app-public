@@ -629,64 +629,70 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       categoryId ?? '',
       counterpartyId ?? '',
     ].join('|');
-    if (offline) {
-      final epoch = ++_periodEpoch;
-      _pendingPeriodScope = null;
-      final saved = await const VerifiedExpenseTotalsCache().load(scope);
-      if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
-          businessId != widget.businessId) {
-        return;
-      }
-      setState(() {
-        final sameScope = _lastPeriodScope == scope && _periodTotals != null;
-        if (saved != null) {
-          _periodTotals = saved.totals;
-          _lastPeriodScope = scope;
-          _lastPeriodAt = saved.at;
-        } else if (!sameScope) {
-          _periodTotals = null;
-          _lastPeriodAt = null;
-        }
-        _periodCalculating = false;
-        _periodError = _periodTotals == null
-          ? 'Complete totals require an online refresh.'
-          : 'Offline · last verified ${DateFormat('MMM d, yyyy h:mm a').format(_lastPeriodAt!)} · later changes excluded';
-      });
-      return;
-    }
+    // Restore complete stored totals and add all locally committed deltas.
+    // The server is NOT a prerequisite for entering the Expenses screen.
     if (_pendingPeriodScope == scope) return;
-    final sameScope = _lastPeriodScope == scope && _periodTotals != null;
-    final fresh = sameScope && _lastPeriodAt != null &&
-        DateTime.now().difference(_lastPeriodAt!) <
-            const Duration(minutes: 5);
-    if (fresh && !force) return;
     final epoch = ++_periodEpoch;
+    final journal = LocalFinancialTotalsJournal();
     _pendingPeriodScope = scope;
-    setState(() {
-      // Preserve a recently verified amount while rechecking the same scope.
-      // Switching periods never shows a total from an earlier date range.
-      if (!sameScope) _periodTotals = null;
-      _periodCalculating = true;
-      _periodError = null;
-    });
-    // Restore the last *complete, exact-scope* snapshot before awaiting an
-    // expensive network calculation. A cold start must not forget a verified
-    // value merely because its first online request times out.
+    final sameScope = _lastPeriodScope == scope && _serverPeriodBase != null;
+    final saved = await const VerifiedExpenseTotalsCache().load(scope);
+    if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
+        widget.businessId != businessId) return;
+    final baseline = saved?.totals ?? (sameScope ? _serverPeriodBase : null);
+    final lastVerified = saved?.at ?? (sameScope ? _lastPeriodAt : null);
+    ExpensesPeriodTotals? local;
+    int localChanges = 0;
     try {
-      final saved = await const VerifiedExpenseTotalsCache().load(scope);
-      if (saved != null && mounted && epoch == _periodEpoch &&
-          _pendingPeriodScope == scope && widget.businessId == businessId &&
-          _showFinancialSummary) {
+      local = baseline == null ? null : await journal.apply(
+        businessId, baseline,
+        startDate: startDate, endDate: endDate,
+        search: search.isEmpty ? null : search, direction: direction,
+        accountId: accountId, categoryId: categoryId,
+        counterpartyId: counterpartyId,
+      );
+      localChanges = await journal.pendingCount(businessId);
+    } catch (_) {
+      if (mounted && epoch == _periodEpoch) {
         setState(() {
-          _periodTotals = saved.totals;
-          _lastPeriodScope = scope;
-          _lastPeriodAt = saved.at;
-          _periodError = 'Last verified totals · updating';
+          _periodCalculating = false;
+          _pendingPeriodScope = null;
+          _periodError = 'Local totals need verification. Refresh to retry.';
         });
       }
-    } catch (_) {
-      // Failure to read cache must not prevent a fresh server calculation.
+      return;
     }
+    if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
+        widget.businessId != businessId) return;
+    final fresh = lastVerified != null &&
+        DateTime.now().difference(lastVerified) < const Duration(minutes: 30);
+    setState(() {
+      _serverPeriodBase = baseline;
+      _periodTotals = local;
+      _lastPeriodScope = scope;
+      _lastPeriodAt = lastVerified;
+      _periodCalculating = false;
+      _periodError = local == null
+          ? (offline ? 'Complete baseline not yet saved on this device.'
+              : 'Preparing first complete local baseline…')
+          : localChanges > 0
+              ? 'Includes $localChanges locally saved change(s) · sync pending'
+              : offline
+                  ? 'Offline · saved totals verified ' +
+                      DateFormat('MMM d, h:mm a').format(lastVerified!)
+                  : 'Saved local totals · verified ' +
+                      DateFormat('MMM d, h:mm a').format(lastVerified!);
+    });
+    if (offline || (fresh && !force)) {
+      _pendingPeriodScope = null;
+      return;
+    }
+    // Only a missing/old snapshot or an explicit refresh runs a full scan.
+    // The previously projected figures remain visible during verification.
+    if (_periodTotals == null) {
+      setState(() => _periodCalculating = true);
+    }
+
     bool current() =>
         mounted && epoch == _periodEpoch &&
         _pendingPeriodScope == scope &&
