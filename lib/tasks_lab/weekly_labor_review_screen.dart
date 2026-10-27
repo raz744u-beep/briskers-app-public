@@ -23,6 +23,7 @@ class WeeklyLaborReviewLab extends StatefulWidget {
     this.onCancel,
     this.onPaymentSaved,
     this.onWeekChanged,
+    this.onAssignedHoursChange,
   });
 
   final String employeeId;
@@ -35,6 +36,7 @@ class WeeklyLaborReviewLab extends StatefulWidget {
   final VoidCallback? onCancel;
   final Future<void> Function()? onPaymentSaved;
   final ValueChanged<DateTime>? onWeekChanged;
+  final Future<void> Function(Map<String, dynamic>, double)? onAssignedHoursChange;
 
   @override
   State<WeeklyLaborReviewLab> createState() => _WeeklyLaborReviewLabState();
@@ -43,6 +45,8 @@ class WeeklyLaborReviewLab extends StatefulWidget {
 class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   final Map<String, double> _selected = {};
   final Map<String, double> _paidHours = {};
+  final Map<String, double> _assignedOverrides = {};
+  final Set<String> _expandedTasks = <String>{};
   bool _showTip = true;
   Timer? _tipTimer;
   static final _date = DateFormat('MMM d');
@@ -187,8 +191,12 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
     }).toList();
   }
 
+  double _assigned(Map<String, dynamic> task) =>
+    _assignedOverrides[_id(task)] ?? widget.hoursOf(task);
+
   double _available(Map<String, dynamic> task) =>
-    (widget.hoursOf(task) - (_paidHours[_id(task)] ?? 0)).clamp(0.0, double.infinity).toDouble();
+    (_assigned(task) - (_paidHours[_id(task)] ?? 0))
+      .clamp(0.0, double.infinity).toDouble();
 
   double get _totalHours {
     final ids = _eligible.map(_id).toSet();
@@ -215,44 +223,85 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
 
   Future<void> _editHours(Map<String, dynamic> task) async {
     final key = _id(task);
-    final maxHours = _available(task);
-    final input = TextEditingController(text:
-      (_selected[key] ?? maxHours).toStringAsFixed(1));
-    final value = await showDialog<double>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Hours to pay (TEST)'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('Assigned: ' + maxHours.toStringAsFixed(1) + ' hrs'),
-          const SizedBox(height: 12),
-          TextField(
-            controller: input,
-            autofocus: true,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Payable hours', border: OutlineInputBorder()),
-            onTap: () => input.selection = TextSelection(
-              baseOffset: 0, extentOffset: input.text.length),
-          ),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel')),
-          FilledButton(onPressed: () {
-            final parsed = double.tryParse(input.text);
-            if (parsed == null || !parsed.isFinite || parsed < 0 ||
-                parsed > maxHours) { return; }
-            Navigator.pop(context, parsed);
-          }, child: const Text('Apply')),
+    final paid = _paidHours[key] ?? 0;
+    final assignedInput = TextEditingController(
+      text:_assigned(task).toStringAsFixed(2));
+    final payInput = TextEditingController(
+      text:(_selected[key] ?? _available(task)).toStringAsFixed(2));
+    final rawBilled = task['source_invoice_hours'];
+    final billed = rawBilled is num ? rawBilled.toDouble() : null;
+    final result = await showDialog<({double assigned,double pay})>(
+      context:context,
+      builder:(dialog) => AlertDialog(
+        title:const Text('Edit Mechanic Labor · TEST'),
+        content:SingleChildScrollView(child:Column(
+          mainAxisSize:MainAxisSize.min,
+          crossAxisAlignment:CrossAxisAlignment.start,
+          children:[
+            Text((task['custom_description'] ??
+              task['source_description'] ?? 'Task').toString(),
+              style:const TextStyle(fontWeight:FontWeight.w700)),
+            const SizedBox(height:12),
+            Text('Customer billed: ' + (billed == null ? '—' :
+              billed.toStringAsFixed(2) + ' hrs')),
+            const SizedBox(height:12),
+            TextField(
+              controller:assignedInput,
+              readOnly:widget.onAssignedHoursChange == null,
+              keyboardType:const TextInputType.numberWithOptions(decimal:true),
+              decoration:const InputDecoration(
+                labelText:'Mechanic assigned hours',
+                suffixText:'hrs',border:OutlineInputBorder()),
+              onTap:()=>assignedInput.selection=TextSelection(
+                baseOffset:0,extentOffset:assignedInput.text.length),
+            ),
+            const SizedBox(height:10),
+            Text('Previously paid: ' + paid.toStringAsFixed(2) + ' hrs'),
+            const SizedBox(height:10),
+            TextField(
+              controller:payInput,
+              keyboardType:const TextInputType.numberWithOptions(decimal:true),
+              decoration:const InputDecoration(
+                labelText:'Hours to pay now',
+                suffixText:'hrs',border:OutlineInputBorder()),
+              onTap:()=>payInput.selection=TextSelection(
+                baseOffset:0,extentOffset:payInput.text.length),
+            ),
+            const SizedBox(height:7),
+            const Text('Customer billed labor is unchanged.',
+              style:TextStyle(fontSize:11,color:Color(0xFF64748B))),
+          ],
+        )),
+        actions:[
+          TextButton(onPressed:()=>Navigator.pop(dialog),
+            child:const Text('Cancel')),
+          FilledButton(onPressed:(){
+            final assigned=double.tryParse(assignedInput.text.trim());
+            final pay=double.tryParse(payInput.text.trim());
+            if(assigned==null||pay==null||!assigned.isFinite||
+              !pay.isFinite||assigned<paid||pay<0||
+              pay>assigned-paid+0.00001) {return;}
+            Navigator.pop(dialog,(assigned:assigned,pay:pay));
+          },child:const Text('Save')),
         ],
       ),
     );
-    input.dispose();
-    if (value == null || !mounted) { return; }
-    setState(() {
-      if (value == 0) { _selected.remove(key); }
-      else { _selected[key] = value; }
-    });
+    assignedInput.dispose();payInput.dispose();
+    if(!mounted||result==null) {return;}
+    try {
+      if((result.assigned-_assigned(task)).abs()>0.00001) {
+        await widget.onAssignedHoursChange?.call(task,result.assigned);
+      }
+      if(!mounted) {return;}
+      setState((){
+        _assignedOverrides[key]=result.assigned;
+        if(result.pay<=0) {_selected.remove(key);}
+        else {_selected[key]=result.pay;}
+      });
+    } catch(error) {
+      if(mounted) {setState(() => _error =
+        'Unable to update mechanic hours: ' + error.toString());}
+    }
   }
 
   Future<void> _moveWeek(int weeks) async {
@@ -463,6 +512,13 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
     ]);
   }
 
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
   Widget _compactWeekSelector() {
     final start = _start(_week);
     final end = _end(_week).subtract(const Duration(days: 1));
@@ -577,39 +633,72 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                       'requires scheduling data.'
                     : 'No dated test labor for this week.',
                     style: const TextStyle(color: Color(0xFF64748B)))),
-              for (final task in tasks)
+              for(final task in tasks)
                 Card(
-                  margin: const EdgeInsets.only(bottom: 6),
-                  child: Row(children: [
-                    Checkbox(
-                      value: _selected.containsKey(_id(task)),
-                      onChanged: (v) => setState(() {
-                        if (v == true) {
-                          final h = _available(task);
-                          if (h > 0) { _selected[_id(task)] = h; }
-                        } else { _selected.remove(_id(task)); }
-                      }),
-                    ),
-                    Expanded(child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text((task['custom_description'] ??
-                          task['source_description'] ?? 'Task').toString(),
-                          maxLines: 2, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w600)),
-                        Text('J-24 · ' + task['status'].toString() +
-                          ' · ' + _available(task).toStringAsFixed(1) +
-                          ' unpaid hrs', style: const TextStyle(
-                            fontSize: 11, color: Color(0xFF64748B))),
-                      ],
-                    )),
-                    Text((_selected[_id(task)] ??
-                      _available(task)).toStringAsFixed(1) + 'h',
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                    IconButton(
-                      icon: const Icon(Icons.edit_outlined, size: 19),
-                      tooltip: 'Edit hours',
-                      onPressed: () => _editHours(task)),
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
                   ]),
                 ),
               if (!widget.embedded)
