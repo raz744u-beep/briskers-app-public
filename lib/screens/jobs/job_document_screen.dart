@@ -67,6 +67,7 @@ import '../customers/customer_vehicle_findings_section.dart';
 import '../customers/customer_quick_actions.dart';
 import 'customer_invoice_signature_screen.dart';
 import 'invoice_warranty_panel.dart';
+import 'invoice_header_warranty_fields.dart';
 import 'invoice_note_draft_rules.dart';
 import '../../widgets/document_tab_label.dart';
 import 'standard_note_editor_sheet.dart';
@@ -3822,24 +3823,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   },
                 ),
                 const SizedBox(height: 6),
-                TextField(
-                  controller: claimController,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    labelText: 'Claim number',
-                    prefixIcon: Icon(Icons.assignment_outlined),
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: authorizationController,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    labelText: 'Authorization number',
-                    prefixIcon: Icon(Icons.verified_outlined),
-                    border: OutlineInputBorder(),
-                  ),
+                InvoiceHeaderWarrantyFields(
+                  claimController: claimController,
+                  authorizationController: authorizationController,
+                  // Existing warranty paperwork stays visible on edit.
+                  // The toggle changes only this sheet's layout, not the
+                  // persisted Warranty Job status or any payment setting.
+                  initiallyExpanded: _warrantyDetail['extended_warranty'] == true,
                 ),
                 if ((_detail!['job_number']?.toString() ?? '').isNotEmpty)
                   const Padding(
