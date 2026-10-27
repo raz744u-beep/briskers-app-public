@@ -706,6 +706,41 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                           : _laborAssignment(task),
                           style: const TextStyle(fontSize: 12.5,
                             color: Color(0xFF526273))),
+                      if(isRecheck && !done &&
+                          ((task['payroll_hours'] as num?)?.toDouble() ?? 0) == 0)
+                        TextButton.icon(
+                          onPressed: () async {
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (dialog) => AlertDialog(
+                                title: const Text('Move to Shop Tasks?'),
+                                content: const Text(
+                                  'This unpaid, unfinished internal task '
+                                  'will no longer appear under Job J-24.'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(dialog,false),
+                                    child: const Text('Cancel')),
+                                  FilledButton(
+                                    onPressed: () => Navigator.pop(dialog,true),
+                                    child: const Text('Move')),
+                                ],
+                              ),
+                            );
+                            if(confirm != true) return;
+                            try {
+                              await store.moveUnpaidRecheckToShop(
+                                businessId: BriskersLabFixture.businessId,
+                                jobId: BriskersLabFixture.jobId,
+                                lineId: task['line_id'].toString());
+                              await _refresh();
+                            } catch (error) {
+                              if(mounted) ScaffoldMessenger.of(context)
+                                .showSnackBar(SnackBar(content: Text('$error')));
+                            }
+                          },
+                          icon: const Icon(Icons.drive_file_move_outline),
+                          label: const Text('Move to Shop Tasks')),
                       Text(done
                         ? stamp.isEmpty
                           ? 'Completed · read-only'
