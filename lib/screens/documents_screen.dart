@@ -497,13 +497,29 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     final businessId = widget.businessId;
     final kind = widget.kind;
     final estimate = _estimate;
+
+    // On a cold visit, the first protected local document read MUST be
+    // ahead of the optional receipt-index hydration on the shared SQLite
+    // executor. A large receipt snapshot must never starve the first invoice
+    // card frame. Repeated visits retain their existing fast refresh path.
+    var firstLocalShown = false;
+    if (!BriskersConnectionModeController.instance.forceOnline &&
+        _rows == null) {
+      firstLocalShown = await _loadLocalRows(
+        epoch, businessId, kind, estimate: estimate,
+      );
+    }
+    if (!mounted || epoch != _loadEpoch) return;
     final receipts = _refreshReceiptTotals(
       epoch,
       businessId,
       estimate: estimate,
     );
     try {
-      await _loadRows(epoch, businessId, kind, estimate: estimate);
+      await _loadRows(
+        epoch, businessId, kind,
+        estimate: estimate, firstLocalShown: firstLocalShown,
+      );
     } finally {
       // Receipt work participates in coalescing and cannot outlive the pass
       // that promises fresh status/payment state to the caller.
@@ -516,15 +532,16 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     String businessId,
     String kind, {
     required bool estimate,
+    bool firstLocalShown = false,
   }) async {
-    var localShown = false;
+    var localShown = firstLocalShown;
     final forceOnline = BriskersConnectionModeController.instance.forceOnline;
     final forceOffline = BriskersConnectionModeController.instance.forceOffline;
 
     // Warm online refreshes never replace richer API rows with index-only
     // placeholders. Offline entries must read the index to pick up edits made
     // in another module, since there is no server refresh in that mode.
-    if (!forceOnline && (_rows == null || forceOffline)) {
+    if (!forceOnline && !firstLocalShown && (_rows == null || forceOffline)) {
       localShown = await _loadLocalRows(
         epoch, businessId, kind, estimate: estimate,
       );

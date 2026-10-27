@@ -771,8 +771,9 @@ class LocalJobRepository {
 
   Future<LocalJobDetailSnapshot?> jobDetail(
     String businessId,
-    String jobId,
-  ) async {
+    String jobId, {
+    bool coreOnly = false,
+  }) async {
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {
       return null;
     }
@@ -817,7 +818,7 @@ class LocalJobRepository {
         )
         .toList();
 
-    final visitRows = await _database
+    final visitRows = coreOnly ? <QueryRow>[] : await _database
         .customSelect(
           '''
       SELECT *
@@ -886,13 +887,20 @@ class LocalJobRepository {
       'visits': visits,
       'status_history': const <dynamic>[],
       '_local_snapshot': true,
+      // The quick view is display-only; secondary inspection, findings and
+      // statuses arrive in the next local detail pass. Never grant writes
+      // based solely on this partial snapshot.
+      if (coreOnly) '_first_frame_only': true,
     };
 
-    final preInspection = await _preInspection(businessId, jobId);
-    final findings = vehicleId == null
+    final preInspection =
+        coreOnly ? null : await _preInspection(businessId, jobId);
+    final findings = coreOnly || vehicleId == null
         ? <Map<String, dynamic>>[]
         : await _findings(businessId, vehicleId);
-    final statuses = await jobStatuses(businessId);
+    final statuses = coreOnly
+        ? <Map<String, dynamic>>[]
+        : await jobStatuses(businessId);
 
     // A retirement observed while assembling nested rows also hides this load.
     if (await LocalJobRetirement.isJobBlocked(_database, businessId, jobId)) {

@@ -59,6 +59,34 @@ void main() {
   List<String> ids(List<Map<String, dynamic>> rows) =>
       rows.map((row) => row['id'] as String).toList();
 
+  test('direct Job local core first frame is readable before secondary graph',
+      () async {
+    await addJob('fast-local-job', number: 'J-123',
+        title: 'Local brake service', status: 'in_progress',
+        payment: 'partial');
+    final core = await repository.jobDetail(
+        'shop', 'fast-local-job', coreOnly: true);
+    expect(core, isNotNull);
+    expect(core!.job['job_number'], 'J-123');
+    expect(core.job['customer_name'], 'Synthetic Jobs Customer');
+    expect(core.job['vehicle'], 'Ford Ranger');
+    expect(core.job['title'], 'Local brake service');
+    expect(core.job['payment_state'], 'partial');
+    expect(core.job['_first_frame_only'], isTrue,
+        reason: 'Preview cannot authorize edits before full local detail');
+    expect(core.preInspection, isNull);
+    expect(core.findings, isEmpty);
+    expect(core.statuses, isEmpty);
+
+    final full = await repository.jobDetail('shop', 'fast-local-job');
+    expect(full, isNotNull);
+    expect(full!.job['_first_frame_only'], isNot(true));
+    expect(full.job['title'], core.job['title']);
+    expect((await repository.jobDetail('other-shop',
+        'fast-local-job', coreOnly: true)), isNull,
+        reason: 'Never borrow another shop\'s saved Job');
+  });
+
   test(
     'synthetic J-6 completed today stays in first All page and Completed',
     () async {

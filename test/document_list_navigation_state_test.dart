@@ -57,6 +57,35 @@ class _Payments extends InvoicePaymentFeed {
   }
 }
 
+class _HeldDocuments extends _Documents {
+  _HeldDocuments(super.database);
+  final Completer<void> gate = Completer<void>();
+  bool requested = false;
+
+  @override
+  Future<List<Map<String, dynamic>>> listByKind(
+    String businessId, {
+    required String kind,
+  }) async {
+    requested = true;
+    await gate.future;
+    return super.listByKind(businessId, kind: kind);
+  }
+}
+
+class _HeldPayments extends _Payments {
+  _HeldPayments(super.database);
+  final Completer<void> gate = Completer<void>();
+  bool requested = false;
+
+  @override
+  Future<List<Map<String, dynamic>>> load(String businessId) async {
+    requested = true;
+    await gate.future;
+    return super.load(businessId);
+  }
+}
+
 class _DelayedApi extends BriskersApi {
   final response = Completer<List<Map<String, dynamic>>>();
   int reads = 0;
@@ -118,6 +147,65 @@ void main() {
     payments = _Payments(database);
   });
   tearDown(() => database.close());
+
+  testWidgets(
+    'first Auto invoice visit paints protected local row before reading '
+    'receipt inventory or waiting on server',
+    (tester) async {
+      await BriskersConnectionModeController.instance.setMode(
+        BriskersConnectionMode.auto,
+      );
+      final heldDocuments = _HeldDocuments(database)
+        ..rows = [
+          {
+            'id': 'synthetic-first-invoice',
+            'kind': 'invoice',
+            'document_number': 'I-2467',
+            'customer_name': 'Synthetic Invoice Customer',
+            'status': 'issued',
+            'display_status': 'Open',
+            'total_amount': 125,
+            '_local_snapshot': true,
+          },
+        ];
+      final heldPayments = _HeldPayments(database);
+      final api = _DelayedApi();
+
+      await tester.pumpWidget(MaterialApp(
+        home: DocumentsScreen(
+          businessId: 'synthetic-shop',
+          kind: 'invoice',
+          roleCode: 'owner',
+          isOwner: true,
+          showAppBar: false,
+          dockDefaultsToOpen: true,
+          localDocuments: heldDocuments,
+          paymentFeed: heldPayments,
+          api: api,
+          blockedDocumentIds: (_) async => <String>{},
+        ),
+      ));
+      await tester.pump();
+      expect(heldDocuments.requested, isTrue,
+        reason: 'First protected local list read has priority');
+      expect(heldPayments.requested, isFalse,
+        reason: 'Receipt inventory may not queue a SQLite read first');
+
+      heldDocuments.gate.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('I-2467'), findsOneWidget);
+      expect(heldPayments.requested, isTrue);
+      expect(api.reads, 1);
+      expect(find.byType(CircularProgressIndicator), findsNothing,
+        reason: 'Saved invoices paint with receipts and RPC still pending');
+
+      heldPayments.gate.complete();
+      api.response.complete(const []);
+      await tester.pump();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   for (final estimate in [true, false]) {
     testWidgets(
