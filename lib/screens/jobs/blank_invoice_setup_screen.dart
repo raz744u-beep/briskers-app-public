@@ -104,7 +104,9 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
       _customerCacheIncomplete = false;
       _error = null;
     });
-    if (term.isEmpty) return;
+    if (term.isEmpty) {
+      return;
+    }
     // Local SQLite is the search source. No arbitrary 350ms delay before the
     // FIRST local result and no network request in the first-frame path.
     // The short coalescing window prevents queueing a DB scan on each key.
@@ -120,7 +122,9 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
         widget.businessId, search: term, limit: 50,
       );
       if (!mounted || generation != _searchGeneration ||
-          term != _customerSearch.text.trim()) return;
+          term != _customerSearch.text.trim()) {
+        return;
+      }
       setState(() {
         _customers = localMatches;
         _searchingCustomers = false;
@@ -128,7 +132,9 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
       // An exact local zero is definitive only AFTER this shop's customer
       // bootstrap completed. When incomplete, show the usable local result
       // first and try the network independently; never await it for display.
-      if (localMatches.isNotEmpty) return;
+      if (localMatches.isNotEmpty) {
+        return;
+      }
       bool bootstrapped = false;
       try {
         bootstrapped = await _localCustomers.hasBootstrap(widget.businessId);
@@ -136,8 +142,12 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
         // Missing local scope is not proof that no customer exists.
       }
       if (!mounted || generation != _searchGeneration ||
-          term != _customerSearch.text.trim()) return;
-      if (bootstrapped) return;
+          term != _customerSearch.text.trim()) {
+        return;
+      }
+      if (bootstrapped) {
+        return;
+      }
       setState(() {
         _customerCacheIncomplete = true;
         _checkingUnsyncedCustomers =
@@ -147,7 +157,9 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
         unawaited(_searchUnsyncedCustomers(generation, term));
       }
     } catch (_) {
-      if (!mounted || generation != _searchGeneration) return;
+      if (!mounted || generation != _searchGeneration) {
+        return;
+      }
       setState(() {
         _searchingCustomers = false;
         _customerCacheIncomplete = true;
@@ -163,13 +175,17 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
       );
       if (!mounted || generation != _searchGeneration ||
           term != _customerSearch.text.trim() ||
-          BriskersConnectionModeController.instance.forceOffline) return;
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
       setState(() {
         _customers = rows;
         _checkingUnsyncedCustomers = false;
       });
     } catch (_) {
-      if (!mounted || generation != _searchGeneration) return;
+      if (!mounted || generation != _searchGeneration) {
+        return;
+      }
       // Local selection remains available. Remote outages are informational,
       // not a reason to hold the picker on a spinner.
       setState(() => _checkingUnsyncedCustomers = false);
