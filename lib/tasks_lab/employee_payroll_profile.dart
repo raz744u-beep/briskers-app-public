@@ -71,6 +71,13 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   String _money(int cents) => _currency.format(cents / 100);
   static final _date = DateFormat('MMM d, yyyy');
 
+  // Overwrite-friendly numeric inputs: tapping an amount selects all digits,
+  // including an existing 0.00, without changing the stored amount.
+  static void _selectAmount(TextEditingController controller) {
+    controller.selection = TextSelection(
+      baseOffset: 0, extentOffset: controller.text.length);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -654,6 +661,8 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
           Row(children: [
             Expanded(child: TextField(
               controller: _opening,
+              onTapAlwaysCalled: true,
+              onTap: () => _selectAmount(_opening),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               readOnly: !_editingOpening,
               decoration: const InputDecoration(
@@ -684,6 +693,8 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
           const SizedBox(height: 9),
           TextField(
             controller: _repayment,
+            onTapAlwaysCalled: true,
+            onTap: () => _selectAmount(_repayment),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: const InputDecoration(
               labelText: 'Amount', prefixText: r'$ ',
