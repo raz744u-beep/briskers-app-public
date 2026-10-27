@@ -301,6 +301,14 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     }
   }
 
+  // The Save button is enabled only for a valid, positive amount that
+  // does not exceed the employee's remaining debt.
+  bool _canSaveRepayment(LabAdvanceSnapshot? snapshot) {
+    final amount = _cents(_repayment.text);
+    return !_saving && amount != null && amount > 0 &&
+      amount <= (snapshot?.remainingCents ?? 0);
+  }
+
   Future<void> _saveRepayment() async {
     final cents = _cents(_repayment.text);
     if (cents == null || cents == 0) {
@@ -695,6 +703,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
             controller: _repayment,
             onTapAlwaysCalled: true,
             onTap: () => _selectAmount(_repayment),
+            onChanged: (_) => setState(() {}),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: const InputDecoration(
               labelText: 'Amount', prefixText: r'$ ',
@@ -734,7 +743,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
               border: OutlineInputBorder())),
           const SizedBox(height: 10),
           FilledButton(
-            onPressed: _saving ? null : _saveRepayment,
+            onPressed: _canSaveRepayment(snapshot) ? _saveRepayment : null,
             child: const Text('Save Repayment (TEST)'),
           ),
           const SizedBox(height: 8),
