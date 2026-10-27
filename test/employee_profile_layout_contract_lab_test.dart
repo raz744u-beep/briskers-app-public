@@ -81,6 +81,22 @@ void main() {
     expect(source, contains('baseOffset: 0, extentOffset: controller.text.length'));
   });
 
+  test('TEST payment debt deduction defaults collapsed and resets safely', () {
+    final source = File('lib/tasks_lab/weekly_labor_review_screen.dart')
+        .readAsStringSync();
+    final dialog = source.split('Future<void> _verifyPayment() async {').last
+        .split('if(confirmed==true&&mounted)').first;
+    expect(dialog, contains('var showDebtOptions=false;'));
+    expect(dialog, contains("Key('test-debt-deduction-expander')"));
+    expect(dialog, contains("Text('Debt deduction (optional)')"));
+    expect(dialog, contains('if(showDebtOptions) ...['));
+    expect(dialog, contains('if(!showDebtOptions) {'));
+    expect(dialog, contains('deduct=false;'));
+    expect(dialog, contains('debtInput.clear();'));
+    expect(dialog, contains('final repayment=deduct ?'));
+    expect(dialog, contains("onTapAlwaysCalled:true"));
+  });
+
   test('Legacy Payroll TEST ledger is no longer the employee landing', () {
     final source = File('lib/tasks_lab_main.dart').readAsStringSync();
     expect(source, isNot(contains("_sectionHeader('Payroll TEST ledger'")));
