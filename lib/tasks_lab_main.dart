@@ -11,6 +11,7 @@ import 'local/local_database_provider.dart';
 import 'services/local_job_tasks_lab_store.dart';
 import 'tasks_lab/fixture.dart';
 import 'tasks_lab/employee_payroll_profile.dart';
+import 'tasks_lab/tasks_workspace.dart';
 import 'tasks_lab/payroll_overview_screen.dart';
 
 void main() {
@@ -1699,6 +1700,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Future<void> _addInternalShopTask() async {
     final description = TextEditingController();
     String assigned = '';
+    String category = 'General';
+    DateTime? dueDate;
     final created = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true, isScrollControlled: true,
@@ -1716,7 +1719,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text('New Shop Task',
+                    const Text('New General Task',
                       style: TextStyle(fontSize: 20,
                         fontWeight: FontWeight.w800)),
                     const SizedBox(height: 8),
@@ -1749,6 +1752,30 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                       ],
                       onChanged: (v) => update(() => assigned = v ?? ''),
                     ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: category,
+                      decoration: const InputDecoration(
+                        labelText: 'Category', border: OutlineInputBorder()),
+                      items: const [
+                        for (final name in ['General','Cleaning','Inventory',
+                          'Office','Maintenance','Yard','Errands'])
+                          DropdownMenuItem(value:name,child:Text(name)),
+                      ],
+                      onChanged: (v) => update(() => category = v ?? 'General'),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final selected = await showDatePicker(
+                          context:sheet, initialDate:dueDate ?? DateTime.now(),
+                          firstDate:DateTime(2020),lastDate:DateTime(2100));
+                        if(selected!=null) update(()=>dueDate=selected);
+                      },
+                      icon:const Icon(Icons.calendar_month_outlined),
+                      label:Text(dueDate==null?'Due date (optional)':
+                        'Due '+DateFormat('MMM d, yyyy').format(dueDate!)),
+                    ),
                     const SizedBox(height: 16),
                     FilledButton.icon(
                       onPressed: () async {
@@ -1757,7 +1784,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                           await store.addShopTask(
                             businessId: BriskersLabFixture.businessId,
                             description: description.text,
-                            employeeId: assigned);
+                            employeeId: assigned,
+                            category: category, dueDate: dueDate);
                           if (sheet.mounted) Navigator.pop(sheet, true);
                         } catch (error) {
                           if (sheet.mounted) {
@@ -1767,7 +1795,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         }
                       },
                       icon: const Icon(Icons.add),
-                      label: const Text('Save Shop Task'),
+                      label: const Text('Save General Task'),
                     ),
                   ],
                 ),
@@ -1780,6 +1808,24 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     description.dispose();
     if (created == true) await _refresh();
   }
+
+  Widget _tasksWorkspace() => TasksWorkspaceLab(
+    key: const Key('approved-tasks-workspace'),
+    serviceTasks: tasks,
+    generalTasks: shopTasks,
+    allocationsByLine: allocationsByLine,
+    employeeName: _employeeName,
+    serviceTaskCard: _taskCard,
+    onAddService: _addRecheckWork,
+    onAddGeneral: _addInternalShopTask,
+    onGeneralStatus: (id, status) async {
+      await store.setShopTaskStatus(
+        businessId: BriskersLabFixture.businessId,
+        taskId: id, status: status);
+      await _refresh();
+    },
+    onOpenJob: () => _openVehicleJob(0),
+  );
 
   Widget _shopTasksPage() {
     final active = shopTasks.where((task) => task['status'] != 'done').toList();
@@ -2538,7 +2584,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       case 0: return _overviewPage();
       case 1: return _customerPage();
       case 2: return _jobPage();
-      case 3: return _taskList();
+      case 3: return _tasksWorkspace();
       case 4: return _shopTasksPage();
       case 5: return _payrollPage();
       case 6: return _settingsPage();
