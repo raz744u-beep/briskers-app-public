@@ -49,6 +49,35 @@ void main() {
     expect(sheet, contains('await store.addRecheckTask('));
   });
 
+  test('Independent shop tasks never become J-24 customer labor', () async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    const shop='synthetic-shop', job='synthetic-job';
+    final store=LocalJobTasksLabStore(db);
+    try {
+      await store.addShopTask(
+        businessId:shop, description:'Clean up your desk!',
+        employeeId:'lab-chris');
+      var chores=await store.shopTasks(shop);
+      expect(chores,hasLength(1));
+      expect(chores.single['description'],'Clean up your desk!');
+      expect(chores.single['employee_id'],'lab-chris');
+      expect(await store.shopTasks('another-shop'),isEmpty);
+      expect(await store.list(shop,job),isEmpty);
+      await store.setShopTaskStatus(
+        businessId:shop,taskId:chores.single['id'] as int,
+        status:'in_progress');
+      chores=await store.shopTasks(shop);
+      expect(chores.single['status'],'in_progress');
+      await store.setShopTaskStatus(
+        businessId:shop,taskId:chores.single['id'] as int,
+        status:'done');
+      chores=await store.shopTasks(shop);
+      expect(chores.single['status'],'done');
+      expect(chores.single['completed_at'],isNotNull);
+      expect(await store.list(shop,job),isEmpty);
+    } finally { await db.close(); }
+  });
+
   test('Test Android build has distinct package and offline entrypoint', () {
     // CI creates a generated Flutter shell one level below the checkout.
     // Local tests may also run directly from the repository root.
@@ -72,7 +101,11 @@ void main() {
     expect(main, contains("if (index == 2 || index == 7) {"));
     expect(main, contains('jobDetailsOpen'));
     expect(main, contains('Assign main job mechanic'));
-    expect(main, contains('Add Task · Not on Invoice'));
+    expect(main, contains('Add job recheck · Not on Invoice'));
+    expect(main, contains("_menuEntry(Icons.cleaning_services_outlined, 'Shop Tasks', 4)"));
+    expect(main, contains('case 4: return _shopTasksPage();'));
+    expect(main, contains('Move to Shop Tasks'));
+    expect(main, contains("Key('shop-task-"));
     expect(main, contains('Payroll hours can be adjusted independently.'));
     expect(main, isNot(contains('Assigned hours cannot exceed')));
 
