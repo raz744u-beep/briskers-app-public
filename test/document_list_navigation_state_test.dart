@@ -207,6 +207,66 @@ void main() {
     },
   );
 
+  testWidgets(
+    'repeated cold Invoices dock entry cannot invalidate first protected '
+    'local read and strand cards behind slow network',
+    (tester) async {
+      await BriskersConnectionModeController.instance.setMode(
+        BriskersConnectionMode.auto,
+      );
+      final pendingDocuments = _HeldDocuments(database)
+        ..rows = [
+          {
+            'id': 'protected-synthetic-invoice',
+            'kind': 'invoice',
+            'document_number': 'I-6390',
+            'customer_name': 'Synthetic Customer',
+            'status': 'issued',
+            'display_status': 'Open',
+            'total_amount': 200,
+            '_local_snapshot': true,
+          },
+        ];
+      final api = _DelayedApi();
+      Widget screen(int token) => MaterialApp(
+        home: DocumentsScreen(
+          key: const ValueKey('retained-invoices-cold-load'),
+          businessId: 'synthetic-shop',
+          kind: 'invoice',
+          roleCode: 'owner',
+          isOwner: true,
+          showAppBar: false,
+          dockResetToken: token,
+          localDocuments: pendingDocuments,
+          paymentFeed: payments,
+          api: api,
+          blockedDocumentIds: (_) async => <String>{},
+        ),
+      );
+
+      await tester.pumpWidget(screen(0));
+      await tester.pump();
+      expect(pendingDocuments.requested, isTrue);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      // Shell/Home/sync notices can rebuild and request an additional
+      // refresh BEFORE the original protected SQLite query has completed.
+      await tester.pumpWidget(screen(1));
+      await tester.pump();
+      pendingDocuments.gate.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('I-6390'), findsOneWidget,
+          reason: 'Saved invoice must paint ahead of the pending HTTP refresh');
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+
+      api.response.complete(const []);
+      await tester.pump();
+      await tester.pump();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   for (final estimate in [true, false]) {
     testWidgets(
       '${estimate ? 'Estimate status' : 'Invoice future-date'} filter and search '
