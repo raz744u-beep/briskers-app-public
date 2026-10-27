@@ -596,7 +596,10 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   @override
   Widget build(BuildContext context) {
     final tasks = _eligible.where((task) => _available(task) > 0.00001).toList();
-    final paidTaskCount = _eligible.length - tasks.length;
+    // A zero-hour or unassigned task is not proof of a payment.
+    final paidTaskCount = _eligible.where((task) =>
+      _available(task) <= 0.00001 && (_paidHours[_id(task)] ?? 0) > 0
+    ).length;
     return Scaffold(
       appBar: widget.embedded ? null : AppBar(
         leading: IconButton(
