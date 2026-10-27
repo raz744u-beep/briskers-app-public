@@ -114,7 +114,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
     ''');
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool selectUnpaidByDefault = true}) async {
     setState(() { _loading = true; _error = null; });
     try {
       await _ensure();
@@ -158,7 +158,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
         for (final task in _eligible) {
           final key = _id(task);
           final remaining = _available(task);
-          if (remaining > 0) {
+          if (selectUnpaidByDefault && remaining > 0) {
             final requested = selections[key];
             _selected[key] = requested == null ? remaining :
               requested.clamp(0.0, remaining).toDouble();
@@ -411,7 +411,10 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
         });
         if (mounted) {
           if (widget.embedded) {
-            await _load();
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
             await widget.onPaymentSaved?.call();
           } else {
             Navigator.pop(context, true);
