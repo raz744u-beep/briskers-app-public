@@ -44,6 +44,7 @@ class TasksLabHome extends StatefulWidget {
 class _TasksLabHomeState extends State<TasksLabHome> {
   final LocalJobTasksLabStore store = LocalJobTasksLabStore(localDatabase);
   List<Map<String, dynamic>> tasks = const [];
+  List<Map<String, dynamic>> shopTasks = const [];
   Map<String, String> nicknames = const {};
   Map<String, String> fullNames = const {};
   String? leadMechanicId;
@@ -106,6 +107,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final rows = await store.list(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId,
     );
+    final shopRows = await store.shopTasks(BriskersLabFixture.businessId);
     final aliases = await store.nicknames(BriskersLabFixture.businessId);
     final names = await store.fullNames(BriskersLabFixture.businessId);
     final allocations = await Future.wait(rows.map((task) => store.allocations(
@@ -128,6 +130,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (!mounted) return;
     setState(() {
       tasks = rows;
+      shopTasks = shopRows;
       nicknames = aliases;
       fullNames = names;
       leadMechanicId = lead;
@@ -275,7 +278,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (index == 2) ...[
-            _menuEntry(Icons.rule_outlined, 'Tasks & completed work', 3),
+            _menuEntry(Icons.rule_outlined, 'Job J-24 tasks', 3),
+            _menuEntry(Icons.cleaning_services_outlined, 'Shop Tasks', 4),
           ],
           if (index == 7) ...[
             _menuEntry(Icons.account_balance_wallet_outlined, 'Payroll', 5),
@@ -1655,6 +1659,147 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (added == true) await _refresh();
   }
 
+  Future<void> _addInternalShopTask() async {
+    final description = TextEditingController();
+    String assigned = '';
+    final created = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true, isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheet) => StatefulBuilder(
+        builder: (sheet, update) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(sheet).bottom),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text('New Shop Task',
+                      style: TextStyle(fontSize: 20,
+                        fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 8),
+                    const Text('Internal work · No customer, job, invoice or '
+                      'automatic payroll charge',
+                      style: TextStyle(color: Color(0xFF64748B))),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: description,
+                      autofocus: true,
+                      minLines: 1,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Task description',
+                        border: OutlineInputBorder())),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: assigned,
+                      decoration: const InputDecoration(
+                        labelText: 'Assign employee',
+                        border: OutlineInputBorder()),
+                      items: [
+                        const DropdownMenuItem(
+                          value: '', child: Text('Unassigned')),
+                        for (final e in BriskersLabFixture.employees)
+                          DropdownMenuItem(
+                            value: e['id']!,
+                            child: Text(_employeeName(e['id'])),
+                          ),
+                      ],
+                      onChanged: (v) => update(() => assigned = v ?? ''),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: () async {
+                        if (description.text.trim().isEmpty) return;
+                        try {
+                          await store.addShopTask(
+                            businessId: BriskersLabFixture.businessId,
+                            description: description.text,
+                            employeeId: assigned);
+                          if (sheet.mounted) Navigator.pop(sheet, true);
+                        } catch (error) {
+                          if (sheet.mounted) {
+                            ScaffoldMessenger.of(sheet).showSnackBar(
+                              SnackBar(content: Text('$error')));
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Save Shop Task'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    description.dispose();
+    if (created == true) await _refresh();
+  }
+
+  Widget _shopTasksPage() {
+    final active = shopTasks.where((task) => task['status'] != 'done').toList();
+    final completed = shopTasks.where((task) => task['status'] == 'done').toList();
+    Widget render(Map<String,dynamic> task) {
+      final status = task['status']?.toString() ?? 'planned';
+      final id = task['id'] as int;
+      return Card(
+        key: ValueKey('shop-task-$id'),
+        margin: const EdgeInsets.fromLTRB(12, 3, 12, 3),
+        child: ListTile(
+          leading: Icon(status=='done' ? Icons.check_circle :
+            status=='in_progress' ? Icons.timelapse : Icons.circle_outlined,
+            color: status=='done' ? const Color(0xFF117C56) :
+              BriskersColors.jobs),
+          title: Text(task['description']?.toString()??'',
+            style: const TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text(_employeeName(task['employee_id']?.toString())+
+            ' · '+(status=='done' ? 'Complete' :
+              status=='in_progress' ? 'In Progress' : 'Planned')),
+          trailing: PopupMenuButton<String>(
+            tooltip: 'Change shop task status',
+            onSelected: (value) async {
+              await store.setShopTaskStatus(
+                businessId: BriskersLabFixture.businessId,
+                taskId: id, status: value);
+              await _refresh();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value:'planned',child:Text('Planned')),
+              PopupMenuItem(value:'in_progress',child:Text('In Progress')),
+              PopupMenuItem(value:'done',child:Text('Complete')),
+            ],
+          ),
+        ),
+      );
+    }
+    return ListView(children: [
+      _sectionHeader('Shop Tasks',
+        subtitle: 'Internal work · Not attached to customer jobs'),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: FilledButton.icon(
+          onPressed: _addInternalShopTask,
+          icon: const Icon(Icons.add),
+          label: const Text('New Shop Task')),
+      ),
+      const SizedBox(height: 14),
+      for (final task in active) render(task),
+      if (active.isEmpty) const ListTile(title: Text('No active shop tasks')),
+      ExpansionTile(
+        title: Text('Completed · '+completed.length.toString()),
+        initiallyExpanded: false,
+        children: [for (final task in completed) render(task)]),
+    ]);
+  }
+
   Widget _taskList() {
     final original = tasks.where((task) =>
       task['source_missing'] != 1 &&
@@ -1668,7 +1813,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: [
-        _sectionHeader('Job tasks & completed work',
+        _sectionHeader('Job J-24 tasks & completed work',
           subtitle: 'One entry per task · Original work stays preserved'),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -1685,7 +1830,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             child: OutlinedButton.icon(
               onPressed: _addRecheckWork,
               icon: const Icon(Icons.add_circle_outline),
-              label: const Text('Add Task · Not on Invoice'),
+              label: const Text('Add job recheck · Not on Invoice'),
             ),
           ),
         if (active.isNotEmpty)
@@ -1707,7 +1852,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         ...original.map(_taskCard),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 16, 16, 5),
-          child: Text('Additional / recheck work',
+          child: Text('Additional job work / rechecks',
             style: TextStyle(fontSize: 16,
               fontWeight: FontWeight.w800))),
         if (additional.isEmpty)
@@ -2357,7 +2502,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       case 1: return _customerPage();
       case 2: return _jobPage();
       case 3: return _taskList();
-      case 4: return _taskList();
+      case 4: return _shopTasksPage();
       case 5: return _payrollPage();
       case 6: return _settingsPage();
       case 7: return _readOnlyModule('Estimates',
