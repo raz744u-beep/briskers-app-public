@@ -1,12 +1,29 @@
 import 'dart:io';
 
 import 'package:briskers_app/screens/jobs/blank_invoice_setup_screen.dart';
+import 'package:briskers_app/local/briskers_local_database.dart';
+import 'package:briskers_app/services/local_customer_repository.dart';
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+class _NoVehicles extends LocalCustomerRepository {
+  _NoVehicles(BriskersLocalDatabase db) : super(database: db);
+
+  @override
+  Future<Map<String, dynamic>?> customerDetail(
+      String businessId, String customerId) async => {
+        'id': customerId,
+        'vehicles': <Map<String, dynamic>>[],
+      };
+}
 
 void main() {
   testWidgets('Both New Invoice and New Estimate require a real vehicle',
       (tester) async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final local = _NoVehicles(db);
     for (final kind in ['invoice', 'estimate']) {
       await tester.pumpWidget(MaterialApp(
         home: BlankInvoiceSetupScreen(
@@ -14,10 +31,11 @@ void main() {
           kind: kind,
           initialCustomerId: 'customer-synthetic',
           initialCustomerName: 'Test Customer',
+          localCustomers: local,
           initialVehicles: const [],
         ),
       ));
-      await tester.pump();
+      await tester.pumpAndSettle();
       final submit = find.byType(FilledButton);
       expect(submit, findsOneWidget);
       expect(tester.widget<FilledButton>(submit).onPressed, isNull,
