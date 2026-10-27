@@ -555,7 +555,8 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
                   isDense: true,
                   contentPadding: EdgeInsets.symmetric(horizontal: 8,
                     vertical: 9),
-                  border: OutlineInputBorder()),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14))),
                 items: options.map((label) => DropdownMenuItem(
                   value: label, child: Text(label,
                     overflow: TextOverflow.ellipsis,
