@@ -31,6 +31,24 @@ void main() {
     }
   });
 
+  test('Recheck sheet pins Add action above Android navigation', () {
+    final main = File('lib/tasks_lab_main.dart').readAsStringSync();
+    final sheet = main.split('Future<void> _addRecheckWork() async {').last
+        .split('Widget _taskList()').first;
+    expect(sheet, contains('useSafeArea: true'));
+    expect(sheet, contains('child: SafeArea('));
+    expect(sheet, contains('top: false'));
+    expect(sheet, contains('MediaQuery.viewInsetsOf(sheet).bottom'));
+    expect(sheet, contains('MediaQuery.sizeOf(sheet).height'));
+    expect(sheet, contains("Key('recheck-form-scroll')"));
+    expect(sheet, contains('Expanded(child: SingleChildScrollView('));
+    expect(sheet, contains("Key('recheck-add-sticky-button')"));
+    expect(sheet, contains("label: const Text('Add recheck task')"));
+    expect(sheet.indexOf("Key('recheck-form-scroll')"), lessThan(
+        sheet.indexOf("Key('recheck-add-sticky-button')")));
+    expect(sheet, contains('await store.addRecheckTask('));
+  });
+
   test('Test Android build has distinct package and offline entrypoint', () {
     // CI creates a generated Flutter shell one level below the checkout.
     // Local tests may also run directly from the repository root.
