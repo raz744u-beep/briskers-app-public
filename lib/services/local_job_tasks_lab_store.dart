@@ -147,6 +147,113 @@ class LocalJobTasksLabStore {
         full_name TEXT NOT NULL, PRIMARY KEY (business_id, employee_id)
       )
     ''');
+    // A shop chore is never linked to a customer, invoice or vehicle.
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_shop_tasks_lab (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_id TEXT NOT NULL,
+        description TEXT NOT NULL,
+        employee_id TEXT,
+        status TEXT NOT NULL DEFAULT 'planned',
+        created_at INTEGER NOT NULL,
+        completed_at INTEGER
+      )
+    ''');
+    await db.customStatement('''
+      CREATE INDEX IF NOT EXISTS idx_lab_shop_tasks_business_status
+      ON local_shop_tasks_lab (business_id, status, created_at)
+    ''');
+  }
+
+  Future<List<Map<String, dynamic>>> shopTasks(String businessId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT id, description, employee_id, status, completed_at '
+      'FROM local_shop_tasks_lab WHERE business_id=? '
+      "ORDER BY CASE WHEN status='done' THEN 1 ELSE 0 END, id DESC",
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((r) => Map<String,dynamic>.from(r.data)).toList();
+  }
+
+  Future<void> addShopTask({
+    required String businessId,
+    required String description,
+    String? employeeId,
+  }) async {
+    if (businessId.trim().isEmpty || description.trim().isEmpty) {
+      throw ArgumentError('Shop task description required');
+    }
+    await ensureTables(db);
+    await db.customStatement(
+      'INSERT INTO local_shop_tasks_lab '
+      '(business_id, description, employee_id, status, created_at) '
+      "VALUES (?, ?, ?, 'planned', ?)",
+      [businessId, description.trim(),
+        employeeId?.isEmpty == true ? null : employeeId,
+        DateTime.now().millisecondsSinceEpoch],
+    );
+  }
+
+  Future<void> setShopTaskStatus({
+    required String businessId, required int taskId,
+    required String status,
+  }) async {
+    if (!const {'planned','in_progress','done'}.contains(status)) {
+      throw ArgumentError('Invalid shop task status');
+    }
+    await ensureTables(db);
+    await db.customStatement(
+      'UPDATE local_shop_tasks_lab SET status=?, completed_at=? '
+      'WHERE business_id=? AND id=?',
+      [status,status=='done' ? DateTime.now().millisecondsSinceEpoch : null,
+        businessId,taskId],
+    );
+  }
+
+  /// Owner correction for a mistakenly job-linked UNPAID, unfinished chore.
+  /// Never moves completed/credited/paid invoice labor into the shop queue.
+  Future<void> moveUnpaidRecheckToShop({
+    required String businessId,
+    required String jobId,
+    required String lineId,
+  }) async {
+    await ensureTables(db);
+    await db.transaction(() async {
+      final source = await db.customSelect(
+        'SELECT document_id, line_id, status, source_description, '
+        'custom_description, employee_id, payroll_hours FROM local_job_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId),Variable<String>(jobId),
+          Variable<String>(recheckDocumentId),Variable<String>(lineId)],
+      ).getSingleOrNull();
+      if (source == null || source.read<String>('status')=='done' ||
+          (source.readNullable<double>('payroll_hours')??0)>0) {
+        throw StateError('Only unpaid unfinished job chores can move to Shop Tasks');
+      }
+      final frozen = await db.customSelect(
+        'SELECT 1 FROM local_payroll_preserved_tasks_lab WHERE '
+        'business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables:[Variable<String>(businessId),Variable<String>(jobId),
+          Variable<String>(recheckDocumentId),Variable<String>(lineId)],
+      ).getSingleOrNull();
+      if (frozen != null) throw StateError('Completed work cannot move');
+      final description=(source.readNullable<String>('custom_description') ??
+        source.read<String>('source_description')).trim();
+      if (description.isEmpty) throw StateError('Task description missing');
+      await db.customStatement(
+        'INSERT INTO local_shop_tasks_lab '
+        '(business_id,description,employee_id,status,created_at) '
+        'VALUES (?,?,?,?,?)',
+        [businessId,description,source.readNullable<String>('employee_id'),
+          source.read<String>('status'),DateTime.now().millisecondsSinceEpoch],
+      );
+      await db.customStatement(
+        'DELETE FROM local_job_tasks_lab WHERE business_id=? AND job_id=? '
+        'AND document_id=? AND line_id=?',
+        [businessId,jobId,recheckDocumentId,lineId],
+      );
+    });
   }
 
   static const validJobStatuses = <String>{
