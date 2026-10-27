@@ -66,6 +66,10 @@ void main() {
     expect(review, contains('Verify Payment'));
     expect(review, contains('weekly-labor-tasks-scroll-only'));
     expect(review, contains('weekly-labor-fixed-footer'));
+    expect(review, contains('selectUnpaidByDefault = true'));
+    expect(review, contains('if (selectUnpaidByDefault && remaining > 0)'));
+    expect(review, contains('_load(selectUnpaidByDefault: false)'));
+
     expect(review, contains('Timer(const Duration(seconds: 10)'));
     expect(review, contains('lab_weekly_labor_notes'));
     expect(review, isNot(contains('Final amount override (TEST)')));
