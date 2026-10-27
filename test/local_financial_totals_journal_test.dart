@@ -140,9 +140,9 @@ void main() {
   test('Expenses first frame uses saved totals and never partial page sums', () {
     final code = File('lib/screens/expenses_screen.dart').readAsStringSync();
     expect(code, contains('LocalFinancialTotalsJournal()'));
-    expect(code, contains('final saved = await const VerifiedExpenseTotalsCache().load(scope)'));
+    expect(code, contains('final sqliteSaved = await journal.loadBaseline(businessId, scope)'));
     expect(code, contains('await journal.apply('));
-    expect(code, contains('await journal.reconcile('));
+    expect(code, contains('await journal.reconcileAndSaveBaseline('));
     expect(code, contains('const Duration(minutes: 30)'));
     expect(code, isNot(contains('final income = _transactions.fold(')));
   });
