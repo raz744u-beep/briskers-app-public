@@ -65,6 +65,25 @@ void main() {
     expect(source, isNot(contains('BriskersApi')));
   });
 
+  test('Advance and repayment amounts select their full value when tapped', () {
+    final source = File('lib/tasks_lab/employee_payroll_profile.dart')
+        .readAsStringSync();
+    final advancePanel = source.split('Widget _advancePanel() {').last
+        .split('Widget _reportsTab()').first;
+    expect(advancePanel, contains("labelText: 'Original amount owed'"));
+    expect(advancePanel, contains("labelText: 'Amount'"));
+    expect(advancePanel, contains('controller: _opening,\\n'
+      '              onTapAlwaysCalled: true,\\n'
+      '              onTap: () => _selectAmount(_opening),'
+        .replaceAll(r'\\n', '\\n')));
+    expect(advancePanel, contains('controller: _repayment,\\n'
+      '            onTapAlwaysCalled: true,\\n'
+      '            onTap: () => _selectAmount(_repayment),'
+        .replaceAll(r'\\n', '\\n')));
+    expect(source, contains('controller.selection = TextSelection('));
+    expect(source, contains('baseOffset: 0, extentOffset: controller.text.length'));
+  });
+
   test('Legacy Payroll TEST ledger is no longer the employee landing', () {
     final source = File('lib/tasks_lab_main.dart').readAsStringSync();
     expect(source, isNot(contains("_sectionHeader('Payroll TEST ledger'")));
