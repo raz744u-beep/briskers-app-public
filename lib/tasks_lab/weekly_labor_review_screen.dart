@@ -410,7 +410,30 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                   }),
                 ),
                 if(showDebtOptions) ...[
-                  Text(r'Currently owed: 
+                  Text(r'Currently owed: $'+
+                    (debt.remainingCents/100).toStringAsFixed(2),
+                    style:const TextStyle(fontSize:12,
+                      color:Color(0xFF64748B))),
+                  CheckboxListTile(
+                    dense:true,contentPadding:EdgeInsets.zero,
+                    value:deduct,
+                    title:const Text('Deduct from employee debt'),
+                    onChanged:(value)=>update(()=>deduct=value??false),
+                  ),
+                  if(deduct) TextField(
+                    controller:debtInput,
+                    keyboardType:const TextInputType.numberWithOptions(
+                      decimal:true),
+                    decoration:const InputDecoration(
+                      labelText:'Debt repayment',
+                      prefixText:r'$ ',border:OutlineInputBorder()),
+                    onChanged:(value)=>update((){}),
+                    onTapAlwaysCalled:true,
+                    onTap:()=>debtInput.selection=TextSelection(
+                      baseOffset:0,extentOffset:debtInput.text.length),
+                  ),
+                ],
+              ],
               const SizedBox(height:9),
               Builder(builder:(context){
                 final gross=double.tryParse(amount.text.trim())??0;
