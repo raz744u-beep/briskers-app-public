@@ -7,6 +7,7 @@ import '../local/local_database_provider.dart';
 import 'employee_advance_ledger.dart';
 import 'payroll_week_projection.dart';
 import 'payroll_period_projection.dart';
+import 'lab_payroll_payment_service.dart';
 import 'package:drift/drift.dart' show Variable;
 import 'payroll_history_panel.dart';
 import '../services/local_job_tasks_lab_store.dart';
@@ -55,6 +56,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   List<Map<String, dynamic>> _drafts = const [];
   List<Map<String, dynamic>> _payments = const [];
   List<Map<String, dynamic>> _taskPayments = const [];
+  List<Map<String,dynamic>> _settlements=const [];
   final Map<String,double> _assignedOverride = {};
   String _payrollPeriod = 'This Week';
   DateTimeRange? _customPeriod;
@@ -109,6 +111,13 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
           paid_at INTEGER NOT NULL
         )
       ''');
+      await LabPayrollPaymentService.ensure();
+      final settled=await localDatabase.customSelect(
+        'SELECT employee_id,week_key,gross_cents,net_cents,debt_cents '
+        'FROM lab_payroll_settlements WHERE business_id=? AND employee_id=?',
+        variables:[const Variable<String>(_shop),
+          Variable<String>(widget.employeeId)],
+      ).get();
       final linked = await localDatabase.customSelect(
         'SELECT employee_id, week_key, hours, cents, paid_at '
         'FROM lab_payroll_task_payments '
@@ -120,7 +129,8 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
       ).get();
       if (!mounted) { return; }
       setState(() { _drafts = drafts; _payments = payments;
-        _taskPayments = linked.map((r) => Map<String, dynamic>.from(r.data)).toList(); });
+        _taskPayments = linked.map((r) => Map<String, dynamic>.from(r.data)).toList();
+        _settlements=settled.map((r)=>Map<String,dynamic>.from(r.data)).toList(); });
     } catch (error) {
       _snack('Unable to load TEST payroll summary: ' + error.toString());
     }
@@ -495,7 +505,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
       from:from, until:until,
       hourlyRateCents:widget.rateCents,
       drafts:_drafts, payments:_payments,
-      taskPayments:_taskPayments,
+      taskPayments:_taskPayments,settlements:_settlements,
     );
 
   Future<void> _setPayrollPeriod(String? next) async {
@@ -746,6 +756,8 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
       rateCents: widget.rateCents,
       drafts: _drafts,
       payments: _payments,
+      taskPayments:_taskPayments,
+      settlements:_settlements,
       onWeekTap: (date) {
         setState(() => _week = date);
         DefaultTabController.of(inner).animateTo(1);
