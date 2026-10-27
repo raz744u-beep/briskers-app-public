@@ -546,7 +546,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
                 textAlign:TextAlign.center,
                 style:TextStyle(fontWeight:FontWeight.w800,
                   color:_showGeneralTasks==general ? Colors.white :
-                    const Color(0xFF334155))))),
+                    const Color(0xFF334155)))))),
       ]),
     ),
     Expanded(child:_showGeneralTasks
