@@ -10,7 +10,8 @@ import '../local/local_database_provider.dart';
 import 'employee_advance_ledger.dart';
 import 'lab_payroll_payment_service.dart';
 
-/// Offline-only TEST labor draft. Never posts money or marks work paid.
+/// Offline-only TEST labor draft. Only verified task-linked TEST settlements
+/// mark labor paid; no actual bank payment or production posting occurs.
 class WeeklyLaborReviewLab extends StatefulWidget {
   const WeeklyLaborReviewLab({
     super.key,
@@ -207,7 +208,8 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
 
 
   void _selectAll() {
-    final items = _eligible;
+    // Paid allocations are historical, never part of a new selection.
+    final items = _eligible.where((task) => _available(task) > 0.00001).toList();
     final all = items.isNotEmpty && items.every((t) => _selected.containsKey(_id(t)));
     setState(() {
       for (final t in items) {
@@ -586,7 +588,8 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
 
   @override
   Widget build(BuildContext context) {
-    final tasks = _eligible;
+    final tasks = _eligible.where((task) => _available(task) > 0.00001).toList();
+    final paidTaskCount = _eligible.length - tasks.length;
     return Scaffold(
       appBar: widget.embedded ? null : AppBar(
         leading: IconButton(
@@ -641,7 +644,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             children: [
               Row(children: [
-                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                Expanded(child: Text('Unpaid work · ' + tasks.length.toString(),
                   style: const TextStyle(fontWeight: FontWeight.bold))),
                 TextButton(
                   onPressed: tasks.isEmpty ? null : _selectAll,
@@ -650,12 +653,33 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                       ? 'Clear All' : 'Select All'),
                 ),
               ]),
+              if (paidTaskCount > 0)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 7),
+                  child: Row(children: [
+                    const Icon(Icons.check_circle_outline,
+                      size: 16, color: Color(0xFF167A54)),
+                    const SizedBox(width: 5),
+                    Expanded(child: Text(
+                      '$paidTaskCount paid task allocation(s) moved to history',
+                      style: const TextStyle(fontSize: 11.5,
+                        color: Color(0xFF167A54)))),
+                    if (widget.embedded)
+                      TextButton(
+                        key: const Key('view-paid-tasks-in-reports'),
+                        onPressed: () => DefaultTabController.of(context).animateTo(2),
+                        child: const Text('View Paid Tasks')),
+                  ]),
+                ),
               if (tasks.isEmpty)
                 Padding(padding: const EdgeInsets.symmetric(vertical: 18),
                   child: Text(_future
                     ? 'Future weeks show no earned payroll. Planned work '
                       'requires scheduling data.'
-                    : 'No dated test labor for this week.',
+                    : paidTaskCount > 0
+                      ? 'All work shown for this week is already paid. '
+                        'See Reports → Payroll History.'
+                      : 'No unpaid test labor for this week.',
                     style: const TextStyle(color: Color(0xFF64748B)))),
               for(final task in tasks)
                 Card(
@@ -694,6 +718,11 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                                 _available(task).toStringAsFixed(2)+' unpaid hrs',
                                 style:const TextStyle(fontSize:11,
                                   color:Color(0xFF64748B))),
+                              if ((_paidHours[_id(task)] ?? 0) > 0)
+                                const Text('Partially Paid · Remaining hours only',
+                                  style: TextStyle(fontSize: 11,
+                                    color: Color(0xFF167A54),
+                                    fontWeight: FontWeight.w700)),
                             ],
                           ),
                         ),
