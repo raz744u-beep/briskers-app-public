@@ -39,6 +39,19 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
   bool _matches(DateTime week) {
     final today = DateTime.now();
     switch (_period) {
+      case 'This Week':
+        final monday=DateTime(today.year,today.month,today.day)
+          .subtract(Duration(days:today.weekday-1));
+        return !week.isBefore(monday) &&
+          week.isBefore(monday.add(const Duration(days:7)));
+      case 'Last Week':
+        final monday=DateTime(today.year,today.month,today.day)
+          .subtract(Duration(days:today.weekday-1));
+        return !week.isBefore(monday.subtract(const Duration(days:7)))
+          && week.isBefore(monday);
+      case 'Last 30 Days':
+        return !week.isBefore(DateTime(today.year,today.month,today.day)
+          .subtract(const Duration(days:29)));
       case 'All': return true;
       case '2026': return week.year == 2026;
       case '2025': return week.year == 2025;
@@ -75,28 +88,6 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
       setState(() { _custom = range; _period = chosen; });
     }
   }
-
-  Widget _filterChip(String label) => Expanded(
-    child: Padding(
-      padding: const EdgeInsets.only(right: 4),
-      child: InkWell(
-        onTap: () => _change(label),
-        child: Container(
-          height: 34,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: const Color(0xFFDCE4E9)),
-            color: _period == label
-              ? const Color(0xFF007E78) : Colors.white),
-          child: Text(label, style: TextStyle(
-            fontSize: 11.5, fontWeight: FontWeight.w700,
-            color: _period == label ? Colors.white
-              : const Color(0xFF354052))),
-        ),
-      ),
-    ),
-  );
 
   Widget _metric(String title, String value, Color color) =>
     Expanded(child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -240,41 +231,36 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
     for (final w in weeks) { gross += w.grossCents ?? 0; }
     return Column(children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 7),
-        child: Row(children: [
-          const Expanded(child: Text('Payroll History',
-            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800))),
-          const Icon(Icons.history, color: BriskersColors.jobs),
-        ]),
-      ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 8, 6),
-        child: Row(children: [
-          _filterChip('All'),
-          _filterChip('2026'),
-          _filterChip('2025'),
-          _filterChip('Custom'),
-        ]),
-      ),
-      Padding(padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Align(alignment: Alignment.centerRight,
-          child: DropdownButton<String>(
-            value: const [
-              'This Month','Last Month','Last 3 Months',
-              'Last 6 Months','Year to Date',
-            ].contains(_period) ? _period : null,
-            hint: const Text('More date filters', style: TextStyle(
-              fontSize: 12, color: Color(0xFF64748B))),
-            items: const [
-              'This Month','Last Month','Last 3 Months',
-              'Last 6 Months','Year to Date',
-            ].map((label) => DropdownMenuItem(
-              value: label, child: Text(label))).toList(),
-            onChanged: (value) {
-              if (value != null) { _change(value); }
+        padding:const EdgeInsets.fromLTRB(12,10,12,9),
+        child:Row(children:[
+          const Expanded(child:Text('Payroll History',
+            maxLines:1,overflow:TextOverflow.ellipsis,
+            style:TextStyle(fontSize:18,fontWeight:FontWeight.w800))),
+          SizedBox(width:159,child:DropdownButtonFormField<String>(
+            key:ValueKey('reports-period-$_period'),
+            initialValue:_period,
+            isExpanded:true,
+            decoration:InputDecoration(
+              isDense:true,
+              contentPadding:const EdgeInsets.symmetric(
+                horizontal:10,vertical:9),
+              border:OutlineInputBorder(
+                borderRadius:BorderRadius.circular(14))),
+            items:const [
+              'All','2026','2025','This Week','Last Week',
+              'Last 30 Days','This Month','Last Month',
+              'Last 3 Months','Last 6 Months','Year to Date','Custom',
+            ].map((label)=>DropdownMenuItem(value:label,
+              child:Text(label,overflow:TextOverflow.ellipsis,
+                style:const TextStyle(fontSize:12)))).toList(),
+            onChanged:(value) {
+              if(value!=null) {_change(value);}
             },
-          ),
-        )),
+          )),
+          const SizedBox(width:7),
+          const Icon(Icons.history,color:BriskersColors.jobs,size:22),
+        ]),
+      ),
       Expanded(child: ListView(
         padding: const EdgeInsets.fromLTRB(12, 5, 12, 9),
         children: [
@@ -286,7 +272,7 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
           for (final week in weeks) _card(week),
         ],
       )),
-      Container(
+      SafeArea(top:false,child:Container(
         key: const Key('reports-fixed-payment-total'),
         decoration: const BoxDecoration(
           color: Colors.white,
@@ -315,7 +301,7 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
             ],
           )),
         ]),
-      ),
+      )),
     ]);
   }
 }
