@@ -703,7 +703,20 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         widget.businessId != businessId) {
       return;
     }
-    final fresh = !rolloverPending && lastVerified != null &&
+    // An upgraded b2468 device may have a perfectly valid exact baseline
+    // saved before daily buckets existed. Keep displaying its totals now, but
+    // seed daily buckets with ONE background reconciliation so tomorrow's
+    // rolling range will not hit the same cold-cache problem.
+    final needsDailySeed = baseline != null && rolling == null &&
+        startDate != null && endDate != null &&
+        await journal.loadRollingBaseline(
+          businessId, scope, startDate: startDate, endDate: endDate,
+        ) == null;
+    if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
+        widget.businessId != businessId) {
+      return;
+    }
+    final fresh = !rolloverPending && !needsDailySeed && lastVerified != null &&
         DateTime.now().difference(lastVerified) < const Duration(minutes: 30);
     setState(() {
       _serverPeriodBase = baseline;
