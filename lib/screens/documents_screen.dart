@@ -368,6 +368,9 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     }
     _retirement = LocalJobRetirement.events.listen((event) {
       if (event.businessId == widget.businessId && mounted) {
+        // Retirement is a strict visibility fence, including before the first
+        // local list frame. Never let a pre-retirement snapshot publish.
+        ++_loadEpoch;
         // Hide known retired jobs immediately, even when a pre-retirement
         // network request is still pending or its replacement will fail.
         if (!_estimate && _rows != null) {
@@ -394,6 +397,10 @@ class _DocumentsScreenState extends State<DocumentsScreen>
 
   void _connectionChanged() {
     if (!mounted) return;
+    // Connection-mode changes are authorization/behavior boundaries, unlike
+    // a harmless dock revisit; invalidate the prior HTTP/local epoch even
+    // while the first list is still loading.
+    ++_loadEpoch;
     unawaited(_load());
     if (BriskersConnectionModeController.instance.forceOffline) {
       // A stalled remote read must not delay switching to usable offline
@@ -413,6 +420,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.businessId != widget.businessId ||
         oldWidget.kind != widget.kind) {
+      // Prevent a prior shop/kind's in-flight local row from painting here.
+      ++_loadEpoch;
       _rows = null;
       _descriptionEpoch++;
       _serverRows = null;
@@ -483,9 +492,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   }
 
   Future<void> _load({bool freshAfterCurrent = true}) {
-    if (freshAfterCurrent) {
-      // Manual refresh and return from a mutation/detail must supersede a
-      // request that started before that action, even if it is still running.
+    if (freshAfterCurrent && _rows != null) {
+      // Mutations to a populated list supersede older reads. When the screen
+      // is still on its VERY FIRST local read, harmless repeated navigation
+      // must not invalidate that read and strand the empty UI behind a slow
+      // in-flight network response. The coalescer still schedules a new pass
+      // after the first pass, preserving the requested freshness boundary.
       _loadEpoch++;
     }
     return _refresh.run(_loadOnce, afterCurrent: freshAfterCurrent);
