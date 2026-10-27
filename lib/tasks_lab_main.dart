@@ -1757,7 +1757,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                       initialValue: category,
                       decoration: const InputDecoration(
                         labelText: 'Category', border: OutlineInputBorder()),
-                      items: const [
+                      items: [
                         for (final name in ['General','Cleaning','Inventory',
                           'Office','Maintenance','Yard','Errands'])
                           DropdownMenuItem(value:name,child:Text(name)),
