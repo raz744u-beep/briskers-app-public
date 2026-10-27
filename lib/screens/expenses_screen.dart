@@ -246,11 +246,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final today = _dateOnly(DateTime.now());
     switch (_dateRange) {
       case '30d':
-        return today.subtract(const Duration(days: 29));
+        return DateTime(today.year, today.month, today.day - 29);
       case '60d':
-        return today.subtract(const Duration(days: 59));
+        return DateTime(today.year, today.month, today.day - 59);
       case '90d':
-        return today.subtract(const Duration(days: 89));
+        return DateTime(today.year, today.month, today.day - 89);
       case 'thisMonth':
         return DateTime(today.year, today.month, 1);
       case 'lastMonth':
@@ -659,14 +659,25 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       await journal.saveBaseline(
           businessId, scope, legacy.totals, legacy.at);
     }
+    // A rolling 30/60/90-day filter shifts at midnight. Its previous exact
+    // baseline is still valuable: reuse verified daily buckets for the
+    // overlapping days and include local committed changes for today.
+    // The unsynced new day is labeled explicitly, never called verified.
+    final rolling = sqliteSaved == null && legacy == null &&
+            startDate != null && endDate != null
+        ? await journal.loadRollingBaseline(
+            businessId, scope, startDate: startDate, endDate: endDate,
+          ) : null;
     if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
         widget.businessId != businessId) {
       return;
     }
     final baseline = sqliteSaved?.totals ?? legacy?.totals ??
-        (sameScope ? _serverPeriodBase : null);
+        rolling?.totals ?? (sameScope ? _serverPeriodBase : null);
     final lastVerified = sqliteSaved?.at ?? legacy?.at ??
-        (sameScope ? _lastPeriodAt : null);
+        rolling?.at ?? (sameScope ? _lastPeriodAt : null);
+    final rolloverPending = rolling != null && endDate != null &&
+        rolling.verifiedThrough.isBefore(endDate);
     ExpensesPeriodTotals? local;
     int localChanges = 0;
     try {
@@ -692,7 +703,20 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         widget.businessId != businessId) {
       return;
     }
-    final fresh = lastVerified != null &&
+    // An upgraded b2468 device may have a perfectly valid exact baseline
+    // saved before daily buckets existed. Keep displaying its totals now, but
+    // seed daily buckets with ONE background reconciliation so tomorrow's
+    // rolling range will not hit the same cold-cache problem.
+    final needsDailySeed = baseline != null && rolling == null &&
+        startDate != null && endDate != null &&
+        await journal.loadRollingBaseline(
+          businessId, scope, startDate: startDate, endDate: endDate,
+        ) == null;
+    if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
+        widget.businessId != businessId) {
+      return;
+    }
+    final fresh = !rolloverPending && !needsDailySeed && lastVerified != null &&
         DateTime.now().difference(lastVerified) < const Duration(minutes: 30);
     setState(() {
       _serverPeriodBase = baseline;
@@ -703,11 +727,13 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       _periodError = local == null
           ? (offline ? 'Complete baseline not yet saved on this device.'
               : 'Preparing first complete local baseline…')
-          : localChanges > 0
-              ? 'Includes $localChanges locally saved change(s) · sync pending'
-              : offline
-                  ? 'Offline · saved totals verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}'
-                  : 'Saved local totals · verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}';
+          : rolloverPending
+              ? 'Saved local totals through ${DateFormat('MMM d').format(rolling.verifiedThrough)} · today not yet verified'
+              : localChanges > 0
+                  ? 'Includes $localChanges locally saved change(s) · sync pending'
+                  : offline
+                      ? 'Offline · saved totals verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}'
+                      : 'Saved local totals · verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}';
     });
     if (offline || (fresh && !force)) {
       _pendingPeriodScope = null;

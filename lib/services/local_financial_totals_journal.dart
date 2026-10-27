@@ -193,6 +193,178 @@ class LocalFinancialTotalsJournal {
       search: search, accountId: accountId, categoryId: categoryId,
       counterpartyId: counterpartyId);
 
+
+  /// Same business/role/search/classification filters across a date rollover.
+  String? _rollingKey(String scope) {
+    final fields = scope.split('|');
+    if (fields.length != 9 || fields[0].isEmpty || fields[1].isEmpty) {
+      return null;
+    }
+    final start = DateTime.tryParse(fields[2]);
+    final end = DateTime.tryParse(fields[3]);
+    if (start == null || end == null || end.isBefore(start)) return null;
+    // A custom 1-day or year-to-date verification must not replace the
+    // 30-day complete snapshot that keeps that window fast tomorrow.
+    final startDay = DateTime.utc(start.year, start.month, start.day);
+    final endDay = DateTime.utc(end.year, end.month, end.day);
+    final periodDays = endDay.difference(startDay).inDays + 1;
+    return 'financial_verified_daily_v1_${fields[0]}|${fields[1]}|'
+        '${fields[4]}|${fields[5]}|${fields[6]}|${fields[7]}|${fields[8]}|$periodDays';
+  }
+
+  static String _dateKey(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-'
+      '${date.month.toString().padLeft(2, '0')}-'
+      '${date.day.toString().padLeft(2, '0')}';
+
+  /// Reconstruct a shifted date window from days known to be complete.
+  /// The newly arrived day is NOT server-verified; UI must mark sync pending.
+  Future<({ExpensesPeriodTotals totals, DateTime at, DateTime verifiedThrough})?>
+      loadRollingBaseline(
+    String businessId, String scope, {
+    required DateTime startDate,
+    required DateTime endDate,
+  }) async {
+    final key = _rollingKey(scope);
+    if (key == null || !scope.startsWith('$businessId|')) return null;
+    final requestStart = _dateKey(startDate);
+    final requestEnd = _dateKey(endDate);
+    if (requestStart.compareTo(requestEnd) > 0) return null;
+    final records = await _database.customSelect(
+      'SELECT payload_json FROM local_financial_cache '
+      'WHERE business_id=? AND cache_key=? LIMIT 1',
+      variables: [Variable<String>(businessId), Variable<String>(key)],
+    ).get();
+    if (records.isEmpty) return null;
+    try {
+      final saved = Map<String, dynamic>.from(
+        jsonDecode(records.single.read<String>('payload_json')) as Map,
+      );
+      final verifiedStart = saved['rangeStart']?.toString() ?? '';
+      final verifiedEnd = saved['rangeEnd']?.toString() ?? '';
+      if (requestStart.compareTo(verifiedStart) < 0 ||
+          requestStart.compareTo(verifiedEnd) > 0) {
+        return null;
+      }
+      final verifiedAt = DateTime.parse(saved['verifiedAt'] as String).toLocal();
+      final lastVerifiedDay = DateTime.parse(verifiedEnd);
+      final requestedEnd = DateTime.parse(requestEnd);
+      final missingDays = DateTime.utc(
+        requestedEnd.year, requestedEnd.month, requestedEnd.day,
+      ).difference(DateTime.utc(
+        lastVerifiedDay.year, lastVerifiedDay.month, lastVerifiedDay.day,
+      )).inDays;
+      if (verifiedAt.isAfter(DateTime.now()) ||
+          missingDays > 7 || missingDays < 0) {
+        return null;
+      }
+      final daily = Map<String, dynamic>.from(saved['days'] as Map);
+      var incomeCents = 0;
+      var expenseCents = 0;
+      var count = 0;
+      var unknown = 0;
+      for (final item in daily.entries) {
+        if (item.key.compareTo(requestStart) < 0 ||
+            item.key.compareTo(requestEnd) > 0) {
+          continue;
+        }
+        if (item.key.compareTo(verifiedEnd) > 0 ||
+            item.key.compareTo(verifiedStart) < 0) {
+          return null;
+        }
+        final raw = Map<String, dynamic>.from(item.value as Map);
+        final income = raw['incomeCents'];
+        final expense = raw['expensesCents'];
+        final transactions = raw['transactions'];
+        final unverified = raw['unverifiedIncomeReceipts'];
+        if (income is! int || expense is! int ||
+            transactions is! int || unverified is! int ||
+            income < 0 || expense < 0 ||
+            transactions < 0 || unverified < 0) {
+          return null;
+        }
+        incomeCents += income;
+        expenseCents += expense;
+        count += transactions;
+        unknown += unverified;
+      }
+      return (
+        totals: ExpensesPeriodTotals(
+          income: incomeCents / 100,
+          expenses: expenseCents / 100,
+          transactions: count,
+          feesUnverified: unknown > 0,
+          unverifiedIncomeReceipts: unknown,
+        ),
+        at: verifiedAt,
+        verifiedThrough: lastVerifiedDay,
+      );
+    } catch (_) {
+      // A malformed historic snapshot cannot authorize a guessed total.
+      return null;
+    }
+  }
+
+  /// Complete authenticated scans only. Preserve scope and processor-fee
+  /// reporting, and never save a partial list as verified daily totals.
+  Future<void> _saveRollingBuckets(
+    String businessId, String scope,
+    ExpensesPeriodTotals totals, DateTime verifiedAt,
+  ) async {
+    final fields = scope.split('|');
+    final key = _rollingKey(scope);
+    final daily = totals.dailyBreakdown;
+    if (key == null || daily == null ||
+        fields[0] != businessId ||
+        fields[2].isEmpty || fields[3].isEmpty) {
+      return;
+    }
+    final start = fields[2].split('T').first;
+    final end = fields[3].split('T').first;
+    final days = <String, dynamic>{};
+    var incomeCents = 0;
+    var expenseCents = 0;
+    var count = 0;
+    var unknown = 0;
+    for (final item in daily.entries) {
+      if (item.key.compareTo(start) < 0 ||
+          item.key.compareTo(end) > 0) {
+        return;
+      }
+      final day = item.value;
+      incomeCents += day.incomeCents;
+      expenseCents += day.expensesCents;
+      count += day.transactions;
+      unknown += day.unverifiedIncomeReceipts;
+      days[item.key] = {
+        'incomeCents': day.incomeCents,
+        'expensesCents': day.expensesCents,
+        'transactions': day.transactions,
+        'unverifiedIncomeReceipts': day.unverifiedIncomeReceipts,
+      };
+    }
+    if (incomeCents != (totals.income * 100).round() ||
+        expenseCents != (totals.expenses * 100).round() ||
+        count != totals.transactions ||
+        unknown != totals.unverifiedIncomeReceipts) {
+      return;
+    }
+    await _database.customStatement('''
+      INSERT INTO local_financial_cache
+        (business_id,cache_key,payload_json,updated_at) VALUES (?,?,?,?)
+      ON CONFLICT(business_id,cache_key) DO UPDATE SET
+        payload_json=excluded.payload_json,updated_at=excluded.updated_at
+      ''', [
+      businessId, key,
+      jsonEncode({
+        'rangeStart': start,
+        'rangeEnd': end,
+        'verifiedAt': verifiedAt.toUtc().toIso8601String(),
+        'days': days,
+      }), DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+    ]);
+  }
+
   String _baselineKey(String scope) => 'financial_baseline_v1_$scope';
 
   /// Durable, full-scope last-verified baseline in the SAME local SQLite
@@ -267,6 +439,7 @@ class LocalFinancialTotalsJournal {
     await _database.transaction(() async {
       await reconcile(businessId, canonicalRows, receipts: receipts);
       await _writeBaseline(businessId, scope, totals, at);
+      await _saveRollingBuckets(businessId, scope, totals, at);
     });
   }
 
