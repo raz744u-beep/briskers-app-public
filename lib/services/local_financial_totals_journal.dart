@@ -200,8 +200,14 @@ class LocalFinancialTotalsJournal {
     if (fields.length != 9 || fields[0].isEmpty || fields[1].isEmpty) {
       return null;
     }
+    final start = DateTime.tryParse(fields[2]);
+    final end = DateTime.tryParse(fields[3]);
+    if (start == null || end == null || end.isBefore(start)) return null;
+    // A custom 1-day or year-to-date verification must not replace the
+    // 30-day complete snapshot that keeps that window fast tomorrow.
+    final periodDays = end.difference(start).inDays + 1;
     return 'financial_verified_daily_v1_${fields[0]}|${fields[1]}|'
-        '${fields[4]}|${fields[5]}|${fields[6]}|${fields[7]}|${fields[8]}';
+        '${fields[4]}|${fields[5]}|${fields[6]}|${fields[7]}|${fields[8]}|$periodDays';
   }
 
   static String _dateKey(DateTime date) =>
