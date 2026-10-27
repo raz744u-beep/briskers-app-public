@@ -558,6 +558,26 @@ class _JobsScreenState extends State<JobsScreen>
     widget.onJobsChanged?.call();
   }
 
+  // Only update an already visible authorized card. Do not add rows from
+  // callbacks, which could resurrect a quarantined/retired Job or leak
+  // another list filter. The next regular entry still queries local SQLite.
+  void _patchQuickAdminCard(
+    String jobId, Map<String, dynamic> values,
+  ) {
+    final current = _rows;
+    if (!mounted || current == null) return;
+    final index = current.indexWhere((row) =>
+        row['id']?.toString() == jobId);
+    if (index < 0) return;
+    final rows = List<Map<String, dynamic>>.from(current);
+    rows[index] = <String, dynamic>{
+      ...rows[index],
+      ...values,
+      'sync_state': 'pending',
+    };
+    setState(() => _rows = rows);
+  }
+
   Future<void> _quickEditMechanic(Map<String, dynamic> job) async {
     if (!_canManage || _busyJobId != null) return;
 
@@ -649,9 +669,14 @@ class _JobsScreenState extends State<JobsScreen>
         position: selectedEmployee?['position_name']?.toString(),
       );
 
-      // Publish the durable local change immediately. A slow server response
-      // must not keep the pencil editor blocked or delay the updated card.
-      await _load(refreshRemote: false);
+      // SQLite and the retry-safe outbox are committed. Repaint only this
+      // already-authorized Job card; don't await a large sorted list query.
+      _patchQuickAdminCard(job['id'].toString(), {
+        'assigned_employee': selectedEmployee?['name'],
+        'assigned_employee_id': selected.isEmpty ? null : selected,
+        'assigned_position': selectedEmployee?['position_name'],
+        'is_unassigned': selected.isEmpty,
+      });
       widget.onJobsChanged?.call();
       _scheduleQuickEditSync();
     } catch (error) {
@@ -735,7 +760,9 @@ class _JobsScreenState extends State<JobsScreen>
         job['id'].toString(),
         value,
       );
-      await _load(refreshRemote: false);
+      _patchQuickAdminCard(job['id'].toString(), {
+        'planned_hours': value,
+      });
       widget.onJobsChanged?.call();
       _scheduleQuickEditSync();
     } catch (error) {

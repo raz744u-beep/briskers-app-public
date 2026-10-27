@@ -1485,6 +1485,35 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     ));
   }
 
+  // Job admin writes commit locally first. A remote refresh or outbox replay
+  // is optional background work and must never hold the editor busy.
+  bool _jobAdminSyncBusy = false;
+  bool _jobAdminSyncAgain = false;
+
+  void _scheduleJobAdminSync() {
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    _jobAdminSyncAgain = true;
+    if (_jobAdminSyncBusy) return;
+    _jobAdminSyncBusy = true;
+    unawaited(() async {
+      try {
+        while (_jobAdminSyncAgain &&
+            !BriskersConnectionModeController.instance.forceOffline) {
+          _jobAdminSyncAgain = false;
+          try {
+            await _offlineJobAdmin.flush(widget.businessId);
+          } catch (_) {
+            // Failed replay remains in the durable outbox. Do not undo a
+            // locally accepted mechanic/hours choice on network failure.
+            return;
+          }
+        }
+      } finally {
+        _jobAdminSyncBusy = false;
+      }
+    }());
+  }
+
   Future<void> _changePlannedHours() async {
     if (!_canQuickAdmin || _job == null || _busy) return;
     final controller = TextEditingController(
@@ -1557,6 +1586,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     controller.dispose();
     if (value == null || _job == null) return;
 
+    // Cancel stale in-flight Job Detail responses before changing local data.
+    ++_loadEpoch;
     setState(() {
       _busy = true;
       _error = null;
@@ -1567,12 +1598,13 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         widget.jobId,
         value,
       );
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {}
-      }
-      if (mounted) await _load();
+      if (!mounted || _contentBlocked) return;
+      setState(() {
+        _job = <String, dynamic>{..._job!, 'planned_hours': value};
+        _busy = false;
+      });
+      _modalRefresh?.call();
+      _scheduleJobAdminSync();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -1788,9 +1820,12 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     List<Map<String, dynamic>> employees;
     if (_onlineReady && _employees.isNotEmpty) {
       employees = _employees;
-      try {
-        await _offlineJobAdmin.refreshEmployees(widget.businessId);
-      } catch (_) {}
+      // Cached authorized employee options already exist. Refresh for next
+      // visit without holding this picker on HTTP.
+      if (!BriskersConnectionModeController.instance.forceOffline) {
+        unawaited(_offlineJobAdmin.refreshEmployees(widget.businessId)
+            .catchError((Object _) => <Map<String, dynamic>>[]));
+      }
     } else {
       employees = await _offlineJobAdmin.cachedEmployees(widget.businessId);
     }
@@ -1879,6 +1914,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       }
     }
 
+    // Older remote reads cannot repaint this Job with an assignment that
+    // predates the new local SQLite/outbox commit.
+    ++_loadEpoch;
     setState(() {
       _busy = true;
       _error = null;
@@ -1891,12 +1929,31 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         employeeName: employee?['name']?.toString(),
         position: employee?['position_name']?.toString(),
       );
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {}
-      }
-      if (mounted) await _load();
+      if (!mounted || _contentBlocked) return;
+      final assigned = selected.isNotEmpty;
+      setState(() {
+        _job = <String, dynamic>{
+          ..._job!,
+          'assigned_employee_id': assigned ? selected : null,
+          'assigned_employee_name': employee?['name'],
+          'assigned_position': employee?['position_name'],
+          'is_unassigned': !assigned,
+          'assignments': assigned
+              ? <Map<String, dynamic>>[
+                  {
+                    'employee_id': selected,
+                    'employee_name': employee?['name'],
+                    'position': employee?['position_name'],
+                    'source': 'offline_admin',
+                    'active': true,
+                  },
+                ]
+              : <Map<String, dynamic>>[],
+        };
+        _busy = false;
+      });
+      _modalRefresh?.call();
+      _scheduleJobAdminSync();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
