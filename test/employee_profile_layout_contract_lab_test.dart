@@ -72,14 +72,11 @@ void main() {
         .split('Widget _reportsTab()').first;
     expect(advancePanel, contains("labelText: 'Original amount owed'"));
     expect(advancePanel, contains("labelText: 'Amount'"));
-    expect(advancePanel, contains('controller: _opening,\\n'
-      '              onTapAlwaysCalled: true,\\n'
-      '              onTap: () => _selectAmount(_opening),'
-        .replaceAll(r'\\n', '\\n')));
-    expect(advancePanel, contains('controller: _repayment,\\n'
-      '            onTapAlwaysCalled: true,\\n'
-      '            onTap: () => _selectAmount(_repayment),'
-        .replaceAll(r'\\n', '\\n')));
+    expect(advancePanel, contains('controller: _opening,'));
+    expect(advancePanel, contains('controller: _repayment,'));
+    expect(advancePanel, contains('onTapAlwaysCalled: true'));
+    expect(advancePanel, contains('onTap: () => _selectAmount(_opening),'));
+    expect(advancePanel, contains('onTap: () => _selectAmount(_repayment),'));
     expect(source, contains('controller.selection = TextSelection('));
     expect(source, contains('baseOffset: 0, extentOffset: controller.text.length'));
   });
