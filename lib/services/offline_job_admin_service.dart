@@ -633,17 +633,40 @@ class OfflineJobAdminService {
             businessId,
             outboxId: outboxId,
           );
+          // The user may have changed mechanic/hours again while the RPC
+          // was in flight. Never delete that newer merged local operation or
+          // mark the Job synced for a payload the server has NOT received.
+          final current = await _database.customSelect(
+            'SELECT payload_json FROM sync_outbox '
+            'WHERE business_id=? AND id=? AND entity_type=\'job_admin\' '
+            'AND state=\'pending\' LIMIT 1',
+            variables: [
+              Variable<String>(businessId),
+              Variable<int>(outboxId),
+            ],
+          ).get();
+          if (current.isEmpty ||
+              current.single.read<String>('payload_json') !=
+                  row.read<String>('payload_json')) {
+            return;
+          }
           await _database.customStatement(
-            'DELETE FROM sync_outbox WHERE id = ?',
-            [outboxId],
+            'DELETE FROM sync_outbox WHERE business_id=? AND id=?',
+            [businessId, outboxId],
           );
           await _database.customStatement(
             '''
             UPDATE local_jobs
             SET sync_state = 'synced'
             WHERE business_id = ? AND id = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM sync_outbox
+                WHERE business_id=? AND entity_id=?
+                  AND state='pending'
+                  AND entity_type IN ('job_admin','job_create')
+              )
             ''',
-            [businessId, jobId],
+            [businessId, jobId, businessId, jobId],
           );
         });
       } catch (error) {
