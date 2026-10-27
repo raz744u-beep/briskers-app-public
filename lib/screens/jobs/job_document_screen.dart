@@ -44,6 +44,7 @@ import '../../services/local_catalog_repository.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_document_repository.dart';
 import '../../services/verified_invoice_close_events.dart';
+import '../../services/verified_invoice_payment_events.dart';
 import '../../services/local_customer_repository.dart';
 import '../../services/local_job_repository.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
@@ -3201,6 +3202,35 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       );
     });
     if (mounted && succeeded) {
+      // The finalize RPC succeeded. Verify the exact authoritative invoice
+      // before publishing an immediate paid status to retained Invoices lists.
+      // Do this BEFORE the independent Complete Job prompt: keeping the
+      // repair In Progress must never leave a fully paid invoice as Open.
+      try {
+        final verified = await _api.documentDetail(
+          widget.businessId, widget.documentId);
+        final presentation = DocumentPresentation(
+          <String, dynamic>{...verified, 'kind': 'invoice'});
+        final identity = verified['id']?.toString() ?? '';
+        if (identity == widget.documentId &&
+            presentation.paymentDetailsKnown &&
+            (presentation.totalCents ?? 0) > 0 &&
+            (presentation.pendingCents ?? -1) == 0 &&
+            (presentation.finalizedCents ?? -1) >=
+                (presentation.totalCents ?? 0)) {
+          VerifiedInvoicePaymentEvents.confirmedFullyPaid(
+            VerifiedInvoiceFullyPaid(
+              businessId: widget.businessId,
+              invoiceId: widget.documentId,
+              total: presentation.totalCents! / 100,
+              finalizedPaid: presentation.finalizedCents! / 100,
+            ),
+          );
+        }
+      } catch (_) {
+        // A failed verification read cannot invent a paid invoice. The
+        // protected close path and subsequent refresh still work normally.
+      }
       await _offerCompletePaidJob();
       try {
         await _autoCloseOwnerInvoiceIfReady();
