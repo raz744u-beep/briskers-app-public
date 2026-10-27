@@ -7,7 +7,6 @@ import 'package:drift/drift.dart' show Variable;
 import 'package:intl/intl.dart';
 
 import '../local/local_database_provider.dart';
-import '../services/local_job_tasks_lab_store.dart';
 import 'employee_advance_ledger.dart';
 import 'lab_payroll_payment_service.dart';
 
@@ -351,7 +350,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
               Text(selected.length.toString()+' tasks · '+
                 _totalHours.toStringAsFixed(2)+' hours'),
               const SizedBox(height:10),
-              Text('Calculated labor: '+r'$'+(laborCents/100).toStringAsFixed(2)),
+              Text(r'Calculated labor: $'+(laborCents/100).toStringAsFixed(2)),
               const SizedBox(height:9),
               TextField(
                 controller:amount,
@@ -385,7 +384,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                   dense:true,contentPadding:EdgeInsets.zero,
                   value:deduct,
                   title:const Text('Deduct from employee debt'),
-                  subtitle:Text('Currently owed: '+r'$'+
+                  subtitle:Text(r'Currently owed: $'+
                     (debt.remainingCents/100).toStringAsFixed(2)),
                   onChanged:(value)=>update(()=>deduct=value??false),
                 ),
@@ -410,7 +409,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                   crossAxisAlignment:CrossAxisAlignment.start,children:[
                     Text('Adjustment: '+(gross-laborCents/100>=0?'+':'')+
                       (gross-laborCents/100).toStringAsFixed(2)),
-                    Text('Send employee: '+r'$'+
+                    Text(r'Send employee: $'+
                       (gross-repayment).toStringAsFixed(2),
                       style:const TextStyle(fontWeight:FontWeight.w800)),
                   ]);
@@ -469,11 +468,11 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                 children:[
                   Text(widget.employeeName+' · '+
                     result.hours.toStringAsFixed(2)+' hrs'),
-                  Text('Gross compensation: '+r'$'+
+                  Text(r'Gross compensation: $'+
                     (result.grossCents/100).toStringAsFixed(2)),
-                  Text('Debt repayment: '+r'$'+
+                  Text(r'Debt repayment: $'+
                     (result.debtCents/100).toStringAsFixed(2)),
-                  Text('Transferred: '+r'$'+
+                  Text(r'Transferred: $'+
                     (result.netCents/100).toStringAsFixed(2),
                     style:const TextStyle(fontWeight:FontWeight.w700)),
                   const SizedBox(height:8),
