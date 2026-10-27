@@ -74,6 +74,13 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
       if (_vehicles.length == 1) {
         _vehicleId = _vehicles.first['id']?.toString();
       }
+      // Some customer shortcuts supply an ID/name but not the vehicle list.
+      // Required vehicle selection must not strand those shortcuts.
+      if (_vehicles.isEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_loadVehicles(selected));
+        });
+      }
       _loading = false;
     } else {
       // Customer matches are only shown once a query is entered. Do not
