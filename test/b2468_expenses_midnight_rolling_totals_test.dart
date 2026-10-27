@@ -126,6 +126,25 @@ void main() {
     }
   });
 
+  test('Calendar-date windows remain exactly 30 days across fall DST', () {
+    final sundayAfterFallback = DateTime(2026, 11, 2);
+    final start = DateTime(
+      sundayAfterFallback.year,
+      sundayAfterFallback.month,
+      sundayAfterFallback.day - 29,
+    );
+    expect(start.year, 2026);
+    expect(start.month, 10);
+    expect(start.day, 4);
+    expect(DateTime.utc(2026, 11, 2).difference(
+        DateTime.utc(start.year, start.month, start.day)).inDays, 29);
+    final code = File('lib/screens/expenses_screen.dart').readAsStringSync();
+    expect(code, contains(
+        'DateTime(today.year, today.month, today.day - 29)'));
+    expect(code, isNot(contains(
+        'today.subtract(const Duration(days: 29))')));
+  });
+
   test('Date change is not allowed to show Calculating when daily baseline exists', () {
     final code = File('lib/screens/expenses_screen.dart').readAsStringSync();
     expect(code, contains('journal.loadRollingBaseline('));
