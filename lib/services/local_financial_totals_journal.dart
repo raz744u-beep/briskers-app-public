@@ -205,7 +205,9 @@ class LocalFinancialTotalsJournal {
     if (start == null || end == null || end.isBefore(start)) return null;
     // A custom 1-day or year-to-date verification must not replace the
     // 30-day complete snapshot that keeps that window fast tomorrow.
-    final periodDays = end.difference(start).inDays + 1;
+    final startDay = DateTime.utc(start.year, start.month, start.day);
+    final endDay = DateTime.utc(end.year, end.month, end.day);
+    final periodDays = endDay.difference(startDay).inDays + 1;
     return 'financial_verified_daily_v1_${fields[0]}|${fields[1]}|'
         '${fields[4]}|${fields[5]}|${fields[6]}|${fields[7]}|${fields[8]}|$periodDays';
   }
@@ -246,8 +248,12 @@ class LocalFinancialTotalsJournal {
       }
       final verifiedAt = DateTime.parse(saved['verifiedAt'] as String).toLocal();
       final lastVerifiedDay = DateTime.parse(verifiedEnd);
-      final missingDays = DateTime.parse(requestEnd)
-          .difference(lastVerifiedDay).inDays;
+      final requestedEnd = DateTime.parse(requestEnd);
+      final missingDays = DateTime.utc(
+        requestedEnd.year, requestedEnd.month, requestedEnd.day,
+      ).difference(DateTime.utc(
+        lastVerifiedDay.year, lastVerifiedDay.month, lastVerifiedDay.day,
+      )).inDays;
       if (verifiedAt.isAfter(DateTime.now()) ||
           missingDays > 7 || missingDays < 0) return null;
       final daily = Map<String, dynamic>.from(saved['days'] as Map);
