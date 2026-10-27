@@ -1021,7 +1021,67 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
   }
 
-  Future<void> _addLineLocalAware({
+  /// Item additions never wait for an entire Invoice detail RPC to redraw
+  /// locally saved lines and totals. All other mutations keep _run's existing
+  /// full authorization/reconciliation behavior.
+  Future<void> _runAddLine(Future<bool> Function() action) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final writtenLocally = await action();
+      if (writtenLocally) {
+        final saved = await _detailCache.load(
+          widget.businessId, widget.documentId,
+        );
+        if (saved == null) {
+          throw StateError('The locally saved invoice cannot be displayed.');
+        }
+        if (!mounted) return;
+        setState(() {
+          _detail = saved;
+          _loading = false;
+          _error = null;
+        });
+        _startLineBackgroundSync();
+      } else {
+        // The first-ever uncached invoice falls back to online authorization.
+        await _load(fastAfterMutation: true);
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  bool _lineSyncBusy = false;
+  bool _lineSyncAgain = false;
+  void _startLineBackgroundSync() {
+    if (BriskersConnectionModeController.instance.forceOffline) return;
+    if (_lineSyncBusy) {
+      _lineSyncAgain = true;
+      return;
+    }
+    _lineSyncBusy = true;
+    unawaited(() async {
+      try {
+        do {
+          _lineSyncAgain = false;
+          await _offlineDocumentEdit.flush(widget.businessId);
+        } while (_lineSyncAgain &&
+            !BriskersConnectionModeController.instance.forceOffline);
+      } catch (_) {
+        // Preserve the durable outbox for a subsequent sync attempt.
+      } finally {
+        _lineSyncBusy = false;
+      }
+    }());
+  }
+
+  Future<bool> _addLineLocalAware({
     required String name,
     String? description,
     String? itemId,
@@ -1042,9 +1102,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         taxRate: taxRate,
         lineKind: lineKind,
       );
-      return;
+      return true;
     }
-    if (BriskersConnectionModeController.instance.forceOffline) {
+    // In Auto, a fully downloaded and authorized invoice can be edited
+    // against its existing on-device detail; the server synchronizes later.
+    // If this device has never cached the detail, retain the existing safe
+    // online path instead of inventing a partial invoice.
+    final locallySaved = await _detailCache.load(
+      widget.businessId, widget.documentId,
+    );
+    if (BriskersConnectionModeController.instance.forceOffline ||
+        locallySaved != null) {
       await _offlineDocumentEdit.addLine(
         widget.businessId,
         widget.documentId,
@@ -1056,7 +1124,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         taxRate: taxRate,
         lineKind: lineKind,
       );
-      return;
+      return true;
     }
     await _api.addDocumentLine(
       widget.businessId,
@@ -1070,6 +1138,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       taxRate: taxRate,
       lineKind: lineKind,
     );
+    return false;
   }
 
   Future<void> _updateLineLocalAware(
@@ -1917,8 +1986,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     );
     if (translatedResult == null) return;
 
-    await _run(() async {
-      await _addLineLocalAware(
+    await _runAddLine(() async {
+      return _addLineLocalAware(
         name: translatedResult['name'].toString(),
         description: translatedResult['description']?.toString(),
         itemId: chosenItem['id']?.toString(),
@@ -1957,8 +2026,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     final translatedResult = await _translateManualEntry(result);
     if (translatedResult == null) return;
 
-    await _run(() async {
-      await _addLineLocalAware(
+    await _runAddLine(() async {
+      return _addLineLocalAware(
         name: translatedResult['name'].toString(),
         description: translatedResult['description']?.toString(),
         quantity: translatedResult['quantity'] as num,
