@@ -1033,6 +1033,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     try {
       final writtenLocally = await action();
       if (writtenLocally) {
+        // An RPC started before this local commit may not replace the fresh
+        // local line or totals with an older server snapshot.
+        ++_loadGeneration;
         final saved = await _detailCache.load(
           widget.businessId, widget.documentId,
         );
