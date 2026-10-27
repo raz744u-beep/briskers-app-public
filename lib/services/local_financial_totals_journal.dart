@@ -88,6 +88,16 @@ class LocalFinancialTotalsJournal {
   static DateTime? _date(Map<String, dynamic> row) =>
       DateTime.tryParse(row['transaction_date']?.toString() ?? '');
 
+  // Reconciliation compares actual gross posted amounts. A verified
+  // processor-fee reporting adjustment does not change payment identity.
+  static int _rawAmountCents(Map<String, dynamic> row) {
+    final amount = num.tryParse(row['amount']?.toString() ?? '');
+    if (amount == null || !amount.isFinite || amount < 0) {
+      throw StateError('Invalid posted transaction amount.');
+    }
+    return (amount * 100).round();
+  }
+
   static int _cents(Map<String, dynamic> row) {
     final value = row['reporting_status'] == 'verified' &&
             row['direction'] == 'income' && row['reporting_amount'] != null
@@ -110,7 +120,9 @@ class LocalFinancialTotalsJournal {
     if (accountId != null && row['account_id']?.toString() != accountId) return false;
     if (categoryId != null && row['category_id']?.toString() != categoryId) return false;
     if (counterpartyId != null &&
-        row['counterparty_id']?.toString() != counterpartyId) return false;
+        row['counterparty_id']?.toString() != counterpartyId) {
+      return false;
+    }
     final date = _date(row);
     if (date == null) throw StateError('Local financial date is missing.');
     final day = DateTime(date.year, date.month, date.day);
@@ -146,7 +158,9 @@ class LocalFinancialTotalsJournal {
         final row = Map<String, dynamic>.from(value);
         if (!_within(row, startDate: startDate, endDate: endDate,
             direction: direction, search: search, accountId: accountId,
-            categoryId: categoryId, counterpartyId: counterpartyId)) continue;
+            categoryId: categoryId, counterpartyId: counterpartyId)) {
+          continue;
+        }
         final amount = _cents(row) * sign;
         if (row['direction'] == 'income') {
           income += amount;
@@ -220,7 +234,7 @@ class LocalFinancialTotalsJournal {
       if (posted['direction'] == value['direction'] &&
           posted['transaction_date']?.toString().split('T').first ==
               value['transaction_date']?.toString().split('T').first &&
-          _cents(posted) == _cents(value)) {
+          _rawAmountCents(posted) == _rawAmountCents(value)) {
         entries.remove(key);
         changed = true;
       }
