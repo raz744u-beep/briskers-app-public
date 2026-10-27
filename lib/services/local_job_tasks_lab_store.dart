@@ -155,10 +155,22 @@ class LocalJobTasksLabStore {
         description TEXT NOT NULL,
         employee_id TEXT,
         status TEXT NOT NULL DEFAULT 'planned',
+        category TEXT NOT NULL DEFAULT 'General',
+        due_at INTEGER,
         created_at INTEGER NOT NULL,
         completed_at INTEGER
       )
     ''');
+    final shopColumns = await db.customSelect(
+      'PRAGMA table_info(local_shop_tasks_lab)').get();
+    if (!shopColumns.any((r) => r.read<String>('name') == 'category')) {
+      await db.customStatement(
+        "ALTER TABLE local_shop_tasks_lab ADD COLUMN category TEXT NOT NULL DEFAULT 'General'");
+    }
+    if (!shopColumns.any((r) => r.read<String>('name') == 'due_at')) {
+      await db.customStatement(
+        'ALTER TABLE local_shop_tasks_lab ADD COLUMN due_at INTEGER');
+    }
     await db.customStatement('''
       CREATE INDEX IF NOT EXISTS idx_lab_shop_tasks_business_status
       ON local_shop_tasks_lab (business_id, status, created_at)
@@ -168,7 +180,8 @@ class LocalJobTasksLabStore {
   Future<List<Map<String, dynamic>>> shopTasks(String businessId) async {
     await ensureTables(db);
     final rows = await db.customSelect(
-      'SELECT id, description, employee_id, status, completed_at '
+      'SELECT id, description, employee_id, status, completed_at, '
+      'category, due_at '
       'FROM local_shop_tasks_lab WHERE business_id=? '
       "ORDER BY CASE WHEN status='done' THEN 1 ELSE 0 END, id DESC",
       variables: [Variable<String>(businessId)],
@@ -180,6 +193,8 @@ class LocalJobTasksLabStore {
     required String businessId,
     required String description,
     String? employeeId,
+    String category = 'General',
+    DateTime? dueDate,
   }) async {
     if (businessId.trim().isEmpty || description.trim().isEmpty) {
       throw ArgumentError('Shop task description required');
@@ -187,10 +202,12 @@ class LocalJobTasksLabStore {
     await ensureTables(db);
     await db.customStatement(
       'INSERT INTO local_shop_tasks_lab '
-      '(business_id, description, employee_id, status, created_at) '
-      "VALUES (?, ?, ?, 'planned', ?)",
+      '(business_id, description, employee_id, status, category, due_at, created_at) '
+      "VALUES (?, ?, ?, 'planned', ?, ?, ?)",
       [businessId, description.trim(),
         employeeId?.isEmpty == true ? null : employeeId,
+        category.trim().isEmpty ? 'General' : category.trim(),
+        dueDate?.millisecondsSinceEpoch,
         DateTime.now().millisecondsSinceEpoch],
     );
   }
