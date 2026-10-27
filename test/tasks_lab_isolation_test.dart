@@ -78,6 +78,52 @@ void main() {
     } finally { await db.close(); }
   });
 
+  test('Approved Tasks workspace keeps job and General Tasks independent', () {
+    final source=File('lib/tasks_lab/tasks_workspace.dart').readAsStringSync();
+    final main=File('lib/tasks_lab_main.dart').readAsStringSync();
+    final employee=File('lib/tasks_lab/employee_payroll_profile.dart')
+      .readAsStringSync();
+    expect(source,contains("'Service Tasks'"));
+    expect(source,contains("'General Tasks'"));
+    expect(source,contains("Key('service-tasks-list')"));
+    expect(source,contains("Key('general-tasks-list')"));
+    expect(source,contains("dropdown('Task Type'"));
+    expect(source,contains("dropdown('Employee'"));
+    expect(source,contains("dropdown('Job'"));
+    expect(source,contains("dropdown('Category'"));
+    expect(source,contains("dropdown('Status'"));
+    expect(source,contains("dropdown('Due Date'"));
+    expect(source,contains("dropdown('Sort By'"));
+    expect(source,contains("child:const Text('Apply Filters')"));
+    expect(source,contains("widget.serviceTaskCard(task)"));
+    expect(source,contains("widget.onGeneralStatus"));
+    expect(main,contains("case 3: return _tasksWorkspace();"));
+    expect(main,contains("generalTasks: shopTasks"));
+    expect(employee,contains("generalTasks = const []"));
+    expect(employee,contains("_showGeneralTasks"));
+    expect(employee,contains("WeeklyLaborReviewLab("));
+    expect(source,isNot(contains("Supabase")));
+  });
+
+  test('General Tasks category and due date survive offline reopen', () async {
+    final db=BriskersLocalDatabase(NativeDatabase.memory());
+    final store=LocalJobTasksLabStore(db);
+    try {
+      final due=DateTime(2026,10,30);
+      await store.addShopTask(
+        businessId:'shop-lab',description:'Scan parts invoices',
+        employeeId:'lab-karol',category:'Office',dueDate:due);
+      final rows=await store.shopTasks('shop-lab');
+      expect(rows,hasLength(1));
+      expect(rows.single['category'],'Office');
+      expect(rows.single['due_at'],due.millisecondsSinceEpoch);
+      expect(await store.shopTasks('different-shop'),isEmpty);
+      expect(await store.list('shop-lab','any-job'),isEmpty);
+    } finally {
+      await db.close();
+    }
+  });
+
   test('Test Android build has distinct package and offline entrypoint', () {
     // CI creates a generated Flutter shell one level below the checkout.
     // Local tests may also run directly from the repository root.
