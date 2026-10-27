@@ -164,7 +164,16 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
                       row.read<int>('paid_at'))) +
                     (row.read<String>('note').isEmpty ? '' :
                       '\n' + row.read<String>('note'))),
-                  trailing: Text(_money(row.read<int>('cents'))),
+                  trailing: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Text('✓ Paid', style: TextStyle(
+                        fontSize: 11, fontWeight: FontWeight.w800,
+                        color: Color(0xFF117C56))),
+                      Text(_money(row.read<int>('cents'))),
+                    ],
+                  ),
                 ),
               if (rows.length > visibleTaskCount)
                 TextButton(
