@@ -205,7 +205,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   int get _selectedDock {
-    if (page == 3 || page == 4) return 2;
+    if (page == 3 || page == 4 || page == 12) return 2;
     if (page == 5 || page == 6) return 7;
     final idx = _dockPages.indexOf(page);
     return idx < 0 ? 0 : idx;
@@ -1559,7 +1559,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     style: TextStyle(fontWeight: FontWeight.w800)),
                   subtitle: Text('$activeTasks labor tasks · $completed done'),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _navigate(3),
+                  onTap: () => _navigate(12),
                 ),
 
               ],
@@ -1896,6 +1896,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: [
+        TextButton.icon(
+          onPressed: () => _openVehicleJob(0),
+          icon: const Icon(Icons.arrow_back),
+          label: const Text('Back to Job J-24'),
+        ),
         _sectionHeader('Job J-24 tasks & completed work',
           subtitle: 'One entry per task · Original work stays preserved'),
         Padding(
@@ -2586,6 +2591,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       case 1: return _customerPage();
       case 2: return _jobPage();
       case 3: return _tasksWorkspace();
+      case 12: return _taskList();
       case 4: return _shopTasksPage();
       case 5: return _payrollPage();
       case 6: return _settingsPage();
