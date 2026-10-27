@@ -18,6 +18,7 @@ import '../services/local_financial_cache.dart';
 import '../services/invoice_payment_feed.dart';
 import '../services/expenses_period_totals.dart';
 import '../services/verified_expense_totals_cache.dart';
+import '../services/local_financial_totals_journal.dart';
 import '../services/expenseiq_local_photo_sync.dart';
 import '../services/expenseiq_background_scheduler.dart';
 import '../widgets/briskers_page_header.dart';
@@ -103,6 +104,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   int _receiptEpoch = 0;
   int _periodEpoch = 0;
   ExpensesPeriodTotals? _periodTotals;
+  ExpensesPeriodTotals? _serverPeriodBase;
   bool _periodCalculating = false;
   String? _periodError;
   String? _lastPeriodScope;
@@ -155,6 +157,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       ++_periodEpoch;
       _pendingPeriodScope = null;
       _periodTotals = null;
+      _serverPeriodBase = null;
       _lastPeriodScope = null;
       _lastPeriodAt = null;
       _periodCalculating = false;
