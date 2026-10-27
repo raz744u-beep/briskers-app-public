@@ -32,6 +32,7 @@ class LabPayrollHistoryPanel extends StatefulWidget {
 
 class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
   String _period = 'All';
+  int _visibleWeeks = 10;
   DateTimeRange? _custom;
   static final _date = DateFormat('MMM d, yyyy');
   static final _currency = NumberFormat.simpleCurrency(locale: 'en_US');
@@ -80,7 +81,7 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
 
   Future<void> _change(String chosen) async {
     if (chosen != 'Custom') {
-      setState(() => _period = chosen);
+      setState(() { _period = chosen; _visibleWeeks = 10; });
       return;
     }
     final range = await showDateRangePicker(
@@ -88,7 +89,7 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
       firstDate: DateTime(2020), lastDate: DateTime(2100),
       initialDateRange: _custom);
     if (range != null && mounted) {
-      setState(() { _custom = range; _period = chosen; });
+      setState(() { _custom = range; _period = chosen; _visibleWeeks = 10; });
     }
   }
 
@@ -103,6 +104,7 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
     ]));
 
   Future<void> _showTaskHistory(LabPayrollWeek week) async {
+    var visibleTaskCount = 10;
     await localDatabase.customStatement('CREATE TABLE IF NOT EXISTS lab_payroll_task_payments ('
       'id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, employee_id TEXT NOT NULL, '
       'document_id TEXT NOT NULL, line_id TEXT NOT NULL, week_key TEXT NOT NULL, '
@@ -131,7 +133,8 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
     if (!mounted) { return; }
     await showDialog<void>(
       context: context,
-      builder: (dialog) => AlertDialog(
+      builder: (dialog) => StatefulBuilder(
+        builder: (dialog, updateDialog) => AlertDialog(
         title: Text('Week of ' +
           _date.format(LabPayrollWeekSource.dateForKey(week.weekKey))),
         content: SizedBox(
@@ -148,7 +151,7 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
               ],
               if (rows.isEmpty)
                 const Text('No task-linked TEST payments for this week.'),
-              for (final row in rows)
+              for (final row in rows.take(visibleTaskCount))
                 ListTile(
                   isThreeLine: true,
                   contentPadding: EdgeInsets.zero,
@@ -163,6 +166,11 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
                       '\n' + row.read<String>('note'))),
                   trailing: Text(_money(row.read<int>('cents'))),
                 ),
+              if (rows.length > visibleTaskCount)
+                TextButton(
+                  key: const Key('paid-task-history-load-more'),
+                  onPressed: () => updateDialog(() => visibleTaskCount += 10),
+                  child: Text('Load More · ${rows.length - visibleTaskCount} remaining')),
             ],
           ),
         ),
@@ -170,7 +178,7 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
           TextButton(onPressed: () => Navigator.pop(dialog),
             child: const Text('Close')),
         ],
-      ),
+      )),
     );
   }
 
@@ -291,7 +299,17 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
               padding: EdgeInsets.all(20),
               child: Text('No TEST payroll weeks in this period.',
                 style: TextStyle(color: Color(0xFF64748B)))),
-          for (final week in weeks) _card(week),
+          for (final week in weeks.take(_visibleWeeks)) _card(week),
+          if (weeks.length > _visibleWeeks)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: OutlinedButton.icon(
+                key: const Key('payroll-history-load-more'),
+                onPressed: () => setState(() => _visibleWeeks += 10),
+                icon: const Icon(Icons.expand_more),
+                label: Text('Load More · ${weeks.length - _visibleWeeks} weeks remaining'),
+              ),
+            ),
         ],
       )),
       SafeArea(top:false,child:Container(
