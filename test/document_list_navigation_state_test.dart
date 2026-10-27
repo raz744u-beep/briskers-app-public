@@ -64,8 +64,9 @@ class _HeldDocuments extends _Documents {
 
   @override
   Future<List<Map<String, dynamic>>> listByKind(
-    String businessId, {required String kind},
-  ) async {
+    String businessId, {
+    required String kind,
+  }) async {
     requested = true;
     await gate.future;
     return super.listByKind(businessId, kind: kind);
