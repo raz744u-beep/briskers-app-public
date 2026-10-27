@@ -246,11 +246,11 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final today = _dateOnly(DateTime.now());
     switch (_dateRange) {
       case '30d':
-        return today.subtract(const Duration(days: 29));
+        return DateTime(today.year, today.month, today.day - 29);
       case '60d':
-        return today.subtract(const Duration(days: 59));
+        return DateTime(today.year, today.month, today.day - 59);
       case '90d':
-        return today.subtract(const Duration(days: 89));
+        return DateTime(today.year, today.month, today.day - 89);
       case 'thisMonth':
         return DateTime(today.year, today.month, 1);
       case 'lastMonth':
