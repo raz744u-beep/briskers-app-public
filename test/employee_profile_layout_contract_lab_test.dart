@@ -15,7 +15,7 @@ void main() {
     expect(source, contains('WeeklyLaborReviewLab('));
     expect(source, contains('embedded: true'));
     expect(source, contains('onCancel: () => Navigator.of(context).pop()'));
-    expect(source, contains('onPaymentSaved: _refreshPayrollData'));
+    expect(source, contains('onPaymentSaved: _afterPaymentSaved'));
     expect(source, contains('employee-payroll-period-dropdown'));
     expect(source, isNot(contains('Widget _weekPicker()')));
     expect(source, contains('bool _advanceExpanded = false;'));
