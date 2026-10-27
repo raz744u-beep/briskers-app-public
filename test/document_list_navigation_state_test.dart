@@ -182,6 +182,7 @@ void main() {
           localDocuments: heldDocuments,
           paymentFeed: heldPayments,
           api: api,
+          blockedDocumentIds: (_) async => <String>{},
         ),
       ));
       await tester.pump();
