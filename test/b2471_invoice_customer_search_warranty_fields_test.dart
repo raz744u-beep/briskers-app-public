@@ -42,7 +42,8 @@ class _SlowRemote extends BriskersApi {
 
   @override
   Future<List<Map<String, dynamic>>> customers(String businessId, {
-    int limit = 500,
+    int limit = 100,
+    int offset = 0,
     String? search,
   }) {
     requests++;
