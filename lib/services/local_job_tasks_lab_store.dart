@@ -225,7 +225,7 @@ class LocalJobTasksLabStore {
         'custom_description, employee_id, payroll_hours FROM local_job_tasks_lab '
         'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
         variables: [Variable<String>(businessId),Variable<String>(jobId),
-          Variable<String>(recheckDocumentId),Variable<String>(lineId)],
+          const Variable<String>(recheckDocumentId),Variable<String>(lineId)],
       ).getSingleOrNull();
       if (source == null || source.read<String>('status')=='done' ||
           (source.readNullable<double>('payroll_hours')??0)>0) {
@@ -235,7 +235,7 @@ class LocalJobTasksLabStore {
         'SELECT 1 FROM local_payroll_preserved_tasks_lab WHERE '
         'business_id=? AND job_id=? AND document_id=? AND line_id=?',
         variables:[Variable<String>(businessId),Variable<String>(jobId),
-          Variable<String>(recheckDocumentId),Variable<String>(lineId)],
+          const Variable<String>(recheckDocumentId),Variable<String>(lineId)],
       ).getSingleOrNull();
       if (frozen != null) throw StateError('Completed work cannot move');
       final description=(source.readNullable<String>('custom_description') ??
