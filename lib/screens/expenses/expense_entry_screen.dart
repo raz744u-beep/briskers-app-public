@@ -82,6 +82,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
   String? _recurringRuleId;
 
   bool _loading = true;
+  bool _optionsLoading = true;
   bool _saving = false;
   bool _readingReceipt = false;
   bool _autoScanLaunched = false;
@@ -102,6 +103,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
     _jobId = widget.jobId;
     _documentId = widget.documentId;
     _contextLabel = widget.contextLabel;
+    // A new expense is an immediately usable local form. Account/category
+    // options hydrate in place; don't hide the entire screen behind a spinner.
+    _loading = _editing || _copying;
     _load();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -278,6 +282,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       }
 
       _loading = false;
+      _optionsLoading = false;
       _error = null;
     });
   }
@@ -311,6 +316,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       if (!localShown && mounted) {
         setState(() {
           _loading = false;
+          _optionsLoading = false;
           _error = 'Expense setup has not been cached yet. Go online once to sync accounts and categories.';
         });
       }
@@ -347,6 +353,7 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       if (!localShown) {
         setState(() {
           _loading = false;
+          _optionsLoading = false;
           _error = error.toString();
         });
       }
@@ -1293,7 +1300,9 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
                   foregroundColor: Colors.white,
                   minimumSize: const Size.fromHeight(52),
                 ),
-                onPressed: _saving ? null : _save,
+                onPressed: _saving || _optionsLoading ||
+                        _accounts.isEmpty || _categories.isEmpty
+                    ? null : _save,
                 icon: _saving
                     ? const SizedBox.square(
                         dimension: 18,
@@ -1309,6 +1318,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               children: [
+                if (_optionsLoading) ...[
+                  const LinearProgressIndicator(),
+                  const SizedBox(height: 8),
+                  const Text('Loading saved accounts and categories…'),
+                  const SizedBox(height: 16),
+                ],
                 if ((_contextLabel ?? '').isNotEmpty) ...[
                   Card(
                     margin: EdgeInsets.zero,

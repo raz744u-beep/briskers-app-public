@@ -74,6 +74,13 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
       if (_vehicles.length == 1) {
         _vehicleId = _vehicles.first['id']?.toString();
       }
+      // Some customer shortcuts supply an ID/name but not the vehicle list.
+      // Required vehicle selection must not strand those shortcuts.
+      if (_vehicles.isEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_loadVehicles(selected));
+        });
+      }
       _loading = false;
     } else {
       // Customer matches are only shown once a query is entered. Do not
@@ -239,8 +246,13 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
 
   Future<void> _create() async {
     final customerId = _customerId;
-    if (customerId == null) {
+    if (customerId == null || customerId.isEmpty) {
       setState(() => _error = 'Select a customer.');
+      return;
+    }
+    if (_vehicleId == null || _vehicleId!.isEmpty ||
+        !_vehicles.any((v) => v['id']?.toString() == _vehicleId)) {
+      setState(() => _error = 'Select a vehicle before creating the document.');
       return;
     }
 
@@ -316,8 +328,8 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
         children: [
           Text(
             widget.kind=='estimate'
-                ? 'Choose a customer and optional vehicle. The estimate does not create a Job until converted to an invoice.'
-                : 'Choose a customer and optional vehicle. After creating the invoice, you can add parts, labor, and other items.',
+                ? 'Choose a customer and vehicle. Both are required before creating an estimate. The estimate does not create a Job until converted to an invoice.'
+                : 'Choose a customer and vehicle. Both are required before adding parts, labor, and other invoice items.',
             style: const TextStyle(color: Color(0xFF667085)),
           ),
           const SizedBox(height: 16),
@@ -410,6 +422,11 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
                   ? null
                   : (value) => setState(() => _vehicleId = value),
             ),
+          if (_customerId != null && _vehicles.isEmpty && !_loadingVehicles)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('No saved vehicle for this customer. Add the vehicle to the customer profile before creating this document.'),
+            ),
           if (_error != null) ...[
             const SizedBox(height: 14),
             Text(
@@ -424,7 +441,9 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
                   ? BriskersColors.estimates : BriskersColors.invoices,
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
-            onPressed: _saving ? null : _create,
+            onPressed: _saving || _loadingVehicles || _customerId == null ||
+                    _vehicleId == null || _vehicleId!.isEmpty
+                ? null : _create,
             icon: _saving
                 ? const SizedBox.square(
                     dimension: 18,
