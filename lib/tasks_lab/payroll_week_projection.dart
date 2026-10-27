@@ -69,6 +69,9 @@ class LabPayrollWeekSource {
     required int? hourlyCents,
     required List<Map<String, dynamic>> drafts,
     required List<Map<String, dynamic>> payments,
+    List<Map<String,dynamic>> taskPayments=const [],
+    List<Map<String,dynamic>> settlements=const [],
+    bool confirmedOnly=false,
   }) {
     final weekId = weekKey(week);
     Map<String, dynamic>? draft;
@@ -119,6 +122,27 @@ class LabPayrollWeekSource {
       if (!date.isBefore(selectedStart) && date.isBefore(selectedEnd)) {
         paid += row['cents'] as int;
       }
+    }
+    if(confirmedOnly) {
+      final linked=taskPayments.where((row)=>
+        row['employee_id']==employeeId&&row['week_key']==weekId).toList();
+      final hrs=linked.fold<double>(0,(sum,row)=>
+        sum+((row['hours'] is num) ?
+          (row['hours'] as num).toDouble():0));
+      final confirmed=settlements.where((row)=>
+        row['employee_id']==employeeId&&row['week_key']==weekId).toList();
+      int? approvedGross;
+      if(confirmed.isNotEmpty) {
+        approvedGross=confirmed.fold<int>(0,(sum,row)=>
+          sum+(row['gross_cents'] as int));
+      } else if(linked.isNotEmpty&&hourlyCents!=null) {
+        approvedGross=(hrs*hourlyCents).round();
+      }
+      return LabPayrollWeek(
+        weekKey:weekId,employeeId:employeeId,
+        taskCount:linked.length,hours:hrs,
+        grossCents:approvedGross,
+        paidCents:paid,hasDraft:linked.isNotEmpty);
     }
     return LabPayrollWeek(
       weekKey: weekId, employeeId: employeeId, taskCount: taskCount,
