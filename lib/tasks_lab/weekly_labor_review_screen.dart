@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 
 import '../local/local_database_provider.dart';
 import '../services/local_job_tasks_lab_store.dart';
+import 'employee_advance_ledger.dart';
 
 /// Offline-only TEST labor draft. Never posts money or marks work paid.
 class WeeklyLaborReviewLab extends StatefulWidget {
@@ -321,6 +322,9 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   }
 
   Future<void> _verifyPayment() async {
+    final debtSnapshot=await LabAdvanceLedger(localDatabase)
+      .read('briskers-tasks-test-only',widget.employeeId);
+    if (!mounted) {return;}
     if (_saving || _loading || _future || widget.rateCents == null ||
         widget.rateCents! <= 0 || _totalHours <= 0) { return; }
     final selected = Map<String, double>.from(_selected)
@@ -329,6 +333,8 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
       text: (_totalHours * widget.rateCents! / 100)
         .toStringAsFixed(2));
     final memo = TextEditingController();
+    final debtInput=TextEditingController();
+    var useDebt=false;
     var method = 'zelle';
     final confirmed = await showDialog<bool>(
       context: context,
@@ -346,6 +352,9 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
               const SizedBox(height: 8),
               TextField(
                 controller: amount,
+                onTap:() => amount.selection=TextSelection(
+                  baseOffset:0,extentOffset:amount.text.length),
+                onChanged:(v)=>update((){}),
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true),
                 decoration: const InputDecoration(
@@ -367,6 +376,7516 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                   if (v != null) update(() => method = v);
                 },
               ),
+              if(debtSnapshot.remainingCents>0) ...[
+                const SizedBox(height:8),
+                CheckboxListTile(
+                  value:useDebt,
+                  dense:true,
+                  contentPadding:EdgeInsets.zero,
+                  title:const Text('Deduct from employee debt'),
+                  subtitle:Text('Currently owed: '+
+                    (debtSnapshot.remainingCents/100).toStringAsFixed(2)),
+                  onChanged:(v)=>update(()=>useDebt=v??false),
+                ),
+                if(useDebt)
+                  TextField(
+                    controller:debtInput,
+                    keyboardType:const TextInputType.numberWithOptions(
+                      decimal:true),
+                    decoration:const InputDecoration(
+                      labelText:'Debt repayment',prefixText:r'$ ',
+                      border:OutlineInputBorder()),
+                    onTap:()=>debtInput.selection=TextSelection(
+                      baseOffset:0,extentOffset:debtInput.text.length),
+                    onChanged:(v)=>update((){}),
+                  ),
+              ],
+              const SizedBox(height:8),
+              Builder(builder:(context){
+                final gross=(double.tryParse(amount.text.trim())??0)*100;
+                final deduction=useDebt
+                  ? (double.tryParse(debtInput.text.trim())??0)*100:0.0;
+                return Column(crossAxisAlignment:CrossAxisAlignment.start,
+                  children:[
+                    Text('Calculated labor: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              final repayment=useDebt
+                ? double.tryParse(debtInput.text.trim()):0.0;
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000 ||
+                  repayment == null || !repayment.isFinite ||
+                  repayment < 0 || (useDebt && repayment <= 0) ||
+                  repayment > dollars ||
+                  (repayment*100).round()>debtSnapshot.remainingCents) {
+                return;
+              }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final deductionCents = useDebt
+        ? (double.parse(debtInput.text.trim())*100).round():0;
+      final netCents=cents-deductionCents;
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.customStatement(
+          'CREATE TABLE IF NOT EXISTS lab_payroll_settlements ('
+          'disbursement_id INTEGER PRIMARY KEY, '
+          'business_id TEXT NOT NULL,employee_id TEXT NOT NULL,'
+          'week_key TEXT NOT NULL,gross_cents INTEGER NOT NULL,'
+          'labor_cents INTEGER NOT NULL,debt_cents INTEGER NOT NULL,'
+          'net_cents INTEGER NOT NULL,created_at INTEGER NOT NULL)');
+
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          final row=await localDatabase.customSelect(
+            'SELECT last_insert_rowid() AS disbursement_id').getSingle();
+          final disbursementId=row.read<int>('disbursement_id');
+          if(deductionCents>0) {
+            final opening=await localDatabase.customSelect(
+              'SELECT opening_cents FROM lab_employee_advance_balances '
+              'WHERE business_id=? AND employee_id=?',
+              variables:[
+                const Variable<String>('briskers-tasks-test-only'),
+                Variable<String>(widget.employeeId),
+              ],
+            ).getSingleOrNull();
+            final repaid=await localDatabase.customSelect(
+              'SELECT COALESCE(SUM(cents),0) AS repaid '
+              'FROM lab_employee_advance_repayments '
+              'WHERE business_id=? AND employee_id=?',
+              variables:[
+                const Variable<String>('briskers-tasks-test-only'),
+                Variable<String>(widget.employeeId),
+              ],
+            ).getSingle();
+            final remaining=(opening?.read<int>('opening_cents')??0)
+              -repaid.read<int>('repaid');
+            if(deductionCents>remaining) {
+              throw StateError('Employee debt changed; review repayment');
+            }
+            await localDatabase.customStatement(
+              'INSERT INTO lab_employee_advance_repayments '
+              '(business_id,employee_id,cents,method,note,paid_at,'
+              'remaining_after_cents,created_at) '
+              'VALUES (?,?,?,?,?,?,?,?)',
+              ['briskers-tasks-test-only',widget.employeeId,
+                deductionCents,'Payroll deduction',memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch,
+                remaining-deductionCents,
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+          final laborCents=(_totalHours*widget.rateCents!).round();
+          await localDatabase.customStatement(
+            'INSERT INTO lab_payroll_settlements '
+            '(disbursement_id,business_id,employee_id,week_key,'
+            'gross_cents,labor_cents,debt_cents,net_cents,created_at) '
+            'VALUES (?,?,?,?,?,?,?,?,?)',
+            [disbursementId,'briskers-tasks-test-only',
+              widget.employeeId,_weekKey(_week),cents,laborCents,
+              deductionCents,netCents,DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? laborCents - allocated : (laborCents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          await showDialog<void>(
+            context:context,
+            builder:(dialog)=>AlertDialog(
+              title:const Text('Payment Recorded · TEST'),
+              content:Column(mainAxisSize:MainAxisSize.min,
+                crossAxisAlignment:CrossAxisAlignment.start,
+                children:[
+                  Text(widget.employeeName+' · '+totalHours.toStringAsFixed(2)+' hrs'),
+                  Text('Gross compensation: 
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+    debtInput.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++
+                      (_totalHours*widget.rateCents!/100).toStringAsFixed(2)),
+                    Text('Final gross pay: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++(gross/100).toStringAsFixed(2)),
+                    Text('Repayment: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++(deduction/100).toStringAsFixed(2)),
+                    Text('Transfer to employee: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++
+                      ((gross-deduction)/100).toStringAsFixed(2),
+                      style:const TextStyle(fontWeight:FontWeight.w800)),
+                  ]);
+              }),
+              const SizedBox(height: 8),
+              TextField(
+                controller: memo,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++(cents/100).toStringAsFixed(2)),
+                  Text('Debt repaid: 
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++
+                      (_totalHours*widget.rateCents!/100).toStringAsFixed(2)),
+                    Text('Final gross pay: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++(gross/100).toStringAsFixed(2)),
+                    Text('Repayment: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++(deduction/100).toStringAsFixed(2)),
+                    Text('Transfer to employee: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++
+                      ((gross-deduction)/100).toStringAsFixed(2),
+                      style:const TextStyle(fontWeight:FontWeight.w800)),
+                  ]);
+              }),
+              const SizedBox(height: 8),
+              TextField(
+                controller: memo,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++(deductionCents/100).toStringAsFixed(2)),
+                  Text('Transfer: 
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++
+                      (_totalHours*widget.rateCents!/100).toStringAsFixed(2)),
+                    Text('Final gross pay: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++(gross/100).toStringAsFixed(2)),
+                    Text('Repayment: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++(deduction/100).toStringAsFixed(2)),
+                    Text('Transfer to employee: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++
+                      ((gross-deduction)/100).toStringAsFixed(2),
+                      style:const TextStyle(fontWeight:FontWeight.w800)),
+                  ]);
+              }),
+              const SizedBox(height: 8),
+              TextField(
+                controller: memo,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++(netCents/100).toStringAsFixed(2),
+                    style:const TextStyle(fontWeight:FontWeight.bold)),
+                  const SizedBox(height:8),
+                  const Text('Recorded locally only; no bank transfer sent.'),
+                ]),
+              actions:[FilledButton(
+                onPressed:()=>Navigator.pop(dialog),child:const Text('Done'))],
+            ),
+          );
+          if (!mounted) {return;}
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++
+                      (_totalHours*widget.rateCents!/100).toStringAsFixed(2)),
+                    Text('Final gross pay: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++(gross/100).toStringAsFixed(2)),
+                    Text('Repayment: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++(deduction/100).toStringAsFixed(2)),
+                    Text('Transfer to employee: 
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Payment note (optional)',
+                  hintText: 'Partial payment, waiting for parts…',
+                  border: OutlineInputBorder())),
+              const SizedBox(height: 7),
+              const Text('TEST ONLY · This records a local simulated '
+                'payment, not a real transfer or shop payroll posting.',
+                style: TextStyle(fontSize: 11)),
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final dollars = double.tryParse(amount.text.trim());
+              if (dollars == null || !dollars.isFinite ||
+                  dollars <= 0 || dollars > 1000000) { return; }
+              Navigator.pop(dialog, true);
+            }, child: const Text('Pay (TEST)')),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final cents = (double.parse(amount.text.trim()) * 100).round();
+      final eligible = _eligible.where((task) =>
+        selected.containsKey(_id(task))).toList();
+      final totalHours = eligible.fold<double>(0, (s, task) =>
+        s + (selected[_id(task)] ?? 0));
+      if (totalHours <= 0) { return; }
+      setState(() => _saving = true);
+      try {
+        await _ensure();
+        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
+          'briskers-tasks-test-only');
+        await localDatabase.transaction(() async {
+          final already = await localDatabase.customSelect(
+            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
+            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
+            'GROUP BY document_id, line_id',
+            variables: [
+              const Variable<String>('briskers-tasks-test-only'),
+              Variable<String>(widget.employeeId),
+            ],
+          ).get();
+          final paid = <String, double>{};
+          for (final row in already) {
+            paid[row.read<String>('document_id') + ':' +
+              row.read<String>('line_id')] = row.read<double>('hours_paid');
+          }
+          for (final task in eligible) {
+            final id = _id(task);
+            final left = widget.hoursOf(task) - (paid[id] ?? 0);
+            if ((selected[id] ?? 0) > left + 0.00001) {
+              throw StateError('Task hours changed. Reopen payroll to review.');
+            }
+          }
+          await localDatabase.customStatement(
+            'INSERT INTO local_lab_payroll_disbursements '
+            '(business_id, employee_id, cents, kind, method, note, '
+            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            ['briskers-tasks-test-only', widget.employeeId, cents,
+              'pay', method, memo.text.trim(),
+              DateTime.now().millisecondsSinceEpoch,
+              DateTime.now().millisecondsSinceEpoch],
+          );
+          var allocated = 0;
+          for (var i = 0; i < eligible.length; i++) {
+            final task = eligible[i];
+            final hours = selected[_id(task)]!;
+            final part = i == eligible.length - 1
+              ? cents - allocated : (cents * hours / totalHours).round();
+            allocated += part;
+            await localDatabase.customStatement(
+              'INSERT INTO lab_payroll_task_payments '
+              '(business_id, employee_id, document_id, line_id, week_key, '
+              'description, hours, cents, method, note, paid_at) '
+              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              ['briskers-tasks-test-only', widget.employeeId,
+                task['document_id'].toString(), task['line_id'].toString(),
+                _weekKey(_week), (task['custom_description'] ??
+                  task['source_description'] ?? 'Task').toString(),
+                hours, part, method, memo.text.trim(),
+                DateTime.now().millisecondsSinceEpoch],
+            );
+          }
+        });
+        if (mounted) {
+          if (widget.embedded) {
+            // Confirming a payment must not silently select the next batch.
+            // Keep all checkboxes clear until the owner explicitly selects
+            // more unpaid hours; initial/week-change loads still default on.
+            await _load(selectUnpaidByDefault: false);
+            await widget.onPaymentSaved?.call();
+          } else {
+            Navigator.pop(context, true);
+          }
+        }
+      } catch (error) {
+        if (mounted) {
+          setState(() => _error = 'Payment not saved: ' + error.toString());
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+    amount.dispose();
+    memo.dispose();
+  }
+
+  Widget _weekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Row(children: [
+      IconButton(icon: const Icon(Icons.chevron_left),
+        onPressed: () => _moveWeek(-1)),
+      Expanded(child: InkWell(
+        onTap: _pickWeek,
+        child: Column(children: [
+          Text('Week of ' + DateFormat('MMMM d').format(start),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Text(_date.format(start) + ' – ' +
+            DateFormat('MMM d, yyyy').format(end) +
+            (_current ? ' · Current' : _future ? ' · Future' : ' · Previous'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+        ]),
+      )),
+      IconButton(icon: const Icon(Icons.chevron_right),
+        onPressed: () => _moveWeek(1)),
+      IconButton(icon: const Icon(Icons.today_outlined),
+        tooltip: 'Current week',
+        onPressed: () async {
+          setState(() => _week = DateTime.now());
+          widget.onWeekChanged?.call(_week);
+          await _load();
+        }),
+    ]);
+  }
+
+  Widget _detailHours(String label,double? hrs) =>
+    Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[
+      Text(label,style:const TextStyle(fontSize:12,color:Color(0xFF64748B))),
+      Text(hrs==null?'—':hrs.toStringAsFixed(2)+' hrs',
+        style:const TextStyle(fontSize:12,fontWeight:FontWeight.w700)),
+    ]);
+
+  Widget _compactWeekSelector() {
+    final start = _start(_week);
+    final end = _end(_week).subtract(const Duration(days: 1));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      child: SizedBox(
+        height: 43,
+        child: Row(children: [
+          IconButton(
+            tooltip: 'Previous week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(-1),
+            icon: const Icon(Icons.chevron_left)),
+          Expanded(child: InkWell(
+            onTap: _pickWeek,
+            child: Center(child: Text(
+              DateFormat('MMM d').format(start) + ' – ' +
+                DateFormat('MMM d, yyyy').format(end),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800),
+              textAlign: TextAlign.center)),
+          )),
+          IconButton(
+            tooltip: 'Next week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: () => _moveWeek(1),
+            icon: const Icon(Icons.chevron_right)),
+          IconButton(
+            tooltip: 'Choose week',
+            visualDensity: VisualDensity.compact,
+            iconSize: 21,
+            onPressed: _pickWeek,
+            icon: const Icon(Icons.calendar_today_outlined)),
+        ]),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = _eligible;
+    return Scaffold(
+      appBar: widget.embedded ? null : AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Close weekly labor',
+          onPressed: () => Navigator.pop(context)),
+        titleSpacing: 4,
+        title: Row(children: [
+          const Expanded(child: Text('Weekly labor times',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 17,
+              fontWeight: FontWeight.w400))),
+          const Icon(Icons.engineering_outlined,
+            size: 22, color: Color(0xFF00897B)),
+          const SizedBox(width: 7),
+          Container(width: 1, height: 24,
+            color: const Color(0xFFCBD5E1)),
+          const SizedBox(width: 7),
+          Flexible(child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(widget.employeeName,
+              maxLines: 1, style: const TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w800)))),
+        ]),
+      ),
+      body: SafeArea(child: Column(children: [
+        widget.embedded ? _compactWeekSelector() : _weekSelector(),
+        if (_showTip && !widget.embedded)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF2DE),
+              borderRadius: BorderRadius.circular(8)),
+            child: const Text(
+              'Select the work to include in this week. '
+              'OFFLINE TEST · No actual payroll posting.',
+              style: TextStyle(fontSize: 11.5,
+                color: Color(0xFF80541A))),
+          ),
+        if (_error != null)
+          Padding(padding: const EdgeInsets.all(6),
+            child: Text(_error!, style: const TextStyle(color: Colors.red))),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(child: ListView(
+            key: const Key('weekly-labor-tasks-scroll-only'),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            children: [
+              Row(children: [
+                Expanded(child: Text('Jobs & Tasks · ' + tasks.length.toString(),
+                  style: const TextStyle(fontWeight: FontWeight.bold))),
+                TextButton(
+                  onPressed: tasks.isEmpty ? null : _selectAll,
+                  child: Text(tasks.isNotEmpty &&
+                    tasks.every((t) => _selected.containsKey(_id(t)))
+                      ? 'Clear All' : 'Select All'),
+                ),
+              ]),
+              if (tasks.isEmpty)
+                Padding(padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text(_future
+                    ? 'Future weeks show no earned payroll. Planned work '
+                      'requires scheduling data.'
+                    : 'No dated test labor for this week.',
+                    style: const TextStyle(color: Color(0xFF64748B)))),
+              for(final task in tasks)
+                Card(
+                  key:ValueKey('payroll-task-'+_id(task)),
+                  color:const Color(0xFFF0F6F5),
+                  margin:const EdgeInsets.only(bottom:6),
+                  child:Column(children:[
+                    Row(children:[
+                      Checkbox(
+                        value:_selected.containsKey(_id(task)),
+                        onChanged:_available(task)<=0 ? null :
+                          (v)=>setState((){
+                            if(v==true) {_selected[_id(task)]=_available(task);}
+                            else {_selected.remove(_id(task));}
+                          }),
+                      ),
+                      Expanded(child:InkWell(
+                        onTap:()=>setState((){
+                          if(!_expandedTasks.add(_id(task))) {
+                            _expandedTasks.remove(_id(task));
+                          }
+                        }),
+                        child:Padding(
+                          padding:const EdgeInsets.symmetric(vertical:9),
+                          child:Column(
+                            crossAxisAlignment:CrossAxisAlignment.start,
+                            children:[
+                              Text((task['custom_description'] ??
+                                task['source_description'] ?? 'Task').toString(),
+                                maxLines:_expandedTasks.contains(_id(task))
+                                  ? null:2,
+                                overflow:_expandedTasks.contains(_id(task))
+                                  ? TextOverflow.visible:TextOverflow.ellipsis,
+                                style:const TextStyle(fontWeight:FontWeight.w700)),
+                              Text('J-24 · '+task['status'].toString()+' · '+
+                                _available(task).toStringAsFixed(2)+' unpaid hrs',
+                                style:const TextStyle(fontSize:11,
+                                  color:Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      )),
+                      Text((_selected[_id(task)]??_available(task))
+                        .toStringAsFixed(2)+'h',
+                        style:const TextStyle(fontWeight:FontWeight.bold)),
+                      IconButton(icon:const Icon(Icons.edit_outlined,size:19),
+                        tooltip:'Edit mechanic assigned / payable hours',
+                        onPressed:()=>_editHours(task)),
+                      Icon(_expandedTasks.contains(_id(task))
+                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
+                        color:const Color(0xFF64748B),size:19),
+                      const SizedBox(width:6),
+                    ]),
+                    if(_expandedTasks.contains(_id(task)))
+                      Padding(
+                        padding:const EdgeInsets.fromLTRB(50,0,14,12),
+                        child:Column(children:[
+                          const Divider(height:12),
+                          _detailHours('Customer billed',
+                            task['source_invoice_hours'] is num
+                              ? (task['source_invoice_hours'] as num).toDouble()
+                              : null),
+                          _detailHours('Mechanic assigned',_assigned(task)),
+                          _detailHours('Previously paid',_paidHours[_id(task)]??0),
+                          _detailHours('Remaining to pay',_available(task)),
+                        ]),
+                      ),
+                  ]),
+                ),
+              if (!widget.embedded)
+                const Text('Unfinished work can be paid partially in TEST. '
+                  'Real payroll posting remains disabled.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+            ],
+          )),
+        // Approved fixed footer: only the task-list above scrolls.
+        Container(
+          key: const Key('weekly-labor-fixed-footer'),
+          padding: const EdgeInsets.fromLTRB(10, 9, 10, 10),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFD6E0E8)))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F6F7),
+                borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                Expanded(child: Column(children: [
+                  const Text('Tasks selected', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_selected.length.toString() +
+                    ' of ' + tasks.length.toString(),
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Selected this week', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(_totalHours.toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800,
+                      color: Color(0xFF00897B))),
+                ])),
+                Expanded(child: Column(children: [
+                  const Text('Available hours', style: TextStyle(
+                    fontSize: 10.5, color: Color(0xFF64748B))),
+                  const SizedBox(height: 3),
+                  Text(tasks.fold<double>(0, (sum, task) =>
+                    sum + _available(task)).toStringAsFixed(2) + ' hrs',
+                    style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+                ])),
+              ]),
+            ),
+            const SizedBox(height: 9),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                onPressed: () => widget.onCancel == null
+                  ? Navigator.pop(context, false)
+                  : widget.onCancel!(),
+                child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(
+                onPressed: _loading || _saving || _future ||
+                  _totalHours <= 0 ? null : _verifyPayment,
+                child: const Text('Verify Payment'))),
+            ]),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
++
+                      ((gross-deduction)/100).toStringAsFixed(2),
+                      style:const TextStyle(fontWeight:FontWeight.w800)),
+                  ]);
+              }),
               const SizedBox(height: 8),
               TextField(
                 controller: memo,
