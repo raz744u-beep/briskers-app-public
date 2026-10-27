@@ -59,7 +59,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   String _payrollPeriod = 'This Week';
   DateTimeRange? _customPeriod;
   DateTime _repaymentDate = DateTime.now();
-  String _repaymentMethod = 'Payroll deduction';
+  String _repaymentMethod = 'Cash';
   bool _advanceExpanded = false;
   bool _editingOpening = false;
   bool _saving = false;
@@ -436,6 +436,11 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     setState(() { _assignedOverride[doc+':'+line]=hours; });
   }
 
+  Future<void> _afterPaymentSaved() async {
+    await _refreshPayrollData();
+    await _loadLedger();
+  }
+
   Widget _tasksTab() => WeeklyLaborReviewLab(
     employeeId: widget.employeeId,
     employeeName: widget.nickname,
@@ -446,7 +451,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     embedded: true,
     onCancel: () => Navigator.of(context).pop(),
     onWeekChanged: (date) => _week = date,
-    onPaymentSaved: _refreshPayrollData,
+    onPaymentSaved: _afterPaymentSaved,
     onAssignedHoursChange: _updateAssignedHours,
   );
 
@@ -693,15 +698,13 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
             decoration: const InputDecoration(
               labelText: 'Repayment method', border: OutlineInputBorder()),
             items: const [
-              DropdownMenuItem(value: 'Payroll deduction',
-                child: Text('Payroll deduction')),
               DropdownMenuItem(value: 'Cash', child: Text('Cash')),
               DropdownMenuItem(value: 'Zelle', child: Text('Zelle')),
               DropdownMenuItem(value: 'Check', child: Text('Check')),
               DropdownMenuItem(value: 'ACH', child: Text('ACH')),
             ],
             onChanged: (value) => setState(() =>
-              _repaymentMethod = value ?? 'Payroll deduction'),
+              _repaymentMethod = value ?? 'Cash'),
           ),
           const SizedBox(height: 9),
           TextField(controller: _note, decoration:
@@ -713,8 +716,8 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
             child: const Text('Save Repayment (TEST)'),
           ),
           const SizedBox(height: 8),
-          const Text('Method is recorded; selecting payroll deduction '
-            'does not post or reduce real payroll in this TEST build.',
+          const Text('Payroll deductions happen automatically during Verify Payment. '
+            'Record separate cash, Zelle, check or ACH repayments here.',
             style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
           const Divider(height: 25),
           const Text('Repayment History',
