@@ -255,7 +255,9 @@ class LocalFinancialTotalsJournal {
         lastVerifiedDay.year, lastVerifiedDay.month, lastVerifiedDay.day,
       )).inDays;
       if (verifiedAt.isAfter(DateTime.now()) ||
-          missingDays > 7 || missingDays < 0) return null;
+          missingDays > 7 || missingDays < 0) {
+        return null;
+      }
       final daily = Map<String, dynamic>.from(saved['days'] as Map);
       var incomeCents = 0;
       var expenseCents = 0;
@@ -263,9 +265,13 @@ class LocalFinancialTotalsJournal {
       var unknown = 0;
       for (final item in daily.entries) {
         if (item.key.compareTo(requestStart) < 0 ||
-            item.key.compareTo(requestEnd) > 0) continue;
+            item.key.compareTo(requestEnd) > 0) {
+          continue;
+        }
         if (item.key.compareTo(verifiedEnd) > 0 ||
-            item.key.compareTo(verifiedStart) < 0) return null;
+            item.key.compareTo(verifiedStart) < 0) {
+          return null;
+        }
         final raw = Map<String, dynamic>.from(item.value as Map);
         final income = raw['incomeCents'];
         final expense = raw['expensesCents'];
@@ -274,7 +280,9 @@ class LocalFinancialTotalsJournal {
         if (income is! int || expense is! int ||
             transactions is! int || unverified is! int ||
             income < 0 || expense < 0 ||
-            transactions < 0 || unverified < 0) return null;
+            transactions < 0 || unverified < 0) {
+          return null;
+        }
         incomeCents += income;
         expenseCents += expense;
         count += transactions;
@@ -308,7 +316,9 @@ class LocalFinancialTotalsJournal {
     final daily = totals.dailyBreakdown;
     if (key == null || daily == null ||
         fields[0] != businessId ||
-        fields[2].isEmpty || fields[3].isEmpty) return;
+        fields[2].isEmpty || fields[3].isEmpty) {
+      return;
+    }
     final start = fields[2].split('T').first;
     final end = fields[3].split('T').first;
     final days = <String, dynamic>{};
@@ -318,7 +328,9 @@ class LocalFinancialTotalsJournal {
     var unknown = 0;
     for (final item in daily.entries) {
       if (item.key.compareTo(start) < 0 ||
-          item.key.compareTo(end) > 0) return;
+          item.key.compareTo(end) > 0) {
+        return;
+      }
       final day = item.value;
       incomeCents += day.incomeCents;
       expenseCents += day.expensesCents;
@@ -334,7 +346,9 @@ class LocalFinancialTotalsJournal {
     if (incomeCents != (totals.income * 100).round() ||
         expenseCents != (totals.expenses * 100).round() ||
         count != totals.transactions ||
-        unknown != totals.unverifiedIncomeReceipts) return;
+        unknown != totals.unverifiedIncomeReceipts) {
+      return;
+    }
     await _database.customStatement('''
       INSERT INTO local_financial_cache
         (business_id,cache_key,payload_json,updated_at) VALUES (?,?,?,?)
