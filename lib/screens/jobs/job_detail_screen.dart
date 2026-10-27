@@ -208,9 +208,12 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       _onlineReady &&
       widget.roleCode == 'mechanic' &&
       _jobCapability('request_job');
-  bool get _canEditWork => _jobCapability('edit_work');
-  bool get _canEditFindings => _jobCapability('edit_findings');
-  bool get _canEditInspection => _jobCapability('edit_inspection');
+  bool get _canEditWork =>
+      _job?['_first_frame_only'] != true && _jobCapability('edit_work');
+  bool get _canEditFindings =>
+      _job?['_first_frame_only'] != true && _jobCapability('edit_findings');
+  bool get _canEditInspection =>
+      _job?['_first_frame_only'] != true && _jobCapability('edit_inspection');
   bool get _owner => widget.roleCode == 'owner';
   String? _profitabilityError;
 
@@ -514,6 +517,33 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (!forceOnline && _owner) {
       // Read the last permission-scoped verified snapshot without blocking Job.
       unawaited(_loadCachedProfitability(epoch));
+    }
+
+    if (!forceOnline && _job == null) {
+      // Direct Job links have no authorized selected-card preview. Paint the
+      // protected local core row before reading visits, findings, inspection,
+      // photo metadata and statuses. Permissions/actions remain disabled
+      // until the complete local detail snapshot replaces this preview.
+      try {
+        final core = await _localJobs.jobDetail(
+          widget.businessId, widget.jobId, coreOnly: true,
+        );
+        if (core != null && _currentLoad(epoch)) {
+          localShown = true;
+          setState(() {
+            _job = core.job;
+            _statuses = const [];
+            _preInspection = null;
+            _findings = const [];
+            _loading = false;
+            _onlineReady = false;
+            _showingLocal = true;
+            _error = null;
+          });
+        }
+      } catch (_) {
+        // Keep existing selected-row preview or await full authorized detail.
+      }
     }
 
     if (!forceOnline) {
