@@ -18,6 +18,7 @@ import '../services/local_financial_cache.dart';
 import '../services/invoice_payment_feed.dart';
 import '../services/expenses_period_totals.dart';
 import '../services/verified_expense_totals_cache.dart';
+import '../services/local_financial_totals_journal.dart';
 import '../services/expenseiq_local_photo_sync.dart';
 import '../services/expenseiq_background_scheduler.dart';
 import '../widgets/briskers_page_header.dart';
@@ -103,6 +104,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
   int _receiptEpoch = 0;
   int _periodEpoch = 0;
   ExpensesPeriodTotals? _periodTotals;
+  ExpensesPeriodTotals? _serverPeriodBase;
   bool _periodCalculating = false;
   String? _periodError;
   String? _lastPeriodScope;
@@ -155,6 +157,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       ++_periodEpoch;
       _pendingPeriodScope = null;
       _periodTotals = null;
+      _serverPeriodBase = null;
       _lastPeriodScope = null;
       _lastPeriodAt = null;
       _periodCalculating = false;
@@ -568,7 +571,22 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           rows.map((row) => row['id']?.toString() ?? '')
               .where((id) => id.isNotEmpty),
         );
-        _transactions = rows;
+        // Retain locally committed, not-yet-synced financial entries if
+        // the authenticated server's first page has not received them.
+        // Identity-scoped replacement avoids duplicate list cards.
+        final localPending = {
+          for (final row in _transactions)
+            if (row['sync_state']?.toString() == 'pending')
+              row['id']?.toString(): row,
+        };
+        final seen = <String>{};
+        _transactions = [
+          for (final row in rows)
+            if (seen.add(row['id']?.toString() ?? ''))
+              localPending[row['id']?.toString()] ?? row,
+          for (final entry in localPending.entries)
+            if (!seen.contains(entry.key)) entry.value,
+        ];
         _hasMore = rows.length == _pageSize;
         _loading = false;
         _showingLocal = false;
@@ -626,101 +644,141 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       categoryId ?? '',
       counterpartyId ?? '',
     ].join('|');
-    if (offline) {
-      final epoch = ++_periodEpoch;
-      _pendingPeriodScope = null;
-      final saved = await const VerifiedExpenseTotalsCache().load(scope);
-      if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
-          businessId != widget.businessId) {
-        return;
-      }
-      setState(() {
-        final sameScope = _lastPeriodScope == scope && _periodTotals != null;
-        if (saved != null) {
-          _periodTotals = saved.totals;
-          _lastPeriodScope = scope;
-          _lastPeriodAt = saved.at;
-        } else if (!sameScope) {
-          _periodTotals = null;
-          _lastPeriodAt = null;
-        }
-        _periodCalculating = false;
-        _periodError = _periodTotals == null
-          ? 'Complete totals require an online refresh.'
-          : 'Offline · last verified ${DateFormat('MMM d, yyyy h:mm a').format(_lastPeriodAt!)} · later changes excluded';
-      });
+    // Restore complete stored totals and add all locally committed deltas.
+    // The server is NOT a prerequisite for entering the Expenses screen.
+    if (_pendingPeriodScope == scope) return;
+    final epoch = ++_periodEpoch;
+    final journal = LocalFinancialTotalsJournal();
+    _pendingPeriodScope = scope;
+    final sameScope = _lastPeriodScope == scope && _serverPeriodBase != null;
+    final sqliteSaved = await journal.loadBaseline(businessId, scope);
+    // Migrate an older complete verified snapshot from preferences once.
+    final legacy = sqliteSaved == null
+        ? await const VerifiedExpenseTotalsCache().load(scope) : null;
+    if (sqliteSaved == null && legacy != null) {
+      await journal.saveBaseline(
+          businessId, scope, legacy.totals, legacy.at);
+    }
+    if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
+        widget.businessId != businessId) {
       return;
     }
-    if (_pendingPeriodScope == scope) return;
-    final sameScope = _lastPeriodScope == scope && _periodTotals != null;
-    final fresh = sameScope && _lastPeriodAt != null &&
-        DateTime.now().difference(_lastPeriodAt!) <
-            const Duration(minutes: 5);
-    if (fresh && !force) return;
-    final epoch = ++_periodEpoch;
-    _pendingPeriodScope = scope;
-    setState(() {
-      // Preserve a recently verified amount while rechecking the same scope.
-      // Switching periods never shows a total from an earlier date range.
-      if (!sameScope) _periodTotals = null;
-      _periodCalculating = true;
-      _periodError = null;
-    });
-    // Restore the last *complete, exact-scope* snapshot before awaiting an
-    // expensive network calculation. A cold start must not forget a verified
-    // value merely because its first online request times out.
+    final baseline = sqliteSaved?.totals ?? legacy?.totals ??
+        (sameScope ? _serverPeriodBase : null);
+    final lastVerified = sqliteSaved?.at ?? legacy?.at ??
+        (sameScope ? _lastPeriodAt : null);
+    ExpensesPeriodTotals? local;
+    int localChanges = 0;
     try {
-      final saved = await const VerifiedExpenseTotalsCache().load(scope);
-      if (saved != null && mounted && epoch == _periodEpoch &&
-          _pendingPeriodScope == scope && widget.businessId == businessId &&
-          _showFinancialSummary) {
+      local = baseline == null ? null : await journal.apply(
+        businessId, baseline,
+        startDate: startDate, endDate: endDate,
+        search: search.isEmpty ? null : search, direction: direction,
+        accountId: accountId, categoryId: categoryId,
+        counterpartyId: counterpartyId,
+      );
+      localChanges = await journal.pendingCount(businessId);
+    } catch (_) {
+      if (mounted && epoch == _periodEpoch) {
         setState(() {
-          _periodTotals = saved.totals;
-          _lastPeriodScope = scope;
-          _lastPeriodAt = saved.at;
-          _periodError = 'Last verified totals · updating';
+          _periodCalculating = false;
+          _pendingPeriodScope = null;
+          _periodError = 'Local totals need verification. Refresh to retry.';
         });
       }
-    } catch (_) {
-      // Failure to read cache must not prevent a fresh server calculation.
+      return;
     }
+    if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
+        widget.businessId != businessId) {
+      return;
+    }
+    final fresh = lastVerified != null &&
+        DateTime.now().difference(lastVerified) < const Duration(minutes: 30);
+    setState(() {
+      _serverPeriodBase = baseline;
+      _periodTotals = local;
+      _lastPeriodScope = scope;
+      _lastPeriodAt = lastVerified;
+      _periodCalculating = false;
+      _periodError = local == null
+          ? (offline ? 'Complete baseline not yet saved on this device.'
+              : 'Preparing first complete local baseline…')
+          : localChanges > 0
+              ? 'Includes $localChanges locally saved change(s) · sync pending'
+              : offline
+                  ? 'Offline · saved totals verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}'
+                  : 'Saved local totals · verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}';
+    });
+    if (offline || (fresh && !force)) {
+      _pendingPeriodScope = null;
+      return;
+    }
+    // Only a missing/old snapshot or an explicit refresh runs a full scan.
+    // The previously projected figures remain visible during verification.
+    if (_periodTotals == null) {
+      setState(() => _periodCalculating = true);
+    }
+
     bool current() =>
         mounted && epoch == _periodEpoch &&
         _pendingPeriodScope == scope &&
         widget.businessId == businessId &&
         !BriskersConnectionModeController.instance.forceOffline;
     try {
+      final completeRows = <Map<String, dynamic>>[];
       final totals = await ExpensesPeriodTotals.calculate(
         isCurrent: current,
-        readPage: (offset, limit) => _api.transactionsPaged(
-          businessId,
-          offset: offset, limit: limit,
-          startDate: startDate, endDate: endDate,
-          search: search.isEmpty ? null : search,
-          direction: direction,
-          accountId: accountId,
-          categoryId: categoryId,
-          counterpartyId: counterpartyId,
-        ),
-        // Use only existing, identity-scoped reporting evidence for processor
-        // fees. Never invent a fee or modify canonical transaction amounts.
+        readPage: (offset, limit) async {
+          final rows = await _api.transactionsPaged(
+            businessId,
+            offset: offset, limit: limit,
+            startDate: startDate, endDate: endDate,
+            search: search.isEmpty ? null : search,
+            direction: direction,
+            accountId: accountId,
+            categoryId: categoryId,
+            counterpartyId: counterpartyId,
+          );
+          completeRows.addAll(rows);
+          return rows;
+        },
         enrichPage: (rows) => const WarrantyReceiptReporting().enrich(
           businessId, rows, refresh: false,
         ),
       );
       if (!current()) return;
+      // Retire only receipts proven identical by the complete authenticated
+      // history and exact operation/transaction identities.
+      final verifiedAt = DateTime.now();
+      await journal.reconcileAndSaveBaseline(
+        businessId, scope, totals, verifiedAt,
+        completeRows, receipts: _invoiceReceipts,
+      );
+      final projected = await journal.apply(
+        businessId, totals,
+        startDate: startDate, endDate: endDate,
+        search: search.isEmpty ? null : search, direction: direction,
+        accountId: accountId, categoryId: categoryId,
+        counterpartyId: counterpartyId,
+      );
+      final remaining = await journal.pendingCount(businessId);
+      if (!current()) return;
+      // Preferences are a legacy fallback; SQLite above is authoritative.
+      try {
+        await const VerifiedExpenseTotalsCache().save(scope, totals, verifiedAt);
+      } catch (_) { /* Keep the in-memory verified baseline. */ }
+      if (!current()) return;
       setState(() {
-        _periodTotals = totals;
+        _serverPeriodBase = totals;
+        _periodTotals = projected;
         _lastPeriodScope = scope;
-        _lastPeriodAt = DateTime.now();
+        _lastPeriodAt = verifiedAt;
         _pendingPeriodScope = null;
         _periodCalculating = false;
-        _periodError = null;
+        _periodError = remaining > 0
+            ? 'Includes $remaining locally saved change(s) · sync pending'
+            : null;
       });
-      // Persistence failure cannot invalidate a successfully verified total.
-      try {
-        await const VerifiedExpenseTotalsCache().save(scope, totals, _lastPeriodAt!);
-      } catch (_) { /* Keep the verified in-memory result. */ }
     } catch (_) {
       if (!current()) return;
       setState(() {
@@ -773,7 +831,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
       });
       // The offline cache remains durable, but does not block first paint.
-      await _localFinancial.saveTransactions(businessId, snapshot);
+      await _localFinancial.mergeServerTransactions(businessId, snapshot);
       await _localFinancial.saveServerConfirmedTransactions(
         businessId, snapshot,
       );

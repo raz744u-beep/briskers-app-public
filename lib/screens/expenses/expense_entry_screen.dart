@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart' hide showDialog, showModalBottomSheet;
 
 import '../../core/module_modal_theme.dart';
@@ -1010,7 +1012,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
       final rounded = num.parse(amount.toStringAsFixed(2));
       final counterpartyName = _counterpartyController.text.trim();
 
-      if (BriskersConnectionModeController.instance.forceOffline) {
+      // Ordinary income and expenses are local-first even in Auto mode.
+      // Recurring rules and AI extraction currently need additional online
+      // operations; preserve those workflows until their queue is supported.
+      final localFirst = BriskersConnectionModeController.instance.forceOffline ||
+          (!_repeat && _recurringRuleId == null && _receiptExtraction == null);
+      if (localFirst) {
         if (_repeat) {
           setState(() {
             _saving = false;
@@ -1075,6 +1082,12 @@ class _ExpenseEntryScreenState extends State<ExpenseEntryScreen>
           );
         }
 
+        if (!BriskersConnectionModeController.instance.forceOffline) {
+          // The local transaction and totals were committed already. Sync is
+          // best-effort and never delays or reverses the successful local save.
+          unawaited(_offlineFinancial.flush(widget.businessId)
+              .catchError((Object _) {}));
+        }
         if (!mounted) return;
         Navigator.pop(context, true);
         return;

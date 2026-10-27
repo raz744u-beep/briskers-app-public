@@ -10,6 +10,7 @@ import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
 import 'local_financial_cache.dart';
+import 'local_financial_totals_journal.dart';
 
 typedef FinancialMediaDirectoryProvider = Future<Directory> Function();
 
@@ -185,7 +186,7 @@ class OfflineFinancialWriteService {
     final localId = 'local-transaction-$operationId';
     final attachments = <Map<String, dynamic>>[];
 
-    await _database.transaction(() async {
+    return _database.transaction(() async {
       await _enqueue(
         businessId,
         'financial_create',
@@ -210,7 +211,6 @@ class OfflineFinancialWriteService {
       attachments.addAll(
         await _queueReceipts(businessId, localId, receipts),
       );
-    });
 
     final cleanCounterparty =
         (counterpartyName ?? '').trim().isEmpty
@@ -248,6 +248,11 @@ class OfflineFinancialWriteService {
       'sync_state': 'pending',
     };
     await _upsertSummary(businessId, summary);
+    // Financial projection is committed atomically with the queue and local
+    // summary. A failed SQLite write rolls back all three.
+    await LocalFinancialTotalsJournal(database: _database).record(
+      businessId, 'transaction:$localId', after: summary,
+    );
 
     final detail = <String, dynamic>{
       ...summary,
@@ -263,6 +268,7 @@ class OfflineFinancialWriteService {
       detail,
     );
     return detail;
+    });
   }
 
   Future<Map<String, dynamic>> updateLocalTransaction(
@@ -377,7 +383,19 @@ class OfflineFinancialWriteService {
         'recurring': false,
         'sync_state': 'pending',
       };
+      final oldRows = await _allTransactions(businessId);
+      Map<String, dynamic>? previous;
+      for (final row in oldRows) {
+        if (row['id']?.toString() == transactionId) {
+          previous = row;
+          break;
+        }
+      }
       await _upsertSummary(businessId, summary);
+      await LocalFinancialTotalsJournal(database: _database).record(
+        businessId, 'transaction:$transactionId',
+        before: previous, after: summary,
+      );
 
       final detail = <String, dynamic>{
         ...existing,
@@ -509,6 +527,10 @@ class OfflineFinancialWriteService {
         };
         await _cache.saveTransactions(businessId, rows);
       }
+      await LocalFinancialTotalsJournal(database: _database).remap(
+        businessId, 'transaction:$localId', 'transaction:$serverId',
+        newTransactionId: serverId,
+      );
 
       final detail =
           await _cache.loadTransactionDetail(businessId, localId);

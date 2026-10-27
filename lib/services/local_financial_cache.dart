@@ -143,6 +143,35 @@ class LocalFinancialCache {
     );
   }
 
+  /// Refresh the server's limited list without erasing locally committed
+  /// transactions/edits that are still queued for synchronization. Both the
+  /// overlay read and persisted result share a single SQLite transaction.
+  Future<void> mergeServerTransactions(
+    String businessId, List<Map<String, dynamic>> serverRows,
+  ) async {
+    await _database.transaction(() async {
+      final saved = await loadTransactions(businessId);
+      final pending = <String, Map<String, dynamic>>{
+        for (final row in saved)
+          if (row['sync_state']?.toString() == 'pending' &&
+              (row['id']?.toString() ?? '').isNotEmpty)
+            row['id'].toString(): row,
+      };
+      final seen = <String>{};
+      final merged = <Map<String, dynamic>>[
+        for (final row in serverRows)
+          if (seen.add(row['id']?.toString() ?? ''))
+            pending[row['id']?.toString()] ?? row,
+        for (final entry in pending.entries)
+          if (!seen.contains(entry.key)) entry.value,
+      ];
+      merged.sort((a, b) =>
+        (b['transaction_date']?.toString() ?? '').compareTo(
+        a['transaction_date']?.toString() ?? ''));
+      await saveTransactions(businessId, merged);
+    });
+  }
+
   Future<List<Map<String, dynamic>>> loadTransactions(
     String businessId, {
     DateTime? startDate,

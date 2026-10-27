@@ -9,6 +9,7 @@ import '../core/connection_mode.dart';
 import 'briskers_api.dart';
 import 'local_job_quarantine.dart';
 import 'local_document_detail_cache.dart';
+import 'local_financial_totals_journal.dart';
 
 /// Durable *local* payment capture and idempotent replay. This class records
 /// received payments only; it never finalizes payments or posts income.
@@ -240,6 +241,19 @@ class OfflineInvoicePaymentLedger {
         ''',
         [businessId, invoiceId, jsonEncode(payload), now],
       );
+      await LocalFinancialTotalsJournal(database: _database).record(
+        businessId, 'invoice-payment:$operationId',
+        after: {
+          'id': 'invoice-payment:$operationId',
+          'operation_id': operationId,
+          'document_id': invoiceId,
+          'direction': 'income',
+          'amount': amountCents / 100,
+          'transaction_date': capturedDate,
+          'counterparty': 'Invoice payment',
+          'sync_state': 'pending',
+        },
+      );
     });
     return operationId;
   }
@@ -320,6 +334,19 @@ class OfflineInvoicePaymentLedger {
       await _database.customStatement(
         "UPDATE sync_outbox SET payload_json=?,last_error=NULL WHERE id=?",
         [jsonEncode(value), row.read<int>('id')],
+      );
+      await LocalFinancialTotalsJournal(database: _database).record(
+        businessId, 'invoice-payment:$operationId',
+        after: {
+          'id': 'invoice-payment:$operationId',
+          'operation_id': operationId,
+          'document_id': invoiceId,
+          'direction': 'income',
+          'amount': amountCents / 100,
+          'transaction_date': paymentDate,
+          'counterparty': 'Invoice payment',
+          'sync_state': 'pending',
+        },
       );
     });
   }
@@ -553,6 +580,10 @@ class OfflineInvoicePaymentLedger {
       }
       await _database.customStatement(
         'DELETE FROM sync_outbox WHERE id=?', [row.read<int>('id')]);
+      await LocalFinancialTotalsJournal(database: _database).record(
+        businessId, 'invoice-payment:$operationId',
+        after: null,
+      );
     });
   }
 
