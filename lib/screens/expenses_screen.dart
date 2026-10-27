@@ -651,13 +651,22 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final journal = LocalFinancialTotalsJournal();
     _pendingPeriodScope = scope;
     final sameScope = _lastPeriodScope == scope && _serverPeriodBase != null;
-    final saved = await const VerifiedExpenseTotalsCache().load(scope);
+    final sqliteSaved = await journal.loadBaseline(businessId, scope);
+    // Migrate an older complete verified snapshot from preferences once.
+    final legacy = sqliteSaved == null
+        ? await const VerifiedExpenseTotalsCache().load(scope) : null;
+    if (sqliteSaved == null && legacy != null) {
+      await journal.saveBaseline(
+          businessId, scope, legacy.totals, legacy.at);
+    }
     if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
         widget.businessId != businessId) {
       return;
     }
-    final baseline = saved?.totals ?? (sameScope ? _serverPeriodBase : null);
-    final lastVerified = saved?.at ?? (sameScope ? _lastPeriodAt : null);
+    final baseline = sqliteSaved?.totals ?? legacy?.totals ??
+        (sameScope ? _serverPeriodBase : null);
+    final lastVerified = sqliteSaved?.at ?? legacy?.at ??
+        (sameScope ? _lastPeriodAt : null);
     ExpensesPeriodTotals? local;
     int localChanges = 0;
     try {
@@ -740,8 +749,10 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       if (!current()) return;
       // Retire only receipts proven identical by the complete authenticated
       // history and exact operation/transaction identities.
-      await journal.reconcile(
-        businessId, completeRows, receipts: _invoiceReceipts,
+      final verifiedAt = DateTime.now();
+      await journal.reconcileAndSaveBaseline(
+        businessId, scope, totals, verifiedAt,
+        completeRows, receipts: _invoiceReceipts,
       );
       final projected = await journal.apply(
         businessId, totals,
@@ -752,9 +763,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       );
       final remaining = await journal.pendingCount(businessId);
       if (!current()) return;
-      final verifiedAt = DateTime.now();
-      // Only the complete authoritative baseline is saved. Never save a
-      // local-adjusted figure then replay the same delta on app restart.
+      // Preferences are a legacy fallback; SQLite above is authoritative.
       try {
         await const VerifiedExpenseTotalsCache().save(scope, totals, verifiedAt);
       } catch (_) { /* Keep the in-memory verified baseline. */ }
