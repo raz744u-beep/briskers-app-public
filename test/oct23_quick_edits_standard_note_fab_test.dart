@@ -69,7 +69,9 @@ void main() {
     );
     expect(init, contains('_loading = false;'));
     expect(init, isNot(contains('_loadCustomers();')));
-    expect(source, contains('const Duration(milliseconds: 350)'));
+    expect(source, contains('const Duration(milliseconds: 60)'));
+    expect(source, contains('await _localCustomers.customers('));
+    expect(source, contains('unawaited(_searchUnsyncedCustomers('));
   });
 
   test('Expenses restores verified complete-period totals during refresh', () {
