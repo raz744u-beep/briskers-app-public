@@ -321,164 +321,187 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   }
 
   Future<void> _verifyPayment() async {
-    if (_saving || _loading || _future || widget.rateCents == null ||
-        widget.rateCents! <= 0 || _totalHours <= 0) { return; }
-    final selected = Map<String, double>.from(_selected)
-      ..removeWhere((key, hours) => hours <= 0);
-    final amount = TextEditingController(
-      text: (_totalHours * widget.rateCents! / 100)
-        .toStringAsFixed(2));
-    final memo = TextEditingController();
-    var method = 'zelle';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (outer) => StatefulBuilder(
-        builder: (dialog, update) => AlertDialog(
-          title: const Text('Verify Payment · TEST'),
-          content: SingleChildScrollView(child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(widget.employeeName + ' · Week of ' +
+    if(_saving||_loading||_future||widget.rateCents==null||
+      widget.rateCents!<=0||_totalHours<=0) {return;}
+    final debt=await LabAdvanceLedger(localDatabase)
+      .read('briskers-tasks-test-only',widget.employeeId);
+    if(!mounted) {return;}
+    final selected=Map<String,double>.from(_selected)
+      ..removeWhere((key,hours)=>hours<=0);
+    final laborCents=(_totalHours*widget.rateCents!).round();
+    final amount=TextEditingController(
+      text:(laborCents/100).toStringAsFixed(2));
+    final debtInput=TextEditingController();
+    final note=TextEditingController();
+    var method='zelle';
+    var deduct=false;
+    final confirmed=await showDialog<bool>(
+      context:context,
+      builder:(outer)=>StatefulBuilder(
+        builder:(dialog,update)=>AlertDialog(
+          title:const Text('Verify Payment · TEST'),
+          content:SingleChildScrollView(child:Column(
+            mainAxisSize:MainAxisSize.min,
+            crossAxisAlignment:CrossAxisAlignment.start,
+            children:[
+              Text(widget.employeeName+' · Week of '+
                 DateFormat('MMM d, yyyy').format(_start(_week))),
-              Text(selected.length.toString() + ' tasks · ' +
-                _totalHours.toStringAsFixed(2) + ' hours'),
-              const SizedBox(height: 8),
+              Text(selected.length.toString()+' tasks · '+
+                _totalHours.toStringAsFixed(2)+' hours'),
+              const SizedBox(height:10),
+              Text('Calculated labor: $'+(laborCents/100).toStringAsFixed(2)),
+              const SizedBox(height:9),
               TextField(
-                controller: amount,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Final amount',
-                  prefixText: r'$ ', border: OutlineInputBorder())),
-              const SizedBox(height: 8),
+                controller:amount,
+                keyboardType:const TextInputType.numberWithOptions(
+                  decimal:true),
+                decoration:const InputDecoration(
+                  labelText:'Final gross payment',
+                  prefixText:r'$ ',border:OutlineInputBorder()),
+                onChanged:(value)=>update((){}),
+                onTap:()=>amount.selection=TextSelection(
+                  baseOffset:0,extentOffset:amount.text.length),
+              ),
+              const SizedBox(height:9),
               DropdownButtonFormField<String>(
-                initialValue: method,
-                decoration: const InputDecoration(
-                  labelText: 'Payment method',
-                  border: OutlineInputBorder()),
-                items: const [
-                  DropdownMenuItem(value: 'zelle', child: Text('Zelle')),
-                  DropdownMenuItem(value: 'cash', child: Text('Cash')),
-                  DropdownMenuItem(value: 'check', child: Text('Check')),
-                  DropdownMenuItem(value: 'ach', child: Text('ACH')),
+                initialValue:method,
+                decoration:const InputDecoration(
+                  labelText:'Payment method',border:OutlineInputBorder()),
+                items:const [
+                  DropdownMenuItem(value:'zelle',child:Text('Zelle')),
+                  DropdownMenuItem(value:'cash',child:Text('Cash')),
+                  DropdownMenuItem(value:'check',child:Text('Check')),
+                  DropdownMenuItem(value:'ach',child:Text('ACH')),
                 ],
-                onChanged: (v) {
-                  if (v != null) update(() => method = v);
+                onChanged:(value){
+                  if(value!=null) {update(()=>method=value);}
                 },
               ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: memo,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Payment note (optional)',
-                  hintText: 'Partial payment, waiting for parts…',
-                  border: OutlineInputBorder())),
-              const SizedBox(height: 7),
-              const Text('TEST ONLY · This records a local simulated '
-                'payment, not a real transfer or shop payroll posting.',
-                style: TextStyle(fontSize: 11)),
+              if(debt.remainingCents>0) ...[
+                const SizedBox(height:8),
+                CheckboxListTile(
+                  dense:true,contentPadding:EdgeInsets.zero,
+                  value:deduct,
+                  title:const Text('Deduct from employee debt'),
+                  subtitle:Text('Currently owed: $'+
+                    (debt.remainingCents/100).toStringAsFixed(2)),
+                  onChanged:(value)=>update(()=>deduct=value??false),
+                ),
+                if(deduct) TextField(
+                  controller:debtInput,
+                  keyboardType:const TextInputType.numberWithOptions(
+                    decimal:true),
+                  decoration:const InputDecoration(
+                    labelText:'Debt repayment',
+                    prefixText:r'$ ',border:OutlineInputBorder()),
+                  onChanged:(value)=>update((){}),
+                  onTap:()=>debtInput.selection=TextSelection(
+                    baseOffset:0,extentOffset:debtInput.text.length),
+                ),
+              ],
+              const SizedBox(height:9),
+              Builder(builder:(context){
+                final gross=double.tryParse(amount.text.trim())??0;
+                final repayment=deduct ?
+                  (double.tryParse(debtInput.text.trim())??0):0.0;
+                return Column(
+                  crossAxisAlignment:CrossAxisAlignment.start,children:[
+                    Text('Adjustment: '+(gross-laborCents/100>=0?'+':'')+
+                      (gross-laborCents/100).toStringAsFixed(2)),
+                    Text('Send employee: $'+
+                      (gross-repayment).toStringAsFixed(2),
+                      style:const TextStyle(fontWeight:FontWeight.w800)),
+                  ]);
+              }),
+              const SizedBox(height:9),
+              TextField(controller:note,maxLines:2,
+                decoration:const InputDecoration(
+                  labelText:'Payment note (optional)',
+                  border:OutlineInputBorder())),
+              const SizedBox(height:7),
+              const Text('TEST ONLY · Local simulated payment; '
+                'no external money transferred.',
+                style:TextStyle(fontSize:11)),
             ],
           )),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialog, false),
-              child: const Text('Cancel')),
-            FilledButton(onPressed: () {
-              final dollars = double.tryParse(amount.text.trim());
-              if (dollars == null || !dollars.isFinite ||
-                  dollars <= 0 || dollars > 1000000) { return; }
-              Navigator.pop(dialog, true);
-            }, child: const Text('Pay (TEST)')),
+          actions:[
+            TextButton(onPressed:()=>Navigator.pop(dialog,false),
+              child:const Text('Cancel')),
+            FilledButton(onPressed:(){
+              final gross=double.tryParse(amount.text.trim());
+              final repayment=deduct
+                ? double.tryParse(debtInput.text.trim()):0.0;
+              if(gross==null||!gross.isFinite||gross<=0||
+                gross>1000000||repayment==null||!repayment.isFinite||
+                repayment<0||(deduct&&repayment<=0)||
+                repayment>gross||
+                (repayment*100).round()>debt.remainingCents) {return;}
+              Navigator.pop(dialog,true);
+            },child:const Text('Pay (TEST)')),
           ],
         ),
       ),
     );
-    if (confirmed == true && mounted) {
-      final cents = (double.parse(amount.text.trim()) * 100).round();
-      final eligible = _eligible.where((task) =>
-        selected.containsKey(_id(task))).toList();
-      final totalHours = eligible.fold<double>(0, (s, task) =>
-        s + (selected[_id(task)] ?? 0));
-      if (totalHours <= 0) { return; }
-      setState(() => _saving = true);
+    if(confirmed==true&&mounted) {
+      setState(()=>_saving=true);
       try {
-        await _ensure();
-        await LocalJobTasksLabStore(localDatabase).payrollTestPayments(
-          'briskers-tasks-test-only');
-        await localDatabase.transaction(() async {
-          final already = await localDatabase.customSelect(
-            'SELECT document_id, line_id, SUM(hours) AS hours_paid '
-            'FROM lab_payroll_task_payments WHERE business_id=? AND employee_id=? '
-            'GROUP BY document_id, line_id',
-            variables: [
-              const Variable<String>('briskers-tasks-test-only'),
-              Variable<String>(widget.employeeId),
-            ],
-          ).get();
-          final paid = <String, double>{};
-          for (final row in already) {
-            paid[row.read<String>('document_id') + ':' +
-              row.read<String>('line_id')] = row.read<double>('hours_paid');
-          }
-          for (final task in eligible) {
-            final id = _id(task);
-            final left = widget.hoursOf(task) - (paid[id] ?? 0);
-            if ((selected[id] ?? 0) > left + 0.00001) {
-              throw StateError('Task hours changed. Reopen payroll to review.');
+        final grossCents=(double.parse(amount.text.trim())*100).round();
+        final debtCents=deduct
+          ? (double.parse(debtInput.text.trim())*100).round():0;
+        final result=await LabPayrollPaymentService.record(
+          employeeId:widget.employeeId,
+          week:_week,tasks:_eligible,
+          hoursByTask:selected,assignedHours:_assigned,
+          hourlyRateCents:widget.rateCents!,
+          grossCents:grossCents,debtCents:debtCents,
+          method:method,note:note.text,
+        );
+        if(mounted) {
+          await showDialog<void>(
+            context:context,
+            builder:(dialog)=>AlertDialog(
+              title:const Text('Payment Recorded · TEST'),
+              content:Column(
+                mainAxisSize:MainAxisSize.min,
+                crossAxisAlignment:CrossAxisAlignment.start,
+                children:[
+                  Text(widget.employeeName+' · '+
+                    result.hours.toStringAsFixed(2)+' hrs'),
+                  Text('Gross compensation: $'+
+                    (result.grossCents/100).toStringAsFixed(2)),
+                  Text('Debt repayment: $'+
+                    (result.debtCents/100).toStringAsFixed(2)),
+                  Text('Transferred: $'+
+                    (result.netCents/100).toStringAsFixed(2),
+                    style:const TextStyle(fontWeight:FontWeight.w700)),
+                  const SizedBox(height:8),
+                  const Text('Saved locally; no external transfer sent.'),
+                ],
+              ),
+              actions:[FilledButton(
+                onPressed:()=>Navigator.pop(dialog),
+                child:const Text('Done'))],
+            ),
+          );
+          if(mounted) {
+            if(widget.embedded) {
+              await _load(selectUnpaidByDefault:false);
+              await widget.onPaymentSaved?.call();
+            } else {
+              Navigator.pop(context,true);
             }
           }
-          await localDatabase.customStatement(
-            'INSERT INTO local_lab_payroll_disbursements '
-            '(business_id, employee_id, cents, kind, method, note, '
-            'paid_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            ['briskers-tasks-test-only', widget.employeeId, cents,
-              'pay', method, memo.text.trim(),
-              DateTime.now().millisecondsSinceEpoch,
-              DateTime.now().millisecondsSinceEpoch],
-          );
-          var allocated = 0;
-          for (var i = 0; i < eligible.length; i++) {
-            final task = eligible[i];
-            final hours = selected[_id(task)]!;
-            final part = i == eligible.length - 1
-              ? cents - allocated : (cents * hours / totalHours).round();
-            allocated += part;
-            await localDatabase.customStatement(
-              'INSERT INTO lab_payroll_task_payments '
-              '(business_id, employee_id, document_id, line_id, week_key, '
-              'description, hours, cents, method, note, paid_at) '
-              'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-              ['briskers-tasks-test-only', widget.employeeId,
-                task['document_id'].toString(), task['line_id'].toString(),
-                _weekKey(_week), (task['custom_description'] ??
-                  task['source_description'] ?? 'Task').toString(),
-                hours, part, method, memo.text.trim(),
-                DateTime.now().millisecondsSinceEpoch],
-            );
-          }
-        });
-        if (mounted) {
-          if (widget.embedded) {
-            // Confirming a payment must not silently select the next batch.
-            // Keep all checkboxes clear until the owner explicitly selects
-            // more unpaid hours; initial/week-change loads still default on.
-            await _load(selectUnpaidByDefault: false);
-            await widget.onPaymentSaved?.call();
-          } else {
-            Navigator.pop(context, true);
-          }
         }
-      } catch (error) {
-        if (mounted) {
-          setState(() => _error = 'Payment not saved: ' + error.toString());
-        }
+      } catch(error) {
+        if(mounted) {setState(()=>
+          _error='Payment not saved: '+error.toString());}
       } finally {
-        if (mounted) setState(() => _saving = false);
+        if(mounted) {setState(()=>_saving=false);}
       }
     }
     amount.dispose();
-    memo.dispose();
+    debtInput.dispose();
+    note.dispose();
   }
 
   Widget _weekSelector() {
