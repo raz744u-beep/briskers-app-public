@@ -28,7 +28,8 @@ void main() {
       source.indexOf('Future<void> _changeStatus('),
     );
     for (final code in [mechanic, hours]) {
-      expect(code, contains('await _load(refreshRemote: false)'));
+      expect(code, contains('_patchQuickAdminCard('));
+      expect(code, isNot(contains('await _load(refreshRemote: false)')));
       expect(code, contains('_scheduleQuickEditSync();'));
       expect(code, isNot(contains('await _offlineJobAdmin.flush(')));
     }
