@@ -1,4 +1,4 @@
-// ignore_for_file: prefer_interpolation_to_compose_strings
+// ignore_for_file: prefer_interpolation_to_compose_strings, curly_braces_in_flow_control_structures
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -514,7 +514,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
             }
           },child:const Text('Save General Task')),
         ])),
-      ))),
+      )),
     );
     description.dispose();
     if(created==true) {
