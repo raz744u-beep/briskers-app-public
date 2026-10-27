@@ -699,37 +699,60 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         widget.businessId == businessId &&
         !BriskersConnectionModeController.instance.forceOffline;
     try {
+      final completeRows = <Map<String, dynamic>>[];
       final totals = await ExpensesPeriodTotals.calculate(
         isCurrent: current,
-        readPage: (offset, limit) => _api.transactionsPaged(
-          businessId,
-          offset: offset, limit: limit,
-          startDate: startDate, endDate: endDate,
-          search: search.isEmpty ? null : search,
-          direction: direction,
-          accountId: accountId,
-          categoryId: categoryId,
-          counterpartyId: counterpartyId,
-        ),
-        // Use only existing, identity-scoped reporting evidence for processor
-        // fees. Never invent a fee or modify canonical transaction amounts.
+        readPage: (offset, limit) async {
+          final rows = await _api.transactionsPaged(
+            businessId,
+            offset: offset, limit: limit,
+            startDate: startDate, endDate: endDate,
+            search: search.isEmpty ? null : search,
+            direction: direction,
+            accountId: accountId,
+            categoryId: categoryId,
+            counterpartyId: counterpartyId,
+          );
+          completeRows.addAll(rows);
+          return rows;
+        },
         enrichPage: (rows) => const WarrantyReceiptReporting().enrich(
           businessId, rows, refresh: false,
         ),
       );
       if (!current()) return;
+      // Retire only receipts proven identical by the complete authenticated
+      // history and exact operation/transaction identities.
+      await journal.reconcile(
+        businessId, completeRows, receipts: _invoiceReceipts,
+      );
+      final projected = await journal.apply(
+        businessId, totals,
+        startDate: startDate, endDate: endDate,
+        search: search.isEmpty ? null : search, direction: direction,
+        accountId: accountId, categoryId: categoryId,
+        counterpartyId: counterpartyId,
+      );
+      final remaining = await journal.pendingCount(businessId);
+      if (!current()) return;
+      final verifiedAt = DateTime.now();
+      // Only the complete authoritative baseline is saved. Never save a
+      // local-adjusted figure then replay the same delta on app restart.
+      try {
+        await const VerifiedExpenseTotalsCache().save(scope, totals, verifiedAt);
+      } catch (_) { /* Keep the in-memory verified baseline. */ }
+      if (!current()) return;
       setState(() {
-        _periodTotals = totals;
+        _serverPeriodBase = totals;
+        _periodTotals = projected;
         _lastPeriodScope = scope;
-        _lastPeriodAt = DateTime.now();
+        _lastPeriodAt = verifiedAt;
         _pendingPeriodScope = null;
         _periodCalculating = false;
-        _periodError = null;
+        _periodError = remaining > 0
+            ? 'Includes $remaining locally saved change(s) · sync pending'
+            : null;
       });
-      // Persistence failure cannot invalidate a successfully verified total.
-      try {
-        await const VerifiedExpenseTotalsCache().save(scope, totals, _lastPeriodAt!);
-      } catch (_) { /* Keep the verified in-memory result. */ }
     } catch (_) {
       if (!current()) return;
       setState(() {
