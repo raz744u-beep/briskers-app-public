@@ -602,13 +602,17 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     // operation is synchronized. Keep their local detail usable in Auto mode.
     if (widget.jobId.startsWith('local-') && !forceOnline) {
       if (localShown) {
-        _scheduleInitialAction();
+        if (_job?['_first_frame_only'] != true) {
+          _scheduleInitialAction();
+        }
         return;
       }
     }
 
     if (forceOffline) {
-      if (localShown) _scheduleInitialAction();
+      if (localShown && _job?['_first_frame_only'] != true) {
+        _scheduleInitialAction();
+      }
       if (!localShown && _currentLoad(epoch)) {
         setState(() {
           _loading = false;
