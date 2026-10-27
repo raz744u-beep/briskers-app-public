@@ -98,6 +98,9 @@ void main() {
     expect(source,contains("widget.serviceTaskCard(task)"));
     expect(source,contains("widget.onGeneralStatus"));
     expect(main,contains("case 3: return _tasksWorkspace();"));
+    expect(main,contains("case 12: return _taskList();"));
+    expect(main,contains("label: const Text('Back to Job J-24')"));
+    expect(main,contains("onTap: () => _navigate(12)"));
     expect(main,contains("generalTasks: shopTasks"));
     expect(employee,contains("generalTasks = const []"));
     expect(employee,contains("_showGeneralTasks"));
