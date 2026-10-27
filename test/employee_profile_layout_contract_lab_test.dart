@@ -81,6 +81,21 @@ void main() {
     expect(source, contains('baseOffset: 0, extentOffset: controller.text.length'));
   });
 
+  test('Save TEST Repayment needs positive valid amount in available balance', () {
+    final source = File('lib/tasks_lab/employee_payroll_profile.dart')
+        .readAsStringSync();
+    final logic = source.split('bool _canSaveRepayment(').last
+        .split('Future<void> _saveRepayment()').first;
+    expect(logic, contains('amount != null && amount > 0'));
+    expect(logic, contains('amount <= (snapshot?.remainingCents ?? 0)'));
+    expect(logic, contains('!_saving'));
+    final panel = source.split('Widget _advancePanel() {').last
+        .split('Widget _reportsTab()').first;
+    expect(panel, contains('onChanged: (_) => setState(() {}),'));
+    expect(panel, contains(
+      'onPressed: _canSaveRepayment(snapshot) ? _saveRepayment : null,'));
+  });
+
   test('TEST payment debt deduction defaults collapsed and resets safely', () {
     final source = File('lib/tasks_lab/weekly_labor_review_screen.dart')
         .readAsStringSync();
