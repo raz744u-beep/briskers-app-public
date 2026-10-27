@@ -56,7 +56,9 @@ class ExpensesPeriodTotals {
 
   static String? _dayKey(Object? raw) {
     final key = raw?.toString().split('T').first ?? '';
-    if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(key)) return null;
+    if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(key)) {
+      return null;
+    }
     final parsed = DateTime.tryParse(key);
     if (parsed == null || parsed.toIso8601String().substring(0, 10) != key) {
       return null;
@@ -150,10 +152,14 @@ class ExpensesPeriodTotals {
       }
       for (final row in enriched) {
         final dayKey = _dayKey(row['transaction_date']);
-        if (dayKey == null) dailyComplete = false;
+        if (dayKey == null) {
+          dailyComplete = false;
+        }
         final day = dayKey == null
             ? null : days.putIfAbsent(dayKey, _DayAccumulator.new);
-        if (day != null) day.transactions++;
+        if (day != null) {
+          day.transactions++;
+        }
         final direction = row['direction']?.toString();
         if (direction == 'income') {
           final verified = row['reporting_status'] == 'verified';
@@ -161,15 +167,21 @@ class ExpensesPeriodTotals {
               ? row['reporting_amount'] : row['amount'];
           final cents = (_money(value) * 100).round();
           incomeCents += cents;
-          if (day != null) day.incomeCents += cents;
+          if (day != null) {
+            day.incomeCents += cents;
+          }
           if (!verified) {
             unverifiedIncomeCount++;
-            if (day != null) day.unverifiedIncomeReceipts++;
+            if (day != null) {
+              day.unverifiedIncomeReceipts++;
+            }
           }
         } else if (direction == 'expense') {
           final cents = (_money(row['amount']) * 100).round();
           expenseCents += cents;
-          if (day != null) day.expensesCents += cents;
+          if (day != null) {
+            day.expensesCents += cents;
+          }
         } else {
           throw StateError('Unexpected posted transaction direction.');
         }
