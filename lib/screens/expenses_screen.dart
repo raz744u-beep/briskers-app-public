@@ -638,7 +638,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
     final sameScope = _lastPeriodScope == scope && _serverPeriodBase != null;
     final saved = await const VerifiedExpenseTotalsCache().load(scope);
     if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
-        widget.businessId != businessId) return;
+        widget.businessId != businessId) {
+      return;
+    }
     final baseline = saved?.totals ?? (sameScope ? _serverPeriodBase : null);
     final lastVerified = saved?.at ?? (sameScope ? _lastPeriodAt : null);
     ExpensesPeriodTotals? local;
@@ -663,7 +665,9 @@ class _ExpensesScreenState extends State<ExpensesScreen>
       return;
     }
     if (!mounted || epoch != _periodEpoch || !_showFinancialSummary ||
-        widget.businessId != businessId) return;
+        widget.businessId != businessId) {
+      return;
+    }
     final fresh = lastVerified != null &&
         DateTime.now().difference(lastVerified) < const Duration(minutes: 30);
     setState(() {
@@ -678,10 +682,8 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           : localChanges > 0
               ? 'Includes $localChanges locally saved change(s) · sync pending'
               : offline
-                  ? 'Offline · saved totals verified ' +
-                      DateFormat('MMM d, h:mm a').format(lastVerified!)
-                  : 'Saved local totals · verified ' +
-                      DateFormat('MMM d, h:mm a').format(lastVerified!);
+                  ? 'Offline · saved totals verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}'
+                  : 'Saved local totals · verified ${DateFormat('MMM d, h:mm a').format(lastVerified!)}';
     });
     if (offline || (fresh && !force)) {
       _pendingPeriodScope = null;
