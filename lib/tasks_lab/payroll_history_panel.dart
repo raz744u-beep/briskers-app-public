@@ -15,11 +15,14 @@ class LabPayrollHistoryPanel extends StatefulWidget {
     super.key, required this.employeeId,
     required this.rateCents, required this.drafts,
     required this.payments, required this.onWeekTap,
+    this.taskPayments=const [],this.settlements=const [],
   });
   final String employeeId;
   final int? rateCents;
   final List<Map<String, dynamic>> drafts;
   final List<Map<String, dynamic>> payments;
+  final List<Map<String,dynamic>> taskPayments;
+  final List<Map<String,dynamic>> settlements;
   final void Function(DateTime) onWeekTap;
 
   @override
@@ -116,6 +119,15 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
         Variable<String>(week.weekKey),
       ],
     ).get();
+    final records=widget.settlements.where((row)=>
+      row['employee_id']==widget.employeeId&&
+      row['week_key']==week.weekKey).toList();
+    final gross=records.fold<int>(0,(sum,row)=>
+      sum+(row['gross_cents'] as int));
+    final repaid=records.fold<int>(0,(sum,row)=>
+      sum+(row['debt_cents'] as int));
+    final transferred=records.fold<int>(0,(sum,row)=>
+      sum+(row['net_cents'] as int));
     if (!mounted) { return; }
     await showDialog<void>(
       context: context,
@@ -127,6 +139,13 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
           child: ListView(
             shrinkWrap: true,
             children: [
+              if(records.isNotEmpty) ...[
+                Text('Gross pay: '+_money(gross),
+                  style:const TextStyle(fontWeight:FontWeight.w700)),
+                Text('Debt repaid: '+_money(repaid)),
+                Text('Transferred: '+_money(transferred)),
+                const Divider(),
+              ],
               if (rows.isEmpty)
                 const Text('No task-linked TEST payments for this week.'),
               for (final row in rows)
@@ -223,6 +242,9 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
       week: LabPayrollWeekSource.dateForKey(key),
       hourlyCents: widget.rateCents,
       drafts: widget.drafts, payments: widget.payments,
+      taskPayments:widget.taskPayments,
+      settlements:widget.settlements,
+      confirmedOnly:true,
     )).where((week) => _matches(
       LabPayrollWeekSource.dateForKey(week.weekKey))).toList();
     final paid = weeks.fold<int>(0, (sum, w) => sum + w.paidCents);
