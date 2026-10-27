@@ -434,7 +434,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         ),
       ),
     );
-    if (changed == true) await _load(afterMutation: true);
+    if (changed == true && mounted) {
+      // New/edited appointments have already committed their local snapshot.
+      // Update the current list first; do not await replay/pull/dashboard.
+      await _loadLocal(reportError: true);
+      if (mounted) unawaited(_load(afterMutation: true));
+    }
   }
 
   Future<void> _editAppointment(Map<String, dynamic> item) async {
@@ -450,7 +455,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         ),
       ),
     );
-    if (changed == true) await _load(afterMutation: true);
+    if (changed == true && mounted) {
+      // New/edited appointments have already committed their local snapshot.
+      // Update the current list first; do not await replay/pull/dashboard.
+      await _loadLocal(reportError: true);
+      if (mounted) unawaited(_load(afterMutation: true));
+    }
   }
 
   Future<bool> _confirm({
