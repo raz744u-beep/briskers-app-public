@@ -2143,6 +2143,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           nickname: nicknames[employeeId] ?? employee['nickname'] ?? employee['name']!,
           role: employee['role']!,
           tasks: tasks,
+          generalTasks: shopTasks,
           allocationsByLine: allocationsByLine,
           payments: testPayrollPayments,
           rateCents: testHourlyRates[employeeId],
