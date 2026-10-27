@@ -55,6 +55,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   List<Map<String, dynamic>> _drafts = const [];
   List<Map<String, dynamic>> _payments = const [];
   List<Map<String, dynamic>> _taskPayments = const [];
+  final Map<String,double> _assignedOverride = {};
   String _payrollPeriod = 'This Week';
   DateTimeRange? _customPeriod;
   DateTime _repaymentDate = DateTime.now();
@@ -338,6 +339,8 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   double _hours(Map<String, dynamic> task) {
     final assignment = _assignmentFor(task);
     if (assignment == null) return 0;
+    final key=task['document_id'].toString()+':'+task['line_id'].toString();
+    if (_assignedOverride.containsKey(key)) {return _assignedOverride[key]!;}
     final raw = assignment['hours'] ?? assignment['payroll_hours'];
     final hours = raw is num ? raw.toDouble() :
         double.tryParse(raw?.toString() ?? '') ?? 0;
@@ -405,6 +408,34 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     ),
   ]);
 
+  Future<void> _updateAssignedHours(
+      Map<String,dynamic> task,double hours) async {
+    if(!hours.isFinite||hours<=0) {
+      throw ArgumentError('Use positive mechanic assigned hours');
+    }
+    final line=task['line_id']?.toString()??'';
+    final doc=task['document_id']?.toString()??'';
+    final allocations=widget.allocationsByLine[line]??const [];
+    final map=<String,double>{};
+    for(final item in allocations) {
+      final id=item['employee_id']?.toString()??'';
+      final value=item['hours'];
+      if(id.isNotEmpty&&value is num&&value>0) {map[id]=value.toDouble();}
+    }
+    map[widget.employeeId]=hours;
+    if(map.length>2) {
+      throw StateError('This test supports no more than two mechanics');
+    }
+    await LocalJobTasksLabStore(localDatabase).saveAllocations(
+      businessId:_shop,
+      jobId:'lab-job-richard-j24',
+      documentId:doc,lineId:line,
+      hoursByEmployee:map,
+    );
+    if(!mounted) {return;}
+    setState(() { _assignedOverride[doc+':'+line]=hours; });
+  }
+
   Widget _tasksTab() => WeeklyLaborReviewLab(
     employeeId: widget.employeeId,
     employeeName: widget.nickname,
@@ -416,6 +447,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     onCancel: () => Navigator.of(context).pop(),
     onWeekChanged: (date) => _week = date,
     onPaymentSaved: _refreshPayrollData,
+    onAssignedHoursChange: _updateAssignedHours,
   );
 
   ({DateTime from, DateTime until}) _periodBounds() {
