@@ -24,6 +24,7 @@ import '../services/local_financial_cache.dart';
 import '../services/local_document_repository.dart';
 import '../services/local_document_detail_cache.dart';
 import '../services/verified_invoice_close_events.dart';
+import '../services/verified_invoice_payment_events.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
 import '../services/invoice_finalization_guard.dart';
@@ -183,6 +184,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   int _receiptEpoch = 0;
   StreamSubscription<({String businessId, Set<String> jobIds})>? _retirement;
   StreamSubscription<VerifiedInvoiceClosed>? _invoiceCloseEvents;
+  StreamSubscription<VerifiedInvoiceFullyPaid>? _invoicePaidEvents;
+  final Set<String> _verifiedFullyPaidInvoiceIds = <String>{};
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
   Map<String, num> _receiptTotals = const {};
@@ -198,6 +201,14 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   String _invoiceStage(Map<String, dynamic> row) {
     if (_estimate) {
       return documentListStage(row, estimate: true);
+    }
+    final status = documentListStage(row, estimate: false);
+    // A fully finalized receipt confirmed by the backend must not return to
+    // Open because its retained row/receipt feed was cached before payment.
+    // This is Pending Close, never an invented authoritative Closed state.
+    if (_verifiedFullyPaidInvoiceIds.contains(row['id']?.toString()) &&
+        status != 'Closed' && status != 'Void' && status != 'Reopened') {
+      return 'Pending Close';
     }
     return invoiceListStageWithReceipts(
       row, receipts: _receiptTotals[row['id']?.toString()] ?? 0,
@@ -329,6 +340,31 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       _invoiceStyles = List<Map<String, dynamic>>.from(cachedStyles);
     }
     if (!_estimate) {
+      _invoicePaidEvents = VerifiedInvoicePaymentEvents.fullyPaid.listen((event) {
+        if (!mounted || _estimate || event.businessId != widget.businessId) {
+          return;
+        }
+        final existing = _rows;
+        // Keep exactly the paid invoice ID, even if the retained list is
+        // still being hydrated. No unrelated customer/shop cards are made.
+        _verifiedFullyPaidInvoiceIds.add(event.invoiceId);
+        if (existing != null &&
+            existing.any((row) => row['id']?.toString() == event.invoiceId)) {
+          ++_loadEpoch;
+          setState(() {
+            _rows = existing.map((row) =>
+              row['id']?.toString() == event.invoiceId ? <String, dynamic>{
+                ...row,
+                'paid_amount': event.finalizedPaid,
+                'pending_payment': 0.0,
+                'display_status_code': 'pending_close',
+              } : row).toList();
+            _orderedSource = null;
+            _descriptionEpoch++;
+          });
+          unawaited(_load());
+        }
+      });
       _invoiceCloseEvents = VerifiedInvoiceCloseEvents.changes.listen((event) {
         if (!mounted || _estimate ||
             event.businessId != widget.businessId) {
@@ -349,6 +385,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
             !_rows!.any((row) => row['id']?.toString() == event.invoiceId)) {
           return;
         }
+        _verifiedFullyPaidInvoiceIds.remove(event.invoiceId);
         ++_loadEpoch;
         setState(() {
           _rows = _rows!.map(markClosed).toList();
@@ -428,6 +465,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       _indexRows = null;
       _savedRows = null;
       _receiptTotals = const {};
+      _verifiedFullyPaidInvoiceIds.clear();
       _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
       _futureDatedOnly = false;
       _search.clear();
@@ -447,6 +485,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     BriskersConnectionModeController.instance.removeListener(_connectionChanged);
     _retirement?.cancel();
     _invoiceCloseEvents?.cancel();
+    _invoicePaidEvents?.cancel();
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
