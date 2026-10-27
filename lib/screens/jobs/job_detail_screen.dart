@@ -2085,6 +2085,8 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     );
     if (value == null || _job == null) return;
 
+    // Keep previous server Job reads from restoring an outdated complaint.
+    ++_loadEpoch;
     setState(() {
       _busy = true;
       _error = null;
@@ -2097,12 +2099,16 @@ class _JobDetailScreenState extends State<JobDetailScreen>
         requestedWork: translated.isEmpty ? null : translated,
         replaceRequestedWork: true,
       );
-      if (!BriskersConnectionModeController.instance.forceOffline) {
-        try {
-          await _offlineJobAdmin.flush(widget.businessId);
-        } catch (_) {}
-      }
-      if (mounted) await _load();
+      if (!mounted || _contentBlocked) return;
+      setState(() {
+        _job = <String, dynamic>{
+          ..._job!,
+          'requested_work': translated,
+        };
+        _busy = false;
+      });
+      _modalRefresh?.call();
+      _scheduleJobAdminSync();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {

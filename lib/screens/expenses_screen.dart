@@ -1411,7 +1411,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    if (changed == true && mounted) await _load(forceTotals: true);
+    if (changed == true && mounted) {
+      // Transaction changes have already been durably committed to SQLite.
+      // Do not delay returning to the usable local Expenses list for totals
+      // pagination, processor-fee verification or network reconciliation.
+      unawaited(_load(showLoading: false, forceTotals: true));
+    }
   }
 
   Future<void> _copyTransactionFromList(String transactionId) async {
@@ -1425,7 +1430,12 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ),
       ),
     );
-    if (changed == true && mounted) await _load(forceTotals: true);
+    if (changed == true && mounted) {
+      // Transaction changes have already been durably committed to SQLite.
+      // Do not delay returning to the usable local Expenses list for totals
+      // pagination, processor-fee verification or network reconciliation.
+      unawaited(_load(showLoading: false, forceTotals: true));
+    }
   }
 
   Future<void> _deleteTransactionFromList(String transactionId) async {
