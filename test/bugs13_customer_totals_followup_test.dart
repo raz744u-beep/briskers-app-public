@@ -89,10 +89,11 @@ void main() {
     final end = source.indexOf('Future<void> _hydrateFinancialHistory(', begin);
     final method = source.substring(begin, end);
     expect(method, contains('if (!_showFinancialSummary || !mounted) return;'));
-    expect(method, contains('const Duration(minutes: 5)'));
-    expect(method, contains('if (fresh && !force) return;'));
+    expect(method, contains('const Duration(minutes: 30)'));
+    expect(method, contains('if (offline || (fresh && !force))'));
     expect(method, contains('if (_pendingPeriodScope == scope) return;'));
-    expect(method, contains('if (!sameScope) _periodTotals = null;'));
+    expect(method, contains('await journal.apply('));
+    expect(method, contains('await journal.reconcileAndSaveBaseline('));
     expect(method, contains('Showing last verified totals; refresh failed.'));
     expect(source, contains('onRefresh: () => _load(forceTotals: true)'));
   });
