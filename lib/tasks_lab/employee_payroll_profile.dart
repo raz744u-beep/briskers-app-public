@@ -23,6 +23,7 @@ class EmployeePayrollProfileLab extends StatefulWidget {
     required this.nickname,
     required this.role,
     required this.tasks,
+    this.generalTasks = const [],
     required this.allocationsByLine,
     required this.payments,
     required this.rateCents,
@@ -35,6 +36,7 @@ class EmployeePayrollProfileLab extends StatefulWidget {
   final String nickname;
   final String role;
   final List<Map<String, dynamic>> tasks;
+  final List<Map<String, dynamic>> generalTasks;
   final Map<String, List<Map<String, dynamic>>> allocationsByLine;
   final List<Map<String, dynamic>> payments;
   final int? rateCents;
@@ -56,6 +58,8 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   List<Map<String, dynamic>> _drafts = const [];
   List<Map<String, dynamic>> _payments = const [];
   List<Map<String, dynamic>> _taskPayments = const [];
+  List<Map<String,dynamic>> _generalTasks = const [];
+  bool _showGeneralTasks = false;
   List<Map<String,dynamic>> _settlements=const [];
   final Map<String,double> _assignedOverride = {};
   String _payrollPeriod = 'This Week';
@@ -83,6 +87,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     super.initState();
     _week = widget.initialWeek ?? DateTime.now();
     _payments = widget.payments;
+    _generalTasks = widget.generalTasks;
     _loadLedger();
     _refreshPayrollData();
   }
@@ -466,19 +471,129 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     await _loadLedger();
   }
 
-  Widget _tasksTab() => WeeklyLaborReviewLab(
-    employeeId: widget.employeeId,
-    employeeName: widget.nickname,
-    tasks: _employeeTasks,
-    hoursOf: _hours,
-    rateCents: widget.rateCents,
-    week: _week,
-    embedded: true,
-    onCancel: () => Navigator.of(context).pop(),
-    onWeekChanged: (date) => _week = date,
-    onPaymentSaved: _afterPaymentSaved,
-    onAssignedHoursChange: _updateAssignedHours,
-  );
+  Future<void> _createEmployeeGeneralTask() async {
+    final description = TextEditingController();
+    String category = 'General';
+    final created = await showModalBottomSheet<bool>(
+      context:context,useSafeArea:true,isScrollControlled:true,
+      showDragHandle:true,
+      builder:(sheet)=>StatefulBuilder(builder:(sheet, update)=>Padding(
+        padding:EdgeInsets.fromLTRB(16,10,16,
+          MediaQuery.viewInsetsOf(sheet).bottom+20),
+        child:SingleChildScrollView(child:Column(
+          mainAxisSize:MainAxisSize.min,
+          crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+          Text('New General Task · '+widget.nickname,
+            style:const TextStyle(fontSize:19,fontWeight:FontWeight.w800)),
+          const SizedBox(height:12),
+          TextField(controller:description,minLines:1,maxLines:3,
+            decoration:const InputDecoration(labelText:'Task description',
+              border:OutlineInputBorder())),
+          const SizedBox(height:10),
+          DropdownButtonFormField<String>(
+            initialValue:category,
+            decoration:const InputDecoration(labelText:'Category',
+              border:OutlineInputBorder()),
+            items:const [
+              for(final value in ['General','Cleaning','Inventory',
+                'Office','Maintenance','Yard','Errands'])
+                DropdownMenuItem(value:value,child:Text(value)),
+            ],
+            onChanged:(v)=>update(()=>category=v??'General')),
+          const SizedBox(height:12),
+          FilledButton(onPressed:() async {
+            if(description.text.trim().isEmpty) return;
+            try {
+              await LocalJobTasksLabStore(localDatabase).addShopTask(
+                businessId:_shop, description:description.text,
+                employeeId:widget.employeeId,category:category);
+              if(sheet.mounted)Navigator.pop(sheet,true);
+            } catch(error) {
+              if(sheet.mounted)ScaffoldMessenger.of(sheet).showSnackBar(
+                SnackBar(content:Text('$error')));
+            }
+          },child:const Text('Save General Task')),
+        ])),
+      ))),
+    );
+    description.dispose();
+    if(created==true) {
+      final rows=await LocalJobTasksLabStore(localDatabase).shopTasks(_shop);
+      if(mounted) setState(()=>_generalTasks=rows);
+    }
+  }
+
+  Future<void> _updateEmployeeGeneralTask(int id,String status) async {
+    await LocalJobTasksLabStore(localDatabase).setShopTaskStatus(
+      businessId:_shop,taskId:id,status:status);
+    final rows=await LocalJobTasksLabStore(localDatabase).shopTasks(_shop);
+    if(mounted) setState(()=>_generalTasks=rows);
+  }
+
+  Widget _tasksTab() => Column(children:[
+    Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),
+      child:Row(children:[
+        for(final general in [false,true])
+          Expanded(child:InkWell(
+            onTap:()=>setState(()=>_showGeneralTasks=general),
+            child:Container(
+              padding:const EdgeInsets.symmetric(vertical:9),
+              decoration:BoxDecoration(
+                color:_showGeneralTasks==general
+                  ? const Color(0xFF007E78) : const Color(0xFFF2F6F7),
+                borderRadius:BorderRadius.circular(16)),
+              child:Text(general?'General Tasks':'Service Tasks',
+                textAlign:TextAlign.center,
+                style:TextStyle(fontWeight:FontWeight.w800,
+                  color:_showGeneralTasks==general ? Colors.white :
+                    const Color(0xFF334155))))),
+      ]),
+    ),
+    Expanded(child:_showGeneralTasks
+      ? Builder(builder:(context) {
+        final rows=_generalTasks.where((task)=>
+          task['employee_id']?.toString()==widget.employeeId).toList();
+        return ListView(padding:const EdgeInsets.all(12),children:[
+          Row(children:[
+            Expanded(child:Text('Assigned General Tasks · '+rows.length.toString(),
+              style:const TextStyle(fontWeight:FontWeight.w700))),
+            TextButton.icon(onPressed:_createEmployeeGeneralTask,
+              icon:const Icon(Icons.add),label:const Text('New Task')),
+          ]),
+          if(rows.isEmpty) const ListTile(
+            title:Text('No general tasks assigned')),
+          for(final task in rows)
+            Card(child:ListTile(
+              title:Text(task['description']?.toString()??'',
+                style:const TextStyle(fontWeight:FontWeight.w700)),
+              subtitle:Text((task['category']?.toString()??'General')+
+                ' · '+(task['status']=='done'?'Complete':
+                  task['status']=='in_progress'?'In Progress':'Planned')),
+              trailing:PopupMenuButton<String>(
+                tooltip:'Update task progress',
+                onSelected:(status)=>_updateEmployeeGeneralTask(
+                  task['id'] as int,status),
+                itemBuilder:(_)=>const [
+                  PopupMenuItem(value:'planned',child:Text('Planned')),
+                  PopupMenuItem(value:'in_progress',child:Text('In Progress')),
+                  PopupMenuItem(value:'done',child:Text('Complete')),
+                ]))),
+        ]);
+      })
+      : WeeklyLaborReviewLab(
+        employeeId: widget.employeeId,
+        employeeName: widget.nickname,
+        tasks: _employeeTasks,
+        hoursOf: _hours,
+        rateCents: widget.rateCents,
+        week: _week,
+        embedded: true,
+        onCancel: () => Navigator.of(context).pop(),
+        onWeekChanged: (date) => _week = date,
+        onPaymentSaved: _afterPaymentSaved,
+        onAssignedHoursChange: _updateAssignedHours,
+      )),
+  ]);
 
   ({DateTime from, DateTime until}) _periodBounds() {
     final today = DateTime.now();
