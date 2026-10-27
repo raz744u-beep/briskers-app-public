@@ -103,6 +103,17 @@ class WarrantyReceiptReporting {
           : supabase.auth.currentUser?.id;
     } catch (_) { /* No authenticated identity. */ }
     if (userId == null || userId.isEmpty) return transactions.map(unverified).toList();
+    // Totals request an entire reporting period. Do not scan historical
+    // invoice snapshots if this page contains no relevant income receipts.
+    // The ledger amounts themselves are never altered by this fast path.
+    final wantedReceiptIds = transactions
+        .where((row) => row['direction'] == 'income')
+        .map((row) => row['id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    if (wantedReceiptIds.isEmpty) {
+      return transactions.map(unverified).toList();
+    }
     // Offline reporting only trusts user-scoped verified snapshots. Loading
     // every cached invoice (thousands on established devices) before the
     // first Expenses frame adds seconds but cannot authorize any reporting:
@@ -128,6 +139,20 @@ class WarrantyReceiptReporting {
     for (final key in prefs.getKeys().where((key) => key.startsWith(prefix))) {
       try {
         final saved = Map<String, dynamic>.from(jsonDecode(prefs.getString(key)!) as Map);
+        // When summarizing 30 days, thousands of historical user-scoped
+        // reports may still exist. The old loop awaited a local document
+        // read for every report even when none of its payment IDs appeared
+        // in this period. Filter on saved IDs FIRST; a matching saved report
+        // still goes through the original version/pending-state checks.
+        // An unrelated saved report cannot authorize a fee deduction.
+        if (offline) {
+          final payments = saved['payments'];
+          if (payments is! List || !payments.whereType<Map>().any(
+            (payment) => wantedReceiptIds.contains(payment['id']?.toString()),
+          )) {
+            continue;
+          }
+        }
         final id = saved['id']?.toString();
         // When disconnected, read only the invoice having a verified
         // user-scoped reporting record. Still reject newer/dirty local detail,

@@ -349,6 +349,52 @@ void main() {
     },
   );
 
+  test('period totals read only invoice reports matching the income scope',
+      () async {
+    await _saveReport();
+    final prefs = await SharedPreferences.getInstance();
+    // Simulate a shop with historical, user-scoped warranty reports.
+    // These are genuine previous reporting records but have no payment IDs
+    // in the currently selected accounting period.
+    for (var i = 0; i < 160; i++) {
+      await prefs.setString(
+        'briskers_warranty_reporting_user-a_shop-a_old-$i',
+        jsonEncode({
+          ..._invoice,
+          'id': 'old-$i',
+          'payments': [
+            {'id': 'old-payment-$i', 'amount': 10, 'state': 'posted'},
+          ],
+          'offline_warranty_detail': _warranty,
+        }),
+      );
+    }
+    final cache = _Cache([_invoice]);
+    final rows = [_transaction(_card), _transaction(_cash)];
+    final verified = await _service(_Api(), cache)
+        .enrich('shop-a', rows, refresh: false);
+    expect(verified.map(WarrantyReceiptReporting.amount), [500, 1545]);
+    expect(cache.calls, 0);
+    expect(cache.targetedCalls, 1,
+        reason: 'Do not await 160 unrelated historical invoice reads');
+  });
+
+  test('expense-only total batches never read warranty document caches',
+      () async {
+    await _saveReport();
+    final cache = _Cache([_invoice]);
+    final rows = [
+      {'id': 'expense-1', 'direction': 'expense', 'amount': 12},
+      {'id': 'expense-2', 'direction': 'expense', 'amount': 17},
+    ];
+    final result = await _service(_Api(), cache)
+        .enrich('shop-a', rows, refresh: false);
+    expect(result, hasLength(2));
+    expect(cache.calls, 0);
+    expect(cache.targetedCalls, 0);
+    expect(result.map((r) => r['amount']), [12, 17]);
+  });
+
   test('offline with no user-scoped fee cache does not scan documents',
       () async {
     final cache = _Cache([_invoice], fail: true);
