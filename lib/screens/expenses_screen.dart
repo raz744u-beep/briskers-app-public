@@ -571,7 +571,22 @@ class _ExpensesScreenState extends State<ExpensesScreen>
           rows.map((row) => row['id']?.toString() ?? '')
               .where((id) => id.isNotEmpty),
         );
-        _transactions = rows;
+        // Retain locally committed, not-yet-synced financial entries if
+        // the authenticated server's first page has not received them.
+        // Identity-scoped replacement avoids duplicate list cards.
+        final localPending = {
+          for (final row in _transactions)
+            if (row['sync_state']?.toString() == 'pending')
+              row['id']?.toString(): row,
+        };
+        final seen = <String>{};
+        _transactions = [
+          for (final row in rows)
+            if (seen.add(row['id']?.toString() ?? ''))
+              localPending[row['id']?.toString()] ?? row,
+          for (final entry in localPending.entries)
+            if (!seen.contains(entry.key)) entry.value,
+        ];
         _hasMore = rows.length == _pageSize;
         _loading = false;
         _showingLocal = false;
@@ -807,7 +822,7 @@ class _ExpensesScreenState extends State<ExpensesScreen>
         ).map((raw) => Map<String, dynamic>.from(raw as Map)).toList();
       });
       // The offline cache remains durable, but does not block first paint.
-      await _localFinancial.saveTransactions(businessId, snapshot);
+      await _localFinancial.mergeServerTransactions(businessId, snapshot);
       await _localFinancial.saveServerConfirmedTransactions(
         businessId, snapshot,
       );
