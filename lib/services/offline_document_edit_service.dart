@@ -92,8 +92,11 @@ class OfflineDocumentEditService {
       '_local_pending': true,
     });
 
-    await _saveDesired(businessId, documentId, detail, lines);
-    await _queue(
+    // The optimistic local invoice and its outbox replay entry are one
+    // SQLite commit. A queue failure must never leave an unreplicable line.
+    await _database.transaction(() async {
+      await _saveDesired(businessId, documentId, detail, lines);
+      await _queue(
       businessId,
       documentId,
       'add_line',
@@ -107,7 +110,8 @@ class OfflineDocumentEditService {
         'tax_rate': taxRate,
         'line_kind': lineKind,
       },
-    );
+      );
+    });
   }
 
   Future<void> updateLine(
