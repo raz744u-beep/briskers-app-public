@@ -5,6 +5,9 @@ import 'package:intl/intl.dart';
 
 import '../core/briskers_colors.dart';
 import 'payroll_week_projection.dart';
+import 'lab_payroll_payment_service.dart';
+import '../local/local_database_provider.dart';
+import 'package:drift/drift.dart' show Variable;
 
 /// Owner-provided three-screen visual baseline: screen 1, Payroll Overview.
 /// This widget only reads an isolated TEST ledger; it cannot post live payroll.
@@ -33,6 +36,8 @@ class LabPayrollOverviewScreen extends StatefulWidget {
 class _LabPayrollOverviewScreenState extends State<LabPayrollOverviewScreen> {
   DateTime _week = DateTime.now();
   List<Map<String, dynamic>> _drafts = const [];
+  List<Map<String,dynamic>> _taskPayments=const [];
+  List<Map<String,dynamic>> _settlements=const [];
   bool _loading = true;
   String? _error;
 
@@ -59,8 +64,24 @@ class _LabPayrollOverviewScreenState extends State<LabPayrollOverviewScreen> {
   Future<void> _refresh() async {
     try {
       final drafts = await LabPayrollWeekSource.readDrafts();
+      await LabPayrollPaymentService.ensure();
+      final tasks=await localDatabase.customSelect(
+        'SELECT employee_id,week_key,hours '
+        'FROM lab_payroll_task_payments WHERE business_id=?',
+        variables:[const Variable<String>('briskers-tasks-test-only')],
+      ).get();
+      final settlements=await localDatabase.customSelect(
+        'SELECT employee_id,week_key,gross_cents '
+        'FROM lab_payroll_settlements WHERE business_id=?',
+        variables:[const Variable<String>('briskers-tasks-test-only')],
+      ).get();
       if (!mounted) { return; }
-      setState(() { _drafts = drafts; _error = null; _loading = false; });
+      setState(() {
+        _drafts=drafts;
+        _taskPayments=tasks.map((r)=>Map<String,dynamic>.from(r.data)).toList();
+        _settlements=settlements.map((r)=>Map<String,dynamic>.from(r.data)).toList();
+        _error=null;_loading=false;
+      });
     } catch (error) {
       if (!mounted) { return; }
       setState(() {
@@ -74,14 +95,30 @@ class _LabPayrollOverviewScreenState extends State<LabPayrollOverviewScreen> {
     LabPayrollWeekSource.summarize(
       employeeId: employeeId, week: _week,
       hourlyCents: widget.rates[employeeId],
-      drafts: _drafts, payments: widget.payments,
+      drafts:_drafts,payments:widget.payments,
+      taskPayments:_taskPayments,settlements:_settlements,
+      confirmedOnly:true,
     );
 
-  int? _previous(String id) => LabPayrollWeekSource.previousBalance(
-    employeeId: id, selectedWeek: _week,
-    rateCents: widget.rates[id], drafts: _drafts,
-    payments: widget.payments,
-  );
+  int? _previous(String id) {
+    final current=LabPayrollWeekSource.weekKey(_week);
+    final weeks=LabPayrollWeekSource.historyWeekKeys(
+      employeeId:id,drafts:_drafts,payments:widget.payments,
+    );
+    var balance=0;
+    for(final week in weeks) {
+      if(week.compareTo(current)>=0) {continue;}
+      final snapshot=LabPayrollWeekSource.summarize(
+        employeeId:id,week:LabPayrollWeekSource.dateForKey(week),
+        hourlyCents:widget.rates[id],
+        drafts:_drafts,payments:widget.payments,
+        taskPayments:_taskPayments,settlements:_settlements,
+        confirmedOnly:true,
+      );
+      balance+=snapshot.balanceCents??0;
+    }
+    return balance;
+  }
 
   int _taskCount(String employeeId) {
     if (LabPayrollWeekSource.start(_week).isAfter(DateTime.now())) return 0;
