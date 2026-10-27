@@ -117,6 +117,36 @@ void main() {
     } finally { await db.close(); }
   });
 
+  test('complete baseline survives restart and failed atomic reconciliation',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final journal = LocalFinancialTotalsJournal(database: db);
+    try {
+      final at = DateTime.now().subtract(const Duration(minutes: 1));
+      await journal.saveBaseline('shop', 'shop|owner|30d', old, at);
+      final saved = await LocalFinancialTotalsJournal(database: db)
+          .loadBaseline('shop', 'shop|owner|30d');
+      expect(saved, isNotNull);
+      expect(saved!.totals.income, 20000);
+      await journal.record('shop', 'transaction:server-new',
+          after: row('server-new', 'income', 750, '2026-10-26'));
+      await expectLater(db.transaction(() async {
+        await journal.reconcileAndSaveBaseline(
+          'shop', 'shop|owner|30d',
+          const ExpensesPeriodTotals(income: 20750,
+              expenses: 1000, transactions: 12, feesUnverified: false),
+          DateTime.now(),
+          [row('server-new', 'income', 750, '2026-10-26')],
+        );
+        throw StateError('Simulated process failure before commit');
+      }), throwsStateError);
+      expect((await journal.loadBaseline('shop', 'shop|owner|30d'))!
+          .totals.income, 20000);
+      expect(await journal.pendingCount('shop'), 1);
+      expect((await journal.apply('shop', old)).income, 20750);
+    } finally { await db.close(); }
+  });
+
   test('receipt reconciliation never uses amount-only matching', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     final journal = LocalFinancialTotalsJournal(database: db);
