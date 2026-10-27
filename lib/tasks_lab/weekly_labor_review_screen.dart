@@ -64,6 +64,13 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
       _start(date).add(const Duration(days: 7));
   static String _id(Map<String, dynamic> task) =>
       task['document_id'].toString() + ':' + task['line_id'].toString();
+  static String _statusLabel(Map<String, dynamic> task) {
+    switch (task['status']) {
+      case 'in_progress': return 'In Progress';
+      case 'done': return 'Complete';
+      default: return 'Planned';
+    }
+  }
   static String _weekKey(DateTime value) =>
       DateFormat('yyyy-MM-dd').format(_start(value));
   bool get _future => _start(_week).isAfter(DateTime.now());
@@ -714,7 +721,7 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                                 overflow:_expandedTasks.contains(_id(task))
                                   ? TextOverflow.visible:TextOverflow.ellipsis,
                                 style:const TextStyle(fontWeight:FontWeight.w700)),
-                              Text('J-24 · '+task['status'].toString()+' · '+
+                              Text('J-24 · '+_statusLabel(task)+' · '+
                                 _available(task).toStringAsFixed(2)+' unpaid hrs',
                                 style:const TextStyle(fontSize:11,
                                   color:Color(0xFF64748B))),
