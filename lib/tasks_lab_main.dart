@@ -735,8 +735,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                                 lineId: task['line_id'].toString());
                               await _refresh();
                             } catch (error) {
-                              if(mounted) ScaffoldMessenger.of(context)
-                                .showSnackBar(SnackBar(content: Text('$error')));
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('$error')));
+                              }
                             }
                           },
                           icon: const Icon(Icons.drive_file_move_outline),
