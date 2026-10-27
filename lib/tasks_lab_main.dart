@@ -1542,12 +1542,25 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       showDragHandle: true, useSafeArea: true,
       builder: (sheet) => StatefulBuilder(
         builder: (sheet, update) => Padding(
-          padding: EdgeInsets.fromLTRB(16, 12, 16,
-            MediaQuery.viewInsetsOf(sheet).bottom + 20),
-          child: SingleChildScrollView(child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(sheet).bottom),
+          child: SafeArea(
+            top: false,
+            child: SizedBox(
+              // Reserve space above Android's gesture/navigation bar.
+              // The form scrolls while the primary action stays visible.
+              height: (MediaQuery.sizeOf(sheet).height -
+                MediaQuery.viewInsetsOf(sheet).bottom) * 0.82,
+              child: Column(children: [
+                Expanded(child: SingleChildScrollView(
+                  key: const Key('recheck-form-scroll'),
+                  keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
               const Text('Add recheck work',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
               const SizedBox(height: 5),
@@ -1593,8 +1606,15 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 ],
                 onChanged: (v) => update(() => assignee = v ?? ''),
               ),
-              const SizedBox(height: 14),
-              FilledButton.icon(
+                      const SizedBox(height: 12),
+                    ],
+                  ))),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      key: const Key('recheck-add-sticky-button'),
                 onPressed: () async {
                   final qty = paid ? double.tryParse(hours.text.trim()) : 0.0;
                   if (description.text.trim().isEmpty ||
@@ -1619,11 +1639,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     }
                   }
                 },
-                icon: const Icon(Icons.add),
-                label: const Text('Add recheck task'),
-              ),
-            ],
-          )),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add recheck task'),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          ),
         ),
       ),
     );
