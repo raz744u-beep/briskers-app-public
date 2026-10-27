@@ -1,5 +1,4 @@
 // ignore_for_file: prefer_interpolation_to_compose_strings
-import 'dart:convert';
 
 /// Read-only, local TEST financial projection from week drafts, task-linked
 /// test records, and historical test disbursements. Never posts shop money.
@@ -32,51 +31,29 @@ class LabPayrollPeriodProjection {
     required List<Map<String,dynamic>> drafts,
     required List<Map<String,dynamic>> payments,
     required List<Map<String,dynamic>> taskPayments,
+    List<Map<String,dynamic>> settlements=const [],
   }) {
     bool inPeriod(DateTime t) => !t.isBefore(from) && t.isBefore(until);
-    final weeks = <String, ({double hours, int? gross})>{};
-    for (final row in drafts) {
-      if (row['employee_id'] != employeeId) { continue; }
-      final key = row['week_key']?.toString() ?? '';
-      final week = DateTime.tryParse(key);
-      if (week == null || !inPeriod(week)) continue;
-      double hrs = 0;
-      try {
-        final data = jsonDecode(row['selected_json']?.toString() ?? '{}');
-        if (data is Map) {
-          for (final n in data.values) {
-            if (n is num && n.isFinite && n > 0) hrs += n.toDouble();
-          }
-        }
-      } catch (_) { continue; }
-      final override = row['override_cents'];
-      final gross = override is int && override >= 0
-        ? override : hourlyRateCents == null ? null
-        : (hrs * hourlyRateCents).round();
-      weeks[key] = (hours:hrs,gross:gross);
+    // Task assignment and draft selection are not wages already owed.
+    // Only confirmed, task-linked TEST payroll contributes to earned gross.
+    final hoursByWeek=<String,double>{};
+    for(final task in taskPayments) {
+      if(task['employee_id']!=employeeId) {continue;}
+      final key=task['week_key']?.toString()??'';
+      final when=DateTime.tryParse(key);
+      final raw=task['hours'];
+      if(when==null||!inPeriod(when)||raw is! num||
+        !raw.isFinite||raw<=0) {continue;}
+      hoursByWeek[key]=(hoursByWeek[key]??0)+raw.toDouble();
     }
-    final linkedHours = <String,double>{};
-    for (final task in taskPayments) {
-      if (task['employee_id'] != employeeId) { continue; }
-      final key = task['week_key']?.toString() ?? '';
-      final week = DateTime.tryParse(key);
-      final value = task['hours'];
-      if (week == null || !inPeriod(week) ||
-          value is! num || !value.isFinite || value <= 0) { continue; }
-      linkedHours[key] = (linkedHours[key] ?? 0) + value.toDouble();
-    }
-    for (final item in linkedHours.entries) {
-      final current = weeks[item.key];
-      final linked = item.value;
-      final hours = current == null || current.hours < linked
-        ? linked : current.hours;
-      final linkedGross = hourlyRateCents == null
-        ? null : (linked * hourlyRateCents).round();
-      final draftGross = current?.gross;
-      final gross = draftGross == null ? linkedGross
-        : linkedGross == null ? draftGross
-        : draftGross > linkedGross ? draftGross : linkedGross;
-      weeks[item.key] = (hours:hours,gross:gross);
+    final grossByWeek=<String,int>{};
+    for(final record in settlements) {
+      if(record['employee_id']!=employeeId) {continue;}
+      final key=record['week_key']?.toString()??'';
+      final when=DateTime.tryParse(key);
+      final raw=record['gross_cents'];
+      if(when==null||!inPeriod(when)||raw is! int||raw<0) {continue;}
+      grossByWeek[key]=(grossByWeek[key]??0)+raw;
     }
     var paid = 0;
     for (final row in payments) {
@@ -85,22 +62,25 @@ class LabPayrollPeriodProjection {
       final date = DateTime.fromMillisecondsSinceEpoch(row['paid_at'] as int);
       if (inPeriod(date)) { paid += row['cents'] as int; }
     }
-    if (weeks.isEmpty) {
+    if(hoursByWeek.isEmpty) {
       return LabPayrollPeriodProjection(
         hours:null,grossCents:null,paidCents:paid,balanceCents:null);
     }
-    var hours = 0.0, gross = 0;
-    var known = true;
-    for (final week in weeks.values) {
-      hours += week.hours;
-      if (week.gross == null) { known = false; }
-      else { gross += week.gross!; }
+    final hrs=hoursByWeek.values.fold<double>(0,(sum,n)=>sum+n);
+    var gross=0;
+    for(final entry in hoursByWeek.entries) {
+      if(grossByWeek.containsKey(entry.key)) {
+        gross+=grossByWeek[entry.key]!;
+      } else if(hourlyRateCents!=null) {
+        gross+=(entry.value*hourlyRateCents).round();
+      } else {
+        return LabPayrollPeriodProjection(
+          hours:hrs,grossCents:null,paidCents:paid,balanceCents:null);
+      }
     }
-    final resultGross = known ? gross : null;
-    final balance = resultGross == null ? null
-      : (resultGross - paid).clamp(0, 1000000000).toInt();
     return LabPayrollPeriodProjection(
-      hours:hours,grossCents:resultGross,
-      paidCents:paid,balanceCents:balance);
+      hours:hrs,grossCents:gross,paidCents:paid,
+      balanceCents:(gross-paid).clamp(0,1000000000).toInt());
+
   }
 }
