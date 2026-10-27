@@ -16,6 +16,8 @@ class BlankInvoiceSetupScreen extends StatefulWidget {
     this.initialCustomerId,
     this.initialCustomerName,
     this.initialVehicles = const [],
+    this.localCustomers,
+    this.api,
   });
 
   final String businessId;
@@ -23,6 +25,9 @@ class BlankInvoiceSetupScreen extends StatefulWidget {
   final String? initialCustomerId;
   final String? initialCustomerName;
   final List<dynamic> initialVehicles;
+  // Injectable for deterministic offline-first picker regression tests.
+  final LocalCustomerRepository? localCustomers;
+  final BriskersApi? api;
 
   @override
   State<BlankInvoiceSetupScreen> createState() =>
@@ -30,13 +35,16 @@ class BlankInvoiceSetupScreen extends StatefulWidget {
 }
 
 class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
-  static const _api = BriskersApi();
+  BriskersApi get _api => widget.api ?? const BriskersApi();
   OfflineDocumentDraftService get _offlineDrafts => OfflineDocumentDraftService();
-  LocalCustomerRepository get _localCustomers => LocalCustomerRepository();
+  LocalCustomerRepository get _localCustomers =>
+      widget.localCustomers ?? LocalCustomerRepository();
   final TextEditingController _customerSearch = TextEditingController();
   Timer? _searchDebounce;
   int _searchGeneration = 0;
   bool _searchingCustomers = false;
+  bool _checkingUnsyncedCustomers = false;
+  bool _customerCacheIncomplete = false;
 
   List<Map<String, dynamic>> _customers = const [];
   List<Map<String, dynamic>> _vehicles = const [];
@@ -83,52 +91,88 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
 
   void _onCustomerSearch(String _) {
     _searchDebounce?.cancel();
-    // Discard responses from any prior query before the debounce fires.
-    _searchGeneration++;
+    // A new query invalidates all prior local and network search results.
+    final generation = ++_searchGeneration;
+    final term = _customerSearch.text.trim();
     setState(() {
       _customerId = null;
       _vehicleId = null;
       _vehicles = const [];
       _customers = const [];
-      _searchingCustomers = true;
+      _searchingCustomers = term.isNotEmpty;
+      _checkingUnsyncedCustomers = false;
+      _customerCacheIncomplete = false;
       _error = null;
     });
+    if (term.isEmpty) return;
+    // Local SQLite is the search source. No arbitrary 350ms delay before the
+    // FIRST local result and no network request in the first-frame path.
+    // The short coalescing window prevents queueing a DB scan on each key.
     _searchDebounce = Timer(
-      const Duration(milliseconds: 350),
-      _loadCustomers,
+      const Duration(milliseconds: 60),
+      () => unawaited(_loadCustomers(generation, term)),
     );
   }
 
-  Future<void> _loadCustomers() async {
-    final generation = ++_searchGeneration;
-    final term = _customerSearch.text.trim();
+  Future<void> _loadCustomers(int generation, String term) async {
     try {
       final localMatches = await _localCustomers.customers(
-        widget.businessId,
-        search: term.isEmpty ? null : term,
+        widget.businessId, search: term, limit: 50,
       );
-      // Auto mode must remain usable when the network silently drops.
-      final customers = localMatches.isNotEmpty ||
-              BriskersConnectionModeController.instance.forceOffline
-          ? localMatches
-          : await _api.customers(
-              widget.businessId,
-              search: term.isEmpty ? null : term,
-              limit: 75,
-            );
-      if (!mounted || generation != _searchGeneration) return;
+      if (!mounted || generation != _searchGeneration ||
+          term != _customerSearch.text.trim()) return;
       setState(() {
-        _customers = customers;
-        _loading = false;
+        _customers = localMatches;
         _searchingCustomers = false;
       });
-    } catch (error) {
+      // An exact local zero is definitive only AFTER this shop's customer
+      // bootstrap completed. When incomplete, show the usable local result
+      // first and try the network independently; never await it for display.
+      if (localMatches.isNotEmpty) return;
+      bool bootstrapped = false;
+      try {
+        bootstrapped = await _localCustomers.hasBootstrap(widget.businessId);
+      } catch (_) {
+        // Missing local scope is not proof that no customer exists.
+      }
+      if (!mounted || generation != _searchGeneration ||
+          term != _customerSearch.text.trim()) return;
+      if (bootstrapped) return;
+      setState(() {
+        _customerCacheIncomplete = true;
+        _checkingUnsyncedCustomers =
+            !BriskersConnectionModeController.instance.forceOffline;
+      });
+      if (_checkingUnsyncedCustomers) {
+        unawaited(_searchUnsyncedCustomers(generation, term));
+      }
+    } catch (_) {
       if (!mounted || generation != _searchGeneration) return;
       setState(() {
-        _loading = false;
         _searchingCustomers = false;
-        _error = error.toString();
+        _customerCacheIncomplete = true;
+        _error = 'Saved customer search is unavailable. Check local sync.';
       });
+    }
+  }
+
+  Future<void> _searchUnsyncedCustomers(int generation, String term) async {
+    try {
+      final rows = await _api.customers(
+        widget.businessId, search: term, limit: 50,
+      );
+      if (!mounted || generation != _searchGeneration ||
+          term != _customerSearch.text.trim() ||
+          BriskersConnectionModeController.instance.forceOffline) return;
+      setState(() {
+        _customers = rows;
+        _checkingUnsyncedCustomers = false;
+      });
+    } catch (_) {
+      if (!mounted || generation != _searchGeneration) return;
+      // Local selection remains available. Remote outages are informational,
+      // not a reason to hold the picker on a spinner.
+      setState(() => _checkingUnsyncedCustomers = false);
     }
   }
 
@@ -287,7 +331,11 @@ class _BlankInvoiceSetupScreenState extends State<BlankInvoiceSetupScreen> {
               ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 240),
                 child: _customers.isEmpty
-                    ? const Text('No matching customers.')
+                    ? Text(_checkingUnsyncedCustomers
+                        ? 'Checking customers not yet downloaded…'
+                        : _customerCacheIncomplete
+                            ? 'No saved matches. Customer sync needs attention.'
+                            : 'No matching customers.')
                     : ListView.builder(
                         shrinkWrap: true,
                         itemCount: _customers.length,
