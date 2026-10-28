@@ -2,12 +2,59 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
+import 'local_job_deletion_v3.dart';
+import 'local_job_retirement.dart';
+import 'job_sync_service.dart';
 
 class LocalDocumentRepository {
   LocalDocumentRepository({BriskersLocalDatabase? database})
       : _database = database ?? localDatabase;
 
   final BriskersLocalDatabase _database;
+
+  // Existing shop readers keep their legacy queries until a v3 sandbox
+  // identity scope is installed. When active, every read excludes deleted
+  // identities and stale authorization-scoped records.
+  Future<({int? generation, String docFilter, String rootJoin})>
+      _deletionReadScope(String businessId) async {
+    final present = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' "
+      "AND name='local_job_deletion_v3_scope'",
+    ).get();
+    if (!JobSyncService.deletionFeedEnabled && present.isEmpty) {
+      return (generation: null, docFilter: '', rootJoin: '');
+    }
+    final generation =
+        await LocalJobDeletionV3.captureVisibilityGeneration(
+          _database, businessId,
+        );
+    // SQL contains only trusted static schema names, not user identifiers.
+    const docFilter = """AND NOT EXISTS (
+      SELECT 1 FROM local_job_deletion_v3_fences blocked
+      WHERE blocked.business_id = d.business_id
+        AND blocked.entity_kind = d.kind AND blocked.entity_id = d.id
+    )""";
+    const rootJoin = """AND NOT EXISTS (
+      SELECT 1 FROM local_job_deletion_v3_fences blocked
+      WHERE blocked.business_id = j.business_id
+        AND blocked.entity_kind = 'job' AND blocked.entity_id = j.id
+    )""";
+    return (
+      generation: generation,
+      docFilter: docFilter,
+      rootJoin: rootJoin,
+    );
+  }
+
+  Future<void> _checkDeletionRead(
+      String businessId, int? generation) async {
+    if (generation != null) {
+      await LocalJobDeletionV3.assertVisibilityGeneration(
+        _database, businessId, generation,
+      );
+    }
+  }
+
 
   Future<void> replaceFromServer(
     String businessId,
@@ -127,6 +174,7 @@ class LocalDocumentRepository {
     String businessId, {
     required String kind,
   }) async {
+    final visibility = await _deletionReadScope(businessId);
     final rows = await _database.customSelect(
       '''
       SELECT d.*, j.job_number, j.title AS job_title,
@@ -135,9 +183,11 @@ class LocalDocumentRepository {
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
+        ${visibility.rootJoin}
       LEFT JOIN local_customers c ON c.business_id=d.business_id
         AND c.id=d.customer_id
       WHERE d.business_id = ? AND d.kind = ?
+        ${visibility.docFilter}
       ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
       ''',
       variables: [
@@ -145,6 +195,8 @@ class LocalDocumentRepository {
         Variable<String>(kind),
       ],
     ).get();
+
+    await _checkDeletionRead(businessId, visibility.generation);
 
     String displayStatus(QueryRow row) {
       if (row.read<String>('id').startsWith('local-invoice-') &&
@@ -399,6 +451,7 @@ class LocalDocumentRepository {
     String query, {
     int limit = 30,
   }) async {
+    final visibility = await _deletionReadScope(businessId);
     final value = query.trim().toLowerCase();
     if (value.isEmpty) return const [];
     final numeric = RegExp(r'^[0-9]+$').hasMatch(value);
@@ -409,7 +462,9 @@ class LocalDocumentRepository {
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
+        ${visibility.rootJoin}
       WHERE d.business_id = ?
+        ${visibility.docFilter}
         AND (
           (
             ? = 1 AND (
@@ -443,6 +498,7 @@ class LocalDocumentRepository {
       ],
     ).get();
 
+    await _checkDeletionRead(businessId, visibility.generation);
     return rows.map((row) => <String, dynamic>{
       'id': row.read<String>('id'),
       'job_id': row.readNullable<String>('job_id'),
