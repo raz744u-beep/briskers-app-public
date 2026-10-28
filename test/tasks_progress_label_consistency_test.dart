@@ -10,7 +10,7 @@ void main() {
     expect(card,contains("? 'In Progress'"));
     expect(card,contains(": 'Not Started'"));
     expect(card,contains("? 'Done'"));
-    expect(card,contains("'Done · $stamp'"));
+    expect(card,contains(r"'Done · $stamp'"));
     expect(card,isNot(contains('In progress · Editable')));
     expect(card,isNot(contains('Planned · Editable')));
     expect(card,isNot(contains('Completed · read-only')));
