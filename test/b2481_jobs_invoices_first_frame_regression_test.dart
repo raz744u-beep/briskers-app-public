@@ -36,7 +36,30 @@ void main() {
     expect(code, contains('CREATE TRIGGER IF NOT EXISTS retirement_'));
   });
 
-  test('Invoices retain protected offline-first read ahead of receipt hydration', () {
+  test('Auto document sync captures durable retirement fences once per batch', () {
+    final source = File('lib/services/local_document_repository.dart')
+        .readAsStringSync();
+    final replacement = source.substring(
+        source.indexOf('Future<void> replaceFromServer('),
+        source.indexOf('/// Record a closure already acknowledged'));
+    final upsert = source.substring(
+        source.indexOf('Future<void> upsertFromServer('),
+        source.indexOf('Future<List<Map<String, dynamic>>> listByKind('));
+    for (final batch in [replacement, upsert]) {
+      expect(batch, contains('final fences = await _retirementFences(businessId);'));
+      expect(batch, contains('blockedDocuments: fences.documents'));
+      expect(batch, contains('blockedJobs: fences.jobs'));
+      expect(batch, isNot(contains('await _serverDocumentBlocked(')));
+    }
+    // Protection is still based on permanent/queued retirement states,
+    // not on a cached network permission guess.
+    expect(source, contains('LocalJobRetirement.blockedDocumentIds('));
+    expect(source, contains('LocalJobRetirement.blockedJobIds('));
+    expect(source, contains("_visibleDocumentSql('local_documents')"));
+    expect(source, contains("WHERE local_documents.sync_state = 'synced'"));
+  });
+
+    test('Invoices retain protected offline-first read ahead of receipt hydration', () {
     final code = File('lib/screens/documents_screen.dart').readAsStringSync();
     final begin = code.indexOf('Future<void> _loadOnce() async');
     final firstRead = code.indexOf('firstLocalShown = await _loadLocalRows(', begin);

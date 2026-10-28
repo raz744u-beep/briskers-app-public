@@ -52,18 +52,30 @@ class LocalDocumentRepository {
             AND r.entity_id = $alias.job_id)))
   """;
 
-  Future<bool> _serverDocumentBlocked(
+  // Capture complete deletion fences once per atomic writer transaction.
+  // Rechecking them for every document caused thousands of SQLite round trips
+  // during a full automatic document-index refresh.
+  Future<({Set<String> documents, Set<String> jobs})> _retirementFences(
     String businessId,
-    Map<String, dynamic> document,
   ) async {
+    await LocalJobRetirement.ensureSchema(_database);
+    return (
+      documents: await LocalJobRetirement.blockedDocumentIds(
+        _database, businessId),
+      jobs: await LocalJobRetirement.blockedJobIds(_database, businessId),
+    );
+  }
+
+  static bool _serverDocumentBlocked(
+    Map<String, dynamic> document, {
+    required Set<String> blockedDocuments,
+    required Set<String> blockedJobs,
+  }) {
     final id = document['id']?.toString() ?? '';
-    if (await LocalJobRetirement.isDocumentBlocked(_database, businessId, id)) {
-      return true;
-    }
+    if (blockedDocuments.contains(id)) return true;
     final jobId = document['job_id']?.toString() ?? '';
     return (document['kind']?.toString() ?? 'invoice') == 'invoice' &&
-        jobId.isNotEmpty &&
-        await LocalJobRetirement.isJobBlocked(_database, businessId, jobId);
+        jobId.isNotEmpty && blockedJobs.contains(jobId);
   }
 
   Future<void> replaceFromServer(
@@ -72,7 +84,7 @@ class LocalDocumentRepository {
     String? kind,
   }) async {
     await _database.transaction(() async {
-      await LocalJobRetirement.ensureSchema(_database);
+      final fences = await _retirementFences(businessId);
       // A pending request can be rejected later. Retain its exact prior row
       // rather than letting an unrelated full refresh erase the recovery data.
       final visible = _visibleDocumentSql('local_documents');
@@ -84,7 +96,8 @@ class LocalDocumentRepository {
       );
       for (final document in documents) {
         final id = document['id']?.toString() ?? '';
-        if (id.isEmpty || await _serverDocumentBlocked(businessId, document)) {
+        if (id.isEmpty || _serverDocumentBlocked(document,
+          blockedDocuments: fences.documents, blockedJobs: fences.jobs)) {
           continue;
         }
         await _database.customStatement(
@@ -156,9 +169,11 @@ class LocalDocumentRepository {
     List<Map<String, dynamic>> documents,
   ) async {
     await _database.transaction(() async {
+      final fences = await _retirementFences(businessId);
       for (final document in documents) {
         final id = document['id']?.toString() ?? '';
-        if (id.isEmpty || await _serverDocumentBlocked(businessId, document)) {
+        if (id.isEmpty || _serverDocumentBlocked(document,
+          blockedDocuments: fences.documents, blockedJobs: fences.jobs)) {
           continue;
         }
         await _database.customStatement(
