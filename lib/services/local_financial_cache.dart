@@ -5,10 +5,12 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_deletion_v3.dart';
+import 'job_sync_service.dart';
 
 class LocalFinancialCache {
   LocalFinancialCache({BriskersLocalDatabase? database})
-      : _database = database ?? localDatabase;
+      : _database = database ?? localDatabase,
+        _explicitTestDatabase = database != null;
 
   static const _transactionsKey = 'transactions_snapshot';
   static const _optionsKey = 'transaction_options';
@@ -36,6 +38,9 @@ class LocalFinancialCache {
   }
 
   final BriskersLocalDatabase _database;
+  final bool _explicitTestDatabase;
+  bool get _useDeletionFences =>
+      JobSyncService.deletionFeedEnabled || _explicitTestDatabase;
 
   Future<void> saveTransactions(
     String businessId,
@@ -227,7 +232,22 @@ class LocalFinancialCache {
     String key,
     Object value, {
     int? visibilityGeneration,
-  }) => _database.transaction(() async {
+  }) {
+    if (!_useDeletionFences) {
+      return _database.customStatement(
+        '''INSERT INTO local_financial_cache (
+          business_id, cache_key, payload_json, updated_at
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(business_id, cache_key) DO UPDATE SET
+          payload_json=excluded.payload_json,
+          updated_at=excluded.updated_at''',
+        [
+          businessId, key, jsonEncode(value),
+          DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+        ],
+      );
+    }
+    return _database.transaction(() async {
     await LocalJobDeletionV3.ensureSchema(_database);
     final scopeKey = 'financial:$key';
     final generation = await LocalJobDeletionV3.validateVisibilityCacheWrite(
@@ -258,8 +278,20 @@ class LocalFinancialCache {
     );
     await LocalJobDeletionV3.markVisibilityCacheWritten(_database, businessId, scopeKey, generation);
   });
+  }
 
-  Future<String?> _load(String businessId, String key) => _database.transaction(() async {
+  Future<String?> _load(String businessId, String key) {
+    if (!_useDeletionFences) {
+      return () async {
+        final rows = await _database.customSelect(
+          '''SELECT payload_json FROM local_financial_cache
+             WHERE business_id = ? AND cache_key = ? LIMIT 1''',
+          variables: [Variable<String>(businessId), Variable<String>(key)],
+        ).get();
+        return rows.isEmpty ? null : rows.first.read<String>('payload_json');
+      }();
+    }
+    return _database.transaction(() async {
     final generation = await LocalJobDeletionV3.captureVisibilityGeneration(_database, businessId);
     if (!await LocalJobDeletionV3.visibilityCacheReadable(_database, businessId, 'financial:$key')) { return null; }
     final rows = await _database.customSelect(
@@ -291,5 +323,6 @@ class LocalFinancialCache {
       return LocalJobDeletionV3.referencesAny(decoded, ids) ? null : jsonEncode(stamp(decoded));
     } catch (_) { return null; }
   });
+  }
 }
 
