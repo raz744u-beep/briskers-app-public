@@ -25,6 +25,7 @@ import '../services/local_document_repository.dart';
 import '../services/local_document_detail_cache.dart';
 import '../services/verified_invoice_close_events.dart';
 import '../services/verified_invoice_payment_events.dart';
+import '../services/local_invoice_payment_coverage_events.dart';
 import '../services/offline_document_draft_service.dart';
 import '../services/local_invoice_status_styles_cache.dart';
 import '../services/invoice_finalization_guard.dart';
@@ -185,7 +186,12 @@ class _DocumentsScreenState extends State<DocumentsScreen>
   StreamSubscription<({String businessId, Set<String> jobIds})>? _retirement;
   StreamSubscription<VerifiedInvoiceClosed>? _invoiceCloseEvents;
   StreamSubscription<VerifiedInvoiceFullyPaid>? _invoicePaidEvents;
+  StreamSubscription<LocalInvoicePaymentCoverageChanged>? _localPaymentEvents;
   final Set<String> _verifiedFullyPaidInvoiceIds = <String>{};
+  // Exact local receipt coverage is enough for Pending Close presentation,
+  // but not for finalized/Closed. Don't wait for an unrelated list RPC to
+  // remove the fully covered invoice from the Open filter.
+  final Set<String> _locallyCoveredInvoiceIds = <String>{};
   List<Map<String, dynamic>> _invoiceStyles = const [];
   String? _selectedStatus;
   Map<String, num> _receiptTotals = const {};
@@ -206,7 +212,8 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     // A fully finalized receipt confirmed by the backend must not return to
     // Open because its retained row/receipt feed was cached before payment.
     // This is Pending Close, never an invented authoritative Closed state.
-    if (_verifiedFullyPaidInvoiceIds.contains(row['id']?.toString()) &&
+    if ((_verifiedFullyPaidInvoiceIds.contains(row['id']?.toString()) ||
+          _locallyCoveredInvoiceIds.contains(row['id']?.toString())) &&
         status != 'Closed' && status != 'Void' && status != 'Reopened') {
       return 'Pending Close';
     }
@@ -340,6 +347,23 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       _invoiceStyles = List<Map<String, dynamic>>.from(cachedStyles);
     }
     if (!_estimate) {
+      _localPaymentEvents = LocalInvoicePaymentCoverageEvents.changes.listen(
+        (event) {
+          if (!mounted || event.businessId != widget.businessId) return;
+          final changed = event.coversRemainingBalance
+              ? _locallyCoveredInvoiceIds.add(event.invoiceId)
+              : _locallyCoveredInvoiceIds.remove(event.invoiceId);
+          if (changed) {
+            setState(() {
+              _orderedSource = null;
+              _descriptionEpoch++;
+            });
+          }
+          // Entry/edit/delete may change the amount. Keep actual receipts
+          // authoritative on subsequent reads; never declare Closed here.
+          unawaited(_load());
+        },
+      );
       _invoicePaidEvents = VerifiedInvoicePaymentEvents.fullyPaid.listen((event) {
         if (!mounted || _estimate || event.businessId != widget.businessId) {
           return;
@@ -386,6 +410,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           return;
         }
         _verifiedFullyPaidInvoiceIds.remove(event.invoiceId);
+        _locallyCoveredInvoiceIds.remove(event.invoiceId);
         ++_loadEpoch;
         setState(() {
           _rows = _rows!.map(markClosed).toList();
@@ -466,6 +491,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
       _savedRows = null;
       _receiptTotals = const {};
       _verifiedFullyPaidInvoiceIds.clear();
+      _locallyCoveredInvoiceIds.clear();
       _selectedStatus = widget.dockDefaultsToOpen ? 'Open' : null;
       _futureDatedOnly = false;
       _search.clear();
@@ -486,6 +512,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
     _retirement?.cancel();
     _invoiceCloseEvents?.cancel();
     _invoicePaidEvents?.cancel();
+    _localPaymentEvents?.cancel();
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
