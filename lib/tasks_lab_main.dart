@@ -975,10 +975,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                           style: TextStyle(fontSize: 12,
                             color: Color(0xFF526273))),
                       if (splitCount > 1)
-                        Text(record != null
+                        Text('${record != null
                           ? _completedAssignment(record)
-                          : _laborAssignment(task),
+                          : _laborAssignment(task)} · Total: ${credit.hours}',
                           style: const TextStyle(fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
                             color: Color(0xFF526273))),
                       if(isRecheck && !done &&
                           ((task['payroll_hours'] as num?)?.toDouble() ?? 0) == 0)
