@@ -11,6 +11,9 @@ import '../services/customer_vehicle_sync_service.dart';
 import '../services/document_index_sync_service.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/job_sync_service.dart';
+import '../core/supabase_config.dart';
+import '../services/owner_job_deletion_service_v3.dart';
+import '../services/owner_local_job_purge_service.dart';
 import '../services/local_appointment_repository.dart';
 import '../services/local_customer_repository.dart';
 import '../services/local_document_repository.dart';
@@ -45,9 +48,10 @@ class ShellScreen extends StatefulWidget {
   State<ShellScreen> createState() => _ShellScreenState();
 }
 
-class _ShellScreenState extends State<ShellScreen> {
+class _ShellScreenState extends State<ShellScreen> with WidgetsBindingObserver {
   static const _api = BriskersApi();
   bool _preparingOfflineChoices = false;
+  bool _ownerDeletionSyncing = false;
   static const _sectionColors = [
     BriskersColors.today,
     BriskersColors.customers,
@@ -91,6 +95,8 @@ class _ShellScreenState extends State<ShellScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_syncOwnerDeletionV3());
     _businessName = widget.businessName;
     _index = widget.initialIndex.clamp(0, 5);
     BriskersConnectionModeController.instance.addListener(_connectionChanged);
@@ -150,11 +156,49 @@ class _ShellScreenState extends State<ShellScreen> {
   void _connectionChanged() {
     if (!mounted) return;
     unawaited(_prepareOfflineChoices());
+    unawaited(_syncOwnerDeletionV3());
     setState(() {
       _lazyPages.clear();
       _customersRefreshToken++;
       _jobsRefreshToken++;
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_syncOwnerDeletionV3());
+    }
+  }
+
+  // Runs only in explicitly-enabled test builds. Old offline consent is
+  // replayed with the SAME operation ID only after the server deletion feed
+  // is verified; the normal shop app never enters this code path.
+  Future<void> _syncOwnerDeletionV3() async {
+    if (!JobSyncService.deletionFeedEnabled ||
+        widget.roleCode != 'owner' ||
+        _ownerDeletionSyncing ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
+    final actorId = supabase.auth.currentUser?.id;
+    if (actorId == null || !mounted) return;
+    _ownerDeletionSyncing = true;
+    try {
+      final deletion = OwnerJobDeletionServiceV3();
+      await deletion.pullTombstones(widget.businessId);
+      if (!mounted || supabase.auth.currentUser?.id != actorId) return;
+      await deletion.flush(widget.businessId);
+      if (!mounted || supabase.auth.currentUser?.id != actorId) return;
+      await OwnerLocalJobPurgeService().flushRegistrations(
+        widget.businessId, actorId: actorId, isOwner: true,
+      );
+    } catch (_) {
+      // A failed feed/replay leaves queued work pending. Never run legacy
+      // deletion as a fallback or silently clear immutable fences.
+    } finally {
+      _ownerDeletionSyncing = false;
+    }
   }
 
   /// Preload the shop's actual payment method IDs for future offline use.
@@ -277,6 +321,7 @@ class _ShellScreenState extends State<ShellScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     BriskersConnectionModeController.instance.removeListener(_connectionChanged);
     _homeJobsCountSubscription?.cancel();
     _homeJobsSyncSubscription?.cancel();
