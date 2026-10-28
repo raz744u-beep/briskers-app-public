@@ -466,65 +466,83 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             final hours=allocated.isEmpty
               ? (task['payroll_hours'] as num?)?.toDouble()
               : (allocated.first['hours'] as num?)?.toDouble();
-            return Row(children:[
-              Icon(current=='done'?Icons.check_circle:
-                current=='in_progress'?Icons.timelapse:Icons.circle_outlined,
-                size:19,color:current=='done'?const Color(0xFF159B6A):
-                  const Color(0xFF667C8B)),
-              const SizedBox(width:8),
-              Expanded(child:Column(
-                crossAxisAlignment:CrossAxisAlignment.start,
-                children:[
-                  Text(_employeeName(mechanicId),
+            final statusLabel=current=='done' ? 'Done' :
+              current=='in_progress' ? 'In Progress' : 'Not Started';
+            final statusColor=current=='done'
+              ? const Color(0xFF137D59)
+              : current=='in_progress'
+                ? const Color(0xFF126C73) : const Color(0xFF566979);
+            // The left side describes ACTUAL progress. Buttons on the right
+            // are named as actions, never mistaken for status labels.
+            return Column(
+              crossAxisAlignment:CrossAxisAlignment.stretch,
+              children:[
+                Row(children:[
+                  Icon(current=='done'?Icons.check_circle:
+                    current=='in_progress'?Icons.timelapse:Icons.circle_outlined,
+                    size:19,color:current=='done'
+                      ? const Color(0xFF159B6A):const Color(0xFF667C8B)),
+                  const SizedBox(width:8),
+                  Expanded(child:Text(_employeeName(mechanicId),
                     overflow:TextOverflow.ellipsis,
                     style:const TextStyle(fontSize:13.5,
-                      fontWeight:FontWeight.w700)),
+                      fontWeight:FontWeight.w700))),
                   if(hours!=null)
-                    Text('${hours.toStringAsFixed(1)} hrs · '
-                      '${current=='done'?'Done':
-                        current=='in_progress'?'In Progress':'Not Started'}',
-                      style:const TextStyle(fontSize:11,
+                    Text('${hours.toStringAsFixed(1)} hrs',
+                      style:const TextStyle(fontSize:12,
+                        fontWeight:FontWeight.w400,
                         color:Color(0xFF64748B))),
-                ])),
-              if(completeTask)
-                const Row(mainAxisSize:MainAxisSize.min,children:[
-                  Icon(Icons.check_circle,color:Color(0xFF159B6A),size:16),
-                  SizedBox(width:3),
-                  Text('Done',style:TextStyle(color:Color(0xFF159B6A),
-                    fontWeight:FontWeight.w700,fontSize:12)),
-                ])
-              else if(current=='done')
-                TextButton.icon(
-                  onPressed:_changingMechanicProgress.contains(
-                    _mechanicTaskKey(task,mechanicId))?null:
-                    ()=>_undoMechanicDone(task,mechanicId),
-                  style:TextButton.styleFrom(
-                    visualDensity:VisualDensity.compact,
-                    padding:const EdgeInsets.symmetric(horizontal:4)),
-                  icon:const Icon(Icons.undo,size:17),
-                  label:const Text('Undo Done',style:TextStyle(fontSize:12)))
-              else ...[
-                if(current=='planned')
-                  TextButton.icon(
-                    onPressed:_changingMechanicProgress.contains(
-                      _mechanicTaskKey(task,mechanicId))?null:
-                      ()=>_changeMechanicProgress(task,mechanicId,'in_progress'),
-                    style:TextButton.styleFrom(
-                      visualDensity:VisualDensity.compact,
-                      padding:const EdgeInsets.symmetric(horizontal:4)),
-                    icon:const Icon(Icons.play_arrow,size:17),
-                    label:const Text('Start',style:TextStyle(fontSize:12))),
-                TextButton.icon(
-                  onPressed:_changingMechanicProgress.contains(
-                    _mechanicTaskKey(task,mechanicId))?null:
-                    ()=>_changeMechanicProgress(task,mechanicId,'done'),
-                  style:TextButton.styleFrom(
-                    visualDensity:VisualDensity.compact,
-                    padding:const EdgeInsets.symmetric(horizontal:4)),
-                  icon:const Icon(Icons.check,size:17),
-                  label:const Text('Done',style:TextStyle(fontSize:12))),
+                ]),
+                Padding(
+                  padding:const EdgeInsets.only(left:27,top:4),
+                  child:Row(children:[
+                    Expanded(child:Text(statusLabel,
+                      key:ValueKey('mechanic-status-${_mechanicTaskKey(task,mechanicId)}'),
+                      overflow:TextOverflow.ellipsis,
+                      style:TextStyle(fontSize:13,
+                        fontWeight:FontWeight.w700,color:statusColor))),
+                    if(completeTask)
+                      const Icon(Icons.lock_outline,
+                        color:Color(0xFF64748B),size:17)
+                    else if(current=='done')
+                      TextButton.icon(
+                        onPressed:_changingMechanicProgress.contains(
+                          _mechanicTaskKey(task,mechanicId))?null:
+                          ()=>_undoMechanicDone(task,mechanicId),
+                        style:TextButton.styleFrom(
+                          visualDensity:VisualDensity.compact,
+                          padding:const EdgeInsets.symmetric(horizontal:4)),
+                        icon:const Icon(Icons.undo,size:17),
+                        label:const Text('Undo Done',
+                          style:TextStyle(fontSize:12)))
+                    else ...[
+                      if(current=='planned')
+                        TextButton.icon(
+                          onPressed:_changingMechanicProgress.contains(
+                            _mechanicTaskKey(task,mechanicId))?null:
+                            ()=>_changeMechanicProgress(task,mechanicId,'in_progress'),
+                          style:TextButton.styleFrom(
+                            visualDensity:VisualDensity.compact,
+                            padding:const EdgeInsets.symmetric(horizontal:4)),
+                          icon:const Icon(Icons.play_arrow,size:17),
+                          label:const Text('Start',
+                            style:TextStyle(fontSize:12))),
+                      OutlinedButton.icon(
+                        onPressed:_changingMechanicProgress.contains(
+                          _mechanicTaskKey(task,mechanicId))?null:
+                          ()=>_changeMechanicProgress(task,mechanicId,'done'),
+                        style:OutlinedButton.styleFrom(
+                          visualDensity:VisualDensity.compact,
+                          padding:const EdgeInsets.symmetric(horizontal:7)),
+                        icon:const Icon(Icons.check,size:16),
+                        label:const Text('Mark Done',
+                          style:TextStyle(fontSize:12)),
+                      ),
+                    ],
+                  ]),
+                ),
               ],
-            ]);
+            );
           }),
         ],
       ]),
