@@ -359,6 +359,49 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     }
   }
 
+  Future<void> _undoMechanicDone(
+      Map<String,dynamic> task,String employeeId) async {
+    final name=_employeeName(employeeId);
+    final confirmed = await showDialog<bool>(
+      context:context,
+      builder:(dialog)=>AlertDialog(
+        title:const Text('Undo Done?'),
+        content:Text(
+          'Correct an accidental Done for $name? '
+          'Their previous task progress will be restored. '
+          'No payroll payments or hours will change.'),
+        actions:[
+          TextButton(
+            onPressed:()=>Navigator.pop(dialog,false),
+            child:const Text('Cancel')),
+          FilledButton(
+            onPressed:()=>Navigator.pop(dialog,true),
+            child:const Text('Undo Done')),
+        ],
+      ),
+    );
+    if(confirmed!=true || !mounted)return;
+    final key=_mechanicTaskKey(task,employeeId);
+    if(_changingMechanicProgress.contains(key))return;
+    setState(()=>_changingMechanicProgress.add(key));
+    try {
+      await store.undoAccidentalMechanicDone(
+        businessId:BriskersLabFixture.businessId,
+        jobId:BriskersLabFixture.jobId,
+        documentId:task['document_id'].toString(),
+        lineId:task['line_id'].toString(),
+        employeeId:employeeId);
+      await _refresh();
+    } catch(error) {
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content:Text('Unable to undo: $error')));
+      }
+    } finally {
+      if(mounted)setState(()=>_changingMechanicProgress.remove(key));
+    }
+  }
+
   // The controls belong visually to this task, never the card below it.
   // Only render the panel after expansion: collapsed task cards stay compact.
   Widget _mechanicProgressControls(Map<String,dynamic> task,
@@ -418,13 +461,24 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                       style:const TextStyle(fontSize:11,
                         color:Color(0xFF64748B))),
                 ])),
-              if(completeTask||current=='done')
+              if(completeTask)
                 const Row(mainAxisSize:MainAxisSize.min,children:[
                   Icon(Icons.check_circle,color:Color(0xFF159B6A),size:16),
                   SizedBox(width:3),
                   Text('Done',style:TextStyle(color:Color(0xFF159B6A),
                     fontWeight:FontWeight.w700,fontSize:12)),
                 ])
+              else if(current=='done')
+                TextButton.icon(
+                  tooltip:'Correct an accidental task completion',
+                  onPressed:_changingMechanicProgress.contains(
+                    _mechanicTaskKey(task,mechanicId))?null:
+                    ()=>_undoMechanicDone(task,mechanicId),
+                  style:TextButton.styleFrom(
+                    visualDensity:VisualDensity.compact,
+                    padding:const EdgeInsets.symmetric(horizontal:4)),
+                  icon:const Icon(Icons.undo,size:17),
+                  label:const Text('Undo Done',style:TextStyle(fontSize:12)))
               else ...[
                 if(current=='planned')
                   TextButton.icon(
