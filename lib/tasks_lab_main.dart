@@ -905,15 +905,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
 
   Future<void> _editTask(Map<String, dynamic> task) async {
     if (_firstCompletion(task) != null) return;
-    var status = task['status']?.toString() ?? 'planned';
     final description = TextEditingController(text: _description(task));
     final updated = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       useSafeArea: true,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (sheetContext, setModalState) => Padding(
+      builder: (sheetContext) => Padding(
           padding: EdgeInsets.fromLTRB(16, 12, 16,
             MediaQuery.viewInsetsOf(sheetContext).bottom + 18),
           child: SingleChildScrollView(
@@ -937,23 +935,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   icon: const Icon(Icons.people_outline),
                   label: const Text('Assign / split labor mechanics'),
                 ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: status,
-                  decoration: const InputDecoration(
-                    labelText: 'Task status', border: OutlineInputBorder()),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'planned', child: Text('Planned')),
-                    DropdownMenuItem(
-                      value: 'in_progress', child: Text('In progress')),
-                    DropdownMenuItem(
-                      value: 'done', child: Text('Done')),
-                  ],
-                  onChanged: (v) {
-                    setModalState(() => status = v ?? 'planned');
-                  },
-                ),
                 const SizedBox(height: 14),
                 FilledButton(
                   child: const Text('Save task'),
@@ -966,7 +947,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         lineId: task['line_id'].toString(),
                         description: description.text,
                         editDescription: true,
-                        status: status,
                       );
                       if (sheetContext.mounted) {
                         Navigator.pop(sheetContext, true);
@@ -983,12 +963,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             ),
           ),
         ),
-      ),
     );
     description.dispose();
     if (updated == true) {
       await _refresh();
-      if (status == 'done') await _offerCompleteJobIfReady();
     }
   }
 
