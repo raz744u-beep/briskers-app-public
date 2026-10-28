@@ -177,11 +177,31 @@ class LocalJobRetirement {
     String businessId,
     String jobId,
   ) async => (await blockedJobIds(db, businessId)).contains(jobId);
+  // Detail navigation needs only this invoice's durable fence. Do not scan
+  // every retired invoice/job in a shop on each route or guard refresh.
+  // Exact invoice tombstones also hide documents missing from the local index.
   static Future<bool> isDocumentBlocked(
     BriskersLocalDatabase db,
     String businessId,
     String documentId,
-  ) async => (await blockedDocumentIds(db, businessId)).contains(documentId);
+  ) async {
+    await ensureSchema(db);
+    return (await db.customSelect(
+      """SELECT 1 FROM local_job_retirement_entities e
+      WHERE e.business_id = ? AND e.state IN $blockedStates
+        AND ((e.entity_kind = 'invoice' AND e.entity_id = ?)
+          OR (e.entity_kind = 'job' AND EXISTS (
+            SELECT 1 FROM local_documents d
+            WHERE d.business_id = e.business_id AND d.id = ?
+              AND d.kind = 'invoice' AND d.job_id = e.entity_id)))
+      LIMIT 1""",
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(documentId),
+        Variable<String>(documentId),
+      ],
+    ).get()).isNotEmpty;
+  }
 
   static void notify(
     BriskersLocalDatabase db,
