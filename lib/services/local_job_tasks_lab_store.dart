@@ -183,6 +183,23 @@ class LocalJobTasksLabStore {
       CREATE INDEX IF NOT EXISTS idx_lab_shop_tasks_business_status
       ON local_shop_tasks_lab (business_id, status, created_at)
     ''');
+    // Separate progress per mechanic, not a second invoice/job or payroll
+    // record. Existing TEST phone tables and payment history stay untouched.
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_lab_mechanic_task_progress (
+        business_id TEXT NOT NULL, job_id TEXT NOT NULL,
+        document_id TEXT NOT NULL, line_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'planned',
+        started_at INTEGER, completed_at INTEGER,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (business_id, job_id, document_id, line_id, employee_id)
+      )
+    ''');
+    await db.customStatement('''
+      CREATE INDEX IF NOT EXISTS idx_lab_mechanic_progress_job
+      ON local_lab_mechanic_task_progress (business_id, job_id)
+    ''');
   }
 
   Future<List<Map<String, dynamic>>> shopTasks(String businessId) async {
@@ -278,6 +295,156 @@ class LocalJobTasksLabStore {
         'AND document_id=? AND line_id=?',
         [businessId,jobId,recheckDocumentId,lineId],
       );
+    });
+  }
+
+  /// Read all progress for a job in one local query. A row records
+  /// mechanic activity only; task completion is derived from all currently
+  /// assigned mechanics and payroll coverage remains a separate ledger.
+  Future<List<Map<String, dynamic>>> mechanicProgressForJob(
+      String businessId, String jobId) async {
+    await ensureTables(db);
+    final rows = await db.customSelect(
+      'SELECT document_id,line_id,employee_id,status,started_at,completed_at '
+      'FROM local_lab_mechanic_task_progress WHERE business_id=? AND job_id=?',
+      variables: [Variable<String>(businessId),Variable<String>(jobId)],
+    ).get();
+    return [
+      for (final row in rows) Map<String,dynamic>.from(row.data),
+    ];
+  }
+
+  /// A mechanic (or the owner on their behalf) starts/finishes their portion.
+  /// Finishing one of two mechanics NEVER finishes the shared task. The job
+  /// may begin work, but can only be officially closed by a separate command.
+  Future<String> setMechanicTaskProgress({
+    required String businessId,
+    required String jobId,
+    required String documentId,
+    required String lineId,
+    required String employeeId,
+    required String status,
+  }) async {
+    if ([businessId,jobId,documentId,lineId,employeeId]
+        .any((value)=>value.trim().isEmpty) ||
+        !const {'planned','in_progress','done'}.contains(status)) {
+      throw ArgumentError('Valid job, task, mechanic and progress required');
+    }
+    await ensureTables(db);
+    return db.transaction(() async {
+      if (await jobStatus(businessId,jobId) == 'completed') {
+        throw StateError('Closed jobs cannot start work. Reopen first.');
+      }
+      final task = await db.customSelect(
+        'SELECT status,source_missing,employee_id FROM local_job_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [
+          Variable<String>(businessId),Variable<String>(jobId),
+          Variable<String>(documentId),Variable<String>(lineId),
+        ],
+      ).getSingleOrNull();
+      if (task == null || task.read<int>('source_missing') != 0) {
+        throw StateError('Active service task not found');
+      }
+      final frozen = await db.customSelect(
+        'SELECT 1 FROM local_payroll_preserved_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [
+          Variable<String>(businessId),Variable<String>(jobId),
+          Variable<String>(documentId),Variable<String>(lineId),
+        ],
+      ).getSingleOrNull();
+      if (task.read<String>('status') == 'done' || frozen != null) {
+        throw StateError('Finished service work is preserved. Add a recheck.');
+      }
+      final assigned = await db.customSelect(
+        'SELECT employee_id FROM local_task_allocations_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [
+          Variable<String>(businessId),Variable<String>(jobId),
+          Variable<String>(documentId),Variable<String>(lineId),
+        ],
+      ).get();
+      final mechanics = assigned.isNotEmpty
+        ? assigned.map((r)=>r.read<String>('employee_id')).toSet()
+        : <String>{
+            if ((task.readNullable<String>('employee_id')??'').isNotEmpty)
+              task.read<String>('employee_id'),
+          };
+      if (mechanics.isEmpty || !mechanics.contains(employeeId)) {
+        throw StateError('Assign this mechanic to the task first');
+      }
+      final existing = await db.customSelect(
+        'SELECT status,started_at,completed_at '
+        'FROM local_lab_mechanic_task_progress WHERE '
+        'business_id=? AND job_id=? AND document_id=? AND line_id=? '
+        'AND employee_id=?',
+        variables: [
+          Variable<String>(businessId),Variable<String>(jobId),
+          Variable<String>(documentId),Variable<String>(lineId),
+          Variable<String>(employeeId),
+        ],
+      ).getSingleOrNull();
+      if (existing?.read<String>('status') == 'done' && status != 'done') {
+        throw StateError('Completed mechanic work is read-only');
+      }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final started = existing?.readNullable<int>('started_at') ??
+        (status == 'planned' ? null : now);
+      final finished = status == 'done'
+        ? (existing?.readNullable<int>('completed_at') ?? now) : null;
+      await db.customStatement(
+        'INSERT INTO local_lab_mechanic_task_progress '
+        '(business_id,job_id,document_id,line_id,employee_id,status,'
+        'started_at,completed_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?) '
+        'ON CONFLICT(business_id,job_id,document_id,line_id,employee_id) '
+        'DO UPDATE SET status=excluded.status, '
+        'started_at=excluded.started_at, '
+        'completed_at=excluded.completed_at,updated_at=excluded.updated_at',
+        [businessId,jobId,documentId,lineId,employeeId,
+          status,started,finished,now],
+      );
+      final progress = await db.customSelect(
+        'SELECT employee_id,status FROM local_lab_mechanic_task_progress '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [
+          Variable<String>(businessId),Variable<String>(jobId),
+          Variable<String>(documentId),Variable<String>(lineId),
+        ],
+      ).get();
+      final known = {
+        for (final r in progress)
+          r.read<String>('employee_id'):r.read<String>('status'),
+      };
+      // Unrecorded mechanics are Not Started, never silently Done.
+      final statuses = [for (final id in mechanics)
+        known[id] ?? 'planned'];
+      final overall = statuses.every((s)=>s=='done')
+        ? 'done'
+        : statuses.any((s)=>s!='planned') ? 'in_progress' : 'planned';
+      await db.customStatement(
+        'UPDATE local_job_tasks_lab '
+        'SET status=?,completed_at=?,updated_at=? '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        [overall,overall=='done'?now:null,now,
+          businessId,jobId,documentId,lineId],
+      );
+      if (overall == 'done') {
+        await _freezeFirstCompletedTasks(businessId,jobId,now);
+      }
+      // Existing exception/hold statuses take priority over auto-progress.
+      if (overall != 'planned' &&
+          await jobStatus(businessId,jobId) == 'open') {
+        await db.customStatement(
+          'INSERT INTO local_job_status_lab '
+          '(business_id,job_id,status_code,updated_at) '
+          "VALUES (?,?,'in_progress',?) "
+          'ON CONFLICT(business_id,job_id) DO UPDATE SET '
+          'status_code=excluded.status_code,updated_at=excluded.updated_at',
+          [businessId,jobId,now],
+        );
+      }
+      return overall;
     });
   }
 
@@ -1095,6 +1262,19 @@ class LocalJobTasksLabStore {
       if (task.read<String>('status') == 'done' || frozen != null) {
         throw StateError('Completed payroll cannot be edited. '
           'Create a separate recheck task.');
+      }
+      final finishedMechanics = await db.customSelect(
+        'SELECT 1 FROM local_lab_mechanic_task_progress '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=? '
+        "AND status='done' LIMIT 1",
+        variables: [
+          Variable<String>(businessId),Variable<String>(jobId),
+          Variable<String>(documentId),Variable<String>(lineId),
+        ],
+      ).getSingleOrNull();
+      if (finishedMechanics != null) {
+        throw StateError('A mechanic already finished this task. '
+          'Preserve the assignment; use an owner correction or new recheck.');
       }
       // Billed book time is a default, never a ceiling on earned payroll.
       // The task's source_invoice_hours / invoice price remain unchanged.
