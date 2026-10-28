@@ -53,6 +53,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   List<Map<String, dynamic>> completedWorkRows = const [];
   final Set<String> expandedTaskKeys = <String>{};
   Map<String, List<Map<String, dynamic>>> allocationsByLine = {};
+  Map<String, String> mechanicProgressByKey = const {};
+  final Set<String> _changingMechanicProgress = <String>{};
+
   Map<String, double> earnedPayrollPreviewHours = {};
   Map<String, int> testHourlyRates = {};
   List<Map<String, dynamic>> testPayrollPayments = const [];
@@ -122,6 +125,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final earnedHours = await store.earnedHoursPreview(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
+    final mechanicProgressRows = await store.mechanicProgressForJob(
+      BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final currentJobStatus = await store.jobStatus(
       BriskersLabFixture.businessId, BriskersLabFixture.jobId);
     final completedRecords = await store.completedWork(
@@ -139,6 +144,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       completedWorkRows = completedRecords;
       earnedPayrollPreviewHours = earnedHours;
       testHourlyRates = rates;
+      mechanicProgressByKey = {
+        for (final p in mechanicProgressRows)
+          _mechanicTaskKey(p,p['employee_id'].toString()):
+            p['status'].toString(),
+      };
       testPayrollPayments = payments;
       earnedCorrections = corrections;
       allocationsByLine = {for (var i = 0; i < rows.length; i++)
@@ -296,6 +306,110 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final doc = row['document_id']?.toString() ?? '';
     final line = row['line_id']?.toString() ?? '';
     return '${doc.length}:$doc$line';
+  }
+
+  String _mechanicTaskKey(Map<String,dynamic> task,String mechanicId) =>
+    '${_identity(task)}::$mechanicId';
+
+  List<String> _mechanicsOnTask(Map<String,dynamic> task) {
+    final assigned=allocationsByLine[task['line_id']?.toString()??'']
+      ?? const <Map<String,dynamic>>[];
+    if(assigned.isNotEmpty) {
+      return assigned.map((a)=>a['employee_id']?.toString()??'')
+        .where((id)=>id.isNotEmpty).toSet().toList();
+    }
+    final lead=task['employee_id']?.toString()??'';
+    return lead.isEmpty?const []:[lead];
+  }
+
+  String _mechanicTaskStatus(Map<String,dynamic> task,String employeeId) {
+    if (_firstCompletion(task)!=null || task['status']=='done') return 'done';
+    final recorded=mechanicProgressByKey[_mechanicTaskKey(task,employeeId)];
+    if(recorded!=null) return recorded;
+    // Before the first per-mechanic action, preserve an older TEST app's
+    // already-started task. Once tracked, any missing mechanic is Not Started.
+    if(task['status']=='in_progress' &&
+        !_mechanicsOnTask(task).any((id)=>
+          mechanicProgressByKey.containsKey(_mechanicTaskKey(task,id)))) {
+      return 'in_progress';
+    }
+    return 'planned';
+  }
+
+  Future<void> _changeMechanicProgress(
+      Map<String,dynamic> task,String employeeId,String progress) async {
+    final key=_mechanicTaskKey(task,employeeId);
+    if(_changingMechanicProgress.contains(key))return;
+    setState(()=>_changingMechanicProgress.add(key));
+    try {
+      await store.setMechanicTaskProgress(
+        businessId:BriskersLabFixture.businessId,
+        jobId:BriskersLabFixture.jobId,
+        documentId:task['document_id'].toString(),
+        lineId:task['line_id'].toString(),
+        employeeId:employeeId,status:progress);
+      await _refresh();
+    } catch(error) {
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content:Text('Task progress not saved: $error')));
+      }
+    } finally {
+      if(mounted) setState(()=>_changingMechanicProgress.remove(key));
+    }
+  }
+
+  Widget _mechanicProgressControls(Map<String,dynamic> task,
+      {required bool completeTask}) {
+    final mechanics=_mechanicsOnTask(task);
+    if(mechanics.isEmpty) {
+      return Padding(padding:const EdgeInsets.only(top:7),
+        child:TextButton.icon(
+          onPressed:()=>_editInvoiceLabor(task),
+          icon:const Icon(Icons.person_add_alt,size:17),
+          label:const Text('Assign mechanic to start work')));
+    }
+    return Padding(
+      padding:const EdgeInsets.only(top:8),
+      child:Column(children:[
+        for(final mechanicId in mechanics)
+          Padding(
+            padding:const EdgeInsets.symmetric(vertical:3),
+            child:Row(children:[
+              Icon(_mechanicTaskStatus(task,mechanicId)=='done'
+                ? Icons.check_circle :
+                _mechanicTaskStatus(task,mechanicId)=='in_progress'
+                  ? Icons.timelapse:Icons.circle_outlined,
+                size:18,
+                color:_mechanicTaskStatus(task,mechanicId)=='done'
+                  ? const Color(0xFF159B6A):const Color(0xFF64748B)),
+              const SizedBox(width:6),
+              Expanded(child:Text(_employeeName(mechanicId),
+                overflow:TextOverflow.ellipsis,
+                style:const TextStyle(fontWeight:FontWeight.w600))),
+              if(completeTask || _mechanicTaskStatus(task,mechanicId)=='done')
+                const Text('Done',style:TextStyle(
+                  fontSize:12,color:Color(0xFF159B6A),
+                  fontWeight:FontWeight.w800))
+              else ...[
+                if(_mechanicTaskStatus(task,mechanicId)=='planned')
+                  TextButton.icon(
+                    onPressed:_changingMechanicProgress.contains(
+                      _mechanicTaskKey(task,mechanicId))?null:
+                      ()=>_changeMechanicProgress(task,mechanicId,'in_progress'),
+                    icon:const Icon(Icons.play_arrow,size:18),
+                    label:const Text('Start')),
+                TextButton.icon(
+                  onPressed:_changingMechanicProgress.contains(
+                    _mechanicTaskKey(task,mechanicId))?null:
+                    ()=>_changeMechanicProgress(task,mechanicId,'done'),
+                  icon:const Icon(Icons.check,size:18),
+                  label:const Text('Done')),
+              ],
+            ]),
+          ),
+      ]),
+    );
   }
 
   Map<String, dynamic>? _firstCompletion(Map<String, dynamic> task) {
@@ -691,6 +805,18 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     color: const Color(0xFF64748B), size: 18),
                 ],
               ),
+              if (done || _mechanicsOnTask(task).length == 1 || expanded)
+                _mechanicProgressControls(task,completeTask:done),
+              if (!done && _mechanicsOnTask(task).length > 1 && !expanded)
+                Padding(
+                  padding:const EdgeInsets.only(top:4,left:28),
+                  child:Text(
+                    '${_mechanicsOnTask(task).where((mechanic)=>
+                      _mechanicTaskStatus(task,mechanic)=='done').length}'
+                    ' of ${_mechanicsOnTask(task).length} mechanics Done'
+                    ' · Tap to manage',
+                    style:const TextStyle(fontSize:11.5,
+                      color:Color(0xFF64748B)))),
               if (expanded)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(28, 8, 8, 3),
