@@ -340,36 +340,44 @@ class LocalDocumentRepository {
   }
 
   Future<int> openEstimateCount(String businessId) async {
+    final visibility = await _deletionReadScope(businessId);
     final row = await _database.customSelect(
       '''
       SELECT COUNT(*) AS count
-      FROM local_documents
-      WHERE business_id = ?
+      FROM local_documents d
+      WHERE d.business_id = ?
         AND kind = 'estimate'
         AND converted = 0
         AND lower(COALESCE(status, '')) NOT IN ('accepted', 'declined', 'expired', 'void')
+        ${visibility.docFilter}
       ''',
       variables: [Variable<String>(businessId)],
     ).getSingle();
+    await _checkDeletionRead(businessId, visibility.generation);
     return row.read<int>('count');
   }
 
-  Stream<int> watchOpenEstimateCount(String businessId) {
-    return _database
+  Stream<int> watchOpenEstimateCount(String businessId) async* {
+    final visibility = await _deletionReadScope(businessId);
+    final changes = _database
         .customSelect(
           '''
           SELECT COUNT(*) AS count
-          FROM local_documents
-          WHERE business_id = ?
+          FROM local_documents d
+          WHERE d.business_id = ?
             AND kind = 'estimate'
             AND converted = 0
             AND lower(COALESCE(status, '')) NOT IN ('accepted', 'declined', 'expired', 'void')
+            ${visibility.docFilter}
           ''',
           variables: [Variable<String>(businessId)],
           readsFrom: {_database.localDocuments},
         )
-        .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .watchSingle();
+    await for (final row in changes) {
+      await _checkDeletionRead(businessId, visibility.generation);
+      yield row.read<int>('count');
+    }
   }
 
   /// Read-only offline Home attention from the already-synced invoice index.
@@ -426,36 +434,44 @@ class LocalDocumentRepository {
   }
 
   Future<int> openInvoiceCount(String businessId) async {
+    final visibility = await _deletionReadScope(businessId);
     final row = await _database.customSelect(
       '''
       SELECT COUNT(*) AS count
-      FROM local_documents
-      WHERE business_id = ?
+      FROM local_documents d
+      WHERE d.business_id = ?
         AND kind = 'invoice'
         AND closed_at IS NULL
         AND lower(COALESCE(status, '')) <> 'void'
+        ${visibility.docFilter}
       ''',
       variables: [Variable<String>(businessId)],
     ).getSingle();
+    await _checkDeletionRead(businessId, visibility.generation);
     return row.read<int>('count');
   }
 
-  Stream<int> watchOpenInvoiceCount(String businessId) {
-    return _database
+  Stream<int> watchOpenInvoiceCount(String businessId) async* {
+    final visibility = await _deletionReadScope(businessId);
+    final changes = _database
         .customSelect(
           '''
           SELECT COUNT(*) AS count
-          FROM local_documents
-          WHERE business_id = ?
+          FROM local_documents d
+          WHERE d.business_id = ?
             AND kind = 'invoice'
             AND closed_at IS NULL
             AND lower(COALESCE(status, '')) <> 'void'
+            ${visibility.docFilter}
           ''',
           variables: [Variable<String>(businessId)],
           readsFrom: {_database.localDocuments},
         )
-        .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .watchSingle();
+    await for (final row in changes) {
+      await _checkDeletionRead(businessId, visibility.generation);
+      yield row.read<int>('count');
+    }
   }
 
   Future<List<Map<String, dynamic>>> search(
