@@ -7,6 +7,7 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import '../core/supabase_config.dart';
 import 'local_job_deletion_v3.dart';
 import 'local_job_retirement.dart';
 import 'owner_job_deletion_service_v3.dart';
@@ -14,9 +15,10 @@ import 'owner_job_deletion_service_v3.dart';
 class JobSyncService {
   // Deliberately OFF in released builds until the sandbox backend, exact
   // permissions and multi-device deletion behavior are independently verified.
-  static const deletionFeedEnabled = bool.fromEnvironment(
-    'BRISKERS_OWNER_DELETE_V3_FEED', defaultValue: false,
-  );
+  static const deletionFeedEnabled = isSyntheticTestBuild &&
+      bool.fromEnvironment(
+        'BRISKERS_OWNER_DELETE_V3_FEED', defaultValue: false,
+      );
 
   // A missing, rejected or outdated feed MUST prevent a v3-enabled client
   // from reloading server Jobs. Never silently downgrade to legacy sync.
