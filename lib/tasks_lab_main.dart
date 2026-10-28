@@ -359,55 +359,96 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     }
   }
 
+  // The controls belong visually to this task, never the card below it.
+  // Only render the panel after expansion: collapsed task cards stay compact.
   Widget _mechanicProgressControls(Map<String,dynamic> task,
       {required bool completeTask}) {
     final mechanics=_mechanicsOnTask(task);
     if(mechanics.isEmpty) {
-      return Padding(padding:const EdgeInsets.only(top:7),
+      return Container(
+        key: ValueKey('service-task-mechanics-${_identity(task)}'),
+        margin:const EdgeInsets.only(top:10),
+        padding:const EdgeInsets.all(10),
+        decoration:BoxDecoration(
+          color:const Color(0xFFF0F6FA),
+          borderRadius:BorderRadius.circular(12)),
         child:TextButton.icon(
           onPressed:()=>_editInvoiceLabor(task),
           icon:const Icon(Icons.person_add_alt,size:17),
           label:const Text('Assign mechanic to start work')));
     }
-    return Padding(
-      padding:const EdgeInsets.only(top:8),
+    final allocations=allocationsByLine[task['line_id']?.toString()??'']
+      ?? const <Map<String,dynamic>>[];
+    return Container(
+      key: ValueKey('service-task-mechanics-${_identity(task)}'),
+      margin:const EdgeInsets.only(top:12,bottom:4),
+      padding:const EdgeInsets.fromLTRB(10,7,10,8),
+      decoration:BoxDecoration(
+        color:const Color(0xFFF0F6FA),
+        borderRadius:BorderRadius.circular(12),
+        border:Border.all(color:const Color(0xFFDCE7ED))),
       child:Column(children:[
-        for(final mechanicId in mechanics)
-          Padding(
-            padding:const EdgeInsets.symmetric(vertical:3),
-            child:Row(children:[
-              Icon(_mechanicTaskStatus(task,mechanicId)=='done'
-                ? Icons.check_circle :
-                _mechanicTaskStatus(task,mechanicId)=='in_progress'
-                  ? Icons.timelapse:Icons.circle_outlined,
-                size:18,
-                color:_mechanicTaskStatus(task,mechanicId)=='done'
-                  ? const Color(0xFF159B6A):const Color(0xFF64748B)),
-              const SizedBox(width:6),
-              Expanded(child:Text(_employeeName(mechanicId),
-                overflow:TextOverflow.ellipsis,
-                style:const TextStyle(fontWeight:FontWeight.w600))),
-              if(completeTask || _mechanicTaskStatus(task,mechanicId)=='done')
-                const Text('Done',style:TextStyle(
-                  fontSize:12,color:Color(0xFF159B6A),
-                  fontWeight:FontWeight.w800))
+        for(var index=0;index<mechanics.length;index++) ...[
+          if(index>0) const Divider(height:16,color:Color(0xFFD0DCE4)),
+          Builder(builder:(context){
+            final mechanicId=mechanics[index];
+            final current=_mechanicTaskStatus(task,mechanicId);
+            final allocated=allocations.where((a)=>
+              a['employee_id']?.toString()==mechanicId).toList();
+            final hours=allocated.isEmpty
+              ? (task['payroll_hours'] as num?)?.toDouble()
+              : (allocated.first['hours'] as num?)?.toDouble();
+            return Row(children:[
+              Icon(current=='done'?Icons.check_circle:
+                current=='in_progress'?Icons.timelapse:Icons.circle_outlined,
+                size:19,color:current=='done'?const Color(0xFF159B6A):
+                  const Color(0xFF667C8B)),
+              const SizedBox(width:8),
+              Expanded(child:Column(
+                crossAxisAlignment:CrossAxisAlignment.start,
+                children:[
+                  Text(_employeeName(mechanicId),
+                    overflow:TextOverflow.ellipsis,
+                    style:const TextStyle(fontSize:13.5,
+                      fontWeight:FontWeight.w700)),
+                  if(hours!=null)
+                    Text('${hours.toStringAsFixed(1)} hrs · '
+                      '${current=='done'?'Done':
+                        current=='in_progress'?'In Progress':'Not Started'}',
+                      style:const TextStyle(fontSize:11,
+                        color:Color(0xFF64748B))),
+                ])),
+              if(completeTask||current=='done')
+                const Row(mainAxisSize:MainAxisSize.min,children:[
+                  Icon(Icons.check_circle,color:Color(0xFF159B6A),size:16),
+                  SizedBox(width:3),
+                  Text('Done',style:TextStyle(color:Color(0xFF159B6A),
+                    fontWeight:FontWeight.w700,fontSize:12)),
+                ])
               else ...[
-                if(_mechanicTaskStatus(task,mechanicId)=='planned')
+                if(current=='planned')
                   TextButton.icon(
                     onPressed:_changingMechanicProgress.contains(
                       _mechanicTaskKey(task,mechanicId))?null:
                       ()=>_changeMechanicProgress(task,mechanicId,'in_progress'),
-                    icon:const Icon(Icons.play_arrow,size:18),
-                    label:const Text('Start')),
+                    style:TextButton.styleFrom(
+                      visualDensity:VisualDensity.compact,
+                      padding:const EdgeInsets.symmetric(horizontal:4)),
+                    icon:const Icon(Icons.play_arrow,size:17),
+                    label:const Text('Start',style:TextStyle(fontSize:12))),
                 TextButton.icon(
                   onPressed:_changingMechanicProgress.contains(
                     _mechanicTaskKey(task,mechanicId))?null:
                     ()=>_changeMechanicProgress(task,mechanicId,'done'),
-                  icon:const Icon(Icons.check,size:18),
-                  label:const Text('Done')),
+                  style:TextButton.styleFrom(
+                    visualDensity:VisualDensity.compact,
+                    padding:const EdgeInsets.symmetric(horizontal:4)),
+                  icon:const Icon(Icons.check,size:17),
+                  label:const Text('Done',style:TextStyle(fontSize:12))),
               ],
-            ]),
-          ),
+            ]);
+          }),
+        ],
       ]),
     );
   }
@@ -718,11 +759,18 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       ? (record['payroll_allocations'] as List?)?.length ?? 0
       : allocationsByLine[task['line_id'].toString()]?.length ?? 0;
     return Card(
-      margin: const EdgeInsets.fromLTRB(10, 2, 10, 2),
-      elevation: 0,
+      key: ValueKey('service-task-card-$id'),
+      margin: const EdgeInsets.fromLTRB(10, 7, 10, 8),
+      elevation: 1.5,
+      shadowColor: const Color(0x220C344D),
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: Color(0xFFCAD9E2), width: 1)),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         key: ValueKey('compact-task-$id'),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         onTap: () => setState(() {
           if (expanded) {
             expandedTaskKeys.remove(id);
@@ -731,7 +779,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           }
         }),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 7, 6, 7),
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -805,7 +853,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     color: const Color(0xFF64748B), size: 18),
                 ],
               ),
-              if (done || _mechanicsOnTask(task).length == 1 || expanded)
+              // Keep the whole mechanic section inside the expanded task.
+              // The next service task is a separate, individually bordered card.
+              if (expanded)
                 _mechanicProgressControls(task,completeTask:done),
               if (!done && _mechanicsOnTask(task).length > 1 && !expanded)
                 Padding(
@@ -819,7 +869,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                       color:Color(0xFF64748B)))),
               if (expanded)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(28, 8, 8, 3),
+                  padding: const EdgeInsets.fromLTRB(4, 9, 4, 3),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
