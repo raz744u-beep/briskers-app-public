@@ -679,19 +679,6 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       final projected = await _withLocalPayments(
         await _offlineInvoiceTax.projectPending(
             widget.businessId, widget.documentId, detail));
-      // The authorized document + projected local payments are enough for a
-      // usable first frame. Optional tax, signature, warranty and findings
-      // metadata are secondary and must never strand a new invoice on a
-      // full-page spinner when one of their RPCs is slow.
-      if (!mounted || generation != _loadGeneration) return;
-      setState(() {
-        _detail = projected;
-        if (!_notesDirty && !_notesFocusNode.hasFocus) {
-          _notesController.text = projected['memo']?.toString() ?? '';
-        }
-        _loading = false;
-        _error = null;
-      });
       debugPrint('PERF-001 document detail RPC: ${openWatch.elapsedMilliseconds}ms');
       unawaited(const InvoicePerformanceMetrics().record(
         widget.businessId,
@@ -714,6 +701,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             'offline_warranty_detail': cachedWarranty,
         }),
       );
+      // Persist the authorized snapshot before enabling editing so a fast
+      // item/header change cannot race the initial disk cache write.
+      // Optional tax, warranty, signature and findings RPCs remain secondary:
+      // the saved invoice and projected payments can now paint immediately.
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _detail = projected;
+        if (!_notesDirty && !_notesFocusNode.hasFocus) {
+          _notesController.text = projected['memo']?.toString() ?? '';
+        }
+        _loading = false;
+        _error = null;
+      });
       // After a successful item/notes mutation, avoid re-fetching seven
       // unrelated metadata endpoints. The authoritative document detail
       // already includes updated lines, totals, and payment aggregates.

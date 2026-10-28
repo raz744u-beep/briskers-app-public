@@ -16,7 +16,7 @@ void main() {
     expect(detail, greaterThan(before));
   });
 
-  test('Verified invoice paints before cache writes and optional metadata RPCs', () {
+  test('Verified invoice paints after safe cache write but before optional metadata RPCs', () {
     final source = File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
     final origin = source.indexOf("debugPrint('PERF-001 document detail RPC:");
     final section = source.indexOf('final openWatch = Stopwatch()..start();');
@@ -24,9 +24,11 @@ void main() {
     final cache = source.indexOf('final cachedWarranty = _cachedWarrantyDetail(', section);
     final extras = source.indexOf('final results = await Future.wait<dynamic>([', section);
     expect(first, greaterThan(section));
-    expect(first, lessThan(origin));
-    expect(first, lessThan(cache));
-    expect(first, lessThan(extras));
+    expect(first, greaterThan(origin));
+    expect(first, greaterThan(cache),
+      reason: 'The exact verified snapshot must persist before editing is enabled');
+    expect(first, lessThan(extras),
+      reason: 'Optional metadata must never delay first invoice content');
     expect(source.substring(first, origin), contains('_loading = false;'));
     // Optional metadata updates the same authorized document after the first
     // frame, without fabricating payment amounts or skipping the exact scope.
