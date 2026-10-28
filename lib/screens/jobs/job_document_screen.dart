@@ -27,6 +27,7 @@ import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
 import '../../core/mileage_workflow.dart';
+import '../../core/invoice_pdf_mileage_projection.dart';
 import '../../core/document_presentation.dart';
 import '../../core/document_navigation_role.dart';
 import '../../core/standard_note_rules.dart';
@@ -2352,7 +2353,30 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         else
           Future.value(<String, dynamic>{}),
       ]);
-      final detail = Map<String, dynamic>.from(result[0] as Map);
+      final serverDetail = Map<String, dynamic>.from(result[0] as Map);
+      // The document editor already projects saved/queued Miles Out over the
+      // exact invoice. PDF used to ignore that projection, so its Vehicle box
+      // was blank even when the same invoice showed a recorded reading.
+      // Use the identical durable queue and an identity/vehicle/Job-scoped
+      // fallback to the currently displayed invoice. Never change the server
+      // record, payment, status or legacy mileage interpretation.
+      var queuedMileage = serverDetail;
+      if (!_estimate) {
+        try {
+          queuedMileage = await _invoiceMileage.project(
+            widget.businessId, widget.documentId, serverDetail);
+        } catch (_) {
+          // A busy/unavailable local cache must not prevent a current server
+          // invoice PDF. The exact on-screen reading is still scope-checked
+          // below; no payment or close state is inferred from missing cache.
+        }
+      }
+      final detail = _estimate ? queuedMileage
+          : InvoicePdfMileageProjection.reconcile(
+              documentId: widget.documentId,
+              pdfDetail: queuedMileage,
+              visibleDetail: _detail,
+            );
       debugPrint('PERF-001 PDF current data RPCs: ${pdfWatch.elapsedMilliseconds}ms');
       unawaited(const InvoicePerformanceMetrics().record(
         widget.businessId,
