@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -68,6 +70,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _expandedSection;
   Map<String, dynamic> _attention = const {};
   bool _attentionLoading = false;
+  bool _attentionRefreshQueued = false;
+  // In Auto keep the last authorized server counts visible while refreshing.
+  // A temporary local count may legitimately differ until reconciliation.
+  bool _attentionServerVerified = false;
   BriskersWeatherSnapshot? _weather;
   bool _weatherLoading = false;
 
@@ -100,6 +106,12 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void didUpdateWidget(covariant HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.businessId != widget.businessId ||
+        oldWidget.roleCode != widget.roleCode) {
+      // Never reuse another shop's or permission group's attention data.
+      _attention = const {};
+      _attentionServerVerified = false;
+    }
     if (oldWidget.businessId != widget.businessId ||
         oldWidget.roleCode != widget.roleCode ||
         oldWidget.jobsCount != widget.jobsCount ||
@@ -179,48 +191,68 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadAttention() async {
-    if (_attentionLoading) return;
+    if (_attentionLoading) {
+      // Coalesce multiple Home, sync and badge notifications rather than
+      // starting overlapping server/local reads or dropping the last change.
+      _attentionRefreshQueued = true;
+      return;
+    }
     _attentionLoading = true;
+    final businessId = widget.businessId;
+    final roleCode = widget.roleCode;
+    bool sameScope() => mounted && widget.businessId == businessId &&
+        widget.roleCode == roleCode;
 
     try {
       final localJobs = await _localJobs.unassignedOpenJobs(
-        widget.businessId,
+        businessId,
         limit: 25,
       );
       final localCount =
-          await _localJobs.unassignedOpenJobCount(widget.businessId);
+          await _localJobs.unassignedOpenJobCount(businessId);
       final localPending = await _localDocuments.pendingCloseAttention(
-        widget.businessId,
+        businessId,
       );
+      if (!sameScope()) return;
 
-      if (mounted) {
-        final currentCounts = _attention['counts'] is Map
-            ? Map<String, dynamic>.from(_attention['counts'] as Map)
-            : <String, dynamic>{};
-        final next = Map<String, dynamic>.from(_attention)
-          ..['unassigned_jobs'] = localJobs
-          ..['pending_close_invoices'] = localPending['items']
-          ..['counts'] = {
-            ...currentCounts,
-            'unassigned_jobs': localCount,
-            'pending_close_invoices': localPending['count'],
-          };
-        setState(() => _attention = next);
-      }
+      final currentCounts = _attention['counts'] is Map
+          ? Map<String, dynamic>.from(_attention['counts'] as Map)
+          : <String, dynamic>{};
+      final localSnapshot = Map<String, dynamic>.from(_attention)
+        ..['unassigned_jobs'] = localJobs
+        ..['pending_close_invoices'] = localPending['items']
+        ..['counts'] = {
+          ...currentCounts,
+          'unassigned_jobs': localCount,
+          'pending_close_invoices': localPending['count'],
+        };
 
-      if (BriskersConnectionModeController.instance.forceOffline) {
-        return;
+      final connection = BriskersConnectionModeController.instance;
+      if (connection.forceOffline || !_attentionServerVerified) {
+        // First visit / Force Offline: saved authorized counts are usable.
+        // On later Auto visits do not flash a provisional local number before
+        // the server confirms whether Pending Close actually changed.
+        setState(() => _attention = localSnapshot);
       }
+      if (connection.forceOffline) return;
 
       try {
-        final data = await _api.needsAttention(widget.businessId);
-        if (!mounted) return;
+        final data = await _api.needsAttention(businessId)
+            .timeout(const Duration(seconds: 8));
+        if (!sameScope() || connection.forceOffline) return;
+        _attentionServerVerified = true;
         setState(() => _attention = data);
       } catch (_) {
-        // Keep the local unassigned-jobs result and the last server snapshot.
+        if (!sameScope() || connection.forceOffline) return;
+        // Preserve the last verified server snapshot if an Auto refresh fails.
+        // Before the first verification the local snapshot is already visible.
       }
     } finally {
       _attentionLoading = false;
+      if (_attentionRefreshQueued && mounted) {
+        _attentionRefreshQueued = false;
+        unawaited(_loadAttention());
+      }
     }
   }
 

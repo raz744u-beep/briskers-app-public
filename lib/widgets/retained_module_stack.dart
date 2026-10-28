@@ -13,9 +13,10 @@ class RetainedModuleStack extends StatefulWidget {
     required this.index,
     required this.itemCount,
     required this.itemBuilder,
-    // Jobs (index 2) must also survive dock switches. Re-mounting it discarded
-    // already visible rows and brought back the full-page startup spinner.
-    this.retainedIndices = const {1, 2, 3, 4, 5, 6},
+    // Retain Home (0) as well: discarding its attention snapshot every time
+    // the dock switches makes Pending Close briefly reset to local/zero
+    // before a fresh server result. Jobs (2) must likewise keep saved rows.
+    this.retainedIndices = const {0, 1, 2, 3, 4, 5, 6},
   });
 
   final int index;
