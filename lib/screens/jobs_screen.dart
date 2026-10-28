@@ -133,6 +133,9 @@ class _JobsScreenState extends State<JobsScreen>
   bool _jobsRemoteRefreshRunning = false;
   DateTime? _lastDockLocalRefreshAt;
   bool _showingLocal = false;
+  // Avoid cancelling the first authorized SQLite read on a repeated dock tap.
+  ({String businessId, String? status, String query, JobListView view,
+    int limit, String? userId})? _coldLocalReadScope;
 
   bool get _canManage =>
       widget.roleCode == 'owner' ||
@@ -289,6 +292,7 @@ class _JobsScreenState extends State<JobsScreen>
       _searchDebounce?.cancel();
       _search.clear();
       _rows = null;
+      _coldLocalReadScope = null;
       _documentMatches = const [];
       _statuses = const [];
       _statusCounts = const {};
@@ -315,6 +319,18 @@ class _JobsScreenState extends State<JobsScreen>
       final recent = _lastDockLocalRefreshAt != null &&
           now.difference(_lastDockLocalRefreshAt!) <
               const Duration(seconds: 20);
+      final requestedScope = (
+        businessId: widget.businessId,
+        status: _queryStatus,
+        query: _search.text.trim(),
+        view: _listView,
+        limit: _visibleLimit,
+        userId: _userId,
+      );
+      if (_rows == null && _coldLocalReadScope == requestedScope) {
+        // Preserve the existing protected read's visibility generation.
+        return;
+      }
       if (_rows == null || !recent) {
         _lastDockLocalRefreshAt = now;
         unawaited(_load(refreshRemote: false));
@@ -437,6 +453,11 @@ class _JobsScreenState extends State<JobsScreen>
     }
 
     if (!mode.forceOnline || !refreshRemote) {
+      final coldScope = (
+        businessId: businessId, status: status, query: query,
+        view: view, limit: limit, userId: userId,
+      );
+      if (_rows == null) _coldLocalReadScope = coldScope;
       try {
         await readSavedJobs(online: !refreshRemote && _onlineReady);
       } catch (error) {
@@ -449,6 +470,8 @@ class _JobsScreenState extends State<JobsScreen>
             _error = _rows!.isEmpty ? error.toString() : null;
           });
         }
+      } finally {
+        if (_coldLocalReadScope == coldScope) _coldLocalReadScope = null;
       }
     }
     if (!mounted || !visibility.isCurrent(generation)) return;

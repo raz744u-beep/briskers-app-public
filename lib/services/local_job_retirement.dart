@@ -18,7 +18,25 @@ class LocalJobRetirement {
   static const blockedStates = "('pending','accepted','locally_cancelled')";
 
   static final _installed = Expando<bool>('retirement_schema');
-  static Future<void> ensureSchema(BriskersLocalDatabase db) async {
+  static final _schemaInFlight =
+      Expando<Future<void>>('retirement_schema_in_flight');
+
+  static Future<void> ensureSchema(BriskersLocalDatabase db) {
+    final pending = _schemaInFlight[db];
+    if (pending != null) return pending;
+    Future<void> run() async {
+      try {
+        await _ensureSchemaImpl(db);
+      } finally {
+        _schemaInFlight[db] = null;
+      }
+    }
+    final pendingInstall = run();
+    _schemaInFlight[db] = pendingInstall;
+    return pendingInstall;
+  }
+
+  static Future<void> _ensureSchemaImpl(BriskersLocalDatabase db) async {
     if (_installed[db] == true &&
         (await db
                 .customSelect(
