@@ -922,11 +922,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                           label: const Text('Move to General Tasks')),
                       Text(done
                         ? stamp.isEmpty
-                          ? 'Completed · read-only'
-                          : 'Completed $stamp · read-only'
+                          ? 'Done'
+                          : 'Done · $stamp'
                         : task['status'] == 'in_progress'
-                          ? 'In progress · Editable'
-                          : 'Planned · Editable',
+                          ? 'In Progress'
+                          : 'Not Started',
                         style: const TextStyle(fontSize: 12,
                           color: Color(0xFF64748B))),
                       if (corrections.isNotEmpty) ...[
@@ -2003,8 +2003,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           title: Text(task['description']?.toString()??'',
             style: const TextStyle(fontWeight: FontWeight.w700)),
           subtitle: Text(_employeeName(task['employee_id']?.toString())+
-            ' · '+(status=='done' ? 'Complete' :
-              status=='in_progress' ? 'In Progress' : 'Planned')),
+            ' · '+(status=='done' ? 'Done' :
+              status=='in_progress' ? 'In Progress' : 'Not Started')),
           trailing: PopupMenuButton<String>(
             tooltip: 'Change shop task status',
             onSelected: (value) async {
@@ -2014,9 +2014,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               await _refresh();
             },
             itemBuilder: (_) => const [
-              PopupMenuItem(value:'planned',child:Text('Planned')),
+              PopupMenuItem(value:'planned',child:Text('Not Started')),
               PopupMenuItem(value:'in_progress',child:Text('In Progress')),
-              PopupMenuItem(value:'done',child:Text('Complete')),
+              PopupMenuItem(value:'done',child:Text('Done')),
             ],
           ),
         ),
