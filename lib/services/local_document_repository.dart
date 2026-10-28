@@ -3,7 +3,6 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_deletion_v3.dart';
-import 'local_job_retirement.dart';
 import 'job_sync_service.dart';
 
 class LocalDocumentRepository {
