@@ -311,6 +311,10 @@ void main() {
     expect(main,contains("label:const Text('Undo Done'"));
     expect(main,contains('_undoMechanicDone(task,mechanicId)'));
     expect(main,contains("title:const Text('Undo Done?')"));
+    expect(main,contains("title:const Text('Finish entire task?')"));
+    expect(main,contains('final lastMechanic='));
+    expect(main,contains("child:const Text('Finish Task')"));
+
 
     final editor=main.split('Future<void> _editTask(').last
       .split('Future<void> _editEmployeeNames()').first;
