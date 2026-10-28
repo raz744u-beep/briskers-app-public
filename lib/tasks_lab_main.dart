@@ -963,7 +963,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       useSafeArea: true,
       builder: (sheetContext) => Padding(
           padding: EdgeInsets.fromLTRB(16, 12, 16,
-            MediaQuery.viewInsetsOf(sheetContext).bottom + 18),
+            // Reserve physical system-navigation space below Save.
+            MediaQuery.viewInsetsOf(sheetContext).bottom +
+            MediaQuery.viewPaddingOf(sheetContext).bottom + 30),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1119,10 +1121,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       context: context,
       showDragHandle: true,
       useSafeArea: true,
+      isScrollControlled: true,
       builder: (sheet) => StatefulBuilder(
         builder: (sheet, setSheetState) => Padding(
-          padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
-          child: Column(
+          padding: EdgeInsets.fromLTRB(18, 12, 18,
+            MediaQuery.viewInsetsOf(sheet).bottom +
+            MediaQuery.viewPaddingOf(sheet).bottom + 30),
+          child: SingleChildScrollView(child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -1169,7 +1174,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 child: const Text('Save main job assignment'),
               ),
             ],
-          ),
+          )),
         ),
       ),
     );
