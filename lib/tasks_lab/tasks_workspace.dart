@@ -68,15 +68,15 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
   String _statusName(Object? v) {
     switch (v?.toString()) {
       case 'in_progress': return 'In Progress';
-      case 'done': return 'Complete';
-      default: return 'Planned';
+      case 'done': return 'Done';
+      default: return 'Not Started';
     }
   }
 
   bool _matchesStatus(Map<String,dynamic> row) {
     final status = _statusName(row['status']);
     return _status == 'All' ||
-      (_status == 'Active' && status != 'Complete') ||
+      (_status == 'Active' && status != 'Done') ||
       status == _status;
   }
 
@@ -257,7 +257,7 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
                   ['Any','Today','This Week','Overdue'],(v)=>date=v),
               ],
               dropdown('Status',status,
-                ['Active','All','Planned','In Progress','Complete'],
+                ['Active','All','Not Started','In Progress','Done'],
                 (v)=>status=v),
               dropdown('Sort By',sort,
                 ['Newest First','Oldest First','Due Date']
@@ -373,9 +373,9 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
                 tooltip:'Task progress',
                 onSelected:(v)=>widget.onGeneralStatus(task['id'] as int,v),
                 itemBuilder:(_)=>const [
-                  PopupMenuItem(value:'planned',child:Text('Planned')),
+                  PopupMenuItem(value:'planned',child:Text('Not Started')),
                   PopupMenuItem(value:'in_progress',child:Text('In Progress')),
-                  PopupMenuItem(value:'done',child:Text('Complete')),
+                  PopupMenuItem(value:'done',child:Text('Done')),
                 ],
               ),
             ),
@@ -441,7 +441,7 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
               (v)=>setState(()=>_employee=_employeeIdForName(v))),
             const SizedBox(width:6),
             _picker('Status',_status,
-              ['Active','All','Planned','In Progress','Complete'],
+              ['Active','All','Not Started','In Progress','Done'],
               (v)=>setState(()=>_status=v)),
             const SizedBox(width:6),
             _picker(_general?'Category':'Task Type',
