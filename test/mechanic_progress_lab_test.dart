@@ -223,37 +223,72 @@ void main() {
     } finally {await db.close();}
   });
 
-  test('Undo blocked for recorded mechanic payroll even if task active',
+  test('Paid Chris may undo progress on active shared task; no money changes',
       () async {
     final db=BriskersLocalDatabase(NativeDatabase.memory());
     final store=LocalJobTasksLabStore(db);
     try {
-      await store.reconcileDocument(businessId:shop,jobId:job,
-        documentId:invoice,
+      await store.reconcileDocument(
+        businessId:shop,jobId:job,documentId:invoice,
         laborLines:LocalJobTasksLabStore.laborLines(BriskersLabFixture.invoice));
-      await store.saveAllocations(businessId:shop,jobId:job,
-        documentId:invoice,lineId:line,
+      await store.saveAllocations(
+        businessId:shop,jobId:job,documentId:invoice,lineId:line,
         hoursByEmployee:{'lab-chris':1.0,'lab-adam':3.0});
+      for (final mechanic in ['lab-chris','lab-adam']) {
+        await store.setMechanicTaskProgress(
+          businessId:shop,jobId:job,documentId:invoice,lineId:line,
+          employeeId:mechanic,status:'in_progress');
+      }
       await store.setMechanicTaskProgress(
         businessId:shop,jobId:job,documentId:invoice,lineId:line,
         employeeId:'lab-chris',status:'done');
+      // An existing TEST payroll payment is financially immutable even
+      // when the mechanic's progress was marked Done accidentally.
       await db.customStatement('''
         CREATE TABLE lab_payroll_task_payments (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
           document_id TEXT NOT NULL, line_id TEXT NOT NULL,
-          hours REAL NOT NULL
+          hours REAL NOT NULL, cents INTEGER NOT NULL,
+          method TEXT NOT NULL, paid_at INTEGER NOT NULL
         )
       ''');
       await db.customStatement(
         'INSERT INTO lab_payroll_task_payments '
-        '(business_id,employee_id,document_id,line_id,hours) VALUES (?,?,?,?,?)',
-        [shop,'lab-chris',invoice,line,1.0]);
+        '(business_id,employee_id,document_id,line_id,hours,cents,'
+        'method,paid_at) VALUES (?,?,?,?,?,?,?,?)',
+        [shop,'lab-chris',invoice,line,0.5,1800,'cash',1761510000000]);
+      final before=(await db.customSelect(
+        'SELECT * FROM lab_payroll_task_payments').getSingle()).data;
+      expect(await store.undoAccidentalMechanicDone(
+        businessId:shop,jobId:job,documentId:invoice,lineId:line,
+        employeeId:'lab-chris'),'in_progress');
+      final progress=await store.mechanicProgressForJob(shop,job);
+      expect(progress.singleWhere((r)=>r['employee_id']=='lab-chris')
+        ['status'],'in_progress');
+      expect(progress.singleWhere((r)=>r['employee_id']=='lab-adam')
+        ['status'],'in_progress');
+      expect((await store.list(shop,job)).singleWhere(
+        (r)=>r['line_id']==line)['status'],'in_progress');
+      final after=(await db.customSelect(
+        'SELECT * FROM lab_payroll_task_payments').getSingle()).data;
+      expect(after,before);
+      final audit=(await db.customSelect(
+        'SELECT * FROM local_lab_task_progress_undo_audit'
+        ' WHERE business_id=?',variables:[const Variable<String>(shop)])
+        .getSingle()).data;
+      expect(audit['reason'],'Accidental Done corrected; paid hours preserved');
+      // Repeating the Undo is not allowed, and does not change the money.
       await expectLater(store.undoAccidentalMechanicDone(
         businessId:shop,jobId:job,documentId:invoice,lineId:line,
         employeeId:'lab-chris'),throwsStateError);
-      expect((await store.mechanicProgressForJob(shop,job))
-        .single['status'],'done');
+      expect((await db.customSelect(
+        'SELECT * FROM lab_payroll_task_payments').getSingle()).data,before);
+      // Correction does not change the originally assigned mechanic hours.
+      final allocations=await store.allocations(
+        businessId:shop,jobId:job,documentId:invoice,lineId:line);
+      expect({for(final row in allocations)
+        row['employee_id']:row['hours']},{'lab-chris':1.0,'lab-adam':3.0});
     } finally {await db.close();}
   });
 
