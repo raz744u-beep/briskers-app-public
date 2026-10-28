@@ -130,6 +130,11 @@ void main() {
     expect(main,contains("'done'"));
     expect(main,contains("'in_progress'"));
     expect(main,contains('setMechanicTaskProgress('));
+    final editor=main.split('Future<void> _editTask(').last
+      .split('Future<void> _editEmployeeNames()').first;
+    expect(editor,isNot(contains("labelText: 'Task status'")));
+    expect(editor,isNot(contains('status: status,')));
+
     expect(main,isNot(contains('TextDecoration.lineThrough')));
   });
 }
