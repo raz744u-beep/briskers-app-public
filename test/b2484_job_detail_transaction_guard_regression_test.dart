@@ -76,7 +76,7 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     expect(find.text('Authorized Job Detail'), findsNothing);
 
-    await Future<void>.delayed(const Duration(milliseconds: 10));
+    await tester.pump(const Duration(milliseconds: 10));
     continueTransaction.complete();
     await heldTransaction.timeout(const Duration(seconds: 5));
     await tester.pumpAndSettle();
