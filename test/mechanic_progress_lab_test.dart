@@ -344,6 +344,10 @@ void main() {
     expect(main,contains("'in_progress'"));
     expect(main,contains('setMechanicTaskProgress('));
     expect(main,contains("label:const Text('Undo Done'"));
+    expect(main,contains("label:const Text('Mark Done'"));
+    expect(main,contains("final statusLabel=current=="));
+    expect(main,contains("mechanic-status-"));
+    expect(main,contains('fontWeight:FontWeight.w700,color:statusColor'));
     expect(main,contains('_undoMechanicDone(task,mechanicId)'));
     expect(main,contains("title:const Text('Undo Done?')"));
     expect(main,contains("title:const Text('Finish entire task?')"));
