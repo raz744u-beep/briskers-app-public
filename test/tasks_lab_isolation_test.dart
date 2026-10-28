@@ -276,7 +276,13 @@ void main() {
     expect(main, contains('maxLines: expanded ? null : 1'));
     expect(main, contains('expandedTaskKeys.remove(id)'));
     expect(main, contains('expandedTaskKeys.add(id)'));
-    expect(main, contains('const EdgeInsets.fromLTRB(10, 7, 6, 7)'));
+    expect(main, contains('const EdgeInsets.fromLTRB(14, 12, 10, 12)'));
+    expect(main, contains('const EdgeInsets.fromLTRB(10, 7, 10, 8)'));
+    expect(main, contains("ValueKey('service-task-card-"));
+    expect(main, contains('const BorderSide(color: Color(0xFFCAD9E2)'));
+    expect(main, contains("ValueKey('service-task-mechanics-"));
+    expect(main, contains('color:const Color(0xFFF0F6FA)'));
+    expect(main, contains('if(index>0) const Divider('));
     expect(main, contains('fontSize: 15'));
     expect(main, contains('if (expanded)'));
     expect(main, contains('Additional work · Not on Invoice'));
