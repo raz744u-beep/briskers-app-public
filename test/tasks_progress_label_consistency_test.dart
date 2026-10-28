@@ -31,7 +31,13 @@ void main() {
       '                              fontWeight: FontWeight.w400,'));
     expect(controls,contains('Text(_employeeName(mechanicId)'));
     expect(controls,contains('fontWeight:FontWeight.w700'));
-    expect(controls,contains('fontSize:11,'));
+    expect(controls,contains('final statusLabel=current=='));
+    expect(controls,contains("fontSize:13,"));
+    expect(controls,contains("fontWeight:FontWeight.w700,color:statusColor"));
+    expect(controls,contains("fontSize:12,"));
+    expect(controls,contains("label:const Text('Mark Done'"));
+    expect(controls,contains("OutlinedButton.icon("));
+    expect(controls,contains("mechanic-status-"));
   });
 
   test('Both task tabs and status filters share progress terminology', () {
