@@ -513,9 +513,9 @@ class LocalJobTasksLabStore {
     });
   }
 
-  /// Correct an accidental Done tap while a shared task remains active.
-  /// A fully finished/frozen task or recorded payroll must not silently
-  /// revert or alter historical earned hours; those require owner review.
+  /// Correct a mechanic's accidental Done while the shared task is active.
+  /// Actual paid hours remain immutable even when progress is corrected.
+  /// A fully finished/frozen task or closed job still requires owner review.
   Future<String> undoAccidentalMechanicDone({
     required String businessId,
     required String jobId,
@@ -551,10 +551,14 @@ class LocalJobTasksLabStore {
       if(frozen != null) {
         throw StateError('Completed payroll is frozen; owner review required');
       }
-      // The weekly task-payments table exists only after payroll is used.
+      // A paid allocation does not dictate work-progress state. The shared
+      // service task is still active while another mechanic is unfinished.
+      // Undo changes ONLY progress; recorded payments and paid hours stay
+      // immutable and cannot become payable again.
       final paymentTable = await db.customSelect(
         "SELECT 1 FROM sqlite_master WHERE type='table' "
         "AND name='lab_payroll_task_payments'").getSingleOrNull();
+      bool hadPaidHours = false;
       if (paymentTable != null) {
         final paid = await db.customSelect(
           'SELECT 1 FROM lab_payroll_task_payments '
@@ -564,9 +568,7 @@ class LocalJobTasksLabStore {
             Variable<String>(documentId),Variable<String>(lineId),
             Variable<String>(employeeId)],
         ).getSingleOrNull();
-        if(paid != null) {
-          throw StateError('This mechanic was paid; use owner correction');
-        }
+        hadPaidHours = paid != null;
       }
       final row = await db.customSelect(
         'SELECT status,previous_status,started_at '
@@ -598,7 +600,10 @@ class LocalJobTasksLabStore {
         'previous_status,restored_status,recorded_at,reason) '
         'VALUES (?,?,?,?,?,?,?,?,?)',
         [businessId,jobId,documentId,lineId,employeeId,
-          'done',restored,now,'Accidental Done corrected in Tasks TEST'],
+          'done',restored,now,
+          hadPaidHours
+            ? 'Accidental Done corrected; paid hours preserved'
+            : 'Accidental Done corrected in Tasks TEST'],
       );
       final ongoing = await db.customSelect(
         'SELECT status FROM local_lab_mechanic_task_progress '
