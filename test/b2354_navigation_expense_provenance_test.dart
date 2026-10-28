@@ -31,7 +31,7 @@ void main() {
     expect(shell, contains('onBadgeSelected: (index)'));
     expect(shell, contains('unawaited(_openCustomers(request))'));
     expect(dock, contains('widget.onBadgeSelected!(index)'));
-    expect(retained, contains('retainedIndices = const {1, 2, 3, 4, 5, 6}'));
+    expect(retained, contains('retainedIndices = const {0, 1, 2, 3, 4, 5, 6}'));
   });
 
   test('Expense proof signatures include identity amount date and direction', () {

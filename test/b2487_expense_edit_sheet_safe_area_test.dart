@@ -50,7 +50,7 @@ void main() {
     expect(edit, contains('MediaQuery.viewInsetsOf(sheetContext).bottom'));
     expect(edit, contains('padding: EdgeInsets.fromLTRB(16, 0, 16, bottomInset)'));
     expect(edit, contains('height: height'));
-    expect(edit, contains('Expanded(\n                     child: SingleChildScrollView('));
+    expect(RegExp(r'Expanded\(\s*child:\s*SingleChildScrollView\(').hasMatch(edit), isTrue);
     expect(edit, contains("label: const Text('Save changes')"));
   });
 }

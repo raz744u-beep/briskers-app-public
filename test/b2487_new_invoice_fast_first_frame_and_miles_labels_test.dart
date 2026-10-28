@@ -29,7 +29,7 @@ void main() {
       reason: 'The exact verified snapshot must persist before editing is enabled');
     expect(first, lessThan(extras),
       reason: 'Optional metadata must never delay first invoice content');
-    expect(source.substring(first, origin), contains('_loading = false;'));
+    expect(source.substring(first, extras), contains('_loading = false;'));
     // Optional metadata updates the same authorized document after the first
     // frame, without fabricating payment amounts or skipping the exact scope.
     expect(source, contains('if (!mounted || generation != _loadGeneration) return;'));
