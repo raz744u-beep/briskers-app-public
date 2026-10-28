@@ -234,9 +234,9 @@ void main() {
     expect(main, contains('jobDetailsOpen'));
     expect(main, contains('Assign main job mechanic'));
     expect(main, contains('Add job recheck · Not on Invoice'));
-    expect(main, contains("_menuEntry(Icons.cleaning_services_outlined, 'Shop Tasks', 4)"));
+    expect(main, contains("_menuEntry(Icons.cleaning_services_outlined, 'General Tasks', 4)"));
     expect(main, contains('case 4: return _shopTasksPage();'));
-    expect(main, contains('Move to Shop Tasks'));
+    expect(main, contains('Move to General Tasks'));
     expect(main, contains("Key('shop-task-"));
     expect(main, contains('Payroll hours can be adjusted independently.'));
     expect(main, isNot(contains('Assigned hours cannot exceed')));
