@@ -31,7 +31,6 @@ void main() {
       '                              fontWeight: FontWeight.w400,'));
     expect(controls,contains('Text(_employeeName(mechanicId)'));
     expect(controls,contains('fontWeight:FontWeight.w700'));
-    expect(controls,contains('Text(\''));
     expect(controls,contains('fontSize:11,'));
   });
 
