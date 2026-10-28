@@ -18,25 +18,13 @@ class LocalJobRetirement {
   static const blockedStates = "('pending','accepted','locally_cancelled')";
 
   static final _installed = Expando<bool>('retirement_schema');
-  static final _schemaInFlight =
-      Expando<Future<void>>('retirement_schema_in_flight');
-
-  static Future<void> ensureSchema(BriskersLocalDatabase db) {
-    final pending = _schemaInFlight[db];
-    if (pending != null) return pending;
-    Future<void> run() async {
-      try {
-        await _ensureSchemaImpl(db);
-      } finally {
-        _schemaInFlight[db] = null;
-      }
-    }
-    final pendingInstall = run();
-    _schemaInFlight[db] = pendingInstall;
-    return pendingInstall;
-  }
-
-  static Future<void> _ensureSchemaImpl(BriskersLocalDatabase db) async {
+  // Do NOT share one in-flight schema Future across Drift transaction zones.
+  // A guard read outside a held transaction can queue schema SQL behind that
+  // transaction, while its inner retirement check joins the outer Future:
+  // both await each other and Job Detail stays on its initial spinner in Auto
+  // AND Offline. Each caller must instead issue its idempotent statements in
+  // its own executor/transaction context. Existing trigger validation remains.
+  static Future<void> ensureSchema(BriskersLocalDatabase db) async {
     if (_installed[db] == true &&
         (await db
                 .customSelect(

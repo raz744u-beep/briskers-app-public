@@ -27,11 +27,12 @@ void main() {
     expect(jobs, contains('if (ready != null) return ready;'));
   });
 
-  test('Retirement schema setup is single-flight and preserves safety trigger checks', () {
+  test('Retirement schema guards never join a Future from another transaction', () {
     final code = File('lib/services/local_job_retirement.dart').readAsStringSync();
-    expect(code, contains("Expando<Future<void>>('retirement_schema_in_flight')"));
-    expect(code, contains('if (pending != null) return pending;'));
-    expect(code, contains('await _ensureSchemaImpl(db);'));
+    // Shared Future across Drift transaction executors causes circular waits.
+    expect(code, isNot(contains('retirement_schema_in_flight')));
+    expect(code, isNot(contains('final pendingInstall = run();')));
+    expect(code, contains('static Future<void> ensureSchema(BriskersLocalDatabase db) async'));
     expect(code, contains("name='retirement_accepted_no_change'"));
     expect(code, contains('CREATE TRIGGER IF NOT EXISTS retirement_'));
   });
