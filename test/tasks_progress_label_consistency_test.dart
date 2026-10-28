@@ -40,6 +40,21 @@ void main() {
     expect(controls,contains("mechanic-status-"));
   });
 
+  test('Approved allocation footer is bold original gray with total', () {
+    final main=File('lib/tasks_lab_main.dart').readAsStringSync();
+    final card=main.split('Widget _taskCard(').last
+      .split('Future<void> _editTask(').first;
+    expect(card,contains("if (splitCount > 1)"));
+    expect(card,contains(r"· Total: ${credit.hours}"));
+    expect(card,contains('style: const TextStyle(fontSize: 12.5,\\n'
+      '                            fontWeight: FontWeight.w700,\\n'
+      '                            color: Color(0xFF526273))'));
+    expect(card,contains('_completedAssignment(record)'));
+    expect(card,contains('_laborAssignment(task)'));
+    // Names/hours in the mechanic rows are not changed by this request.
+    expect(card,contains('Text(credit.hours,'));
+  });
+
   test('Both task tabs and status filters share progress terminology', () {
     final source=File('lib/tasks_lab/tasks_workspace.dart').readAsStringSync();
     final profile=File('lib/tasks_lab/employee_payroll_profile.dart')
