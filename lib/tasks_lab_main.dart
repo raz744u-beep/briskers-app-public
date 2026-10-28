@@ -290,7 +290,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         children: [
           if (index == 2) ...[
             _menuEntry(Icons.rule_outlined, 'Job J-24 tasks', 3),
-            _menuEntry(Icons.cleaning_services_outlined, 'Shop Tasks', 4),
+            _menuEntry(Icons.cleaning_services_outlined, 'General Tasks', 4),
           ],
           if (index == 7) ...[
             _menuEntry(Icons.account_balance_wallet_outlined, 'Payroll', 5),
@@ -890,7 +890,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                             final confirm = await showDialog<bool>(
                               context: context,
                               builder: (dialog) => AlertDialog(
-                                title: const Text('Move to Shop Tasks?'),
+                                title: const Text('Move to General Tasks?'),
                                 content: const Text(
                                   'This unpaid, unfinished internal task '
                                   'will no longer appear under Job J-24.'),
@@ -919,7 +919,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                             }
                           },
                           icon: const Icon(Icons.drive_file_move_outline),
-                          label: const Text('Move to Shop Tasks')),
+                          label: const Text('Move to General Tasks')),
                       Text(done
                         ? stamp.isEmpty
                           ? 'Completed · read-only'
@@ -2023,14 +2023,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       );
     }
     return ListView(children: [
-      _sectionHeader('Shop Tasks',
+      _sectionHeader('General Tasks',
         subtitle: 'Internal work · Not attached to customer jobs'),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         child: FilledButton.icon(
           onPressed: _addInternalShopTask,
           icon: const Icon(Icons.add),
-          label: const Text('New Shop Task')),
+          label: const Text('New General Task')),
       ),
       const SizedBox(height: 14),
       for (final task in active) render(task),
