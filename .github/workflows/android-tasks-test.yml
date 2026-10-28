@@ -103,471 +103,10 @@ jobs:
           cat > android/app/src/main/kotlin/com/briskers/briskers_app/MainActivity.kt <<'KOTLIN'
           package com.briskers.briskers_app
 
-          import android.app.Activity
-          import android.content.Intent
-          import android.content.ClipData
-          import android.net.Uri
-          import android.os.Build
-          import android.provider.DocumentsContract
-          import androidx.core.content.FileProvider
-          import java.io.File
           import io.flutter.embedding.android.FlutterActivity
-          import io.flutter.embedding.engine.FlutterEngine
-          import io.flutter.plugin.common.MethodChannel
 
-          class MainActivity : FlutterActivity() {
-              private val channelName = "com.briskers/expenseiq"
-              private val pickExpenseFolderRequestCode = 7441
-              private val pickHistoricalFolderRequestCode = 7442
-              private var pendingFolderResult: MethodChannel.Result? = null
-              private var pendingFolderRequestCode: Int? = null
-
-              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-                  super.configureFlutterEngine(flutterEngine)
-                  MethodChannel(
-                      flutterEngine.dartExecutor.binaryMessenger,
-                      channelName
-                  ).setMethodCallHandler { call, result ->
-                      when (call.method) {
-                          "pickExpenseIqFolder" -> openExpenseIqFolderPicker(result)
-                          "pickHistoricalPhotoFolder" -> openHistoricalPhotoFolderPicker(result)
-                          "readExpenseIqFile", "readHistoricalPhotoFile" -> {
-                              val uriText = call.argument<String>("uri")
-                              if (uriText.isNullOrBlank()) {
-                                  result.error("invalid_uri", "Photo URI is missing.", null)
-                              } else {
-                                  readPhotoFile(uriText, result)
-                              }
-                          }
-                          else -> result.notImplemented()
-                      }
-                  }
-
-                  MethodChannel(
-                      flutterEngine.dartExecutor.binaryMessenger,
-                      "com.briskers/gmail"
-                  ).setMethodCallHandler { call, result ->
-                      when (call.method) {
-                          "composeGmailPdf" -> composeGmailPdf(call.arguments, result)
-                          else -> result.notImplemented()
-                      }
-                  }
-
-                  MethodChannel(
-                      flutterEngine.dartExecutor.binaryMessenger,
-                      "com.briskers/pdf"
-                  ).setMethodCallHandler { call, result ->
-                      when (call.method) {
-                          "openPdfInApp" -> openPdfInApp(call.arguments, result)
-                          else -> result.notImplemented()
-                      }
-                  }
-              }
-
-              private fun openPdfInApp(
-                  arguments: Any?,
-                  result: MethodChannel.Result
-              ) {
-                  try {
-                      @Suppress("UNCHECKED_CAST")
-                      val args = arguments as? Map<String, Any?>
-                      val bytes = args?.get("bytes") as? ByteArray
-                      val rawName = (args?.get("filename") as? String) ?: "Briskers-Invoice.pdf"
-                      val filename = File(rawName).name.replace(
-                          Regex("[^A-Za-z0-9._-]"), "_"
-                      )
-
-                      if (bytes == null || bytes.isEmpty()) {
-                          result.error("invalid_pdf", "The invoice PDF is empty.", null)
-                          return
-                      }
-
-                      val directory = File(cacheDir, "pdf-open")
-                      if (!directory.exists()) directory.mkdirs()
-                      val pdf = File(directory, filename)
-                      pdf.writeBytes(bytes)
-                      val uri = FileProvider.getUriForFile(
-                          this,
-                          "${applicationContext.packageName}.fileprovider",
-                          pdf
-                      )
-
-                      val view = Intent(Intent.ACTION_VIEW).apply {
-                          setDataAndType(uri, "application/pdf")
-                          clipData = ClipData.newUri(contentResolver, filename, uri)
-                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                      }
-                      startActivity(Intent.createChooser(view, "Open PDF with"))
-                      result.success(true)
-                  } catch (error: Exception) {
-                      result.error(
-                          "pdf_open_failed",
-                          error.message ?: "No compatible PDF app could be opened.",
-                          null
-                      )
-                  }
-              }
-
-              private fun composeGmailPdf(
-                  arguments: Any?,
-                  result: MethodChannel.Result
-              ) {
-                  try {
-                      @Suppress("UNCHECKED_CAST")
-                      val args = arguments as? Map<String, Any?>
-                      val bytes = args?.get("bytes") as? ByteArray
-                      val filename =
-                          (args?.get("filename") as? String)?.takeIf { it.isNotBlank() }
-                              ?: "Briskers-Invoice.pdf"
-                      val recipient = args?.get("to") as? String ?: ""
-                      val subject = args?.get("subject") as? String ?: ""
-                      val body = args?.get("body") as? String ?: ""
-
-                      if (bytes == null || bytes.isEmpty()) {
-                          result.error(
-                              "invalid_pdf",
-                              "The invoice PDF is empty.",
-                              null
-                          )
-                          return
-                      }
-
-                      val shareDir = File(cacheDir, "warranty-email")
-                      if (!shareDir.exists()) shareDir.mkdirs()
-                      val pdfFile = File(shareDir, filename)
-                      pdfFile.writeBytes(bytes)
-
-                      val authority = "${applicationContext.packageName}.fileprovider"
-                      val uri = FileProvider.getUriForFile(
-                          this,
-                          authority,
-                          pdfFile
-                      )
-
-                      val intent = Intent(Intent.ACTION_SEND).apply {
-                          type = "application/pdf"
-                          setPackage("com.google.android.gm")
-                          putExtra(Intent.EXTRA_EMAIL, arrayOf(recipient))
-                          putExtra(Intent.EXTRA_SUBJECT, subject)
-                          putExtra(Intent.EXTRA_TEXT, body)
-                          putExtra(Intent.EXTRA_STREAM, uri)
-                          clipData = ClipData.newUri(
-                              contentResolver,
-                              "Briskers invoice PDF",
-                              uri
-                          )
-                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                      }
-
-                      // On Android 11+, resolveActivity can return null
-                      // when Gmail is installed but package visibility was not
-                      // declared. Launch directly and catch the real error.
-                      startActivity(intent)
-                      result.success(true)
-                  } catch (error: Exception) {
-                      result.error(
-                          "gmail_failed",
-                          error.message ?: "Could not open Gmail.",
-                          null
-                      )
-                  }
-              }
-
-              private fun readPhotoFile(
-                  uriText: String,
-                  result: MethodChannel.Result
-              ) {
-                  try {
-                      val bytes = contentResolver
-                          .openInputStream(Uri.parse(uriText))
-                          ?.use { it.readBytes() }
-                      if (bytes == null) {
-                          result.error(
-                              "read_failed",
-                              "Could not open the photo.",
-                              null
-                          )
-                      } else {
-                          result.success(bytes)
-                      }
-                  } catch (error: Exception) {
-                      result.error(
-                          "read_failed",
-                          error.message ?: "Could not read photo.",
-                          null
-                      )
-                  }
-              }
-
-              private fun startPhotoFolderPicker(
-                  result: MethodChannel.Result,
-                  requestCode: Int,
-                  initialUri: Uri? = null
-              ) {
-                  if (pendingFolderResult != null) {
-                      result.error(
-                          "picker_busy",
-                          "The folder picker is already open.",
-                          null
-                      )
-                      return
-                  }
-
-                  pendingFolderResult = result
-                  pendingFolderRequestCode = requestCode
-                  val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                      addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-                      addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
-
-                      if (
-                          initialUri != null &&
-                          Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                      ) {
-                          putExtra(
-                              DocumentsContract.EXTRA_INITIAL_URI,
-                              initialUri
-                          )
-                      }
-                  }
-                  startActivityForResult(intent, requestCode)
-              }
-
-              private fun openExpenseIqFolderPicker(result: MethodChannel.Result) {
-                  startPhotoFolderPicker(
-                      result,
-                      pickExpenseFolderRequestCode,
-                      Uri.parse(
-                          "content://com.android.externalstorage.documents/document/primary%3AExpenseIQ%2Fphotos"
-                      )
-                  )
-              }
-
-              private fun openHistoricalPhotoFolderPicker(
-                  result: MethodChannel.Result
-              ) {
-                  startPhotoFolderPicker(
-                      result,
-                      pickHistoricalFolderRequestCode
-                  )
-              }
-
-              override fun onActivityResult(
-                  requestCode: Int,
-                  resultCode: Int,
-                  data: Intent?
-              ) {
-                  super.onActivityResult(requestCode, resultCode, data)
-                  if (
-                      requestCode != pickExpenseFolderRequestCode &&
-                      requestCode != pickHistoricalFolderRequestCode
-                  ) return
-
-                  val pending = pendingFolderResult ?: return
-                  val expectedRequestCode = pendingFolderRequestCode
-                  pendingFolderResult = null
-                  pendingFolderRequestCode = null
-
-                  if (expectedRequestCode != requestCode) {
-                      pending.error(
-                          "picker_mismatch",
-                          "The folder picker result did not match the request.",
-                          null
-                      )
-                      return
-                  }
-
-                  val treeUri = data?.data
-                  if (resultCode != Activity.RESULT_OK || treeUri == null) {
-                      pending.success(null)
-                      return
-                  }
-
-                  try {
-                      contentResolver.takePersistableUriPermission(
-                          treeUri,
-                          Intent.FLAG_GRANT_READ_URI_PERMISSION
-                      )
-                  } catch (_: Exception) {
-                      // The current grant is still valid for this import session.
-                  }
-
-                  try {
-                      if (requestCode == pickHistoricalFolderRequestCode) {
-                          pending.success(listHistoricalPhotos(treeUri))
-                      } else {
-                          pending.success(listReceiptPhotos(treeUri))
-                      }
-                  } catch (error: Exception) {
-                      pending.error(
-                          "folder_read_failed",
-                          error.message ?: "Could not read the selected folder.",
-                          null
-                      )
-                  }
-              }
-
-              private fun listHistoricalPhotos(
-                  treeUri: Uri
-              ): List<Map<String, String>> {
-                  val rootId = DocumentsContract.getTreeDocumentId(treeUri)
-                  val photos = mutableListOf<Map<String, String>>()
-                  walkHistoricalFolder(
-                      treeUri,
-                      rootId,
-                      "",
-                      photos
-                  )
-                  return photos
-              }
-
-              private fun walkHistoricalFolder(
-                  treeUri: Uri,
-                  parentDocumentId: String,
-                  relativePath: String,
-                  photos: MutableList<Map<String, String>>
-              ) {
-                  if (photos.size >= 10000) return
-
-                  val childrenUri =
-                      DocumentsContract.buildChildDocumentsUriUsingTree(
-                          treeUri,
-                          parentDocumentId
-                      )
-                  val projection = arrayOf(
-                      DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                      DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                      DocumentsContract.Document.COLUMN_MIME_TYPE
-                  )
-
-                  contentResolver.query(
-                      childrenUri,
-                      projection,
-                      null,
-                      null,
-                      null
-                  )?.use { cursor ->
-                      val idIndex = cursor.getColumnIndexOrThrow(
-                          DocumentsContract.Document.COLUMN_DOCUMENT_ID
-                      )
-                      val nameIndex = cursor.getColumnIndexOrThrow(
-                          DocumentsContract.Document.COLUMN_DISPLAY_NAME
-                      )
-                      val mimeIndex = cursor.getColumnIndexOrThrow(
-                          DocumentsContract.Document.COLUMN_MIME_TYPE
-                      )
-
-                      while (cursor.moveToNext()) {
-                          if (photos.size >= 10000) break
-                          val documentId = cursor.getString(idIndex)
-                          val name = cursor.getString(nameIndex) ?: continue
-                          val mime = cursor.getString(mimeIndex) ?: ""
-                          val path =
-                              if (relativePath.isBlank()) name
-                              else "$relativePath/$name"
-
-                          if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                              walkHistoricalFolder(
-                                  treeUri,
-                                  documentId,
-                                  path,
-                                  photos
-                              )
-                              continue
-                          }
-
-                          val lower = name.lowercase()
-                          val imageFile =
-                              mime.startsWith("image/") ||
-                              lower.endsWith(".jpg") ||
-                              lower.endsWith(".jpeg") ||
-                              lower.endsWith(".png") ||
-                              lower.endsWith(".webp")
-                          if (!imageFile) continue
-
-                          val documentUri =
-                              DocumentsContract.buildDocumentUriUsingTree(
-                                  treeUri,
-                                  documentId
-                              )
-                          photos.add(
-                              mapOf(
-                                  "name" to name,
-                                  "uri" to documentUri.toString(),
-                                  "relative_path" to path,
-                                  "mime_type" to if (mime.isBlank()) {
-                                      when {
-                                          lower.endsWith(".png") -> "image/png"
-                                          lower.endsWith(".webp") -> "image/webp"
-                                          else -> "image/jpeg"
-                                      }
-                                  } else {
-                                      mime
-                                  }
-                              )
-                          )
-                      }
-                  }
-              }
-
-              private fun listReceiptPhotos(treeUri: Uri): List<Map<String, String>> {
-                  val treeDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
-                  val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
-                      treeUri,
-                      treeDocumentId
-                  )
-                  val projection = arrayOf(
-                      DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                      DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                      DocumentsContract.Document.COLUMN_MIME_TYPE
-                  )
-                  val photos = mutableListOf<Map<String, String>>()
-
-                  contentResolver.query(
-                      childrenUri,
-                      projection,
-                      null,
-                      null,
-                      null
-                  )?.use { cursor ->
-                      val idIndex = cursor.getColumnIndexOrThrow(
-                          DocumentsContract.Document.COLUMN_DOCUMENT_ID
-                      )
-                      val nameIndex = cursor.getColumnIndexOrThrow(
-                          DocumentsContract.Document.COLUMN_DISPLAY_NAME
-                      )
-                      val mimeIndex = cursor.getColumnIndexOrThrow(
-                          DocumentsContract.Document.COLUMN_MIME_TYPE
-                      )
-
-                      while (cursor.moveToNext()) {
-                          val documentId = cursor.getString(idIndex)
-                          val name = cursor.getString(nameIndex) ?: continue
-                          val mime = cursor.getString(mimeIndex) ?: ""
-                          val lower = name.lowercase()
-
-                          if (
-                              mime != DocumentsContract.Document.MIME_TYPE_DIR &&
-                              (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
-                          ) {
-                              val documentUri =
-                                  DocumentsContract.buildDocumentUriUsingTree(
-                                      treeUri,
-                                      documentId
-                                  )
-                              photos.add(
-                                  mapOf(
-                                      "name" to name,
-                                      "uri" to documentUri.toString()
-                                  )
-                              )
-                          }
-                      }
-                  }
-
-                  return photos
-              }
-          }
+          // Offline Tasks TEST only. No production document/file method channels.
+          class MainActivity : FlutterActivity()
           KOTLIN
 
           mkdir -p android/app/src/main/res/xml
@@ -600,6 +139,39 @@ jobs:
           '''
           s = s.replace("</application>", provider + "\n    </application>", 1)
           p.write_text(s)
+          PY
+
+          # The offline Tasks TEST should not inherit sensitive permissions
+          # from plugins bundled for the separate production Briskers app.
+          # These are removed during manifest merge, not merely hidden in UI.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          xml = p.read_text()
+          origin = '<manifest xmlns:android="http://schemas.android.com/apk/res/android"'
+          if origin not in xml:
+              raise SystemExit('Cannot safely identify generated Android manifest')
+          xml = xml.replace(origin,
+              origin + ' xmlns:tools="http://schemas.android.com/tools"', 1)
+          disallowed = (
+              'android.permission.CAMERA',
+              'android.permission.INTERNET',
+              'android.permission.ACCESS_NETWORK_STATE',
+              'android.permission.POST_NOTIFICATIONS',
+              'android.permission.RECEIVE_BOOT_COMPLETED',
+              'android.permission.FOREGROUND_SERVICE',
+              'android.permission.FOREGROUND_SERVICE_SHORT_SERVICE',
+              'android.permission.WAKE_LOCK',
+          )
+          removals = '\n'.join(
+              f'    <uses-permission android:name="{permission}" tools:node="remove" />'
+              for permission in disallowed
+          ) + '\n'
+          if '<application' not in xml:
+              raise SystemExit('Cannot find manifest application element')
+          xml = xml.replace('<application', removals + '    <application', 1)
+          p.write_text(xml)
+          print('Offline Tasks TEST removes',len(disallowed),'unused merged permissions')
           PY
 
       - name: Configure persistent Android signing
@@ -725,6 +297,31 @@ jobs:
 
           echo "Android release build failed after 3 attempts."
           exit 1
+
+      - name: Verify offline TEST APK requests no unrelated runtime permissions
+        working-directory: generated
+        run: |
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          test -n "$AAPT"
+          "$AAPT" dump permissions build/app/outputs/flutter-apk/app-release.apk | tee /tmp/tasks-test-permissions.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('/tmp/tasks-test-permissions.txt').read_text()
+          banned = [
+              'android.permission.CAMERA',
+              'android.permission.INTERNET',
+              'android.permission.ACCESS_NETWORK_STATE',
+              'android.permission.POST_NOTIFICATIONS',
+              'android.permission.RECEIVE_BOOT_COMPLETED',
+              'android.permission.FOREGROUND_SERVICE',
+              'android.permission.FOREGROUND_SERVICE_SHORT_SERVICE',
+              'android.permission.WAKE_LOCK',
+          ]
+          found = [p for p in banned if "name='" + p + "'" in text]
+          if found:
+              raise SystemExit('Forbidden permissions in isolated TEST APK: '+str(found))
+          print('Isolated TEST runtime permissions audited: PASS')
+          PY
 
       - name: Verify APK is signed
         working-directory: generated
