@@ -214,6 +214,41 @@ class LocalJobTasksLabStore {
     return rows.map((r) => Map<String,dynamic>.from(r.data)).toList();
   }
 
+  /// The early Note 9 TEST schema requires estimated_minutes NOT NULL,
+  /// whereas later offline task schemas omit it. Insert through the actual
+  /// installed SQLite schema; never DROP, recreate, or change old records.
+  Future<void> _insertGeneralTaskRow({
+    required String businessId,
+    required String description,
+    String? employeeId,
+    required String status,
+    String category = 'General',
+    DateTime? dueDate,
+  }) async {
+    final fields = await db.customSelect(
+      'PRAGMA table_info(local_shop_tasks_lab)').get();
+    final hasEstimatedMinutes = fields.any(
+      (row) => row.read<String>('name') == 'estimated_minutes');
+    final columns = <String>[
+      'business_id', 'description', 'employee_id', 'status',
+      'category', 'due_at', 'created_at',
+      if (hasEstimatedMinutes) 'estimated_minutes',
+    ];
+    final values = <Object?>[
+      businessId, description.trim(), employeeId, status,
+      category.trim().isEmpty ? 'General' : category.trim(),
+      dueDate?.millisecondsSinceEpoch,
+      DateTime.now().millisecondsSinceEpoch,
+      if (hasEstimatedMinutes) 0,
+    ];
+    final placeholders = List.filled(columns.length, '?').join(',');
+    await db.customStatement(
+      'INSERT INTO local_shop_tasks_lab '
+      '(${columns.join(',')}) VALUES ($placeholders)',
+      values,
+    );
+  }
+
   Future<void> addShopTask({
     required String businessId,
     required String description,
@@ -225,15 +260,13 @@ class LocalJobTasksLabStore {
       throw ArgumentError('Shop task description required');
     }
     await ensureTables(db);
-    await db.customStatement(
-      'INSERT INTO local_shop_tasks_lab '
-      '(business_id, description, employee_id, status, category, due_at, created_at) '
-      "VALUES (?, ?, ?, 'planned', ?, ?, ?)",
-      [businessId, description.trim(),
-        employeeId?.isEmpty == true ? null : employeeId,
-        category.trim().isEmpty ? 'General' : category.trim(),
-        dueDate?.millisecondsSinceEpoch,
-        DateTime.now().millisecondsSinceEpoch],
+    await _insertGeneralTaskRow(
+      businessId: businessId,
+      description: description,
+      employeeId: employeeId == null || employeeId.isEmpty ? null : employeeId,
+      status: 'planned',
+      category: category,
+      dueDate: dueDate,
     );
   }
 
@@ -283,12 +316,11 @@ class LocalJobTasksLabStore {
       final description=(source.readNullable<String>('custom_description') ??
         source.read<String>('source_description')).trim();
       if (description.isEmpty) throw StateError('Task description missing');
-      await db.customStatement(
-        'INSERT INTO local_shop_tasks_lab '
-        '(business_id,description,employee_id,status,created_at) '
-        'VALUES (?,?,?,?,?)',
-        [businessId,description,source.readNullable<String>('employee_id'),
-          source.read<String>('status'),DateTime.now().millisecondsSinceEpoch],
+      await _insertGeneralTaskRow(
+        businessId: businessId,
+        description: description,
+        employeeId: source.readNullable<String>('employee_id'),
+        status: source.read<String>('status'),
       );
       await db.customStatement(
         'DELETE FROM local_job_tasks_lab WHERE business_id=? AND job_id=? '
