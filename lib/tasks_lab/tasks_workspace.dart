@@ -168,21 +168,26 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
           PopupMenuItem(value:item,child: Text(item)),
       ],
       child:Container(
-        padding:const EdgeInsets.symmetric(horizontal:10,vertical:7),
+        width:double.infinity,
+        constraints:const BoxConstraints(minHeight:54),
+        padding:const EdgeInsets.symmetric(horizontal:12,vertical:8),
         decoration:BoxDecoration(
           color: const Color(0xFFF3F7F8),
           border: Border.all(color:const Color(0xFFCBD7DC)),
           borderRadius:BorderRadius.circular(20)),
-        child:Row(mainAxisSize:MainAxisSize.min,children:[
-          Column(crossAxisAlignment:CrossAxisAlignment.start,
+        child:Row(children:[
+          Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,
             mainAxisSize:MainAxisSize.min,children:[
-            Text(title,style:const TextStyle(fontSize:10,
-              color:Color(0xFF64748B))),
-            Text(chosen,style:const TextStyle(fontSize:11,
-              fontWeight:FontWeight.w700)),
-          ]),
+            Text(title,maxLines:1,overflow:TextOverflow.ellipsis,
+              style:const TextStyle(fontSize:11,
+                color:Color(0xFF64748B))),
+            const SizedBox(height:2),
+            Text(chosen,maxLines:1,overflow:TextOverflow.ellipsis,
+              style:const TextStyle(fontSize:12,
+                fontWeight:FontWeight.w700)),
+          ])),
           const SizedBox(width:5),
-          const Icon(Icons.keyboard_arrow_down,size:15),
+          const Icon(Icons.keyboard_arrow_down,size:18),
         ]),
       ),
     );
@@ -433,29 +438,36 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
               borderRadius:BorderRadius.circular(22))),
         ),
         const SizedBox(height:9),
-        SingleChildScrollView(scrollDirection:Axis.horizontal,
-          child:Row(children:[
-            _picker('Employee',
-              _employee.isEmpty?'All':widget.employeeName(_employee),
-              _employeeChoices,
-              (v)=>setState(()=>_employee=_employeeIdForName(v))),
-            const SizedBox(width:6),
-            _picker('Status',_status,
-              ['Active','All','Not Started','In Progress','Done'],
-              (v)=>setState(()=>_status=v)),
-            const SizedBox(width:6),
-            _picker(_general?'Category':'Task Type',
-              _general?_category:_kind,
-              _general?['All Categories','General','Cleaning','Inventory',
-                'Office','Maintenance','Yard','Errands']:
-                ['All Types','Invoice Labor','Rechecks'],
-              (v)=>setState((){
-                if(_general) {_category=v;} else {_kind=v;}
-              })),
-            const SizedBox(width:6),
-            _picker('Sort',_sort,
-              ['Newest First','Oldest First',if(_general)'Due Date'],
-              (v)=>setState(()=>_sort=v)),
+        // Two balanced rows on narrow Note 9 screens: no fourth filter
+        // clipped off-screen or undiscoverable horizontal scroll.
+        Padding(
+          padding:const EdgeInsets.symmetric(horizontal:12),
+          child:Column(children:[
+            Row(children:[
+              Expanded(child:_picker('Employee',
+                _employee.isEmpty?'All':widget.employeeName(_employee),
+                _employeeChoices,
+                (v)=>setState(()=>_employee=_employeeIdForName(v)))),
+              const SizedBox(width:8),
+              Expanded(child:_picker('Status',_status,
+                ['Active','All','Not Started','In Progress','Done'],
+                (v)=>setState(()=>_status=v))),
+            ]),
+            const SizedBox(height:8),
+            Row(children:[
+              Expanded(child:_picker(_general?'Category':'Task Type',
+                _general?_category:_kind,
+                _general?['All Categories','General','Cleaning','Inventory',
+                  'Office','Maintenance','Yard','Errands']:
+                  ['All Types','Invoice Labor','Rechecks'],
+                (v)=>setState((){
+                  if(_general) {_category=v;} else {_kind=v;}
+                }))),
+              const SizedBox(width:8),
+              Expanded(child:_picker('Sort',_sort,
+                ['Newest First','Oldest First',if(_general)'Due Date'],
+                (v)=>setState(()=>_sort=v))),
+            ]),
           ]),
         ),
       ]),
