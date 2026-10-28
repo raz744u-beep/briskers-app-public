@@ -76,11 +76,27 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
 
   void _revealSelected() {
     if (!mounted || !_controller.hasClients) return;
-    final viewport = _controller.position.viewportDimension;
-    final target = (widget.selectedIndex * 83.0 - (viewport - 83) / 2)
-        .clamp(0.0, _controller.position.maxScrollExtent);
+    final position = _controller.position;
+    final viewport = position.viewportDimension;
+    final offset = position.pixels;
+    final selectedStart = widget.selectedIndex * 83.0;
+    const itemWidth = 83.0;
+    // Never animate the dock just to re-center an item that is already
+    // visible. This used to interrupt an otherwise fluid horizontal swipe
+    // after selecting a nearby section.
+    if (selectedStart >= offset &&
+        selectedStart + itemWidth <= offset + viewport) {
+      _syncArrows();
+      return;
+    }
+    final target = (selectedStart - (viewport - itemWidth) / 2)
+        .clamp(0.0, position.maxScrollExtent);
+    if ((target - offset).abs() < 2) {
+      _syncArrows();
+      return;
+    }
     _controller.animateTo(target,
-      duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
+      duration: const Duration(milliseconds: 170), curve: Curves.easeOut);
     _syncArrows();
   }
 
@@ -113,13 +129,19 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
           ],
         ),
         child: Row(children: [
-          if (_left) IconButton(
-            tooltip: 'Previous sections', icon: const Icon(Icons.chevron_left),
-            constraints: const BoxConstraints(minWidth: 25, minHeight: 42),
-            padding: EdgeInsets.zero,
-            onPressed: () => _controller.animateTo(
-              (_controller.offset - 190).clamp(0, _controller.position.maxScrollExtent),
-              duration: const Duration(milliseconds: 170), curve: Curves.easeOut),
+          // Reserve the arrow space at both ends even when one is hidden.
+          // Adding/removing arrow buttons during a swipe used to resize the
+          // ListView viewport and change scroll extents mid-gesture.
+          SizedBox(
+            width: 32,
+            child: _left ? IconButton(
+              tooltip: 'Previous sections', icon: const Icon(Icons.chevron_left),
+              constraints: const BoxConstraints(minWidth: 25, minHeight: 42),
+              padding: EdgeInsets.zero,
+              onPressed: () => _controller.animateTo(
+                (_controller.offset - 190).clamp(0.0, _controller.position.maxScrollExtent),
+                duration: const Duration(milliseconds: 170), curve: Curves.easeOut),
+            ) : const SizedBox.shrink(),
           ),
           Expanded(
             child: ListView.builder(
@@ -165,13 +187,16 @@ class _BriskersModuleDockState extends State<BriskersModuleDock> {
               },
             ),
           ),
-          if (_right) IconButton(
-            tooltip: 'More sections', icon: const Icon(Icons.chevron_right),
-            constraints: const BoxConstraints(minWidth: 25, minHeight: 42),
-            padding: EdgeInsets.zero,
-            onPressed: () => _controller.animateTo(
-              (_controller.offset + 190).clamp(0, _controller.position.maxScrollExtent),
-              duration: const Duration(milliseconds: 170), curve: Curves.easeOut),
+          SizedBox(
+            width: 32,
+            child: _right ? IconButton(
+              tooltip: 'More sections', icon: const Icon(Icons.chevron_right),
+              constraints: const BoxConstraints(minWidth: 25, minHeight: 42),
+              padding: EdgeInsets.zero,
+              onPressed: () => _controller.animateTo(
+                (_controller.offset + 190).clamp(0.0, _controller.position.maxScrollExtent),
+                duration: const Duration(milliseconds: 170), curve: Curves.easeOut),
+            ) : const SizedBox.shrink(),
           ),
         ]),
       ),
