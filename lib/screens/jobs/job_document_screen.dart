@@ -502,7 +502,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<void> _load({bool fastAfterMutation = false}) async {
     final generation = ++_loadGeneration;
-    if ((await LocalJobRetirement.blockedDocumentIds(localDatabase, widget.businessId)).contains(widget.documentId)) {
+    if (await LocalJobRetirement.isDocumentBlocked(
+        localDatabase, widget.businessId, widget.documentId)) {
       if (mounted && generation == _loadGeneration) _blockRetiredDocument();
       return;
     }

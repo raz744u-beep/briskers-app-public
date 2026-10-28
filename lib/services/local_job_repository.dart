@@ -28,6 +28,39 @@ class LocalJobRepository {
 
   final BriskersLocalDatabase _database;
 
+  // Shared device SQLite has one executor: avoid repeated DDL ahead of cards.
+  // This is only an index/setup cache, not a bypass of retirement checks.
+  static final _listIndexesReady =
+      Expando<Future<void>>('job_list_read_indexes');
+
+  Future<void> _ensureListReadIndexes() {
+    final ready = _listIndexesReady[_database];
+    if (ready != null) return ready;
+    Future<void> install() async {
+      try {
+        await LocalJobAccessHistory(database: _database).ensureTable();
+        for (final index in const [
+          'idx_jobs_view_visits ON local_job_visits (business_id, job_id)',
+          'idx_jobs_view_outbox ON sync_outbox (business_id, entity_id, state)',
+          'idx_jobs_view_findings ON local_findings (business_id, vehicle_id, status)',
+          'idx_jobs_view_inspections ON local_pre_inspections (business_id, job_id)',
+          'idx_jobs_view_found_job ON local_findings (business_id, found_job_id)',
+          'idx_jobs_view_repair_job ON local_findings (business_id, repair_job_id)',
+          'idx_jobs_view_inspection_photos ON local_pre_inspection_photos (business_id, inspection_id)',
+          'idx_jobs_view_finding_photos ON local_finding_photos (business_id, finding_id)',
+        ]) {
+          await _database.customStatement('CREATE INDEX IF NOT EXISTS $index');
+        }
+      } catch (_) {
+        _listIndexesReady[_database] = null;
+        rethrow;
+      }
+    }
+    final pending = install();
+    _listIndexesReady[_database] = pending;
+    return pending;
+  }
+
   Future<bool> hasJobBootstrap(String businessId) async {
     final rows = await _database
         .customSelect(
@@ -225,31 +258,9 @@ class LocalJobRepository {
     int limit = 50,
     int offset = 0,
   }) async {
+    // Retirements are checked each time; the DDL indexes are installed once.
     await LocalJobRetirement.ensureSchema(_database);
-    await LocalJobAccessHistory(database: _database).ensureTable();
-    // Activity is sorted before paging. Keep related lookups indexed even on
-    // older installed databases so a large imported history stays usable.
-    await _database.customStatement(
-      'CREATE INDEX IF NOT EXISTS '
-      'idx_jobs_view_visits ON local_job_visits (business_id, job_id)',
-    );
-    await _database.customStatement(
-      'CREATE INDEX IF NOT EXISTS '
-      'idx_jobs_view_outbox ON sync_outbox (business_id, entity_id, state)',
-    );
-    await _database.customStatement(
-      'CREATE INDEX IF NOT EXISTS '
-      'idx_jobs_view_findings ON local_findings (business_id, vehicle_id, status)',
-    );
-    for (final index in const [
-      'idx_jobs_view_inspections ON local_pre_inspections (business_id, job_id)',
-      'idx_jobs_view_found_job ON local_findings (business_id, found_job_id)',
-      'idx_jobs_view_repair_job ON local_findings (business_id, repair_job_id)',
-      'idx_jobs_view_inspection_photos ON local_pre_inspection_photos (business_id, inspection_id)',
-      'idx_jobs_view_finding_photos ON local_finding_photos (business_id, finding_id)',
-    ]) {
-      await _database.customStatement('CREATE INDEX IF NOT EXISTS $index');
-    }
+    await _ensureListReadIndexes();
     final filters = _filters(
       businessId,
       status: status,

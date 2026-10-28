@@ -62,7 +62,13 @@ class _JobQuarantineViewGuardState extends State<JobQuarantineViewGuard>
     _sync = (widget.syncEvents ?? JobSyncService.syncEvents).listen((
       businessId,
     ) {
-      if (businessId == widget.businessId) unawaited(_readStatus());
+      // Document retirement has its own event stream below. Job sync
+      // notifications must not repeatedly cancel a Document's first access
+      // check while unrelated Jobs are refreshing.
+      if (widget.documentId == null &&
+          businessId == widget.businessId) {
+        unawaited(_readStatus());
+      }
     });
     _retirement = LocalJobRetirement.events.listen((event) {
       if (event.businessId == widget.businessId &&
@@ -94,24 +100,21 @@ class _JobQuarantineViewGuardState extends State<JobQuarantineViewGuard>
     final epoch = ++_epoch;
     bool blocked;
     try {
-      blocked =
-          await (widget.blockedLookup?.call() ??
-              LocalJobQuarantine.isJobBlocked(
-                localDatabase,
-                widget.businessId,
-                widget.jobId,
-              ));
-      if (widget.blockedLookup == null && !blocked) {
-        blocked = widget.documentId == null
-            ? await LocalJobRetirement.isJobBlocked(
-                localDatabase,
-                widget.businessId,
-                widget.jobId,
-              )
-            : (await LocalJobRetirement.blockedDocumentIds(
-                localDatabase,
-                widget.businessId,
-              )).contains(widget.documentId);
+      if (widget.blockedLookup != null) {
+        blocked = await widget.blockedLookup!();
+      } else if (widget.documentId != null) {
+        // Document routes deliberately have no Job ID. The scoped
+        // retirement check preserves exact invoice + linked Job fences
+        // without scanning the entire shop or checking an empty Job ID.
+        blocked = await LocalJobRetirement.isDocumentBlocked(
+          localDatabase, widget.businessId, widget.documentId!);
+      } else {
+        blocked = await LocalJobQuarantine.isJobBlocked(
+          localDatabase, widget.businessId, widget.jobId);
+        if (!blocked) {
+          blocked = await LocalJobRetirement.isJobBlocked(
+            localDatabase, widget.businessId, widget.jobId);
+        }
       }
     } catch (_) {
       blocked = true;

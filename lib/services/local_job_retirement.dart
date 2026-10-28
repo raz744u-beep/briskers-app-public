@@ -18,6 +18,12 @@ class LocalJobRetirement {
   static const blockedStates = "('pending','accepted','locally_cancelled')";
 
   static final _installed = Expando<bool>('retirement_schema');
+  // Do NOT share one in-flight schema Future across Drift transaction zones.
+  // A guard read outside a held transaction can queue schema SQL behind that
+  // transaction, while its inner retirement check joins the outer Future:
+  // both await each other and Job Detail stays on its initial spinner in Auto
+  // AND Offline. Each caller must instead issue its idempotent statements in
+  // its own executor/transaction context. Existing trigger validation remains.
   static Future<void> ensureSchema(BriskersLocalDatabase db) async {
     if (_installed[db] == true &&
         (await db
@@ -171,11 +177,31 @@ class LocalJobRetirement {
     String businessId,
     String jobId,
   ) async => (await blockedJobIds(db, businessId)).contains(jobId);
+  // Detail navigation needs only this invoice's durable fence. Do not scan
+  // every retired invoice/job in a shop on each route or guard refresh.
+  // Exact invoice tombstones also hide documents missing from the local index.
   static Future<bool> isDocumentBlocked(
     BriskersLocalDatabase db,
     String businessId,
     String documentId,
-  ) async => (await blockedDocumentIds(db, businessId)).contains(documentId);
+  ) async {
+    await ensureSchema(db);
+    return (await db.customSelect(
+      """SELECT 1 FROM local_job_retirement_entities e
+      WHERE e.business_id = ? AND e.state IN $blockedStates
+        AND ((e.entity_kind = 'invoice' AND e.entity_id = ?)
+          OR (e.entity_kind = 'job' AND EXISTS (
+            SELECT 1 FROM local_documents d
+            WHERE d.business_id = e.business_id AND d.id = ?
+              AND d.kind = 'invoice' AND d.job_id = e.entity_id)))
+      LIMIT 1""",
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(documentId),
+        Variable<String>(documentId),
+      ],
+    ).get()).isNotEmpty;
+  }
 
   static void notify(
     BriskersLocalDatabase db,
