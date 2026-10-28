@@ -28,6 +28,7 @@ import '../../services/local_customer_repository.dart';
 import '../../core/job_mileage_summary.dart';
 import '../../services/offline_invoice_mileage_service.dart';
 import '../../widgets/job_mileage_row.dart';
+import '../../widgets/local_first_attachment_image.dart';
 import '../../services/job_detail_first_frame.dart';
 import '../../services/local_job_access_history.dart';
 import '../../services/job_performance_metrics.dart';
@@ -3924,41 +3925,22 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       );
     }
 
-    return FutureBuilder<File?>(
-      future: _attachmentCache.getOrDownload(bucket, key),
-      builder: (context, snapshot) {
-        final cached = snapshot.data;
-        if (cached == null) {
-          return controls(
-            Center(
-              child: snapshot.connectionState == ConnectionState.waiting
-                  ? const CircularProgressIndicator(strokeWidth: 2)
-                  : const Icon(
-                      Icons.broken_image_outlined,
-                      color: Colors.deepOrange,
-                    ),
-            ),
-          );
-        }
-
-        return controls(
-          ClipRRect(
-            borderRadius: BorderRadius.circular(9),
-            child: Image.file(
-              cached,
-              width: 82,
-              height: 82,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => const Center(
-                child: Icon(
-                  Icons.broken_image_outlined,
-                  color: Colors.deepOrange,
-                ),
-              ),
-            ),
-          ),
-        );
-      },
+    // Keep the resolved image Future in a StatefulWidget instead of
+    // recreating it each time Job status, finding counts, or a checkbox
+    // rebuilds this drawer. The original file / persistent photo cache is
+    // always checked first, with server fetch only when online and missing.
+    // A stable identity also prevents wrong photo state if attachments reorder.
+    return controls(
+      ClipRRect(
+        borderRadius: BorderRadius.circular(9),
+        child: LocalFirstAttachmentImage(
+          key: ValueKey('${widget.businessId}::$bucket::$key'),
+          attachment: attachment,
+          width: 82,
+          height: 82,
+          fit: BoxFit.cover,
+        ),
+      ),
     );
   }
 

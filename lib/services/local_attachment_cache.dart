@@ -62,10 +62,17 @@ class LocalAttachmentCache {
     HttpClient? client;
 
     try {
-      final url = await _api.signedAttachmentUrl(bucket, key);
-      client = HttpClient();
-      final request = await client.getUrl(Uri.parse(url));
-      final response = await request.close();
+      // A failing storage request must never leave the finding's thumbnail
+      // spinning indefinitely. Preserve already saved originals and retry on
+      // a later open if the network is unavailable.
+      final url = await _api.signedAttachmentUrl(bucket, key)
+          .timeout(const Duration(seconds: 15));
+      client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 15);
+      final request = await client.getUrl(Uri.parse(url))
+          .timeout(const Duration(seconds: 20));
+      final response = await request.close()
+          .timeout(const Duration(seconds: 20));
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await response.drain<void>();
@@ -79,7 +86,7 @@ class LocalAttachmentCache {
       }
 
       final sink = temp.openWrite();
-      await response.pipe(sink);
+      await response.pipe(sink).timeout(const Duration(seconds: 60));
 
       if (!await _isUsable(temp)) {
         if (await temp.exists()) await temp.delete();
