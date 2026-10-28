@@ -3405,7 +3405,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _deleteUnusedJob() async {
-    if (!_owner || _busy) return;
+    // No live Delete action until the verified sandbox-only v3 feed is enabled.
+    if (!JobSyncService.deletionFeedEnabled || !_owner || _busy) return;
     final actorId = supabase.auth.currentUser?.id;
     if (actorId == null) {
       if (mounted) setState(() => _error = 'Sign in before reviewing Job deletion.');
@@ -5049,7 +5050,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     title: Text('Assign / unassign mechanic'),
                   ),
                 ),
-              if (_owner) ...[
+              if (_owner && JobSyncService.deletionFeedEnabled) ...[
                 const PopupMenuDivider(),
                 PopupMenuItem(
                   enabled: !_busy,
