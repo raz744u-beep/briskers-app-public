@@ -567,16 +567,16 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
               title:Text(task['description']?.toString()??'',
                 style:const TextStyle(fontWeight:FontWeight.w700)),
               subtitle:Text((task['category']?.toString()??'General')+
-                ' · '+(task['status']=='done'?'Complete':
-                  task['status']=='in_progress'?'In Progress':'Planned')),
+                ' · '+(task['status']=='done'?'Done':
+                  task['status']=='in_progress'?'In Progress':'Not Started')),
               trailing:PopupMenuButton<String>(
                 tooltip:'Update task progress',
                 onSelected:(status)=>_updateEmployeeGeneralTask(
                   task['id'] as int,status),
                 itemBuilder:(_)=>const [
-                  PopupMenuItem(value:'planned',child:Text('Planned')),
+                  PopupMenuItem(value:'planned',child:Text('Not Started')),
                   PopupMenuItem(value:'in_progress',child:Text('In Progress')),
-                  PopupMenuItem(value:'done',child:Text('Complete')),
+                  PopupMenuItem(value:'done',child:Text('Done')),
                 ]))),
         ]);
       })
