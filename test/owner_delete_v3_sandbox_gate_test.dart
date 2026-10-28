@@ -18,6 +18,20 @@ void main() {
     }
   });
 
+  test('synthetic app identity cannot collide with regular shop app', () {
+    expect(syntheticAndroidAppId, isNot('com.briskers.briskers_app'));
+    if (isSyntheticTestBuild) {
+      expect(
+        () => verifySyntheticAppIdentity('com.briskers.briskers_app'),
+        throwsStateError,
+      );
+      expect(
+        () => verifySyntheticAppIdentity(syntheticAndroidAppId),
+        returnsNormally,
+      );
+    }
+  });
+
   test('unconfigured synthetic app must fail before initialization', () {
     if (isSyntheticTestBuild && supabasePublishableKey.isEmpty) {
       expect(verifySupabaseEnvironment, throwsStateError);
