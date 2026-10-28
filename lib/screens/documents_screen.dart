@@ -1669,6 +1669,7 @@ class _DocumentsScreenState extends State<DocumentsScreen>
           documentId: invoiceId,
           isOwner: widget.isOwner,
           canManageExpenses: widget.canManageExpenses,
+          freshlyCreated: true,
           initialAction: 'edit',
         ),
       ),

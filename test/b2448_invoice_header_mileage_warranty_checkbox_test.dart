@@ -53,7 +53,7 @@ void main() {
     final src = File('lib/screens/jobs/job_document_screen.dart').readAsStringSync();
     final header = src.substring(src.indexOf('Widget _customerHeader()'));
     expect(src, contains("final mileage = _visibleInvoiceMileage;"));
-    expect(src, contains("final mileageName = _usesInvoiceMileageOut ? 'Mileage Out' : 'Mileage';"));
+    expect(src, contains("final mileageName = _usesInvoiceMileageOut ? 'Miles Out' : 'Miles';"));
     expect(src, contains("key: const ValueKey('invoice-header-mileage')"));
     expect(src, contains("if (!_estimate) mileageLine()"));
     expect(src, contains('Future<void> _editInvoiceMileage() async'));

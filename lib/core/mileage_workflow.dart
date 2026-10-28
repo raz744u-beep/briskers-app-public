@@ -37,15 +37,15 @@ class MileageWorkflow {
     final explicit = getHasExplicitReadings(document);
     if (!explicit) {
       final legacy = parse(document['odometer_in']);
-      return legacy == null ? const [] : [('Mileage', legacy)];
+      return legacy == null ? const [] : [('Miles', legacy)];
     }
     // Never reinterpret an ambiguous legacy invoice value as Mileage In.
     final incoming = parse(document['mileage_in']) ?? linkedJobMileageIn;
     final outgoing = departure(document);
     return [
-      if (incoming != null) ('Mileage In', incoming),
+      if (incoming != null) ('Miles In', incoming),
       if (outgoing != null && document['kind']?.toString() == 'invoice')
-        ('Mileage Out', outgoing),
+        ('Miles Out', outgoing),
     ];
   }
 

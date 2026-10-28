@@ -19,25 +19,25 @@ void main() {
   test('PDF honors two explicit readings without fabricating a zero or out on estimates', () {
     expect(MileageWorkflow.printableReadings({
       'kind':'invoice','mileage_in':125010,'mileage_out':125025,
-    }), [('Mileage In',125010),('Mileage Out',125025)]);
+    }), [('Miles In',125010),('Miles Out',125025)]);
     expect(MileageWorkflow.printableReadings({
       'kind':'invoice','mileage_in':125010,
-    }), [('Mileage In',125010)]);
+    }), [('Miles In',125010)]);
     expect(MileageWorkflow.printableReadings({
       'kind':'invoice','mileage_out':125025,
-    }), [('Mileage Out',125025)]);
+    }), [('Miles Out',125025)]);
     expect(MileageWorkflow.printableReadings({
       'kind':'estimate','mileage_in':125010,'mileage_out':125025,
-    }), [('Mileage In',125010)]);
+    }), [('Miles In',125010)]);
     expect(MileageWorkflow.printableReadings({
       'kind':'invoice','mileage_out':125025,'odometer_in':111111,
-    }), [('Mileage Out',125025)]);
+    }), [('Miles Out',125025)]);
   });
 
   test('old imported invoices retain ambiguous Mileage, not a false Out', () {
     expect(MileageWorkflow.printableReadings({
       'kind':'invoice','odometer_in':89990,
-    }), [('Mileage',89990)]);
+    }), [('Miles',89990)]);
     expect(MileageWorkflow.printableReadings({
       'kind':'invoice',
     }),isEmpty);
@@ -66,20 +66,20 @@ void main() {
 
   test('Customer Complaint shares arrival odometer with pre-inspection', () async {
     final job=await File('lib/screens/jobs/job_detail_screen.dart').readAsString();
-    expect(job,contains("tooltip: 'Edit Mileage In'"));
+    expect(job,contains("tooltip: 'Edit Miles In'"));
     expect(job,contains('Future<void> _editMileageIn() async'));
     expect(job,contains('await _offlineInspection.saveLocalInspection('));
     expect(job,contains('notes: existingNotes,'));
     final vehicle=await File('lib/screens/customers/new_vehicle_screen.dart')
         .readAsString();
-    expect(vehicle,contains('Current Mileage (optional)'));
+    expect(vehicle,contains('Current Miles (optional)'));
     expect(vehicle,contains('Known reading at registration.'));
   });
 
   test('v2 invoice uses separate departure RPC and offline queue, not legacy job arrival', () async {
     final ui=await File('lib/screens/jobs/job_document_screen.dart').readAsString();
     final api=await File('lib/services/briskers_api.dart').readAsString();
-    expect(ui,contains("explicitMileageOut ? 'Mileage Out' : 'Mileage'"));
+    expect(ui,contains("explicitMileageOut ? 'Miles Out' : 'Miles'"));
     expect(ui,contains('await _invoiceMileage.queue('));
     expect(ui,contains('await _invoiceMileage.project('));
     expect(api,contains('briskers_save_invoice_mileage_out_v1'));
@@ -93,7 +93,7 @@ void main() {
     // the repository source context and is NOT claimed as validated by CI.
     expect(MileageWorkflow.printableReadings({
       'kind':'invoice','odometer_in':125010,
-    }),[('Mileage',125010)]);
+    }),[('Miles',125010)]);
     final api=await File('lib/services/briskers_api.dart').readAsString();
     expect(api,contains('briskers_document_detail_v5'));
     expect(api,contains("if (error.code != 'PGRST202') rethrow;"));

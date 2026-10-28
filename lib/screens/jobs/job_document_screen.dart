@@ -162,6 +162,7 @@ class JobDocumentScreen extends StatefulWidget {
     required this.documentId,
     required this.isOwner,
     this.initialDocumentSummary,
+    this.freshlyCreated = false,
     this.roleCode,
     this.canManageExpenses = false,
     this.initialAction,
@@ -175,6 +176,9 @@ class JobDocumentScreen extends StatefulWidget {
   // Only the already authorized selected list row; no financial actions
   // are enabled until locally saved detail and pending edits are projected.
   final Map<String, dynamic>? initialDocumentSummary;
+  // Only for the immediately returned server ID of a newly created invoice.
+  // No other invoice's pending payment replay needs to block this first frame.
+  final bool freshlyCreated;
   final String? roleCode;
   final bool canManageExpenses;
   final String? initialAction;
@@ -659,9 +663,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
     final openWatch = Stopwatch()..start();
     try {
-      // Share the existing replay with background sync before taking the
-      // authoritative snapshot. A lost response retries the saved UUID.
-      await _offlinePayments.flush(widget.businessId);
+      // Existing documents must replay pending payments before the authoritative
+      // snapshot. A freshly created server invoice cannot already have a
+      // payment on this device, so avoid waiting for unrelated invoice replay
+      // before its first frame. All subsequent loads preserve normal replay.
+      if (!(widget.freshlyCreated && generation == 1)) {
+        await _offlinePayments.flush(widget.businessId);
+      }
       if (!mounted || generation != _loadGeneration) return;
       final detail = await _api.documentDetail(
         widget.businessId,
@@ -693,6 +701,19 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
             'offline_warranty_detail': cachedWarranty,
         }),
       );
+      // Persist the authorized snapshot before enabling editing so a fast
+      // item/header change cannot race the initial disk cache write.
+      // Optional tax, warranty, signature and findings RPCs remain secondary:
+      // the saved invoice and projected payments can now paint immediately.
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _detail = projected;
+        if (!_notesDirty && !_notesFocusNode.hasFocus) {
+          _notesController.text = projected['memo']?.toString() ?? '';
+        }
+        _loading = false;
+        _error = null;
+      });
       // After a successful item/notes mutation, avoid re-fetching seven
       // unrelated metadata endpoints. The authoritative document detail
       // already includes updated lines, totals, and payment aggregates.
@@ -3837,7 +3858,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                 ),
                 ListTile(
                   leading: const Icon(Icons.speed_outlined),
-                  title: Text(explicitMileageOut ? 'Mileage Out' : 'Mileage'),
+                  title: Text(explicitMileageOut ? 'Miles Out' : 'Miles'),
                   subtitle: Text(
                     mileageText.isEmpty
                         ? 'Not entered'
@@ -3853,7 +3874,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                           final saveMileage = await showDialog<bool>(
                             context: sheetContext,
                             builder: (dialogContext) => AlertDialog(
-                              title: Text(explicitMileageOut ? 'Mileage Out' : 'Mileage'),
+                              title: Text(explicitMileageOut ? 'Miles Out' : 'Miles'),
                               content: TextField(
                                 controller: controller,
                                 autofocus: true,
@@ -3862,8 +3883,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                                 ),
                                 decoration: InputDecoration(
                                   labelText: explicitMileageOut
-                                      ? 'Mileage Out at repair completion'
-                                      : 'Current mileage',
+                                      ? 'Miles Out at repair completion'
+                                      : 'Current miles',
                                   suffixText: 'mi',
                                 ),
                               ),
@@ -3898,7 +3919,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                             } else if (sheetContext.mounted) {
                               ScaffoldMessenger.of(sheetContext).showSnackBar(
                                 const SnackBar(
-                                  content: Text('Enter valid mileage.'),
+                                  content: Text('Enter valid miles.'),
                                 ),
                               );
                             }
@@ -5341,14 +5362,14 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       builder: (dialogContext) {
         mileageDialogRoute ??= ModalRoute.of(dialogContext);
         return AlertDialog(
-        title: Text(usesMileageOut ? 'Mileage Out' : 'Mileage'),
+        title: Text(usesMileageOut ? 'Miles Out' : 'Miles'),
         content: TextField(
           controller: controller,
           autofocus: true,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: InputDecoration(
             labelText: usesMileageOut
-                ? 'Mileage Out at repair completion' : 'Invoice mileage',
+                ? 'Miles Out at repair completion' : 'Invoice miles',
             suffixText: 'mi',
             border: const OutlineInputBorder(),
           ),
@@ -5384,7 +5405,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (changed.isNotEmpty &&
         (reading == null || !reading.isFinite || reading < 0)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter valid mileage.')),
+        const SnackBar(content: Text('Enter valid miles.')),
       );
       return;
     }
@@ -5419,7 +5440,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     });
     if (saved && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Mileage saved.')),
+        const SnackBar(content: Text('Miles saved.')),
       );
     }
   }
@@ -5430,7 +5451,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     final vehicle = _detail?['vehicle']?.toString().trim() ?? '';
     final vin = _detail?['vehicle_vin']?.toString().trim() ?? '';
     final mileage = _visibleInvoiceMileage;
-    final mileageName = _usesInvoiceMileageOut ? 'Mileage Out' : 'Mileage';
+    final mileageName = _usesInvoiceMileageOut ? 'Miles Out' : 'Miles';
     final documentDateRaw =
         _detail?['document_date']?.toString().trim() ?? '';
     final createdAtRaw =
@@ -7261,7 +7282,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
               child: ListTile(
                 dense: true,
                 leading: const Icon(Icons.speed_outlined),
-                title: Text('Mileage: ${_quantity(savedMileage)} mi',
+                title: Text('Miles: ${_quantity(savedMileage)} mi',
                     style: const TextStyle(fontWeight: FontWeight.w700)),
                 subtitle: const Text('Automatic from Invoice Details'),
                 trailing: _readOnly ? null

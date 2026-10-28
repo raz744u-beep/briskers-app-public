@@ -142,7 +142,51 @@ void main() {
     },
   );
 
-  testWidgets('non-retained modules retain existing remount behavior', (
+  testWidgets('Home attention state stays mounted across dock switches',
+      (tester) async {
+    final loads = <int, int>{};
+    Future<void> show(int index, {String scope = 'shop-a'}) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: RetainedModuleStack(
+            key: ValueKey(scope),
+            index: index,
+            itemCount: 8,
+            itemBuilder: (_, i) => _TestModule(
+              index: i,
+              onLoad: (i) => loads[i] = (loads[i] ?? 0) + 1,
+            ),
+          ),
+        ),
+      ));
+      await tester.pump();
+    }
+
+    await show(0);
+    expect(loads, {0: 1});
+    final homeState = tester.state<_TestModuleState>(
+      find.byType(_TestModule));
+    await tester.tap(find.text('0:Open'));
+    await tester.pump();
+    expect(find.text('0:Closed'), findsOneWidget);
+
+    for (var n = 0; n < 5; n++) {
+      await show(4);
+      await show(0);
+      expect(find.text('0:Closed'), findsOneWidget);
+      expect(tester.state<_TestModuleState>(
+        find.byType(_TestModule).hitTestable().first), same(homeState));
+    }
+    expect(loads, {0: 1, 4: 1},
+      reason: 'Returning Home must not reinitialize attention counts.');
+
+    await show(0, scope: 'shop-b');
+    expect(loads[0], 2);
+    expect(find.text('0:Open'), findsOneWidget,
+      reason: 'A new shop must not inherit the former shop attention state.');
+  });
+
+  testWidgets('non-retained More module still remounts on revisit', (
     tester,
   ) async {
     final loads = <int, int>{};
@@ -163,10 +207,10 @@ void main() {
       );
     }
 
-    await show(0);
+    await show(7);
     await show(4);
-    await show(0);
-    expect(loads, {0: 2, 4: 1});
+    await show(7);
+    expect(loads, {7: 2, 4: 1});
   });
 
   testWidgets('unrelated shell updates do not rebuild hidden module widgets', (
@@ -298,7 +342,7 @@ void main() {
         .readAsStringSync();
     final expenses = File('lib/screens/expenses_screen.dart')
         .readAsStringSync();
-    expect(stack, contains('retainedIndices = const {1, 2, 3, 4, 5, 6}'));
+    expect(stack, contains('retainedIndices = const {0, 1, 2, 3, 4, 5, 6}'));
     expect(expenses, contains('_serverConfirmedTransactionIds'));
     expect(expenses, contains('if (mounted && TickerMode.valuesOf(context).enabled)'));
     expect(expenses, contains('unawaited(_refreshPhotoCounts())'));

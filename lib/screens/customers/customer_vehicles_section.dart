@@ -120,7 +120,7 @@ class CustomerVehiclesSection extends StatelessWidget {
                             state.isEmpty ? plate : '$plate ($state)',
                           ),
                         if (mileage != null)
-                          _detailRow(context, 'Current Mileage', '$mileage mi'),
+                          _detailRow(context, 'Current Miles', '$mileage mi'),
                         if (mileage != null && recorded != null)
                           _detailRow(
                             context,

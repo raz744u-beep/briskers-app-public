@@ -2020,7 +2020,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     final save = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Mileage In'),
+        title: const Text('Miles In'),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -2049,7 +2049,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     if (parsed == null || parsed < 0 || !parsed.isFinite ||
         parsed > 9999999 || parsed != parsed.roundToDouble()) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Enter a valid whole-number Mileage In.'),
+        content: Text('Enter a valid whole-number Miles In.'),
       ));
       return;
     }
@@ -2273,7 +2273,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
                 decoration:
-                    const InputDecoration(labelText: 'Arrival mileage'),
+                    const InputDecoration(labelText: 'Miles In at check-in'),
               ),
               const SizedBox(height: 6),
               TextField(
@@ -3274,7 +3274,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
       id = await _api.createInvoice(widget.businessId, widget.jobId);
     });
     if (!mounted || id == null) return;
-    await _openDocument(id!);
+    await _openDocument(id!, freshlyCreated: true);
   }
 
   Future<void> _addPayment() async {
@@ -3296,7 +3296,9 @@ class _JobDetailScreenState extends State<JobDetailScreen>
     }
   }
 
-  Future<void> _openDocument(String documentId) async {
+  Future<void> _openDocument(String documentId, {
+    bool freshlyCreated = false,
+  }) async {
     Map<String, dynamic>? selected;
     for (final row in _documents) {
       if (row['id']?.toString() == documentId) {
@@ -3312,6 +3314,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
           businessId: widget.businessId,
           documentId: documentId,
           initialDocumentSummary: selected,
+          freshlyCreated: freshlyCreated,
           isOwner: _owner,
           canManageExpenses: <String>{
             'owner',
@@ -4700,13 +4703,13 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                 Expanded(
                   child: Text(
                     mileageIn == null
-                        ? 'Mileage In: Not entered'
-                        : 'Mileage In: ${mileageIn.toString()} mi',
+                        ? 'Miles In: Not entered'
+                        : 'Miles In: ${mileageIn.toString()} mi',
                   ),
                 ),
                 if (_canEditInspection)
                   IconButton(
-                    tooltip: 'Edit Mileage In',
+                    tooltip: 'Edit Miles In',
                     onPressed: _busy ? null : _editMileageIn,
                     icon: const Icon(Icons.edit_outlined, size: 19),
                   ),
@@ -5259,7 +5262,7 @@ class _JobDetailScreenState extends State<JobDetailScreen>
                 child: Text(
                   <String>[
                     if (date.isNotEmpty) date,
-                    if (odometer.isNotEmpty) 'Mileage $odometer',
+                    if (odometer.isNotEmpty) 'Miles $odometer',
                   ].join(' • '),
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
