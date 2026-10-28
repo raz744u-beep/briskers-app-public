@@ -470,7 +470,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                 ])
               else if(current=='done')
                 TextButton.icon(
-                  tooltip:'Correct an accidental task completion',
                   onPressed:_changingMechanicProgress.contains(
                     _mechanicTaskKey(task,mechanicId))?null:
                     ()=>_undoMechanicDone(task,mechanicId),
