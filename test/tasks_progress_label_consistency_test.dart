@@ -17,6 +17,24 @@ void main() {
     expect(card,isNot(contains('TextDecoration.lineThrough')));
   });
 
+  test('Mechanic names bold and hours regular in both task sections', () {
+    final main=File('lib/tasks_lab_main.dart').readAsStringSync();
+    final card=main.split('Widget _taskCard(').last
+      .split('Future<void> _editTask(').first;
+    final controls=main.split('Widget _mechanicProgressControls(').last
+      .split('Map<String, dynamic>? _firstCompletion(').first;
+    expect(card,contains('Expanded(child: Text(credit.mechanics,'));
+    expect(card,contains('fontSize: 13.5,\n'
+      '                              fontWeight: FontWeight.w700,'));
+    expect(card,contains('Text(credit.hours,\n'
+      '                            style: const TextStyle(fontSize: 12.5,\n'
+      '                              fontWeight: FontWeight.w400,'));
+    expect(controls,contains('Text(_employeeName(mechanicId)'));
+    expect(controls,contains('fontWeight:FontWeight.w700'));
+    expect(controls,contains('Text(\''));
+    expect(controls,contains('fontSize:11,'));
+  });
+
   test('Both task tabs and status filters share progress terminology', () {
     final source=File('lib/tasks_lab/tasks_workspace.dart').readAsStringSync();
     final profile=File('lib/tasks_lab/employee_payroll_profile.dart')
