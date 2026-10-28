@@ -177,7 +177,9 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
         _customerSearching = false;
       });
       if (local.isNotEmpty ||
-          BriskersConnectionModeController.instance.forceOffline) return;
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
       // A missing local result is definitive only after customer bootstrap.
       if (await _localCustomers.hasBootstrap(widget.businessId)) return;
       if (!current()) return;
@@ -185,7 +187,9 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
         widget.businessId, search: query, limit: 40)
           .timeout(const Duration(seconds: 8));
       if (!current() ||
-          BriskersConnectionModeController.instance.forceOffline) return;
+          BriskersConnectionModeController.instance.forceOffline) {
+        return;
+      }
       setState(() => _customers = remote);
     } catch (_) {
       if (current()) setState(() => _customerSearching = false);
