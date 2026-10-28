@@ -171,6 +171,14 @@ class LocalJobTasksLabStore {
       await db.customStatement(
         'ALTER TABLE local_shop_tasks_lab ADD COLUMN due_at INTEGER');
     }
+    // Existing Note 9 installs may have a General Tasks table created before
+    // completion timestamps were introduced. CREATE TABLE IF NOT EXISTS does
+    // not update an existing schema, so migrate it before shopTasks() reads
+    // this column or setShopTaskStatus() writes it. Never drop/reset records.
+    if (!shopColumns.any((r) => r.read<String>('name') == 'completed_at')) {
+      await db.customStatement(
+        'ALTER TABLE local_shop_tasks_lab ADD COLUMN completed_at INTEGER');
+    }
     await db.customStatement('''
       CREATE INDEX IF NOT EXISTS idx_lab_shop_tasks_business_status
       ON local_shop_tasks_lab (business_id, status, created_at)
