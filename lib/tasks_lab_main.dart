@@ -2006,7 +2006,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             ' · '+(status=='done' ? 'Done' :
               status=='in_progress' ? 'In Progress' : 'Not Started')),
           trailing: PopupMenuButton<String>(
-            tooltip: 'Change shop task status',
+            tooltip: 'Change General Task progress',
             onSelected: (value) async {
               await store.setShopTaskStatus(
                 businessId: BriskersLabFixture.businessId,
@@ -2036,7 +2036,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       for (final task in active) render(task),
       if (active.isEmpty) const ListTile(title: Text('No active shop tasks')),
       ExpansionTile(
-        title: Text('Completed · '+completed.length.toString()),
+        title: Text('Done · '+completed.length.toString()),
         initiallyExpanded: false,
         children: [for (final task in completed) render(task)]),
     ]);
