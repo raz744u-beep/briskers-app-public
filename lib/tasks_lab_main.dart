@@ -340,6 +340,31 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       Map<String,dynamic> task,String employeeId,String progress) async {
     final key=_mechanicTaskKey(task,employeeId);
     if(_changingMechanicProgress.contains(key))return;
+    if(progress=='done') {
+      final mechanics=_mechanicsOnTask(task);
+      final lastMechanic=mechanics.isNotEmpty && mechanics.every((id)=>
+        id==employeeId || _mechanicTaskStatus(task,id)=='done');
+      if(lastMechanic) {
+        // Freezing first completion protects earned hours. Require explicit
+        // confirmation before the LAST mechanic makes the whole task Done.
+        final confirmed=await showDialog<bool>(
+          context:context,
+          builder:(dialog)=>AlertDialog(
+            title:const Text('Finish entire task?'),
+            content:Text('${_employeeName(employeeId)} is the final '
+              'mechanic. Marking Done will finish this service task and '
+              'preserve its labor hours. Continue?'),
+            actions:[
+              TextButton(onPressed:()=>Navigator.pop(dialog,false),
+                child:const Text('Cancel')),
+              FilledButton(onPressed:()=>Navigator.pop(dialog,true),
+                child:const Text('Finish Task')),
+            ],
+          ),
+        );
+        if(confirmed!=true||!mounted)return;
+      }
+    }
     setState(()=>_changingMechanicProgress.add(key));
     try {
       await store.setMechanicTaskProgress(
