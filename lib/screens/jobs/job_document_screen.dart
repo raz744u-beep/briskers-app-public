@@ -2360,9 +2360,17 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       // Use the identical durable queue and an identity/vehicle/Job-scoped
       // fallback to the currently displayed invoice. Never change the server
       // record, payment, status or legacy mileage interpretation.
-      final queuedMileage = _estimate ? serverDetail
-          : await _invoiceMileage.project(
-              widget.businessId, widget.documentId, serverDetail);
+      var queuedMileage = serverDetail;
+      if (!_estimate) {
+        try {
+          queuedMileage = await _invoiceMileage.project(
+            widget.businessId, widget.documentId, serverDetail);
+        } catch (_) {
+          // A busy/unavailable local cache must not prevent a current server
+          // invoice PDF. The exact on-screen reading is still scope-checked
+          // below; no payment or close state is inferred from missing cache.
+        }
+      }
       final detail = _estimate ? queuedMileage
           : InvoicePdfMileageProjection.reconcile(
               documentId: widget.documentId,
