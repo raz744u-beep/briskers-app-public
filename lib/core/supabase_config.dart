@@ -15,6 +15,17 @@ const supabasePublishableKey = isSyntheticTestBuild
     ? String.fromEnvironment('BRISKERS_SYNTHETIC_PUBLISHABLE_KEY')
     : 'sb_publishable_tY4v9OoY0nkbeFl-5cnGbA_FoWzD9aP';
 
+const syntheticAndroidAppId = 'com.briskers.briskers_test';
+
+void verifySyntheticAppIdentity(String actualPackageId) {
+  if (isSyntheticTestBuild && actualPackageId != syntheticAndroidAppId) {
+    throw StateError(
+      'Briskers TEST must be installed as a separate application. '
+      'The regular shop app cannot be used for synthetic deletion tests.',
+    );
+  }
+}
+
 void verifySupabaseEnvironment() {
   if (isSyntheticTestBuild &&
       (supabaseUrl != syntheticSandboxUrl ||
