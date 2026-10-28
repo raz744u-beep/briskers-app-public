@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_retirement.dart';
+import 'job_sync_service.dart';
 import 'local_job_deletion_v3.dart';
 import 'test_job_cleanup_policy.dart';
 
@@ -17,6 +18,11 @@ class LocalDocumentDetailCache {
   final BriskersLocalDatabase? _injectedDatabase;
   final Future<bool> Function(SharedPreferences, String, String)? _preferenceWriter;
   BriskersLocalDatabase get _database => _injectedDatabase ?? localDatabase;
+
+  // Normal shop clients retain their existing lightweight preference cache.
+  // Explicitly injected local-test databases still exercise v3 safeguards.
+  bool get _useDeletionFences =>
+      JobSyncService.deletionFeedEnabled || _injectedDatabase != null;
 
   Future<bool> _blocked(
     String businessId,
@@ -106,6 +112,12 @@ class LocalDocumentDetailCache {
     Map<String, dynamic> detail, {
     int? visibilityGeneration,
   }) {
+    if (!_useDeletionFences) {
+      return () async {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_key(businessId, documentId), jsonEncode(detail));
+      }();
+    }
     final key = _key(businessId, documentId);
     final encoded = jsonEncode(LocalJobDeletionV3.stripVisibilityMetadata(detail));
     // Always acquire SQLite before the preference queue. Callers may already
@@ -143,6 +155,12 @@ class LocalDocumentDetailCache {
   }
 
   Future<Map<String, dynamic>?> load(String businessId, String documentId) {
+    if (!_useDeletionFences) {
+      return () async {
+        final prefs = await SharedPreferences.getInstance();
+        return _decode(prefs.getString(_key(businessId, documentId)));
+      }();
+    }
     final key = _key(businessId, documentId);
     return _database.transaction(
       () => _serialized(key, () async {
@@ -204,6 +222,12 @@ class LocalDocumentDetailCache {
   }
 
   Future<void> remove(String businessId, String documentId) {
+    if (!_useDeletionFences) {
+      return () async {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove(_key(businessId, documentId));
+      }();
+    }
     final key = _key(businessId, documentId);
     return _database.transaction(
       () => _serialized(key, () async {
