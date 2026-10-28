@@ -49,6 +49,89 @@ void main() {
     expect(sheet, contains('await store.addRecheckTask('));
   });
 
+  test('Note 9 existing General Tasks upgrade adds completed_at without data loss',
+      () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    final store = LocalJobTasksLabStore(db);
+    const shop = 'synthetic-not-production';
+    try {
+      // Exact failure case from a previously installed TEST database:
+      // a real existing table lacks completed_at, category and due_at.
+      await db.customStatement('''
+        CREATE TABLE local_shop_tasks_lab (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          business_id TEXT NOT NULL,
+          description TEXT NOT NULL,
+          employee_id TEXT,
+          status TEXT NOT NULL DEFAULT 'planned',
+          created_at INTEGER NOT NULL
+        )
+      ''');
+      await db.customStatement(
+        "INSERT INTO local_shop_tasks_lab "
+        "(business_id,description,employee_id,status,created_at) "
+        "VALUES ('synthetic-not-production','Clean up your desk!',"
+        "'lab-chris','in_progress',1761510000000)");
+      await db.customStatement(
+        "INSERT INTO local_shop_tasks_lab "
+        "(business_id,description,employee_id,status,created_at) "
+        "VALUES ('synthetic-not-production','Organize tools',"
+        "'lab-kam','done',1761511000000)");
+      // This historical TEST payroll row must not be affected by a
+      // General Tasks table migration.
+      await db.customStatement('''
+        CREATE TABLE local_lab_payroll_disbursements (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          business_id TEXT NOT NULL,
+          employee_id TEXT NOT NULL, cents INTEGER NOT NULL,
+          kind TEXT NOT NULL, method TEXT NOT NULL, note TEXT NOT NULL,
+          paid_at INTEGER NOT NULL, created_at INTEGER NOT NULL
+        )
+      ''');
+      await db.customStatement(
+        "INSERT INTO local_lab_payroll_disbursements "
+        "(business_id,employee_id,cents,kind,method,note,paid_at,created_at) "
+        "VALUES ('synthetic-not-production','lab-kam',1800,"
+        "'payroll','cash','Existing TEST payout',1761511000000,1761511000000)");
+
+      var rows = await store.shopTasks(shop);
+      expect(rows, hasLength(2));
+      expect(rows.singleWhere((r) => r['description'] == 'Clean up your desk!')
+        ['status'], 'in_progress');
+      expect(rows.singleWhere((r) => r['description'] == 'Organize tools')
+        ['status'], 'done');
+      expect(rows.every((r) => r['category'] == 'General'), isTrue);
+      expect(rows.every((r) => r['due_at'] == null), isTrue);
+      // Do not fabricate an earlier completion timestamp.
+      expect(rows.singleWhere((r) => r['description'] == 'Organize tools')
+        ['completed_at'], isNull);
+
+      // Repeated startup calls must be idempotent.
+      await LocalJobTasksLabStore.ensureTables(db);
+      final fields = await db.customSelect(
+        'PRAGMA table_info(local_shop_tasks_lab)').get();
+      expect(fields.where((r) => r.read<String>('name') == 'completed_at'),
+        hasLength(1));
+      rows = await store.shopTasks(shop);
+      expect(rows, hasLength(2));
+      final target = rows.singleWhere(
+        (r) => r['description'] == 'Clean up your desk!');
+      await store.setShopTaskStatus(
+        businessId: shop, taskId: target['id'] as int, status: 'done');
+      rows = await store.shopTasks(shop);
+      expect(rows.singleWhere((r) => r['id'] == target['id'])
+        ['completed_at'], isA<int>());
+      final payout = await db.customSelect(
+        'SELECT employee_id, cents, note FROM local_lab_payroll_disbursements'
+        " WHERE business_id='synthetic-not-production'").getSingle();
+      expect(payout.read<int>('cents'), 1800);
+      expect(payout.read<String>('employee_id'), 'lab-kam');
+      expect(payout.read<String>('note'), 'Existing TEST payout');
+    } finally {
+      await db.close();
+    }
+  });
+
   test('Independent shop tasks never become J-24 customer labor', () async {
     final db=BriskersLocalDatabase(NativeDatabase.memory());
     const shop='synthetic-shop', job='synthetic-job';
