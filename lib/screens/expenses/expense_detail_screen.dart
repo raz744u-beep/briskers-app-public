@@ -21,6 +21,24 @@ import '../../services/expenseiq_local_photo_sync.dart';
 import 'expense_entry_screen.dart';
 import 'transaction_recurring_dialog.dart';
 
+/// Bottom-sheet useSafeArea does not protect Android system navigation.
+@visibleForTesting
+double expenseEditSheetBottomInset({
+  required double keyboardInset,
+  required double systemNavigationInset,
+}) =>
+    (keyboardInset > 0 ? keyboardInset : systemNavigationInset) + 16;
+
+@visibleForTesting
+double expenseEditSheetHeight({
+  required double screenHeight,
+  required double bottomInset,
+}) {
+  final available = (screenHeight - bottomInset - 32)
+      .clamp(0.0, screenHeight);
+  return (screenHeight * 0.82).clamp(0.0, available).toDouble();
+}
+
 class ExpenseDetailScreen extends StatefulWidget {
   const ExpenseDetailScreen({
     super.key,
@@ -888,11 +906,18 @@ class _ExpenseDetailScreenState extends State<ExpenseDetailScreen>
       showDragHandle: true,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) {
-          final keyboard = MediaQuery.viewInsetsOf(sheetContext).bottom;
+          final bottomInset = expenseEditSheetBottomInset(
+            keyboardInset: MediaQuery.viewInsetsOf(sheetContext).bottom,
+            systemNavigationInset: MediaQuery.viewPaddingOf(sheetContext).bottom,
+          );
+          final height = expenseEditSheetHeight(
+            screenHeight: MediaQuery.sizeOf(sheetContext).height,
+            bottomInset: bottomInset,
+          );
           return Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, keyboard + 16),
+            padding: EdgeInsets.fromLTRB(16, 0, 16, bottomInset),
             child: SizedBox(
-              height: MediaQuery.sizeOf(sheetContext).height * 0.82,
+              height: height,
               child: Column(
                 children: [
                   Row(
