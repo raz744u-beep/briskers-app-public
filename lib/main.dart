@@ -10,6 +10,9 @@ import 'services/expenseiq_background_scheduler.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Fail before opening a local DB or network session when a TEST build is
+  // missing its independent sandbox publishable key.
+  verifySupabaseEnvironment();
   await initializeLocalDatabase();
   await BriskersLanguageController.instance.initialize();
   await BriskersConnectionModeController.instance.initialize();
@@ -17,6 +20,9 @@ Future<void> main() async {
     url: supabaseUrl,
     publishableKey: supabasePublishableKey,
   );
-  await ExpenseIqBackgroundScheduler.initialize();
+  // A synthetic testing app must never run the production ExpenseIQ importer.
+  if (!isSyntheticTestBuild) {
+    await ExpenseIqBackgroundScheduler.initialize();
+  }
   runApp(const BriskersApp());
 }
