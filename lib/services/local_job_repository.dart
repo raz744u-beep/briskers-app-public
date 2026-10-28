@@ -194,8 +194,8 @@ class LocalJobRepository {
     }
     if (status == 'paid_still_open') {
       // Payment state is never evidence that repair work is completed.
-      where.add("lower(COALESCE(j.payment_state, '')) = 'paid'");
-      where.add('lower(j.status) NOT IN $_finishedStatuses');
+      where.add("lower(COALESCE(payment_state, '')) = 'paid'");
+      where.add("lower(j.status) NOT IN ('completed','cancelled','closed')");
     } else if (status != null && status.isNotEmpty) {
       where.add('j.status = ?');
       variables.add(Variable<String>(status));
@@ -299,14 +299,15 @@ class LocalJobRepository {
         : 'j.job_date_at DESC,';
     // Only legacy callers keep the old provisional pin. The Jobs screen's All
     // list is strictly newest activity first, including pending local Jobs.
-    final legacyPin =
-        view == JobListView.all || status?.toLowerCase() == 'completed'
+    final legacyPin = status?.toLowerCase() == 'completed'
         ? ''
         : """
-          CASE WHEN (j.job_number = 'Pending sync' OR upper(j.job_number) LIKE 'TEMP-%')
+          CASE WHEN j.sync_state = 'pending' AND j.job_number = 'Pending sync'
             THEN 0 ELSE 1 END,
-          CASE WHEN (j.job_number = 'Pending sync' OR upper(j.job_number) LIKE 'TEMP-%')
+          CASE WHEN j.sync_state = 'pending' AND j.job_number = 'Pending sync'
             THEN j.created_at END DESC,
+          CASE WHEN upper(COALESCE(j.job_number, '')) LIKE 'TEMP-%'
+            THEN 0 ELSE 1 END,
         """;
     final rows = await _database
         .customSelect(
