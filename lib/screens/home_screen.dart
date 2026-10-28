@@ -713,7 +713,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _openDocument(String documentId) async {
+  Future<void> _openDocument(String documentId, {
+    bool freshlyCreated = false,
+  }) async {
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
@@ -723,6 +725,7 @@ class _HomeScreenState extends State<HomeScreen> {
           documentId: documentId,
           isOwner: widget.roleCode == 'owner',
           canManageExpenses: _canManage,
+          freshlyCreated: freshlyCreated,
         ),
       ),
     );
@@ -895,6 +898,7 @@ class _HomeScreenState extends State<HomeScreen> {
             documentId: invoiceId,
             isOwner: widget.roleCode == 'owner',
             canManageExpenses: _canManage,
+            freshlyCreated: true,
             initialAction: 'edit',
           ),
         ),
@@ -910,7 +914,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final documentId = await _api.createInvoice(widget.businessId, jobId);
       if (!mounted) return;
-      await _openDocument(documentId);
+      await _openDocument(documentId, freshlyCreated: true);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

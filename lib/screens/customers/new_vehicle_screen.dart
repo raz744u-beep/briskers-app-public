@@ -270,7 +270,7 @@ class _NewVehicleScreenState extends State<NewVehicleScreen> {
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
             decoration: const InputDecoration(
-              labelText: 'Current Mileage (optional)',
+              labelText: 'Current Miles (optional)',
               helperText: 'Known reading at registration. Updated after a verified repair.',
               suffixText: 'mi',
             ),

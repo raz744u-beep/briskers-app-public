@@ -59,12 +59,12 @@ class JobMileageRow extends StatelessWidget {
       height: 25,
       child: Row(
         children: [
-          reading('Mi. In', mileageIn, onEditIn),
+          reading('Miles In', mileageIn, onEditIn),
           const SizedBox(width: 7),
           const Text('│', style: TextStyle(
               fontSize: 11, color: Color(0xFF9BA5AE))),
           const SizedBox(width: 7),
-          reading('Mi. Out', mileageOut, onOpenOut),
+          reading('Miles Out', mileageOut, onOpenOut),
         ],
       ),
     );

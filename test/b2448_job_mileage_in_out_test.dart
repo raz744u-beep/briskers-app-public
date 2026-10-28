@@ -58,19 +58,19 @@ void main() {
       ),
     );
     await tester.pumpWidget(screen(84250, null));
-    expect(find.text('Mi. In: 84,250'), findsOneWidget);
-    expect(find.text('Mi. Out: —'), findsOneWidget);
+    expect(find.text('Miles In: 84,250'), findsOneWidget);
+    expect(find.text('Miles Out: —'), findsOneWidget);
     final before = tester.getTopLeft(find.byKey(const ValueKey('following-tiles'))).dy;
     await tester.pumpWidget(screen(84250, 84312));
-    expect(find.text('Mi. Out: 84,312'), findsOneWidget);
+    expect(find.text('Miles Out: 84,312'), findsOneWidget);
     expect(tester.getTopLeft(find.byKey(const ValueKey('following-tiles'))).dy, before);
-    await tester.tap(find.text('Mi. In: 84,250'));
-    await tester.tap(find.text('Mi. Out: 84,312'));
+    await tester.tap(find.text('Miles In: 84,250'));
+    await tester.tap(find.text('Miles Out: 84,312'));
     expect(inTaps, 1);
     expect(outTaps, 1);
     await tester.pumpWidget(screen(null, null));
-    expect(find.text('Mi. In: —'), findsOneWidget);
-    expect(find.text('Mi. Out: —'), findsOneWidget);
+    expect(find.text('Miles In: —'), findsOneWidget);
+    expect(find.text('Miles Out: —'), findsOneWidget);
     expect(tester.getTopLeft(find.byKey(const ValueKey('following-tiles'))).dy, before);
   });
 
