@@ -7,8 +7,25 @@ import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'briskers_api.dart';
+import 'local_job_deletion_v3.dart';
+import 'local_job_retirement.dart';
+import 'owner_job_deletion_service_v3.dart';
 
 class JobSyncService {
+  // Deliberately OFF in released builds until the sandbox backend, exact
+  // permissions and multi-device deletion behavior are independently verified.
+  static const deletionFeedEnabled = bool.fromEnvironment(
+    'BRISKERS_OWNER_DELETE_V3_FEED', defaultValue: false,
+  );
+
+  // A missing, rejected or outdated feed MUST prevent a v3-enabled client
+  // from reloading server Jobs. Never silently downgrade to legacy sync.
+  Future<void> _verifyDeletionFeed(String businessId) async {
+    if (!deletionFeedEnabled) return;
+    await OwnerJobDeletionServiceV3(
+      database: _database,
+    ).pullTombstones(businessId);
+  }
   JobSyncService({
     BriskersApi api = const BriskersApi(),
     BriskersLocalDatabase? database,
@@ -30,6 +47,7 @@ class JobSyncService {
     String businessId,
     Set<String> serverJobIds,
   ) async {
+    await _verifyDeletionFeed(businessId);
     final rows = await _database.customSelect(
       'SELECT id, vehicle_id FROM local_jobs WHERE business_id = ?',
       variables: [Variable<String>(businessId)],
@@ -99,6 +117,7 @@ class JobSyncService {
   }
 
   Future<void> pull(String businessId) async {
+    await _verifyDeletionFeed(businessId);
     int? cursor;
     var bootstrapped = false;
 
@@ -137,6 +156,12 @@ class JobSyncService {
           afterCursor: pageCursor,
         );
 
+        await _verifyDeletionFeed(businessId);
+        final generation = deletionFeedEnabled
+            ? await LocalJobDeletionV3.captureVisibilityGeneration(
+                _database, businessId)
+            : null;
+
         final mode = response['mode']?.toString() ?? 'incremental';
         final bundles = List<dynamic>.from(
           response['bundles'] ?? const <dynamic>[],
@@ -152,6 +177,10 @@ class JobSyncService {
         hasMore = response['has_more'] == true;
 
         await _database.transaction(() async {
+          if (generation != null) {
+            await LocalJobDeletionV3.assertVisibilityGeneration(
+              _database, businessId, generation);
+          }
           if (mode == 'bootstrap') {
             await _clearBusinessJobCache(businessId);
           }
@@ -289,7 +318,16 @@ class JobSyncService {
           throw StateError('Job bootstrap continuation is incomplete.');
         }
 
+        await _verifyDeletionFeed(businessId);
+        final generation = deletionFeedEnabled
+            ? await LocalJobDeletionV3.captureVisibilityGeneration(
+                _database, businessId)
+            : null;
         await _database.transaction(() async {
+          if (generation != null) {
+            await LocalJobDeletionV3.assertVisibilityGeneration(
+              _database, businessId, generation);
+          }
           if (firstPage) {
             await _clearBusinessJobCache(businessId);
           }
@@ -353,6 +391,13 @@ class JobSyncService {
     final job = Map<String, dynamic>.from(rawJob);
     final jobId = job['id']?.toString() ?? '';
     if (jobId.isEmpty) return;
+    // A previously deleted identity is not a valid server bundle, even when
+    // received from an old device or an out-of-order bootstrap page.
+    if (deletionFeedEnabled &&
+        await LocalJobRetirement.isJobBlocked(
+          _database, businessId, jobId)) {
+      return;
+    }
 
     final vehicleId = _text(job['vehicle_id']);
 
