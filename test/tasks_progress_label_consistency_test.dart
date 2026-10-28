@@ -46,8 +46,8 @@ void main() {
       .split('Future<void> _editTask(').first;
     expect(card,contains("if (splitCount > 1)"));
     expect(card,contains(r"· Total: ${credit.hours}"));
-    expect(card,contains('style: const TextStyle(fontSize: 12.5,\\n'
-      '                            fontWeight: FontWeight.w700,\\n'
+    expect(card,contains('style: const TextStyle(fontSize: 12.5,\n'
+      '                            fontWeight: FontWeight.w700,\n'
       '                            color: Color(0xFF526273))'));
     expect(card,contains('_completedAssignment(record)'));
     expect(card,contains('_laborAssignment(task)'));
