@@ -192,8 +192,31 @@ class LocalJobTasksLabStore {
         employee_id TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'planned',
         started_at INTEGER, completed_at INTEGER,
+        previous_status TEXT,
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (business_id, job_id, document_id, line_id, employee_id)
+      )
+    ''');
+    // Prior Note 9 APKs recorded mechanic Done without an undo target.
+    // Preserve all those rows; a historical Done falls back to In Progress.
+    final progressColumns = await db.customSelect(
+      'PRAGMA table_info(local_lab_mechanic_task_progress)').get();
+    if (!progressColumns.any((r) =>
+        r.read<String>('name') == 'previous_status')) {
+      await db.customStatement(
+        'ALTER TABLE local_lab_mechanic_task_progress '
+        'ADD COLUMN previous_status TEXT');
+    }
+    await db.customStatement('''
+      CREATE TABLE IF NOT EXISTS local_lab_task_progress_undo_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_id TEXT NOT NULL, job_id TEXT NOT NULL,
+        document_id TEXT NOT NULL, line_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        previous_status TEXT NOT NULL,
+        restored_status TEXT NOT NULL,
+        recorded_at INTEGER NOT NULL,
+        reason TEXT NOT NULL
       )
     ''');
     await db.customStatement('''
@@ -407,7 +430,7 @@ class LocalJobTasksLabStore {
         throw StateError('Assign this mechanic to the task first');
       }
       final existing = await db.customSelect(
-        'SELECT status,started_at,completed_at '
+        'SELECT status,started_at,completed_at,previous_status '
         'FROM local_lab_mechanic_task_progress WHERE '
         'business_id=? AND job_id=? AND document_id=? AND line_id=? '
         'AND employee_id=?',
@@ -425,16 +448,26 @@ class LocalJobTasksLabStore {
         (status == 'planned' ? null : now);
       final finished = status == 'done'
         ? (existing?.readNullable<int>('completed_at') ?? now) : null;
+      // Remember the mechanic's prior state only when first tapping Done.
+      // If Done was tapped straight from Not Started, Undo restores it.
+      final was = existing?.readNullable<String>('previous_status');
+      final previousStatus = status == 'done'
+        ? (existing?.read<String>('status') == 'done'
+            ? was : (existing?.read<String>('status') ?? 'planned'))
+        : was;
       await db.customStatement(
         'INSERT INTO local_lab_mechanic_task_progress '
         '(business_id,job_id,document_id,line_id,employee_id,status,'
-        'started_at,completed_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?) '
+        'started_at,completed_at,previous_status,updated_at) '
+        'VALUES (?,?,?,?,?,?,?,?,?,?) '
         'ON CONFLICT(business_id,job_id,document_id,line_id,employee_id) '
         'DO UPDATE SET status=excluded.status, '
         'started_at=excluded.started_at, '
-        'completed_at=excluded.completed_at,updated_at=excluded.updated_at',
+        'completed_at=excluded.completed_at,'
+        'previous_status=excluded.previous_status,'
+        'updated_at=excluded.updated_at',
         [businessId,jobId,documentId,lineId,employeeId,
-          status,started,finished,now],
+          status,started,finished,previousStatus,now],
       );
       final progress = await db.customSelect(
         'SELECT employee_id,status FROM local_lab_mechanic_task_progress '
@@ -477,6 +510,113 @@ class LocalJobTasksLabStore {
         );
       }
       return overall;
+    });
+  }
+
+  /// Correct an accidental Done tap while a shared task remains active.
+  /// A fully finished/frozen task or recorded payroll must not silently
+  /// revert or alter historical earned hours; those require owner review.
+  Future<String> undoAccidentalMechanicDone({
+    required String businessId,
+    required String jobId,
+    required String documentId,
+    required String lineId,
+    required String employeeId,
+  }) async {
+    if ([businessId,jobId,documentId,lineId,employeeId]
+        .any((id) => id.trim().isEmpty)) {
+      throw ArgumentError('Task and mechanic required');
+    }
+    await ensureTables(db);
+    return db.transaction(() async {
+      if (await jobStatus(businessId,jobId) == 'completed') {
+        throw StateError('Closed job work cannot be reversed');
+      }
+      final task = await db.customSelect(
+        'SELECT status, source_missing FROM local_job_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId),Variable<String>(jobId),
+          Variable<String>(documentId),Variable<String>(lineId)],
+      ).getSingleOrNull();
+      if(task == null || task.read<int>('source_missing') != 0 ||
+          task.read<String>('status') == 'done') {
+        throw StateError('Task is already finalized. Review with owner.');
+      }
+      final frozen = await db.customSelect(
+        'SELECT 1 FROM local_payroll_preserved_tasks_lab '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId),Variable<String>(jobId),
+          Variable<String>(documentId),Variable<String>(lineId)],
+      ).getSingleOrNull();
+      if(frozen != null) {
+        throw StateError('Completed payroll is frozen; owner review required');
+      }
+      // The weekly task-payments table exists only after payroll is used.
+      final paymentTable = await db.customSelect(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='lab_payroll_task_payments'").getSingleOrNull();
+      if (paymentTable != null) {
+        final paid = await db.customSelect(
+          'SELECT 1 FROM lab_payroll_task_payments '
+          'WHERE business_id=? AND document_id=? AND line_id=? '
+          'AND employee_id=? LIMIT 1',
+          variables: [Variable<String>(businessId),
+            Variable<String>(documentId),Variable<String>(lineId),
+            Variable<String>(employeeId)],
+        ).getSingleOrNull();
+        if(paid != null) {
+          throw StateError('This mechanic was paid; use owner correction');
+        }
+      }
+      final row = await db.customSelect(
+        'SELECT status,previous_status,started_at '
+        'FROM local_lab_mechanic_task_progress '
+        'WHERE business_id=? AND job_id=? AND document_id=? '
+        'AND line_id=? AND employee_id=?',
+        variables: [Variable<String>(businessId),Variable<String>(jobId),
+          Variable<String>(documentId),Variable<String>(lineId),
+          Variable<String>(employeeId)],
+      ).getSingleOrNull();
+      if (row?.read<String>('status') != 'done') {
+        throw StateError('Mechanic is not marked Done');
+      }
+      final target = row?.readNullable<String>('previous_status');
+      final restored = target == 'planned' ? 'planned' : 'in_progress';
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await db.customStatement(
+        'UPDATE local_lab_mechanic_task_progress '
+        'SET status=?,completed_at=NULL,previous_status=NULL,'
+        'started_at=?,updated_at=? WHERE business_id=? AND job_id=? '
+        'AND document_id=? AND line_id=? AND employee_id=?',
+        [restored,restored=='planned' ? null :
+          row?.readNullable<int>('started_at'),now,
+          businessId,jobId,documentId,lineId,employeeId],
+      );
+      await db.customStatement(
+        'INSERT INTO local_lab_task_progress_undo_audit '
+        '(business_id,job_id,document_id,line_id,employee_id,'
+        'previous_status,restored_status,recorded_at,reason) '
+        'VALUES (?,?,?,?,?,?,?,?,?)',
+        [businessId,jobId,documentId,lineId,employeeId,
+          'done',restored,now,'Accidental Done corrected in Tasks TEST'],
+      );
+      final ongoing = await db.customSelect(
+        'SELECT status FROM local_lab_mechanic_task_progress '
+        'WHERE business_id=? AND job_id=? AND document_id=? AND line_id=?',
+        variables: [Variable<String>(businessId),Variable<String>(jobId),
+          Variable<String>(documentId),Variable<String>(lineId)],
+      ).get();
+      final overall = ongoing.any((x)=>
+        x.read<String>('status') == 'in_progress' ||
+        x.read<String>('status') == 'done')
+          ? 'in_progress' : 'planned';
+      await db.customStatement(
+        'UPDATE local_job_tasks_lab SET status=?,completed_at=NULL,'
+        'updated_at=? WHERE business_id=? AND job_id=? '
+        'AND document_id=? AND line_id=?',
+        [overall,now,businessId,jobId,documentId,lineId],
+      );
+      return restored;
     });
   }
 
