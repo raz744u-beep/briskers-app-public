@@ -5052,16 +5052,13 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
               if (_owner) ...[
                 const PopupMenuDivider(),
                 PopupMenuItem(
-                  enabled: _onlineReady && !_busy &&
-                      !BriskersConnectionModeController.instance.forceOffline,
+                  enabled: !_busy,
                   value: 'delete_unused',
-                  child: ListTile(
+                  child: const ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.delete_outline, color: Colors.red),
-                    title: Text(_onlineReady
-                        ? 'Delete Job'
-                        : 'Delete Job (waiting for online verification)'),
+                    leading: Icon(Icons.delete_outline, color: Colors.red),
+                    title: Text('Delete Job'),
                   ),
                 ),
               ],
