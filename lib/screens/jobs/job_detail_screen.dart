@@ -10,6 +10,8 @@ import '../../core/connection_mode.dart';
 import '../../core/supabase_config.dart';
 import '../../services/owner_job_deletion_service_v3.dart';
 import '../../services/owner_job_deletion_v3_contract.dart';
+import '../../services/owner_local_job_purge_service.dart';
+import 'offline_job_purge_dialog.dart';
 import 'owner_job_delete_v3_dialog.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/employee_role_style.dart';
@@ -3412,6 +3414,39 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     final online = !BriskersConnectionModeController.instance.forceOffline;
     setState(() { _busy = true; _error = null; });
     try {
+      // A never-uploaded local Job has a different, guarded cancellation path.
+      final localService = OwnerLocalJobPurgeService();
+      final localPreview = await localService.eligiblePreview(
+        widget.businessId,
+        widget.jobId,
+        actorId: actorId,
+        isOwner: _owner,
+      );
+      if (localPreview != null) {
+        if (!mounted) return;
+        final rows = localPreview.items.where((row) => row['kind'] == 'local_jobs');
+        final label = rows.isEmpty ? 'this Job' :
+          (rows.first['label']?.toString() ?? 'this Job');
+        final confirmed = await showOfflineJobPurgeConfirmation(
+          context, jobLabel: label, items: localPreview.items,
+        );
+        if (!confirmed || !mounted) return;
+        if (!_owner || supabase.auth.currentUser?.id != actorId) {
+          throw StateError('Your access changed. Reopen Delete Job to review.');
+        }
+        final cleanup = await localService.confirm(
+          localPreview, actorId: actorId, isOwner: _owner,
+          online: !BriskersConnectionModeController.instance.forceOffline,
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(cleanup.completed
+            ? 'The local test Job was deleted and queued uploads cancelled.'
+            : 'Local deletion is pending safe cleanup and server reconciliation.'),
+        ));
+        Navigator.pop(context, true);
+        return;
+      }
       final deletion = OwnerJobDeletionServiceV3();
       final preview = await deletion.preview(
         widget.businessId,
