@@ -517,7 +517,9 @@ class LocalDocumentRepository {
         Variable<String>(value),
         Variable<String>('I-$value'),
         Variable<String>('MB-$value'),
-        Variable<int>(numeric ? 0 : 1),
+        // The nonnumeric LIKE branch uses '? = 0'. The old inverse flag
+        // accidentally hid alphanumeric estimate numbers from search.
+        Variable<int>(numeric ? 1 : 0),
         Variable<String>(like),
         Variable<String>(like),
         Variable<String>(like),
