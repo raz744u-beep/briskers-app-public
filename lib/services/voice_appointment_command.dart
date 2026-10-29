@@ -101,15 +101,29 @@ class VoiceAppointmentCommand {
   }
 
   static (int, int)? _time(String text) {
-    // Examples: "at 10", "at 10 30", "10 o clock", "at ten".
+    // Also recognize "nine thirty" and "ten fifteen", not only 9:30.
+    final timeText = text.replaceAllMapped(
+      RegExp(
+        r'\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)'
+        r'\s+(fifteen|thirty|forty five)\b',
+      ),
+      (match) {
+        final spokenMinute = match.group(2)!;
+        final minute = spokenMinute == 'fifteen'
+            ? '15'
+            : spokenMinute == 'thirty' ? '30' : '45';
+        return match.group(1)! + ':' + minute;
+      },
+    );
+    // Examples: "at 10", "at nine:30", "10 o clock", "at ten".
     var match = RegExp(
       r'\bat\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)'
       r'(?::(\d{2})|\s+(\d{2}))?\s*(am|pm|a m|p m|o clock)?\b',
-    ).firstMatch(text);
+    ).firstMatch(timeText);
     match ??= RegExp(
       r'\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)'
       r'(?::(\d{2}))?\s*(am|pm|a m|p m|o clock)\b',
-    ).firstMatch(text);
+    ).firstMatch(timeText);
     if (match == null) return null;
     final hourText = match.group(1)!;
     var hour = int.tryParse(hourText) ?? _numbers[hourText];
