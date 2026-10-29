@@ -234,6 +234,33 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
     _invalidateCustomerActivity();
   }
 
+  Future<void> _showVehicleRepairHistory(Map<String, dynamic> vehicle) async {
+    final vehicleId = vehicle['id']?.toString() ?? '';
+    final knownVehicles = List<dynamic>.from(_data?['vehicles'] ?? const []);
+    if (vehicleId.isEmpty ||
+        !knownVehicles.whereType<Map>().any((row) =>
+          row['id']?.toString() == vehicleId)) {
+      return;
+    }
+    await Navigator.push<void>(context, MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('Vehicle Repair History')),
+        body: ListView(children: [
+          CustomerServiceHistorySection(
+            businessId: widget.businessId,
+            customerId: widget.customerId,
+            vehicles: knownVehicles,
+            roleCode: widget.roleCode,
+            initialVehicleId: vehicleId,
+            initiallyExpanded: true,
+          ),
+        ]),
+        bottomNavigationBar: widget.sharedBottomNavigationBar,
+      ),
+    ));
+    _invalidateCustomerActivity();
+  }
+
   Future<void> _showCustomerDocuments(String title) async {
     final isEstimate = title == 'Estimates';
     final customer = Map<String, dynamic>.from(
@@ -1531,6 +1558,7 @@ class _CustomerDetailScreenState extends State<CustomerDetailScreen> {
                     vehicles: vehicles,
                     onAdd: _addVehicle,
                     onEdit: _editVehicle,
+                    onRepairHistory: _showVehicleRepairHistory,
                     enabled: _canEditLocal,
                   ),
                   const SizedBox(height: 18),
