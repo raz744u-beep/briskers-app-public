@@ -74,6 +74,12 @@ void main() {
     final profile=File('lib/tasks_lab/employee_payroll_profile.dart')
       .readAsStringSync();
     final main=File('lib/tasks_lab_main.dart').readAsStringSync();
+    final weekly=File('lib/tasks_lab/weekly_labor_review_screen.dart')
+      .readAsStringSync();
+    expect(weekly,contains("case 'done': return 'Done';"));
+    expect(weekly,contains("default: return 'Not Started';"));
+    expect(weekly,isNot(contains("return 'Complete';")));
+    expect(weekly,isNot(contains("return 'Planned';")));
     expect(source,contains("case 'done': return 'Done';"));
     expect(source,contains("default: return 'Not Started';"));
     expect(source,contains("case 'in_progress': return 'In Progress';"));
