@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/screens/appointments/appointment_manage_screen.dart';
@@ -111,6 +112,61 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('2015 BMW 528i'), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
+  testWidgets('Calendar day selection commits a new appointment date',
+      (tester) async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final initial = DateTime.now();
+    final nextMonth = DateTime(initial.year, initial.month + 1, 5);
+    final customerRepo = _Customers(db);
+    await tester.pumpWidget(MaterialApp(
+      home: AppointmentManageScreen(
+        businessId: 'synthetic-shop', localCustomers: customerRepo,
+        api: _Employees(Completer<List<Map<String, dynamic>>>()..complete([]))),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.event_outlined));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+    await tester.tap(find.byTooltip('Next month'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('5').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK').last);
+    await tester.pumpAndSettle();
+    expect(find.text(DateFormat('EEE, MMM d').format(nextMonth)),
+        findsOneWidget,
+        reason: 'Calendar selection must update the appointment form.');
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('Type date is a visible alternative to calendar gestures',
+      (tester) async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    await tester.pumpWidget(MaterialApp(
+      home: AppointmentManageScreen(
+        businessId: 'synthetic-shop', localCustomers: _Customers(db),
+        api: _Employees(Completer<List<Map<String, dynamic>>>()..complete([]))),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('appointment-date-type')));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+    expect(find.byType(InputDatePickerFormField), findsOneWidget);
+    final selected = DateTime.now().add(const Duration(days: 6));
+    await tester.enterText(find.byType(TextField).last,
+        DateFormat('M/d/yyyy').format(selected));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK').last);
+    await tester.pumpAndSettle();
+    expect(find.text(DateFormat('EEE, MMM d').format(selected)),
+        findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
   });
 
   test('Appointment editor cannot show unfiltered customer dropdown or initial spinner',
