@@ -12,6 +12,9 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: ^0.20.2
+  # Appointment voice pilot: short phrases + spoken verification.
+  speech_to_text: 7.4.0
+  flutter_tts: ^4.2.5
   package_info_plus: ^8.3.1
   image_picker: ^1.2.0
   image: ^4.10.1
