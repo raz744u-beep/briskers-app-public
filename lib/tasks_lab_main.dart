@@ -946,8 +946,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints.tightFor(
                         width: 34, height: 38)),
-                  Icon(expanded ? Icons.expand_less : Icons.expand_more,
-                    color: const Color(0xFF64748B), size: 18),
                 ],
               ),
               // Keep the whole mechanic section inside the expanded task.
