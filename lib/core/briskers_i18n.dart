@@ -83,6 +83,7 @@ String jobStatusLabel(String? code, String fallback) {
 const Map<String, Map<String, String>> _translations = {
   'en': {
     'longPressForOptions': 'Long press for options',
+    'tapForOptions': 'Tap for options',
     'repairImportedData': 'Repair imported data',
     'repairImportedDataHelp': 'Compare the phone with server records. Remove only obsolete local customers and jobs. Unsent changes or device photos block cleanup. No server records are changed.',
     'repairImportedDataDone': 'Removed {customers} old customers, {vehicles} vehicles and {jobs} jobs from this device.',
@@ -503,6 +504,7 @@ const Map<String, Map<String, String>> _translations = {
   },
   'es': {
     'longPressForOptions': 'Mantén pulsado: opciones',
+    'tapForOptions': 'Toca para ver opciones',
     'repairImportedData': 'Reparar datos importados',
     'repairImportedDataHelp': 'Compara el teléfono con el servidor. Elimina solo clientes y trabajos locales obsoletos. Los cambios pendientes o fotos locales detienen la limpieza. No cambia el servidor.',
     'repairImportedDataDone': 'Eliminados del dispositivo: {customers} clientes, {vehicles} vehículos y {jobs} trabajos obsoletos.',
