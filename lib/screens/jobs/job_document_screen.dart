@@ -5433,8 +5433,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<void> _editInvoiceMileage() async {
     final vehicleId = _detail?['vehicle_id']?.toString() ?? '';
-    if (_estimate || _readOnly || _busy || _detail == null ||
-        vehicleId.isEmpty) {
+    if (_estimate || _readOnly || _busy || _detail == null) return;
+    if (vehicleId.isEmpty) {
+      // Imported invoices can show a vehicle label before their original
+      // vehicle identity has been reconciled. Explain why no write is safe.
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Link this invoice to its vehicle before editing Miles Out.'),
+      ));
       return;
     }
     final usesMileageOut = _usesInvoiceMileageOut;
@@ -5613,9 +5618,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       padding: const EdgeInsets.only(left: 30, top: 3),
       child: InkWell(
         key: const ValueKey('invoice-header-mileage'),
-        onTap: !_readOnly && !_busy &&
-                (_detail?['vehicle_id']?.toString().isNotEmpty ?? false)
-            ? _editInvoiceMileage : null,
+        onTap: !_readOnly && !_busy ? _editInvoiceMileage : null,
         borderRadius: BorderRadius.circular(6),
         child: Row(
           children: [
