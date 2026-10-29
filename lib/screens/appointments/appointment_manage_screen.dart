@@ -34,7 +34,7 @@ class AppointmentManageScreen extends StatefulWidget {
 
 class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
   BriskersApi get _api => widget.api ?? const BriskersApi();
-  final AppointmentSyncService _sync = AppointmentSyncService();
+  late final AppointmentSyncService _sync = AppointmentSyncService();
   LocalCustomerRepository get _localCustomers =>
       widget.localCustomers ?? LocalCustomerRepository();
   bool get _pendingCreate => widget.appointment?['id']
@@ -231,7 +231,8 @@ class _AppointmentManageScreenState extends State<AppointmentManageScreen> {
       setState(() {
         _vehicles = vehicles;
         if (!vehicles.any((row) => row['id']?.toString() == _vehicleId)) {
-          _vehicleId = null;
+          _vehicleId = vehicles.length == 1
+              ? vehicles.single['id']?.toString() : null;
         }
       });
     } catch (_) {
