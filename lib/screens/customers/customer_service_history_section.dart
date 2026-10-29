@@ -13,6 +13,7 @@ import 'package:intl/intl.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/job_status_style.dart';
 import '../../core/document_presentation.dart';
+import '../../core/vehicle_invoice_repair_search.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
@@ -32,6 +33,7 @@ class CustomerServiceHistorySection extends StatefulWidget {
     required this.vehicles,
     this.roleCode = 'viewer',
     this.initiallyExpanded = false,
+    this.initialVehicleId,
   });
 
   final String businessId;
@@ -39,6 +41,7 @@ class CustomerServiceHistorySection extends StatefulWidget {
   final List<dynamic> vehicles;
   final String roleCode;
   final bool initiallyExpanded;
+  final String? initialVehicleId;
 
   @override
   State<CustomerServiceHistorySection> createState() =>
@@ -63,6 +66,8 @@ class _CustomerServiceHistorySectionState
   String get _roleCode => widget.roleCode;
   String? _selectedVehicleId;
   String _view = 'jobs';
+  final TextEditingController _repairSearch = TextEditingController();
+  String _repairQuery = '';
   bool _historicalImporting = false;
   int _historicalImportDone = 0;
   int _historicalImportTotal = 0;
@@ -75,6 +80,12 @@ class _CustomerServiceHistorySectionState
   @override
   void initState() {
     super.initState();
+    if (widget.initialVehicleId != null &&
+        widget.vehicles.whereType<Map>().any((v) =>
+          v['id']?.toString() == widget.initialVehicleId)) {
+      _selectedVehicleId = widget.initialVehicleId;
+      _view = 'invoices';
+    }
     _listenForQuarantine();
     _retirement = LocalJobRetirement.events.listen((event) {
       if (event.businessId != widget.businessId || !mounted) return;
@@ -104,6 +115,7 @@ class _CustomerServiceHistorySectionState
 
   @override
   void dispose() {
+    _repairSearch.dispose();
     _jobVisibility.dispose();
     _retirement?.cancel();
     super.dispose();
@@ -488,9 +500,27 @@ class _CustomerServiceHistorySectionState
       .where(_matchesVehicle)
       .toList();
 
-  List<Map<String, dynamic>> get _visibleInvoices => _documents
+  List<Map<String, dynamic>> get _visibleInvoices {
+    // Browsing the unfiltered list is the primary history workflow.
+    // Search is a convenience and must never determine record existence.
+    final invoices = _documents
+        .where((row) => row['kind']?.toString() == 'invoice')
+        .where(_matchesVehicle)
+        .where((row) => VehicleInvoiceRepairSearch.matches(row, _repairQuery))
+        .toList();
+    invoices.sort((a, b) {
+      final first = DateTime.tryParse(a['document_date']?.toString() ?? '');
+      final second = DateTime.tryParse(b['document_date']?.toString() ?? '');
+      if (first == null) return second == null ? 0 : 1;
+      if (second == null) return -1;
+      return second.compareTo(first);
+    });
+    return invoices;
+  }
+
+  List<Map<String, dynamic>> get _unmatchedCustomerInvoices => _documents
       .where((row) => row['kind']?.toString() == 'invoice')
-      .where(_matchesVehicle)
+      .where((row) => (row['vehicle_id']?.toString().trim() ?? '').isEmpty)
       .toList();
 
   List<Map<String, dynamic>> get _visibleExpenses =>
@@ -825,6 +855,79 @@ class _CustomerServiceHistorySectionState
     );
   }
 
+  /// Show each invoice even when its line-item detail has not cached yet.
+  /// Expand to inspect every available repair without opening each invoice.
+  Widget _invoiceRepairRow(Map<String, dynamic> document) {
+    final id = document['id']?.toString() ?? '';
+    final number = document['document_number']?.toString().trim() ?? '';
+    final date = _shortDate(document['document_date']);
+    return FutureBuilder<Map<String, dynamic>>(
+      key: ValueKey('repair-history-invoice-$id'),
+      future: _documentSummaries.putIfAbsent(
+        id,
+        () => CustomerDocumentSummaryService().hydrate(
+          widget.businessId, document),
+      ),
+      builder: (context, snapshot) {
+        final detail = snapshot.hasData && snapshot.data!.isNotEmpty
+            ? snapshot.data! : document;
+        final repairs = VehicleInvoiceRepairSearch.repairDescriptions(detail);
+        final status = DocumentPresentation(detail).statusLabel;
+        return Card(
+          margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          child: ExpansionTile(
+            key: ValueKey('repair-history-expand-$id'),
+            leading: const Icon(Icons.receipt_long_outlined,
+                color: BriskersColors.invoices),
+            title: Text(number.isEmpty
+                ? 'Invoice pending sync' : 'Invoice #$number',
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (date.isNotEmpty) Text(date),
+                Text(repairs.isEmpty
+                    ? 'Open invoice to view repairs'
+                    : repairs.length == 1
+                        ? repairs.first
+                        : '${repairs.first} (+${repairs.length - 1} more)',
+                    maxLines: 3, overflow: TextOverflow.ellipsis),
+                if (status.isNotEmpty) Text(status),
+              ],
+            ),
+            children: [
+              const Divider(height: 1),
+              if (repairs.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 10, 16, 10),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Repair descriptions not saved on this phone. '
+                        'The invoice remains available to open.'),
+                  ),
+                )
+              else
+                for (final repair in repairs)
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.build_outlined, size: 18),
+                    title: Text(repair),
+                  ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => _openDocument(document),
+                  icon: const Icon(Icons.open_in_new),
+                  label: const Text('Open invoice'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _documentsList(List<Map<String, dynamic>> documents, String label) {
     if (documents.isEmpty) {
       return Padding(
@@ -838,6 +941,7 @@ class _CustomerServiceHistorySectionState
 
     return Column(
       children: documents.map((document) {
+        if (label == 'invoices') return _invoiceRepairRow(document);
         final number = document['document_number']?.toString() ?? '';
         final jobNumber = document['job_number']?.toString() ?? '';
         final vehicle = document['vehicle']?.toString() ?? '';
@@ -862,6 +966,9 @@ class _CustomerServiceHistorySectionState
             ),
             builder: (context, snapshot) => Text(
               <String>[
+                if (label == 'invoices')
+                  VehicleInvoiceRepairSearch.summary(snapshot.hasData
+                      ? snapshot.data! : document),
                 if (snapshot.hasData) DocumentPresentation(snapshot.data!).statusLabel,
                 if (jobNumber.isNotEmpty) 'Job $jobNumber',
                 if (vehicle.isNotEmpty) vehicle,
@@ -938,7 +1045,21 @@ class _CustomerServiceHistorySectionState
       case 'estimates':
         return _documentsList(_visibleEstimates, 'estimates');
       case 'invoices':
-        return _documentsList(_visibleInvoices, 'invoices');
+        final unmatched = _unmatchedCustomerInvoices;
+        return Column(
+          children: [
+            _documentsList(_visibleInvoices, 'invoices'),
+            if (_selectedVehicleId != null && unmatched.isNotEmpty)
+              ExpansionTile(
+                leading: const Icon(Icons.help_outline),
+                title: Text('Unmatched customer invoices (${unmatched.length})'),
+                subtitle: const Text('Vehicle not confirmed — review separately'),
+                children: [
+                  _documentsList(unmatched, 'invoices'),
+                ],
+              ),
+          ],
+        );
       case 'expenses':
         return _expensesList();
       case 'jobs':
@@ -949,7 +1070,8 @@ class _CustomerServiceHistorySectionState
 
   @override
   Widget build(BuildContext context) {
-    final count = _visibleJobs.length;
+    final count = _view == 'invoices'
+        ? _visibleInvoices.length : _visibleJobs.length;
 
     return Card(
       child: ExpansionTile(
@@ -1010,6 +1132,29 @@ class _CustomerServiceHistorySectionState
             ],
             _vehicleSelector(),
             _historyTypeSelector(),
+            if (_view == 'invoices') Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+              child: TextField(
+                key: const ValueKey('vehicle-repair-history-search'),
+                controller: _repairSearch,
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.search),
+                  hintText: 'Search repairs, parts or invoice #',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _repairQuery.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Clear repair search',
+                          onPressed: () {
+                            _repairSearch.clear();
+                            setState(() => _repairQuery = '');
+                          },
+                          icon: const Icon(Icons.close),
+                        ),
+                ),
+                onChanged: (value) => setState(() => _repairQuery = value),
+              ),
+            ),
             const Divider(height: 1),
             _selectedHistory(),
           ],

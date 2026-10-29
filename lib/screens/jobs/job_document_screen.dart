@@ -23,6 +23,7 @@ import '../../core/briskers_colors.dart';
 import '../../core/warranty_payment_amounts.dart';
 import '../../widgets/warranty_received_payment_dialog.dart';
 import '../../core/connection_mode.dart';
+import '../../core/invoice_pdf_preparation_policy.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
@@ -42,6 +43,7 @@ import '../../services/email_draft_templates.dart';
 import '../../services/catalog_sync_service.dart';
 import '../settings/catalog_settings_screen.dart';
 import '../../services/local_catalog_repository.dart';
+import '../../services/local_item_categories_cache.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_document_repository.dart';
 import '../../services/verified_invoice_close_events.dart';
@@ -265,6 +267,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   bool _taxSettingsCached = false;
   bool _loading = true;
   bool _busy = false;
+  bool _startingPaymentDialog = false;
   bool _initialActionHandled = false;
   Timer? _pendingInvoiceResolution;
   bool _notesDirty = false;
@@ -1806,6 +1809,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
     if (!mounted) return;
 
+    // Start category lookup while owner searches, never after a blank picker.
+    final categoriesFuture = const LocalItemCategoriesCache().forInvoiceEditor(
+      widget.businessId,
+      forceOffline: BriskersConnectionModeController.instance.forceOffline,
+      localCatalogItems: items,
+    );
     final searchController = TextEditingController();
     var filtered = List<Map<String, dynamic>>.from(items);
 
@@ -1930,13 +1939,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (selected == null || !mounted) return;
     Map<String, dynamic> chosenItem = selected;
     if (selected['_new_catalog_item'] == true) {
+      final categories = await categoriesFuture;
+      if (!mounted) return;
       final created = await showModalBottomSheet<Map<String, dynamic>>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
         showDragHandle: true,
         builder: (_) => CatalogItemDialog(
-          categories: const [],
+          categories: categories,
           initialName: selected['_initial_name']?.toString() ?? '',
         ),
       );
@@ -2329,10 +2340,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
 
     try {
-      final currentStatus = _detail?['status']?.toString() ?? 'draft';
-      final currentNumber =
-          _detail?['document_number']?.toString().trim() ?? '';
-      if (currentStatus == 'draft' || currentNumber.isEmpty) {
+      // A stale cached draft status must never reissue an already-numbered
+      // invoice just to prepare its PDF for preview or email.
+      if (InvoicePdfPreparationPolicy.needsIssue(_detail)) {
         await _api.issueDocument(
           widget.businessId,
           widget.documentId,
@@ -2417,7 +2427,50 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       detail.addAll(memoForPdf);
       return await _withPdfUnits(detail);
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      // Auto's network may fail while the known invoice is still safely
+      // available in the local cache. Do not silently send an unverified PDF.
+      // Use only the same authenticated invoice/vehicle snapshot already
+      // visible in this editor, and require the owner's explicit decision.
+      final cached = _detail;
+      final canOffer = !_estimate && mounted &&
+          InvoicePdfPreparationPolicy.isTransportFailure(error) &&
+          InvoicePdfPreparationPolicy.canOfferCachedPdf(cached);
+      if (canOffer && mounted) {
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Invoice server unavailable'),
+            content: const Text(
+              'Briskers cannot verify the latest invoice online. '
+              'You may prepare a PDF from the copy saved on this phone. '
+              'Before emailing, verify the customer, items, amount paid, '
+              'balance, and mileage. The saved copy may not include recent '
+              'updates from another device. Continue with local copy?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Use local copy'),
+              ),
+            ],
+          ),
+        );
+        if (proceed == true && mounted && cached != null) {
+          setState(() => _error = null);
+          return _withPdfUnits(await _pendingMemoForPdf(cached));
+        }
+      }
+      if (mounted) {
+        setState(() => _error =
+          InvoicePdfPreparationPolicy.isTransportFailure(error)
+              ? 'Could not reach Briskers to prepare the invoice PDF. '
+                'Check your connection or use Force Offline and verify the PDF.'
+              : error.toString());
+      }
       return null;
     }
   }
@@ -2935,7 +2988,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       return cached;
     }
     try {
-      final options = await _api.paymentOptions(widget.businessId);
+      final options = await _api.paymentOptions(widget.businessId)
+          .timeout(const Duration(seconds: 8));
       final methods = List<dynamic>.from(options['methods'] ?? const [])
           .map((raw) => Map<String, dynamic>.from(raw as Map))
           .toList();
@@ -2963,8 +3017,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _enterPayment() async {
-    await _collapseWorkspaceHeader();
-    if (_estimate || _busy || _paymentNeedsReconciliation()) return;
+    if (_estimate || _busy || _startingPaymentDialog) return;
+    setState(() => _startingPaymentDialog = true);
+    try {
+      await _collapseWorkspaceHeader();
+      if (!mounted || _estimate || _busy || _paymentNeedsReconciliation()) return;
 
     List<Map<String, dynamic>> methods;
     try {
@@ -3044,6 +3101,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (mounted && _error == null &&
         (result['amount'] as num) >= remaining - 0.005) {
       await _offerCompleteJobAfterPaymentEntry();
+    }
+    } finally {
+      if (mounted) setState(() => _startingPaymentDialog = false);
     }
   }
 
@@ -5373,8 +5433,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
   Future<void> _editInvoiceMileage() async {
     final vehicleId = _detail?['vehicle_id']?.toString() ?? '';
-    if (_estimate || _readOnly || _busy || _detail == null ||
-        vehicleId.isEmpty) {
+    if (_estimate || _readOnly || _busy || _detail == null) return;
+    if (vehicleId.isEmpty) {
+      // Imported invoices can show a vehicle label before their original
+      // vehicle identity has been reconciled. Explain why no write is safe.
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Link this invoice to its vehicle before editing Miles Out.'),
+      ));
       return;
     }
     final usesMileageOut = _usesInvoiceMileageOut;
@@ -5553,9 +5618,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       padding: const EdgeInsets.only(left: 30, top: 3),
       child: InkWell(
         key: const ValueKey('invoice-header-mileage'),
-        onTap: !_readOnly && !_busy &&
-                (_detail?['vehicle_id']?.toString().isNotEmpty ?? false)
-            ? _editInvoiceMileage : null,
+        onTap: !_readOnly && !_busy ? _editInvoiceMileage : null,
         borderRadius: BorderRadius.circular(6),
         child: Row(
           children: [
@@ -6417,9 +6480,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   backgroundColor: BriskersColors.invoices,
                   foregroundColor: Colors.white,
                 ),
-                onPressed: _busy ? null : _enterPayment,
-                icon: const Icon(Icons.add_card_outlined),
-                label: Text(tr('addPayment')),
+                onPressed: _busy || _startingPaymentDialog ? null : _enterPayment,
+                icon: _startingPaymentDialog
+                    ? const SizedBox(
+                        width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.add_card_outlined),
+                label: Text(_startingPaymentDialog
+                    ? 'Opening payment...' : tr('addPayment')),
               ),
             )
           else
@@ -6802,15 +6871,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _addStandardNote() async {
-    await _collapseWorkspaceHeader();
     if (_readOnly || _busy) return;
+    await _collapseWorkspaceHeader();
+    if (!mounted || _readOnly || _busy) return;
 
+    // Open the picker from the on-device snapshot. Auto-mode server refreshes
+    // can take seconds or abort, but must never block the tap itself.
+    final localOnly = BriskersConnectionModeController.instance.forceOffline ||
+        _offlineDocumentDraft.isLocalDraftId(widget.documentId);
     List<Map<String, dynamic>> templates;
     List<String>? categoryOrder;
     try {
-      templates = await _standardNotes.available(widget.businessId,
-        offline: BriskersConnectionModeController.instance.forceOffline ||
-          _offlineDocumentDraft.isLocalDraftId(widget.documentId));
+      templates = await _standardNotes.cached(widget.businessId);
       categoryOrder = await _standardNotes.categoryOrder(widget.businessId);
     } catch (error) {
       if (mounted) {
@@ -6830,6 +6902,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         templates: templates,
         categoryOrder: categoryOrder,
         canManage: widget.isOwner,
+        onRefresh: localOnly
+            ? null
+            : () => _standardNotes.available(widget.businessId, offline: false),
         onEdit: (template) async {
           await _createStandardNote(template: template);
           return _standardNotes.cached(widget.businessId);
