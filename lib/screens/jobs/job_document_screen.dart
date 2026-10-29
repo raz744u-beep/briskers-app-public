@@ -42,6 +42,7 @@ import '../../services/email_draft_templates.dart';
 import '../../services/catalog_sync_service.dart';
 import '../settings/catalog_settings_screen.dart';
 import '../../services/local_catalog_repository.dart';
+import '../../services/local_item_categories_cache.dart';
 import '../../services/local_document_detail_cache.dart';
 import '../../services/local_document_repository.dart';
 import '../../services/verified_invoice_close_events.dart';
@@ -1806,6 +1807,13 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
 
     if (!mounted) return;
 
+    // Start loading category choices while the user searches for an item.
+    // Force Offline reads local snapshots only; Auto falls back safely.
+    final categoriesFuture = const LocalItemCategoriesCache().forInvoiceEditor(
+      widget.businessId,
+      forceOffline: BriskersConnectionModeController.instance.forceOffline,
+      localCatalogItems: items,
+    );
     final searchController = TextEditingController();
     var filtered = List<Map<String, dynamic>>.from(items);
 
@@ -1930,13 +1938,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (selected == null || !mounted) return;
     Map<String, dynamic> chosenItem = selected;
     if (selected['_new_catalog_item'] == true) {
+      final categories = await categoriesFuture;
+      if (!mounted) return;
       final created = await showModalBottomSheet<Map<String, dynamic>>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
         showDragHandle: true,
         builder: (_) => CatalogItemDialog(
-          categories: const [],
+          categories: categories,
           initialName: selected['_initial_name']?.toString() ?? '',
         ),
       );
