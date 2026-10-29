@@ -21,6 +21,7 @@ import '../services/local_job_repository.dart';
 import '../widgets/briskers_page_header.dart';
 import '../widgets/connection_header_toggle.dart';
 import 'appointments_screen.dart';
+import 'appointments/voice_appointment_pilot_screen.dart';
 import 'customers/customers_screen.dart';
 import 'home_screen.dart';
 import 'jobs_screen.dart';
@@ -302,6 +303,27 @@ class _ShellScreenState extends State<ShellScreen> {
     _applyHomeCustomersCount(0);
   }
 
+  bool get _canScheduleByVoice =>
+      widget.roleCode == 'owner' ||
+      widget.roleCode == 'manager' ||
+      widget.roleCode == 'office';
+
+  Future<void> _openVoiceAppointment() async {
+    if (!_canScheduleByVoice) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => VoiceAppointmentPilotScreen(
+          businessId: widget.businessId,
+        ),
+      ),
+    );
+    if (!mounted || changed != true) return;
+    // No forced network refresh: local-first appointment creation emits
+    // AppointmentSyncService.syncEvents and refreshes cached counts.
+    _refreshHomeAppointmentsCount();
+  }
+
   void _goTo(int index) {
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
@@ -470,6 +492,19 @@ class _ShellScreenState extends State<ShellScreen> {
         ],
       ),
       body: currentPage,
+      // Voice actions belong to the shared shell, not a single module.
+      // This control remains in the same place on every main tab.
+      floatingActionButton: _canScheduleByVoice
+          ? FloatingActionButton.small(
+              heroTag: 'briskers-global-voice-appointments-pilot',
+              tooltip: 'Voice assistant — schedule an appointment',
+              backgroundColor: BriskersColors.schedule,
+              foregroundColor: Colors.white,
+              onPressed: _openVoiceAppointment,
+              child: const Icon(Icons.mic_none_rounded),
+            )
+          : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
       bottomNavigationBar: Theme(
         data: Theme.of(context).copyWith(
           navigationBarTheme: NavigationBarThemeData(
