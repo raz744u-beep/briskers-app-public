@@ -196,17 +196,17 @@ class _VoiceAppointmentPilotScreenState
       // Do not guess a customer or fall back to just the first matching name.
       // Matching local records keeps this usable without an internet connection.
       final all = await _customers.customers(widget.businessId);
-      final transcript = ' ' + VoiceAppointmentCommand.normalized(words) + ' ';
+      final transcript = ' ${VoiceAppointmentCommand.normalized(words)} ';
       final matches = all.where((customer) {
         final name = VoiceAppointmentCommand.normalized(
           customer['display_name']?.toString() ?? '',
         );
         if (name.isEmpty) return false;
-        if (transcript.contains(' ' + name + ' ')) return true;
+        if (transcript.contains(' $name ')) return true;
         final parts = name.split(' ');
         if (parts.length < 2) return false;
-        final firstLast = parts.first + ' ' + parts.last;
-        return transcript.contains(' ' + firstLast + ' ');
+        final firstLast = '${parts.first} ${parts.last}';
+        return transcript.contains(' $firstLast ');
       }).toList();
 
       if (!mounted) return;
@@ -256,8 +256,8 @@ class _VoiceAppointmentPilotScreenState
       final when = DateFormat('EEEE, MMMM d, at h:mm a')
           .format(draft.startsAt);
       await _say(
-        'Schedule ' + name + ' on ' + when + '. '
-        'Reason: ' + service + '. '
+        'Schedule $name on $when. '
+        'Reason: $service. '
         'No vehicle or mechanic is selected. '
         'Say confirm to save this appointment, or cancel.',
         listenAgain: true,
@@ -337,7 +337,7 @@ class _VoiceAppointmentPilotScreenState
               ),
               if (_heard.isNotEmpty) ...[
                 const SizedBox(height: 18),
-                Text('Heard: ' + _heard, textAlign: TextAlign.center),
+                Text('Heard: $_heard', textAlign: TextAlign.center),
               ],
               if (draft != null && _customer != null) ...[
                 const SizedBox(height: 16),
@@ -345,8 +345,7 @@ class _VoiceAppointmentPilotScreenState
                   child: ListTile(
                     title: Text(_customer!['display_name']?.toString() ?? ''),
                     subtitle: Text(
-                      DateFormat('EEE, MMM d · h:mm a').format(draft.startsAt)
-                      + '\n' + draft.service,
+                      '${DateFormat('EEE, MMM d · h:mm a').format(draft.startsAt)}\n${draft.service}',
                     ),
                   ),
                 ),
