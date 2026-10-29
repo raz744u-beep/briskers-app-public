@@ -15,7 +15,6 @@ import '../services/briskers_api.dart';
 import '../services/job_sync_service.dart';
 import '../services/local_appointment_repository.dart';
 import 'appointments/appointment_manage_screen.dart';
-import 'appointments/voice_appointment_pilot_screen.dart';
 import 'jobs/job_detail_screen.dart';
 
 class AppointmentsScreen extends StatefulWidget {
@@ -204,17 +203,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
-  }
-
-  Future<void> _voiceAppointment() async {
-    if (!_canManage) return;
-    final changed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => VoiceAppointmentPilotScreen(businessId: widget.businessId),
-      ),
-    );
-    if (changed == true && mounted) await _load();
   }
 
   Future<void> _addAppointment() async {
@@ -961,12 +949,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     },
                   )),
                   const SizedBox(width: 8),
-                  if (_canManage)
-                    IconButton(
-                      tooltip: 'Voice appointment (pilot)',
-                      onPressed: _voiceAppointment,
-                      icon: const Icon(Icons.mic_outlined),
-                    ),
                   if (_canManage)
                     IconButton.filled(
                       tooltip: 'Add appointment',
