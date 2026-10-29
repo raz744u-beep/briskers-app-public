@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/briskers_i18n.dart';
+import 'widgets/briskers_global_voice_overlay.dart';
 
 import 'screens/auth_gate.dart';
 
@@ -18,6 +19,7 @@ class BriskersApp extends StatelessWidget {
     return AnimatedBuilder(
       animation: BriskersLanguageController.instance,
       builder: (context, _) => MaterialApp(
+      navigatorKey: BriskersVoiceAccess.navigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'Briskers',
       locale: BriskersLanguageController.instance.locale,
@@ -32,9 +34,11 @@ class BriskersApp extends StatelessWidget {
       ],
       builder: (context, child) {
         final media = MediaQuery.of(context);
-        return MediaQuery(
-          data: media.copyWith(textScaler: TextScaler.noScaling),
-          child: child ?? const SizedBox.shrink(),
+        return BriskersGlobalVoiceOverlay(
+          child: MediaQuery(
+            data: media.copyWith(textScaler: TextScaler.noScaling),
+            child: child ?? const SizedBox.shrink(),
+          ),
         );
       },
       theme: ThemeData(

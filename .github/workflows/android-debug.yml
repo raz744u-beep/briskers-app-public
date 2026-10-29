@@ -3,7 +3,7 @@ name: Build Android debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, feature/voice-appointments-pilot-20261029]
     paths-ignore:
       - '.github/workflows/**'
 
@@ -544,6 +544,21 @@ jobs:
                   </provider>
           '''
           s = s.replace("</application>", provider + "\n    </application>", 1)
+          # Required by the Briskers voice-appointment pilot.
+          s = s.replace(
+              "<application",
+              '''<uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <queries>
+                  <intent>
+                      <action android:name="android.speech.RecognitionService" />
+                  </intent>
+                  <intent>
+                      <action android:name="android.intent.action.TTS_SERVICE" />
+                  </intent>
+              </queries>
+              <application''',
+              1,
+          )
           p.write_text(s)
           PY
 
