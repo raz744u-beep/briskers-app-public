@@ -26,6 +26,8 @@ void main() {
     expect(card, contains('expandedTaskKeys.add(id)'));
     expect(card, contains("tooltip: 'Edit task'"));
     expect(card, contains('Icons.edit_outlined'));
+    expect(card, contains("expanded ? 'Tap to collapse' : 'Tap to expand'"));
+    expect(card, contains('fontSize: 10.5, color: Color(0xFF64748B)'));
     // Pencil is the final child in the card header row, flush right inside
     // its existing outer padding: removing the chevron must not leave a slot.
     expect(RegExp(r'width:\s*34,\s*height:\s*38\)\),\s*\],\s*\),')
