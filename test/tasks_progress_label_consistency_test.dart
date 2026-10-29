@@ -26,6 +26,11 @@ void main() {
     expect(card, contains('expandedTaskKeys.add(id)'));
     expect(card, contains("tooltip: 'Edit task'"));
     expect(card, contains('Icons.edit_outlined'));
+    // Pencil is the final child in the card header row, flush right inside
+    // its existing outer padding: removing the chevron must not leave a slot.
+    expect(RegExp(r'width:\s*34,\s*height:\s*38\)\),\s*\],\s*\),')
+      .hasMatch(card), isTrue,
+      reason: 'Edit pencil must be the last right-side header control');
     expect(card, isNot(contains('Icons.expand_less')));
     expect(card, isNot(contains('Icons.expand_more')));
     expect(card, isNot(contains('Icons.chevron_right')));
