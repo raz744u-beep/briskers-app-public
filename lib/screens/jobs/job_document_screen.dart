@@ -2435,7 +2435,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       final canOffer = !_estimate && mounted &&
           InvoicePdfPreparationPolicy.isTransportFailure(error) &&
           InvoicePdfPreparationPolicy.canOfferCachedPdf(cached);
-      if (canOffer) {
+      if (canOffer && mounted) {
         final proceed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
