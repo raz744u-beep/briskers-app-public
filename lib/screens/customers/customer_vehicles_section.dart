@@ -9,6 +9,7 @@ class CustomerVehiclesSection extends StatelessWidget {
     required this.vehicles,
     required this.onAdd,
     required this.onEdit,
+    this.onRepairHistory,
     this.enabled = true,
   });
 
@@ -16,6 +17,7 @@ class CustomerVehiclesSection extends StatelessWidget {
   final bool enabled;
   final VoidCallback onAdd;
   final ValueChanged<Map<String, dynamic>> onEdit;
+  final ValueChanged<Map<String, dynamic>>? onRepairHistory;
 
   String _vehicleName(Map<String, dynamic> vehicle) {
     return <String>[
@@ -137,6 +139,19 @@ class CustomerVehiclesSection extends StatelessWidget {
                             context,
                             'Key Code',
                             keyPassword,
+                          ),
+                        if (onRepairHistory != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                key: ValueKey('vehicle-repair-history-${vehicle['id']}'),
+                                onPressed: () => onRepairHistory!(vehicle),
+                                icon: const Icon(Icons.history_outlined),
+                                label: const Text('Repair History'),
+                              ),
+                            ),
                           ),
                         Align(
                           alignment: Alignment.centerRight,
