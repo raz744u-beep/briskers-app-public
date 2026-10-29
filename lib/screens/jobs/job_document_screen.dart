@@ -265,6 +265,7 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   bool _taxSettingsCached = false;
   bool _loading = true;
   bool _busy = false;
+  bool _startingPaymentDialog = false;
   bool _initialActionHandled = false;
   Timer? _pendingInvoiceResolution;
   bool _notesDirty = false;
@@ -2935,7 +2936,8 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       return cached;
     }
     try {
-      final options = await _api.paymentOptions(widget.businessId);
+      final options = await _api.paymentOptions(widget.businessId)
+          .timeout(const Duration(seconds: 8));
       final methods = List<dynamic>.from(options['methods'] ?? const [])
           .map((raw) => Map<String, dynamic>.from(raw as Map))
           .toList();
@@ -2963,8 +2965,11 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _enterPayment() async {
-    await _collapseWorkspaceHeader();
-    if (_estimate || _busy || _paymentNeedsReconciliation()) return;
+    if (_estimate || _busy || _startingPaymentDialog) return;
+    setState(() => _startingPaymentDialog = true);
+    try {
+      await _collapseWorkspaceHeader();
+      if (!mounted || _estimate || _busy || _paymentNeedsReconciliation()) return;
 
     List<Map<String, dynamic>> methods;
     try {
@@ -3044,6 +3049,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     if (mounted && _error == null &&
         (result['amount'] as num) >= remaining - 0.005) {
       await _offerCompleteJobAfterPaymentEntry();
+    }
+    } finally {
+      if (mounted) setState(() => _startingPaymentDialog = false);
     }
   }
 
@@ -6417,9 +6425,15 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
                   backgroundColor: BriskersColors.invoices,
                   foregroundColor: Colors.white,
                 ),
-                onPressed: _busy ? null : _enterPayment,
-                icon: const Icon(Icons.add_card_outlined),
-                label: Text(tr('addPayment')),
+                onPressed: _busy || _startingPaymentDialog ? null : _enterPayment,
+                icon: _startingPaymentDialog
+                    ? const SizedBox(
+                        width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.add_card_outlined),
+                label: Text(_startingPaymentDialog
+                    ? 'Opening payment...' : tr('addPayment')),
               ),
             )
           else
@@ -6802,15 +6816,18 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
   }
 
   Future<void> _addStandardNote() async {
-    await _collapseWorkspaceHeader();
     if (_readOnly || _busy) return;
+    await _collapseWorkspaceHeader();
+    if (!mounted || _readOnly || _busy) return;
 
+    // Open the picker from the on-device snapshot. Auto-mode server refreshes
+    // can take seconds or abort, but must never block the tap itself.
+    final localOnly = BriskersConnectionModeController.instance.forceOffline ||
+        _offlineDocumentDraft.isLocalDraftId(widget.documentId);
     List<Map<String, dynamic>> templates;
     List<String>? categoryOrder;
     try {
-      templates = await _standardNotes.available(widget.businessId,
-        offline: BriskersConnectionModeController.instance.forceOffline ||
-          _offlineDocumentDraft.isLocalDraftId(widget.documentId));
+      templates = await _standardNotes.cached(widget.businessId);
       categoryOrder = await _standardNotes.categoryOrder(widget.businessId);
     } catch (error) {
       if (mounted) {
@@ -6830,6 +6847,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
         templates: templates,
         categoryOrder: categoryOrder,
         canManage: widget.isOwner,
+        onRefresh: localOnly
+            ? null
+            : () => _standardNotes.available(widget.businessId, offline: false),
         onEdit: (template) async {
           await _createStandardNote(template: template);
           return _standardNotes.cached(widget.businessId);

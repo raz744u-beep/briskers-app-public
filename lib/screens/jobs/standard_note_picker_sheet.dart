@@ -11,6 +11,7 @@ class StandardNotePickerSheet extends StatefulWidget {
     required this.templates,
     required this.canManage,
     this.categoryOrder,
+    this.onRefresh,
     required this.onEdit,
     required this.onReorder,
   });
@@ -18,6 +19,8 @@ class StandardNotePickerSheet extends StatefulWidget {
   final List<Map<String, dynamic>> templates;
   final bool canManage;
   final List<String>? categoryOrder;
+  /// Rehydrate the picker in Auto without delaying its first local render.
+  final Future<List<Map<String, dynamic>>> Function()? onRefresh;
   final Future<List<Map<String, dynamic>>> Function(Map<String, dynamic>)
   onEdit;
   final Future<List<Map<String, dynamic>>> Function(List<String>, List<String>)
@@ -32,6 +35,7 @@ class _StandardNotePickerSheetState extends State<StandardNotePickerSheet> {
   late List<Map<String, dynamic>> _templates;
   late List<String> _categories;
   bool _saving = false;
+  bool _refreshing = false;
   String _search = '';
   final _collapsed = <String>{};
 
@@ -44,6 +48,32 @@ class _StandardNotePickerSheetState extends State<StandardNotePickerSheet> {
         : orderStandardNoteCategories(widget.categoryOrder!)
               .where((key) => key != 'general')
               .toList();
+    if (widget.onRefresh != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _refreshFromServer();
+      });
+    }
+  }
+
+  Future<void> _refreshFromServer() async {
+    final refresh = widget.onRefresh;
+    if (refresh == null || !mounted) return;
+    setState(() => _refreshing = true);
+    try {
+      // Delayed network / pending template flushes must not hold the sheet.
+      final updated = await refresh().timeout(const Duration(seconds: 8));
+      if (!mounted || _saving) return;
+      setState(() {
+        _templates = orderStandardNotes(updated);
+        if (widget.categoryOrder == null) {
+          _categories = _categoryOrder(_templates);
+        }
+      });
+    } catch (_) {
+      // Offline and intermittent Auto connections preserve the local choices.
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
   }
 
   List<String> _categoryOrder(List<Map<String, dynamic>> notes) {
@@ -384,7 +414,7 @@ class _StandardNotePickerSheetState extends State<StandardNotePickerSheet> {
                         '_create_template': true,
                       }),
               ),
-            if (_saving)
+            if (_saving || _refreshing)
               const LinearProgressIndicator(minHeight: 2)
             else
               const Divider(height: 2),
