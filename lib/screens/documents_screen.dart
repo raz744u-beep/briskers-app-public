@@ -1561,9 +1561,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     onLongPress: () => _showDocumentActions(row),
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1712,9 +1715,22 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                           ),
                         ],
                       ),
-                    ),
+                      const SizedBox(height: 3),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          tr('longPressForOptions'),
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                );
+                ),
+              ),
+            );
               }),
           ],
         ),
