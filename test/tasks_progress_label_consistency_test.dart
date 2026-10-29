@@ -17,6 +17,20 @@ void main() {
     expect(card,isNot(contains('TextDecoration.lineThrough')));
   });
 
+  test('Task card uses tap to expand and pencil without a redundant arrow', () {
+    final source = File('lib/tasks_lab_main.dart').readAsStringSync();
+    final card = source.split('Widget _taskCard(').last
+      .split('Future<void> _editTask(').first;
+    expect(card, contains('onTap: () => setState(() {'));
+    expect(card, contains('expandedTaskKeys.remove(id)'));
+    expect(card, contains('expandedTaskKeys.add(id)'));
+    expect(card, contains("tooltip: 'Edit task'"));
+    expect(card, contains('Icons.edit_outlined'));
+    expect(card, isNot(contains('Icons.expand_less')));
+    expect(card, isNot(contains('Icons.expand_more')));
+    expect(card, isNot(contains('Icons.chevron_right')));
+  });
+
   test('Mechanic names bold and hours regular in both task sections', () {
     final main=File('lib/tasks_lab_main.dart').readAsStringSync();
     final card=main.split('Widget _taskCard(').last
