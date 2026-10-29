@@ -1530,9 +1530,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                               _showTransactionActions(transaction),
                           child: Padding(
                             padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
                                 CircleAvatar(
                                   radius: 20,
                                   backgroundColor:
@@ -1627,6 +1630,19 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                       ],
                                     ),
                                   ],
+                                ),
+                              ],
+                            ),
+                                const SizedBox(height: 3),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    tr('longPressForOptions'),
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      color: Color(0xFF64748B),
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
