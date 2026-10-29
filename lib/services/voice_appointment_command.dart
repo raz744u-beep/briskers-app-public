@@ -117,7 +117,9 @@ class VoiceAppointmentCommand {
     if (hour == null || minutes == null || minutes > 59 || hour > 23) {
       return null;
     }
-    final suffix = (match.group(4) ?? '').replaceAll(' ', '');
+    final suffix = ((match.groupCount >= 4
+            ? match.group(4)
+            : match.group(3)) ?? '').replaceAll(' ', '');
     if (suffix == 'pm' && hour < 12) hour += 12;
     if (suffix == 'am' && hour == 12) hour = 0;
     if ((suffix == 'am' || suffix == 'pm') && hour > 23) return null;
