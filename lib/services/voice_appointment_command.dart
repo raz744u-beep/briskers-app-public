@@ -112,7 +112,7 @@ class VoiceAppointmentCommand {
         final minute = spokenMinute == 'fifteen'
             ? '15'
             : spokenMinute == 'thirty' ? '30' : '45';
-        return match.group(1)! + ':' + minute;
+        return '${match.group(1)}:$minute';
       },
     );
     // Examples: "at 10", "at nine:30", "10 o clock", "at ten".
