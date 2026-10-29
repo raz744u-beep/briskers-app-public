@@ -948,6 +948,19 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         width: 34, height: 38)),
                 ],
               ),
+              // A small persistent affordance makes tap-to-expand discoverable
+              // without restoring the redundant chevron or moving the pencil.
+              Padding(
+                padding: const EdgeInsets.only(top: 2, right: 4),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    expanded ? 'Tap to collapse' : 'Tap to expand',
+                    style: const TextStyle(
+                      fontSize: 10.5, color: Color(0xFF64748B)),
+                  ),
+                ),
+              ),
               // Keep the whole mechanic section inside the expanded task.
               // The next service task is a separate, individually bordered card.
               if (expanded)
