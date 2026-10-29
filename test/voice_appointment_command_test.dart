@@ -29,6 +29,12 @@ void main() {
       now: now,
     );
     expect(command?.startsAt, DateTime(2026, 10, 30, 9, 30));
+    expect(
+      VoiceAppointmentCommand.parse(
+        'schedule Larry Carter tomorrow at nine thirty am', now: now,
+      )?.startsAt,
+      DateTime(2026, 10, 30, 9, 30),
+    );
   });
 
   test('Afternoon time is recognized', () {
