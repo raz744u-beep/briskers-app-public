@@ -82,6 +82,8 @@ String jobStatusLabel(String? code, String fallback) {
 
 const Map<String, Map<String, String>> _translations = {
   'en': {
+    'longPressForOptions': 'Long press for options',
+    'tapForOptions': 'Tap for options',
     'profitabilitySummary': 'Job financial summary',
     'profitabilityRevenueCard': 'Revenue',
     'profitabilityCostsCard': 'Costs',
@@ -596,6 +598,8 @@ const Map<String, Map<String, String>> _translations = {
         'No AI receipt samples yet. Add a vendor receipt or invoice to teach Briskers that layout.',
   },
   'es': {
+    'longPressForOptions': 'Mantén pulsado: opciones',
+    'tapForOptions': 'Toca para ver opciones',
     'profitabilitySummary': 'Resumen financiero del trabajo',
     'profitabilityRevenueCard': 'Ingresos',
     'profitabilityCostsCard': 'Costos',

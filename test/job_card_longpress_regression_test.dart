@@ -27,6 +27,8 @@ void main() {
       ),
     );
 
+    expect(find.text('Long press for options'), findsOneWidget);
+
     await tester.tap(find.byType(JobCompactCard));
     await tester.pump();
     expect(opens, 1);
@@ -95,6 +97,7 @@ void main() {
       ),
     );
 
+    expect(find.text('Long press for options'), findsNothing);
     await tester.tap(find.byType(JobCompactCard));
     await tester.longPress(find.byType(JobCompactCard));
     expect(opens, 0);

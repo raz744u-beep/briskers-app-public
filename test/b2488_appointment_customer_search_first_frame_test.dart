@@ -76,7 +76,9 @@ void main() {
     expect(find.text('Aaron Barbes'), findsNothing);
 
     employeeRequest.complete([]);
-    await tester.pump();
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
   });
 
   testWidgets('Appointment customer search filters locally, selects and clears',

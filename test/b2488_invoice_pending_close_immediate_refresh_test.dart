@@ -39,7 +39,7 @@ void main() {
     expect(method, contains("entity_type, entity_id, operation, payload_json"));
     expect(method, contains('LocalInvoicePaymentCoverageEvents.committed('));
     expect(method.indexOf('LocalInvoicePaymentCoverageEvents.committed('),
-        greaterThan(method.lastIndexOf('    });'));
+        greaterThan(method.lastIndexOf('    });')));
     expect(method, contains('remainingBeforePaymentCents > 0'));
     expect(method, contains('amountCents >= remainingBeforePaymentCents'));
     expect(method, contains('return operationId;'));

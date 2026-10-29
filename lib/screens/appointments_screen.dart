@@ -1407,9 +1407,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                              : null,
                         child: Padding(
                                 padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
                                   children: [
+                                    Row(
+                                      crossAxisAlignment: CrossAxisAlignment.center,
+                                      children: [
                                     Expanded(
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1479,6 +1482,21 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                                       )
                                     else
                                       _statusPill(item),
+                                  ],
+                                ),
+                                    if (_canManage || _canCheckIn) ...[
+                                      const SizedBox(height: 3),
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: Text(
+                                          tr('tapForOptions'),
+                                          style: const TextStyle(
+                                            fontSize: 10.5,
+                                            color: Color(0xFF64748B),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                         ),

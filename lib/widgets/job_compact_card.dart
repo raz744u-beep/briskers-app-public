@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/briskers_colors.dart';
+import '../core/briskers_i18n.dart';
 import '../core/employee_role_style.dart';
 import '../core/job_status_style.dart';
 
@@ -336,6 +337,20 @@ class JobCompactCard extends StatelessWidget {
                       ),
                     ],
                   ),
+                  if (canOpen && onLongPress != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3, right: 3),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          tr('longPressForOptions'),
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
