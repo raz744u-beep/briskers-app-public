@@ -23,6 +23,7 @@ import '../../core/briskers_colors.dart';
 import '../../core/warranty_payment_amounts.dart';
 import '../../widgets/warranty_received_payment_dialog.dart';
 import '../../core/connection_mode.dart';
+import '../../core/invoice_pdf_preparation_policy.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/formatters.dart';
 import '../../core/invoice_status_style.dart';
@@ -2339,10 +2340,9 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
     }
 
     try {
-      final currentStatus = _detail?['status']?.toString() ?? 'draft';
-      final currentNumber =
-          _detail?['document_number']?.toString().trim() ?? '';
-      if (currentStatus == 'draft' || currentNumber.isEmpty) {
+      // A stale cached draft status must never reissue an already-numbered
+      // invoice just to prepare its PDF for preview or email.
+      if (InvoicePdfPreparationPolicy.needsIssue(_detail)) {
         await _api.issueDocument(
           widget.businessId,
           widget.documentId,
@@ -2427,7 +2427,50 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       detail.addAll(memoForPdf);
       return await _withPdfUnits(detail);
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      // Auto's network may fail while the known invoice is still safely
+      // available in the local cache. Do not silently send an unverified PDF.
+      // Use only the same authenticated invoice/vehicle snapshot already
+      // visible in this editor, and require the owner's explicit decision.
+      final cached = _detail;
+      final canOffer = !_estimate && mounted &&
+          InvoicePdfPreparationPolicy.isTransportFailure(error) &&
+          InvoicePdfPreparationPolicy.canOfferCachedPdf(cached);
+      if (canOffer) {
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Invoice server unavailable'),
+            content: const Text(
+              'Briskers cannot verify the latest invoice online. '
+              'You may prepare a PDF from the copy saved on this phone. '
+              'Before emailing, verify the customer, items, amount paid, '
+              'balance, and mileage. The saved copy may not include recent '
+              'updates from another device. Continue with local copy?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Use local copy'),
+              ),
+            ],
+          ),
+        );
+        if (proceed == true && mounted && cached != null) {
+          setState(() => _error = null);
+          return _withPdfUnits(await _pendingMemoForPdf(cached));
+        }
+      }
+      if (mounted) {
+        setState(() => _error =
+          InvoicePdfPreparationPolicy.isTransportFailure(error)
+              ? 'Could not reach Briskers to prepare the invoice PDF. '
+                'Check your connection or use Force Offline and verify the PDF.'
+              : error.toString());
+      }
       return null;
     }
   }
