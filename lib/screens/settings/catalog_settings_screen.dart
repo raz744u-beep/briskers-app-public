@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_colors.dart';
+import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/catalog_sync_service.dart';
 import '../../services/local_catalog_repository.dart';
+import '../../services/local_item_categories_cache.dart';
 
 class CatalogSettingsScreen extends StatefulWidget {
   const CatalogSettingsScreen({
@@ -22,6 +24,7 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
   static const _api = BriskersApi();
   final _localCatalog = LocalCatalogRepository();
   final _catalogSync = CatalogSyncService();
+  final _categoriesCache = const LocalItemCategoriesCache();
 
   final _search = TextEditingController();
   List<Map<String, dynamic>>? _items;
@@ -54,15 +57,27 @@ class _CatalogSettingsScreenState extends State<CatalogSettingsScreen> {
         includeInactive: _includeInactive,
       );
 
-      List<Map<String, dynamic>> categories = _categories;
-      try {
-        categories = await _api.itemCategories(
-          widget.businessId,
-          includeInactive: true,
-        );
-      } catch (_) {
-        // Categories are only needed for catalog administration. Item search
-        // continues to work from the local catalog while offline.
+      List<Map<String, dynamic>> categories;
+      final cached = await _categoriesCache.load(widget.businessId);
+      final locallyUsed = LocalItemCategoriesCache.fromCatalogItems(localItems);
+      if (BriskersConnectionModeController.instance.forceOffline) {
+        // Never call a network RPC in Force Offline.
+        categories = LocalItemCategoriesCache.merge(cached, locallyUsed);
+      } else {
+        try {
+          final live = await _api.itemCategories(
+            widget.businessId,
+            includeInactive: true,
+          );
+          await _categoriesCache.save(widget.businessId, live);
+          categories = LocalItemCategoriesCache.merge(live, locallyUsed);
+        } catch (_) {
+          // Retain local choices if the network fails in Auto.
+          categories = LocalItemCategoriesCache.merge(
+            cached.isNotEmpty ? cached : _categories,
+            locallyUsed,
+          );
+        }
       }
 
       if (!mounted || generation != _searchGeneration) return;
