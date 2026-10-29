@@ -67,8 +67,8 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
   static String _statusLabel(Map<String, dynamic> task) {
     switch (task['status']) {
       case 'in_progress': return 'In Progress';
-      case 'done': return 'Complete';
-      default: return 'Planned';
+      case 'done': return 'Done';
+      default: return 'Not Started';
     }
   }
   static String _weekKey(DateTime value) =>
