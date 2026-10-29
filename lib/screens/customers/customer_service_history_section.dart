@@ -1134,24 +1134,22 @@ class _CustomerServiceHistorySectionState
             _historyTypeSelector(),
             if (_view == 'invoices') Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-              child: TextField(
+              child: SearchBar(
                 key: const ValueKey('vehicle-repair-history-search'),
                 controller: _repairSearch,
-                decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.search),
-                  hintText: 'Search repairs, parts or invoice #',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: _repairQuery.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: 'Clear repair search',
-                          onPressed: () {
-                            _repairSearch.clear();
-                            setState(() => _repairQuery = '');
-                          },
-                          icon: const Icon(Icons.close),
-                        ),
-                ),
+                hintText: 'Search repairs, parts or invoice #',
+                leading: const Icon(Icons.search),
+                trailing: [
+                  if (_repairQuery.isNotEmpty)
+                    IconButton(
+                      tooltip: 'Clear repair search',
+                      onPressed: () {
+                        _repairSearch.clear();
+                        setState(() => _repairQuery = '');
+                      },
+                      icon: const Icon(Icons.close),
+                    ),
+                ],
                 onChanged: (value) => setState(() => _repairQuery = value),
               ),
             ),
