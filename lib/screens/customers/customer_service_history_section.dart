@@ -13,6 +13,7 @@ import 'package:intl/intl.dart';
 import '../../core/briskers_colors.dart';
 import '../../core/job_status_style.dart';
 import '../../core/document_presentation.dart';
+import '../../core/vehicle_invoice_repair_search.dart';
 import '../../core/connection_mode.dart';
 import '../../services/briskers_api.dart';
 import '../../services/customer_detail_cache.dart';
@@ -32,6 +33,7 @@ class CustomerServiceHistorySection extends StatefulWidget {
     required this.vehicles,
     this.roleCode = 'viewer',
     this.initiallyExpanded = false,
+    this.initialVehicleId,
   });
 
   final String businessId;
@@ -39,6 +41,7 @@ class CustomerServiceHistorySection extends StatefulWidget {
   final List<dynamic> vehicles;
   final String roleCode;
   final bool initiallyExpanded;
+  final String? initialVehicleId;
 
   @override
   State<CustomerServiceHistorySection> createState() =>
@@ -63,6 +66,8 @@ class _CustomerServiceHistorySectionState
   String get _roleCode => widget.roleCode;
   String? _selectedVehicleId;
   String _view = 'jobs';
+  final TextEditingController _repairSearch = TextEditingController();
+  String _repairQuery = '';
   bool _historicalImporting = false;
   int _historicalImportDone = 0;
   int _historicalImportTotal = 0;
@@ -75,6 +80,12 @@ class _CustomerServiceHistorySectionState
   @override
   void initState() {
     super.initState();
+    if (widget.initialVehicleId != null &&
+        widget.vehicles.whereType<Map>().any((v) =>
+          v['id']?.toString() == widget.initialVehicleId)) {
+      _selectedVehicleId = widget.initialVehicleId;
+      _view = 'invoices';
+    }
     _listenForQuarantine();
     _retirement = LocalJobRetirement.events.listen((event) {
       if (event.businessId != widget.businessId || !mounted) return;
@@ -104,6 +115,7 @@ class _CustomerServiceHistorySectionState
 
   @override
   void dispose() {
+    _repairSearch.dispose();
     _jobVisibility.dispose();
     _retirement?.cancel();
     super.dispose();
@@ -491,6 +503,7 @@ class _CustomerServiceHistorySectionState
   List<Map<String, dynamic>> get _visibleInvoices => _documents
       .where((row) => row['kind']?.toString() == 'invoice')
       .where(_matchesVehicle)
+      .where((row) => VehicleInvoiceRepairSearch.matches(row, _repairQuery))
       .toList();
 
   List<Map<String, dynamic>> get _visibleExpenses =>
@@ -862,6 +875,9 @@ class _CustomerServiceHistorySectionState
             ),
             builder: (context, snapshot) => Text(
               <String>[
+                if (label == 'invoices')
+                  VehicleInvoiceRepairSearch.summary(snapshot.hasData
+                      ? snapshot.data! : document),
                 if (snapshot.hasData) DocumentPresentation(snapshot.data!).statusLabel,
                 if (jobNumber.isNotEmpty) 'Job $jobNumber',
                 if (vehicle.isNotEmpty) vehicle,
@@ -949,7 +965,8 @@ class _CustomerServiceHistorySectionState
 
   @override
   Widget build(BuildContext context) {
-    final count = _visibleJobs.length;
+    final count = _view == 'invoices'
+        ? _visibleInvoices.length : _visibleJobs.length;
 
     return Card(
       child: ExpansionTile(
@@ -1010,6 +1027,29 @@ class _CustomerServiceHistorySectionState
             ],
             _vehicleSelector(),
             _historyTypeSelector(),
+            if (_view == 'invoices') Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+              child: TextField(
+                key: const ValueKey('vehicle-repair-history-search'),
+                controller: _repairSearch,
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.search),
+                  hintText: 'Search repairs, parts or invoice #',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _repairQuery.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Clear repair search',
+                          onPressed: () {
+                            _repairSearch.clear();
+                            setState(() => _repairQuery = '');
+                          },
+                          icon: const Icon(Icons.close),
+                        ),
+                ),
+                onChanged: (value) => setState(() => _repairQuery = value),
+              ),
+            ),
             const Divider(height: 1),
             _selectedHistory(),
           ],
