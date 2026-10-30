@@ -117,7 +117,7 @@ void main() {
     expect(source, isNot(contains("_sectionHeader('Payroll TEST ledger'")));
     expect(source, contains('LabPayrollOverviewScreen('));
     expect(source, contains('onOpenProfile:'));
-    expect(source, contains('initialTab: 0'));
+    expect(source, contains('initialTab: tab'));
     expect(source, contains('BriskersColors.jobs'));
   });
 }
