@@ -1921,7 +1921,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Pay mechanic for this task'),
-                subtitle: const Text('Turn off to record unpaid recheck work'),
+                subtitle: const Text('Turn off to record nonpayable recheck work'),
                 value: paid,
                 onChanged: (value) => update(() => paid = value),
               ),
