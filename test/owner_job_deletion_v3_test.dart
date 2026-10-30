@@ -111,6 +111,18 @@ void main() {
     broken['payments'] = [];
     expect(() => validateDeletionV3Preview(broken, business, job, actor), throwsFormatException);
   });
+  test('financial consent requires an explicit true flag and rejects extras', () {
+    final original = Map<String, dynamic>.from(fixture()['confirmation'] as Map);
+    validateDeletionV3Confirmation(original, business, job, actor);
+    final confirmed = {...original, 'no_real_money_confirmed': true};
+    validateDeletionV3Confirmation(confirmed, business, job, actor);
+    expect(() => validateDeletionV3Confirmation(
+      {...original, 'no_real_money_confirmed': false}, business, job, actor),
+      throwsFormatException);
+    expect(() => validateDeletionV3Confirmation(
+      {...confirmed, 'unexpected_field': true}, business, job, actor),
+      throwsFormatException);
+  });
   test('old retirement consent never authorizes v3 purge', () {
     for (final key in ['schema_version', 'protocol_version', 'scope', 'preview_id']) {
       final value = fixture();
