@@ -834,6 +834,60 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         : hours == 0 ? 'Nonpayable' : '${hours.toStringAsFixed(1)} hrs');
   }
 
+  // Each employee name routes by stable local ID, not by displayed nickname.
+  Widget _linkedMechanics(Map<String, dynamic> task,
+      Map<String, dynamic>? completed) {
+    final rows = completed != null
+      ? (completed['payroll_allocations'] as List?)
+          ?.whereType<Map<String, dynamic>>().toList() ?? []
+      : allocationsByLine[task['line_id'].toString()] ?? [];
+    final ids = rows.map((r) => r['employee_id']?.toString() ?? '')
+      .where((id) => id.isNotEmpty).toSet().toList();
+    if (ids.isEmpty) {
+      final fallback = completed?['completed_by']?.toString() ??
+        task['employee_id']?.toString() ?? '';
+      if (fallback.isNotEmpty) ids.add(fallback);
+    }
+    return Wrap(spacing: 4, runSpacing: 2, children: [
+      for (var i = 0; i < ids.length; i++) ...[
+        if (i > 0) const Text('+',
+          style: TextStyle(color: Color(0xFF64748B))),
+        InkWell(
+          onTap: () => _employeeQuickLinks(ids[i]),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
+            child: Text(_employeeName(ids[i]),
+              style: const TextStyle(
+                fontSize: 13.5, fontWeight: FontWeight.w700,
+                color: Color(0xFF334155),
+                decoration: TextDecoration.underline)),
+          ),
+        ),
+      ],
+    ]);
+  }
+
+  void _employeeQuickLinks(String employeeId) {
+    showModalBottomSheet<void>(context: context,
+      builder: (sheet) => SafeArea(child: Column(
+        mainAxisSize: MainAxisSize.min, children: [
+          ListTile(title: Text(_employeeName(employeeId),
+            style: const TextStyle(fontWeight: FontWeight.w800))),
+          ListTile(leading: const Icon(Icons.assignment_outlined),
+            title: const Text('View Tasks'),
+            onTap: () { Navigator.pop(sheet); _openEmployeeProfile(
+              employeeId, null, 0); }),
+          ListTile(leading: const Icon(Icons.account_balance_wallet_outlined),
+            title: const Text('View Payroll'),
+            onTap: () { Navigator.pop(sheet); _openEmployeeProfile(
+              employeeId, null, 1); }),
+          ListTile(leading: const Icon(Icons.person_outline),
+            title: const Text('Employee Profile'),
+            onTap: () { Navigator.pop(sheet); _openEmployeeProfile(employeeId); }),
+        ],
+      )));
+  }
+
   // A collapsed task is two lines high. Tapping any card expands its full
   // description/completion details; editing stays in its separate pencil.
   Widget _taskCard(Map<String, dynamic> task) {
@@ -903,12 +957,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                             fontWeight: FontWeight.w700, height: 1.16)),
                         const SizedBox(height: 3),
                         Row(children: [
-                          Expanded(child: Text(credit.mechanics,
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF334155)))),
+                          Expanded(child: _linkedMechanics(task, record)),
                           const SizedBox(width: 6),
                           Text(credit.hours,
                             style: const TextStyle(fontSize: 12.5,
@@ -2433,7 +2482,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     if (saved == true) await _refresh();
   }
 
-  Future<void> _openEmployeeProfile(String employeeId, [DateTime? week]) async {
+  Future<void> _openEmployeeProfile(String employeeId, [DateTime? week, int tab = 0]) async {
     final employee = BriskersLabFixture.employees.firstWhere(
       (value) => value['id'] == employeeId,
     );
@@ -2450,7 +2499,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           allocationsByLine: allocationsByLine,
           payments: testPayrollPayments,
           rateCents: testHourlyRates[employeeId],
-          initialTab: 0,
+          initialTab: tab,
           initialWeek: week,
         ),
       ),
