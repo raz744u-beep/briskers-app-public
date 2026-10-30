@@ -1325,18 +1325,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ],
   );
 
+  // Primary lifecycle status only. Holds and rechecks are separate workflow
+  // indicators; they do not compete with Open / In Progress / Complete.
   static const _jobStatusChoices = <(String, String, IconData, Color)>[
     ('open', 'Open', Icons.work_outline, Color(0xFF546E7A)),
     ('in_progress', 'In Progress', Icons.build_circle_outlined,
       BriskersColors.jobs),
-    ('pending_approval', 'Pending Approval', Icons.approval_outlined,
-      Color(0xFFE59A00)),
-    ('waiting_parts', 'Waiting Parts', Icons.local_shipping_outlined,
-      Color(0xFFEF6C00)),
-    ('needs_recheck', 'Needs Recheck', Icons.troubleshoot_outlined,
-      Color(0xFFC62828)),
-    ('completed', 'Completed', Icons.task_alt, Color(0xFF2E7D32)),
-    ('cancelled', 'Cancelled', Icons.cancel_outlined, Color(0xFF757575)),
+    ('completed', 'Complete', Icons.task_alt, Color(0xFF2E7D32)),
   ];
 
   (String, String, IconData, Color) get _currentJobStatusInfo =>
