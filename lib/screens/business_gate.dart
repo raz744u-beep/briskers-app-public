@@ -158,15 +158,15 @@ class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver
 
   Future<void> _retryPendingAutoSync() async {
     if (_inspectingPendingRetry || !mounted || !_inForeground ||
-        BriskersConnectionModeController.instance.forceOffline) return;
+        BriskersConnectionModeController.instance.forceOffline) { return; }
     final businesses = _businesses;
-    if (businesses == null || businesses.isEmpty) return;
+    if (businesses == null || businesses.isEmpty) { return; }
     final business = businesses.first;
     final businessId =
         '${business['business_id'] ?? business['id'] ?? ''}';
     final roleCode =
         '${business['role_code'] ?? business['role'] ?? ''}';
-    if (businessId.isEmpty || roleCode == 'kiosk') return;
+    if (businessId.isEmpty || roleCode == 'kiosk') { return; }
 
     _inspectingPendingRetry = true;
     try {
@@ -178,9 +178,9 @@ class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver
         pendingCount: before,
         now: DateTime.now(),
         notBefore: _nextRetryAt,
-      )) return;
+      )) { return; }
       await _refreshLocalData(businessId, roleCode: roleCode);
-      if (!mounted) return;
+      if (!mounted) { return; }
       final after = await _pendingUploadCount(businessId);
       _stalledRetryAttempts =
           after < before ? 0 : _stalledRetryAttempts + 1;
