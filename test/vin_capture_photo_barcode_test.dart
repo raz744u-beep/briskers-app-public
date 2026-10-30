@@ -172,5 +172,8 @@ void main() {
     expect(screen, contains('Navigator.of(context).pop(candidate)'));
     expect(screen, isNot(contains('cleaned.substring(0, 17)')));
     expect(screen, contains('Only camera images created by this capture flow'));
+    expect(screen, contains('toggleTorch()'));
+    expect(screen, contains('TextRecognitionScript.latin'));
+    expect(screen, contains('VinCaptureParser.hasValidCheckDigit(candidate)'));
   });
 }
