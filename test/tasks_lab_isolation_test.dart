@@ -306,7 +306,7 @@ void main() {
     expect(main, contains('Owner correction · TEST'));
     expect(main, contains('recordOwnerEarnedHoursCorrection('));
 
-    expect(main, contains('Unpaid (0 hrs)'));
+    expect(main, contains('No payroll hours'));
     expect(main, contains('_confirmCompleteAllTasks'));
     expect(main, contains('completeConfirmedJobTasks('));
     expect(main, contains('Assign invoice labor'));
