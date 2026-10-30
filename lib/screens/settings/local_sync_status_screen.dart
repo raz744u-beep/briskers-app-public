@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_i18n.dart';
+import '../../core/connection_mode.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/appointment_sync_service.dart';
 import '../../services/customer_vehicle_sync_service.dart';
@@ -79,6 +80,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
 
   bool _loading = true;
   bool _syncing = false;
+  bool _targetedRecovery = false;
   static const int _syncStepCount = 22;
   int _syncStep = 0;
   String? _syncStage;
@@ -572,10 +574,117 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     }
   }
 
+  // One purpose only: recover already queued customer, vehicle, invoice and
+  // recorded payment operations.  Do not refresh unrelated catalog/tax,
+  // appointments or jobs when a single invoice is awaiting its number.
+  // These services retain their original durable operation IDs.
+  Future<int> _pendingRecoveryOperations(String type) async {
+    final row = await localDatabase.customSelect(
+      "SELECT COUNT(*) AS n FROM sync_outbox "
+      "WHERE business_id=? AND entity_type=? "
+      "AND state IN ('pending','inflight','conflict')",
+      variables: [
+        Variable<String>(widget.businessId),
+        Variable<String>(type),
+      ],
+    ).getSingle();
+    return row.read<int>('n');
+  }
+
+  Future<void> _recoverPendingInvoices() async {
+    if (_syncing) { return; }
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      setState(() {
+        _error = 'Switch out of Force Offline before attempting recovery.';
+      });
+      return;
+    }
+    setState(() {
+      _syncing = true;
+      _targetedRecovery = true;
+      _syncStep = 0;
+      _syncStage = 'Inspecting local invoice queue';
+      _syncMessage = null;
+      _error = null;
+    });
+
+    String? failure;
+    String? message;
+    try {
+      final customer = await _pendingRecoveryOperations('customer_create');
+      final vehicle = await _pendingRecoveryOperations('vehicle_create');
+      final invoice = await _pendingRecoveryOperations('document_draft_create');
+      final payment = await _pendingRecoveryOperations('invoice_payment_received');
+      if (customer + vehicle + invoice + payment == 0) {
+        message = 'No pending customer, vehicle, invoice or received-payment '
+            'uploads found. Confirm invoice number and payment separately.';
+      } else {
+        if (mounted) {
+          setState(() => _syncStage = '1/3 Customer and vehicle uploads');
+        }
+        if (customer + vehicle > 0) {
+          await _customerVehicleAdmin.flush(widget.businessId);
+        }
+        if (await _pendingRecoveryOperations('customer_create') > 0 ||
+            await _pendingRecoveryOperations('vehicle_create') > 0) {
+          throw StateError(
+            'Customer or vehicle is still waiting for server confirmation. '
+            'Invoice and payment uploads were not retried. '
+            'Review the pending operation error.',
+          );
+        }
+        if (mounted) { setState(() => _syncStep = 1); }
+
+        if (mounted) { setState(() => _syncStage = '2/3 Invoice upload'); }
+        if (invoice > 0) { await _documentDrafts.flush(widget.businessId); }
+        if (await _pendingRecoveryOperations('document_draft_create') > 0) {
+          throw StateError(
+            'Invoice is still awaiting server confirmation. '
+            'Payment upload was not retried. '
+            'Review the invoice operation error.',
+          );
+        }
+        if (mounted) { setState(() => _syncStep = 2); }
+
+        if (mounted) { setState(() => _syncStage = '3/3 Recorded payment upload'); }
+        if (payment > 0) { await _payments.flush(widget.businessId); }
+        if (await _pendingRecoveryOperations('invoice_payment_received') > 0) {
+          throw StateError(
+            'The payment is still waiting for an authoritative server receipt. '
+            'Do not enter it a second time.',
+          );
+        }
+        if (mounted) { setState(() => _syncStep = 3); }
+        message = 'The queued customer, vehicle, invoice and received-payment '
+            'uploads have cleared. Check the invoice number and confirm the '
+            'payment separately before finalizing anything.';
+      }
+    } catch (error) {
+      failure = error.toString();
+    } finally {
+      // Inspection alone is read-only; refresh the queue after uploads.
+      try {
+        await _load();
+      } catch (_) {
+        // Preserve the upload error even if refreshing the UI fails.
+      }
+      if (mounted) {
+        setState(() {
+          _syncing = false;
+          _targetedRecovery = false;
+          _syncStage = null;
+          _error = failure;
+          _syncMessage = message;
+        });
+      }
+    }
+  }
+
   Future<void> _syncNow() async {
     if (_syncing) return;
     setState(() {
       _syncing = true;
+      _targetedRecovery = false;
       _syncStep = 0;
       _syncStage = 'Preparing sync';
       _syncMessage = null;
@@ -793,10 +902,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                             Text(_syncStage ?? 'Working…'),
                             const SizedBox(height: 8),
                             LinearProgressIndicator(
-                              value: _syncStep / _syncStepCount,
+                              value: _syncStep / (_targetedRecovery ? 3 : _syncStepCount),
                             ),
                             const SizedBox(height: 6),
-                            Text('Step $_syncStep of $_syncStepCount completed'),
+                            Text('Step $_syncStep of ${_targetedRecovery ? 3 : _syncStepCount} completed'),
                           ],
                         ),
                       ),
@@ -1124,6 +1233,19 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                     ),
                   ],
                   const SizedBox(height: 14),
+                  FilledButton.icon(
+                    onPressed: _syncing ? null : _recoverPendingInvoices,
+                    icon: const Icon(Icons.receipt_long_outlined),
+                    label: const Text('Recover pending invoices'),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Uploads queued customers, vehicles, invoices and recorded '
+                    'payments only. Does not run the 22-step full sync, '
+                    'delete records or finalize payments.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
                   FilledButton.icon(
                     onPressed: _syncing ? null : _syncNow,
                     icon: _syncing
