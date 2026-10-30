@@ -173,25 +173,25 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
       ],
       child:Container(
         width:double.infinity,
-        constraints:const BoxConstraints(minHeight:54),
-        padding:const EdgeInsets.symmetric(horizontal:12,vertical:8),
+        constraints:const BoxConstraints(minHeight:37),
+        padding:const EdgeInsets.symmetric(horizontal:9,vertical:4),
         decoration:BoxDecoration(
           color: const Color(0xFFF3F7F8),
           border: Border.all(color:const Color(0xFFCBD7DC)),
-          borderRadius:BorderRadius.circular(20)),
+          borderRadius:BorderRadius.circular(18)),
         child:Row(children:[
           Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,
             mainAxisSize:MainAxisSize.min,children:[
             Text(title,maxLines:1,overflow:TextOverflow.ellipsis,
-              style:const TextStyle(fontSize:11,
+              style:const TextStyle(fontSize:10,
                 color:Color(0xFF64748B))),
-            const SizedBox(height:2),
+            const SizedBox(height:1),
             Text(chosen,maxLines:1,overflow:TextOverflow.ellipsis,
-              style:const TextStyle(fontSize:12,
+              style:const TextStyle(fontSize:11.5,
                 fontWeight:FontWeight.w700)),
           ])),
           const SizedBox(width:5),
-          const Icon(Icons.keyboard_arrow_down,size:18),
+          const Icon(Icons.keyboard_arrow_down,size:16),
         ]),
       ),
     );
@@ -449,7 +449,7 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
             border:OutlineInputBorder(
               borderRadius:BorderRadius.circular(22))),
         ),
-        const SizedBox(height:9),
+        const SizedBox(height:5),
         // Two balanced rows on narrow Note 9 screens: no fourth filter
         // clipped off-screen or undiscoverable horizontal scroll.
         Padding(
@@ -460,7 +460,7 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
                 _employee.isEmpty?'All':widget.employeeName(_employee),
                 _employeeChoices,
                 (v)=>setState(()=>_employee=_employeeIdForName(v)))),
-              const SizedBox(width:8),
+              const SizedBox(width:5),
               Expanded(child:_picker('Status',_status,
                 ['Active','All','Not Started','In Progress','Done'],
                 (v)=>setState(()=>_status=v))),
@@ -475,7 +475,7 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
                 (v)=>setState((){
                   if(_general) {_category=v;} else {_kind=v;}
                 }))),
-              const SizedBox(width:8),
+              const SizedBox(width:5),
               Expanded(child:_picker('Sort',_sort,
                 ['Newest First','Oldest First',if(_general)'Due Date'],
                 (v)=>setState(()=>_sort=v))),
