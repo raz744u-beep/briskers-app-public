@@ -2,10 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/supabase_config.dart';
 import '../core/connection_mode.dart';
+import '../core/auto_sync_retry_policy.dart';
+import '../local/local_database_provider.dart';
 import '../services/briskers_api.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/customer_vehicle_sync_service.dart';
@@ -39,7 +42,7 @@ class BusinessGate extends StatefulWidget {
   State<BusinessGate> createState() => _BusinessGateState();
 }
 
-class _BusinessGateState extends State<BusinessGate> {
+class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver {
   static const _api = BriskersApi();
   final JobSyncService _jobSync = JobSyncService();
   final AppointmentSyncService _appointmentSync =
@@ -81,18 +84,32 @@ class _BusinessGateState extends State<BusinessGate> {
 
   List<Map<String, dynamic>>? _businesses;
   String? _error;
+  Timer? _autoRetryTimer;
+  bool _inForeground = true;
+  bool _inspectingPendingRetry = false;
+  int _stalledRetryAttempts = 0;
+  DateTime? _nextRetryAt;
+  final Map<String, Future<void>> _activeRefreshes = {};
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     BriskersConnectionModeController.instance.addListener(
       _connectionModeChanged,
+    );
+    // Retry only while foregrounded. Backoff prevents repeated server floods.
+    _autoRetryTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => unawaited(_retryPendingAutoSync()),
     );
     _load();
   }
 
   void _connectionModeChanged() {
     if (BriskersConnectionModeController.instance.forceOffline) return;
+    _stalledRetryAttempts = 0;
+    _nextRetryAt = null;
     final businesses = _businesses;
     if (businesses == null || businesses.isEmpty) return;
     final business = businesses.first;
