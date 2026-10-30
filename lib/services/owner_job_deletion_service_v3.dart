@@ -141,14 +141,24 @@ class OwnerJobDeletionServiceV3 {
   }
 
   Future<JobDeletionV3Result> queueConfirmed(JobDeletionV3Preview preview,
-      {required String actorId, required bool isOwner, bool online = true}) async {
+      {required String actorId, required bool isOwner, bool online = true,
+      bool noRealMoneyConfirmed = false}) async {
     if (!isOwner || !preview.canDelete) throw StateError('Deletion is not available.');
     _gateway.assertActor(actorId);
     final value = preview.snapshot;
     final business = value['business_id'] as String;
     final job = value['job_id'] as String;
     validateDeletionV3Preview(value, business, job, actorId);
+    final requiresFinancialConsent = value['requires_synthetic_consent'] == true;
+    if (requiresFinancialConsent && !noRealMoneyConfirmed) {
+      throw StateError('You must separately confirm these are verified test-only financial records. Nothing has been deleted.');
+    }
+    // The corrected backend requires the extra flag ONLY after a human
+    // explicitly consents; never infer it from a preview or silently default true.
     final confirmation = preview.confirmation;
+    if (requiresFinancialConsent) {
+      confirmation['no_real_money_confirmed'] = true;
+    }
     if (_expired(confirmation)) throw const JobDeletionV3ReviewRequired();
     await ensureSchema();
     final operation = _newOperation();
