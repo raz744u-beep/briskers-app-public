@@ -867,6 +867,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ]);
   }
 
+  // Reuse the same ID-based employee shortcuts in Job Detail task rows.
+  Widget _jobTaskMechanicLinks(Map<String, dynamic> task,
+      Map<String, dynamic>? completed) =>
+    Align(
+      alignment: Alignment.centerLeft,
+      child: _linkedMechanics(task, completed),
+    );
+
   void _employeeQuickLinks(String employeeId) {
     showModalBottomSheet<void>(context: context,
       builder: (sheet) => SafeArea(child: Column(
@@ -1034,6 +1042,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         const Text('Additional work · Not on Invoice',
                           style: TextStyle(fontSize: 12,
                             color: Color(0xFF526273))),
+                      _jobTaskMechanicLinks(task, record),
                       if (splitCount > 1)
                         Text('${record != null
                           ? _completedAssignment(record)
