@@ -17,6 +17,62 @@ void main() {
     expect(VinCaptureParser.isValid('1HGCM82633A00435Q'), false);
   });
 
+  test('US VIN check digit detects photographed character substitution', () {
+    const validAudi = 'WAU34AFD0GN013309';
+    const misreadAudi = '6BU34AFD0GN013309';
+    expect(VinCaptureParser.isValid(validAudi), true);
+    expect(VinCaptureParser.isValid(misreadAudi), true);
+    expect(VinCaptureParser.hasValidCheckDigit(validAudi), true);
+    expect(VinCaptureParser.hasValidCheckDigit(misreadAudi), false);
+    expect(VinCaptureParser.hasValidCheckDigit('1234'), false);
+    expect(VinCaptureParser.preferVerified([misreadAudi, validAudi]),
+        [validAudi, misreadAudi]);
+  });
+
+  testWidgets('manual review field is limited to 17 characters', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: VinScannerScreen()));
+    await tester.tap(find.text('Enter manually'));
+    await tester.pumpAndSettle();
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.maxLength, 17);
+    await tester.enterText(find.byType(TextField), '1HGCM82633A0043521234');
+    expect(find.text('1HGCM82633A004352'), findsOneWidget);
+  });
+
+  testWidgets('check-digit mismatch requires explicit second confirmation',
+      (tester) async {
+    String? result;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: TextButton(
+            onPressed: () async {
+              result = await Navigator.push<String>(
+                context,
+                MaterialPageRoute(builder: (_) => const VinScannerScreen()),
+              );
+            },
+            child: const Text('Open VIN'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('Open VIN'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Enter manually'));
+    await tester.pumpAndSettle();
+    const invalidCheckDigit = '6BU34AFD0GN013309';
+    await tester.enterText(find.byType(TextField), invalidCheckDigit);
+    await tester.tap(find.text('Use this VIN'));
+    await tester.pumpAndSettle();
+    expect(result, isNull);
+    expect(find.textContaining('does not match'), findsOneWidget);
+    expect(find.text('Use unverified VIN'), findsOneWidget);
+    await tester.tap(find.text('Use unverified VIN'));
+    await tester.pumpAndSettle();
+    expect(result, invalidCheckDigit);
+  });
+
   test('barcode strips harmless Code39 wrapping without truncating long codes', () {
     expect(VinCaptureParser.fromBarcodeValues([
       'PART-AB-000004940493',
