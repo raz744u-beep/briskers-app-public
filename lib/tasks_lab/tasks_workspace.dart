@@ -162,7 +162,11 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
       void Function(String) onChange) {
     return PopupMenuButton<String>(
       tooltip:title,
-      onSelected: onChange,
+      onOpened: () => FocusManager.instance.primaryFocus?.unfocus(),
+      onSelected: (value) {
+        FocusManager.instance.primaryFocus?.unfocus();
+        onChange(value);
+      },
       itemBuilder: (_) => [
         for (final item in items)
           PopupMenuItem(value:item,child: Text(item)),
@@ -376,7 +380,11 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
                     task['due_at'] as int)) : '')),
               trailing:PopupMenuButton<String>(
                 tooltip:'Task progress',
-                onSelected:(v)=>widget.onGeneralStatus(task['id'] as int,v),
+                onOpened:()=>FocusManager.instance.primaryFocus?.unfocus(),
+                onSelected:(v){
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  widget.onGeneralStatus(task['id'] as int,v);
+                },
                 itemBuilder:(_)=>const [
                   PopupMenuItem(value:'planned',child:Text('Not Started')),
                   PopupMenuItem(value:'in_progress',child:Text('In Progress')),
@@ -407,10 +415,13 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
             for(final option in [false,true])
               Expanded(child:InkWell(
                 key:ValueKey(option?'general-tasks-tab':'service-tasks-tab'),
-                onTap:()=>setState((){
+                onTap:(){
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  setState((){
                   _general=option;
                   _status='Active';_employee='';_search.clear();
-                }),
+                  });
+                },
                 child:Container(
                   padding:const EdgeInsets.symmetric(vertical:13),
                   decoration:BoxDecoration(
@@ -427,6 +438,7 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
         const SizedBox(height:9),
         TextField(
           controller:_search,
+          onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
           decoration:InputDecoration(
             isDense:true,
             hintText:_general?'Search general tasks':'Search job tasks',
