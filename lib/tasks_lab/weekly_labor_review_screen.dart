@@ -857,7 +857,8 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
               const SizedBox(width: 10),
               Expanded(child: FilledButton(
                 onPressed: _loading || _saving || _future ||
-                  _totalHours <= 0 ? null : _verifyPayment,
+                  _totalHours <= 0 || widget.rateCents == null ||
+                  widget.rateCents! <= 0 ? null : _verifyPayment,
                 child: const Text('Verify Payment'))),
             ]),
           ]),
