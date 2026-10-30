@@ -13,3 +13,7 @@ Release blocker: this commit must pass exact-head checks and produce a permanent
 ## Build trigger
 
 Requested signed Android candidate packaging on October 30, 2026, after PR #401 diagnostics and iOS compilation passed. No Flutter source edits in this build-trigger commit. Verify source SHA, signed APK certificate, versionCode and preserved application ID before distribution. Keep local Gloria data intact by installing as an upgrade only.
+
+## Signed Android build request — exact candidate
+
+Re-trigger the Android `push` workflow on this candidate branch after the fail-closed gate branch correction. Run exact-SHA Diagnostics and iOS prerequisite checks and verify the resulting permanently signed Android artifact before any owner installation. No application feature source or local user data changed by this request.
