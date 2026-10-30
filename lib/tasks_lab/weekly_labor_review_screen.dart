@@ -758,6 +758,17 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                                   style: TextStyle(fontSize: 11,
                                     color: Color(0xFF167A54),
                                     fontWeight: FontWeight.w700)),
+                              const SizedBox(height: 2),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: Text(
+                                  _expandedTasks.contains(_id(task))
+                                      ? 'Tap to collapse' : 'Tap to expand',
+                                  style: const TextStyle(
+                                    fontSize: 10.5,
+                                    color: Color(0xFF64748B)),
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -768,9 +779,6 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
                       IconButton(icon:const Icon(Icons.edit_outlined,size:19),
                         tooltip:'Edit mechanic assigned / payable hours',
                         onPressed:()=>_editHours(task)),
-                      Icon(_expandedTasks.contains(_id(task))
-                        ? Icons.keyboard_arrow_up:Icons.keyboard_arrow_down,
-                        color:const Color(0xFF64748B),size:19),
                       const SizedBox(width:6),
                     ]),
                     if(_expandedTasks.contains(_id(task)))
