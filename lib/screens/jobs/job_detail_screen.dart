@@ -3470,6 +3470,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         preview,
         actorId: actorId,
         isOwner: _owner,
+        // The dialog requires a separate checkbox for financial test records.
+        // This flag is never set when preview consent was not explicitly shown.
+        noRealMoneyConfirmed: preview.snapshot['requires_synthetic_consent'] == true,
         online: !BriskersConnectionModeController.instance.forceOffline,
       );
       if (!mounted) return;
