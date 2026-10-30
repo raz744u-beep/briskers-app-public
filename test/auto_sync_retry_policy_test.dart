@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/core/auto_sync_retry_policy.dart';
 
@@ -44,8 +46,16 @@ void main() {
   });
 
   test('Auto and manual Sync Now both retain document and payment outbox replay', () {
-    // Source contract: this test guards against repeating the production
-    // regression where manual Sync Now omitted invoice payments and mileage.
-    // It uses local source fixture only; never modifies real shop data.
+    // Regression guard on exact in-repo source, no actual server mutations.
+    final manual = File('lib/screens/settings/local_sync_status_screen.dart')
+        .readAsStringSync();
+    final auto = File('lib/screens/business_gate.dart').readAsStringSync();
+    expect(manual, contains('_payments.flush(widget.businessId)'));
+    expect(manual, contains('_mileage.flush(widget.businessId)'));
+    expect(manual, contains('_payments.flushPendingServerEdits(widget.businessId)'));
+    expect(auto, contains('_retryPendingAutoSync()'));
+    expect(auto, contains('_offlineCustomerVehicle.flush(businessId)'));
+    expect(auto, contains('_offlineDocumentDraft.flush(businessId)'));
+    expect(auto, contains('_offlinePayments.flush(businessId)'));
   });
 }
