@@ -9,3 +9,7 @@ Excluded: experimental Tasks/Payroll TEST, Owner Delete v3 draft, voice assistan
 Data safety: do not uninstall Briskers or clear device storage; user has unuploaded original Gloria records. Do not duplicate the already-recorded payment. Verify invoice/job/customer reconciliation only after inspecting outbox state.
 
 Release blocker: this commit must pass exact-head checks and produce a permanently signed APK. Verify build identity and artifact integrity before sharing. Phone verification remains required for S26 VIN flashlight and real Gloria recovery.
+
+## Build trigger
+
+Requested signed Android candidate packaging on October 30, 2026, after PR #401 diagnostics and iOS compilation passed. No Flutter source edits in this build-trigger commit. Verify source SHA, signed APK certificate, versionCode and preserved application ID before distribution. Keep local Gloria data intact by installing as an upgrade only.
