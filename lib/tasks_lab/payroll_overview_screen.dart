@@ -192,10 +192,9 @@ class _LabPayrollOverviewScreenState extends State<LabPayrollOverviewScreen> {
     final rate = widget.rates[id];
     final rateLabel = rate == null ? 'Rate unset'
       : _money(rate) + '/hr';
-    final name = employee['role'] == 'secretary'
-      ? 'Karol'
-      : widget.nicknames[id] ?? employee['nickname'] ??
-        employee['name'] ?? 'Employee';
+    final name = widget.nicknames[id] ?? employee['nickname'] ??
+      (employee['role'] == 'secretary' ? 'Secretary' :
+        employee['name'] ?? 'Employee');
     final role = employee['role'];
     final icon = role == 'secretary'
       ? Icons.headset_mic_outlined
