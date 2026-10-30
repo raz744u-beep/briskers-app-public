@@ -1210,7 +1210,11 @@ class AppointmentSyncService {
         if (error is LocalJobQuarantineException) rethrow;
         final message=error.toString();
         final conflict=message.contains('40001') ||
-          message.contains('Appointment changed on another device');
+          message.contains('Appointment changed on another device') ||
+          // A previously deleted appointment cannot be deleted again with
+          // the stale local revision. Stop infinite replay; keep the local
+          // deletion tombstone and queue entry for Owner reconciliation.
+          message.contains('Appointment missing or deleted by another operation');
         await _database.transaction(() async {
           await _database.customStatement(
             """UPDATE sync_outbox SET state=?,attempt_count=attempt_count+1,
