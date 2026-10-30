@@ -44,9 +44,8 @@ void main() {
       .split('Future<void> _editTask(').first;
     final controls=main.split('Widget _mechanicProgressControls(').last
       .split('Map<String, dynamic>? _firstCompletion(').first;
-    expect(card,contains('Expanded(child: Text(credit.mechanics,'));
-    expect(card,contains('fontSize: 13.5,\n'
-      '                              fontWeight: FontWeight.w700,'));
+    expect(card,contains('Expanded(child: _linkedMechanics(task, record))'));
+    expect(main, contains('decoration: TextDecoration.underline'));
     expect(card,contains('Text(credit.hours,\n'
       '                            style: const TextStyle(fontSize: 12.5,\n'
       '                              fontWeight: FontWeight.w400,'));
