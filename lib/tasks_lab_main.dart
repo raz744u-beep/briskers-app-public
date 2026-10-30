@@ -1596,27 +1596,62 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     await _offerCompleteJobIfReady();
   }
 
-  Widget _jobsListPage() => ListView(
-    children: [
+  // Keep the Jobs list dense: every card exposes progress without expansion.
+  // Progress is derived only from the local task records, never from a server.
+  Widget _jobsListPage() {
+    final total = tasks.length;
+    final done = tasks.where((task) =>
+      _firstCompletion(task) != null || task['status'] == 'done').length;
+    final fraction = total == 0 ? 0.0 : done / total;
+    return ListView(children: [
       _sectionHeader('Jobs', subtitle: '1 example job · Offline TEST'),
       Card(
-        margin: const EdgeInsets.symmetric(horizontal: 10),
+        margin: const EdgeInsets.fromLTRB(10, 5, 10, 5),
         color: BriskersColors.jobs.withValues(alpha: 0.06),
-        child: ListTile(
-          leading: const CircleAvatar(
-            backgroundColor: Color(0x2000897B),
-            child: Icon(Icons.build_outlined, color: BriskersColors.jobs)),
-          title: const Text('J-24 · Richard Goff',
-            style: TextStyle(fontWeight: FontWeight.w800)),
-          subtitle: const Text(
-            'Oil leaks, maintenance\n2012 Hyundai Equus · 4 labor tasks'),
-          isThreeLine: true,
-          trailing: _jobStatusControl(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
           onTap: () => _openVehicleJob(0),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  const Expanded(child: Text('J-24 · Richard Goff',
+                    style: TextStyle(fontWeight: FontWeight.w800,
+                      fontSize: 14))),
+                  _jobStatusControl(),
+                ]),
+                const Text('2012 Hyundai Equus · Oil leaks, maintenance',
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12.5,
+                    color: Color(0xFF64748B))),
+                const SizedBox(height: 6),
+                Row(children: [
+                  Expanded(child: Text('$done of $total tasks done',
+                    style: const TextStyle(fontSize: 11.5,
+                      fontWeight: FontWeight.w700))),
+                  Text('${(fraction * 100).round()}%',
+                    style: const TextStyle(fontSize: 11.5,
+                      color: Color(0xFF64748B))),
+                ]),
+                const SizedBox(height: 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: fraction,
+                    minHeight: 5,
+                    backgroundColor: const Color(0xFFDCE6EA),
+                    color: BriskersColors.jobs)),
+                const Align(
+                  alignment: Alignment.centerRight,
+                  child: Text('Tap to open job',
+                    style: TextStyle(fontSize: 10.5,
+                      color: Color(0xFF64748B)))),
+              ])),
         ),
       ),
-    ],
-  );
+    ]);
+  }
 
   Widget _jobInfoRow(IconData icon, String title, String value) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 7),
