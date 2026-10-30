@@ -568,7 +568,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       }).join(' · ');
     }
     final mechanic = _employeeName(record['completed_by']?.toString());
-    return '$mechanic · Unpaid (0 hrs)';
+    return '$mechanic · No payroll hours';
   }
 
   String _laborAssignment(Map<String, dynamic> task) {
@@ -578,7 +578,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     }
     final hours = (task['payroll_hours'] as num?)?.toDouble();
     if (hours == 0) {
-      return "${_employeeName(task['employee_id']?.toString())} · Unpaid";
+      return "${_employeeName(task['employee_id']?.toString())} · Nonpayable";
     }
     return "${_employeeName(task['employee_id']?.toString())} · ${task['payroll_hours'] ?? '—'} hrs";
   }
@@ -822,7 +822,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       final total = splits.fold<double>(0, (sum, row) =>
         sum + ((row['hours'] as num?)?.toDouble() ?? 0));
       return (mechanics: mechanics,
-        hours: total > 0 ? '${total.toStringAsFixed(1)} hrs' : 'Unpaid');
+        hours: total > 0 ? '${total.toStringAsFixed(1)} hrs' : 'Nonpayable');
     }
     final mechanic = completed != null
       ? completed['completed_by']?.toString()
@@ -831,7 +831,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       : (task['payroll_hours'] as num?)?.toDouble();
     return (mechanics: _employeeName(mechanic),
       hours: hours == null ? '—'
-        : hours == 0 ? 'Unpaid' : '${hours.toStringAsFixed(1)} hrs');
+        : hours == 0 ? 'Nonpayable' : '${hours.toStringAsFixed(1)} hrs');
   }
 
   // A collapsed task is two lines high. Tapping any card expands its full
