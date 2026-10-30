@@ -116,7 +116,12 @@ void validateDeletionV3Confirmation(Map<String, dynamic> value,
     String businessId, String jobId, String actorId) {
   const keys = {'schema_version', 'protocol_version', 'business_id', 'job_id',
     'actor_id', 'scope', 'preview_id', 'issued_at', 'expires_at', 'graph_hash', 'deleted_entities'};
-  if (value.length != keys.length || !keys.every(value.containsKey)) {
+  // The backend issues a minimal preview confirmation. For an explicitly
+  // reviewed synthetic financial deletion, the Owner may add one true flag.
+  final hasFinancialConsent = value.containsKey('no_real_money_confirmed');
+  if (value.length != keys.length + (hasFinancialConsent ? 1 : 0) ||
+      !keys.every(value.containsKey) ||
+      (hasFinancialConsent && value['no_real_money_confirmed'] != true)) {
     throw const FormatException('Confirmation must contain only minimal consent fields.');
   }
   final entities = value['deleted_entities'];
