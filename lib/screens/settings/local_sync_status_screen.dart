@@ -592,7 +592,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   }
 
   Future<void> _recoverPendingInvoices() async {
-    if (_syncing) return;
+    if (_syncing) { return; }
     if (BriskersConnectionModeController.instance.forceOffline) {
       setState(() {
         _error = 'Switch out of Force Offline before attempting recovery.';
@@ -633,10 +633,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
             'Review the pending operation error.',
           );
         }
-        if (mounted) setState(() => _syncStep = 1);
+        if (mounted) { setState(() => _syncStep = 1); }
 
-        if (mounted) setState(() => _syncStage = '2/3 Invoice upload');
-        if (invoice > 0) await _documentDrafts.flush(widget.businessId);
+        if (mounted) { setState(() => _syncStage = '2/3 Invoice upload'); }
+        if (invoice > 0) { await _documentDrafts.flush(widget.businessId); }
         if (await _pendingRecoveryOperations('document_draft_create') > 0) {
           throw StateError(
             'Invoice is still awaiting server confirmation. '
@@ -644,17 +644,17 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
             'Review the invoice operation error.',
           );
         }
-        if (mounted) setState(() => _syncStep = 2);
+        if (mounted) { setState(() => _syncStep = 2); }
 
-        if (mounted) setState(() => _syncStage = '3/3 Recorded payment upload');
-        if (payment > 0) await _payments.flush(widget.businessId);
+        if (mounted) { setState(() => _syncStage = '3/3 Recorded payment upload'); }
+        if (payment > 0) { await _payments.flush(widget.businessId); }
         if (await _pendingRecoveryOperations('invoice_payment_received') > 0) {
           throw StateError(
             'The payment is still waiting for an authoritative server receipt. '
             'Do not enter it a second time.',
           );
         }
-        if (mounted) setState(() => _syncStep = 3);
+        if (mounted) { setState(() => _syncStep = 3); }
         message = 'The queued customer, vehicle, invoice and received-payment '
             'uploads have cleared. Check the invoice number and confirm the '
             'payment separately before finalizing anything.';
