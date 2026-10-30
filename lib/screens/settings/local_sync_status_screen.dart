@@ -25,6 +25,8 @@ import '../../services/offline_document_edit_service.dart';
 import '../../services/local_tax_settings_cache.dart';
 import '../../services/local_invoice_status_styles_cache.dart';
 import '../../services/offline_estimate_invoice_service.dart';
+import '../../services/offline_invoice_mileage_service.dart';
+import '../../services/offline_invoice_payment_ledger.dart';
 import '../../services/offline_work_findings_service.dart';
 import '../../services/offline_attachment_mirror_service.dart';
 
@@ -72,10 +74,12 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       LocalInvoiceStatusStylesCache();
   final OfflineEstimateInvoiceService _estimateInvoice =
       OfflineEstimateInvoiceService();
+  final OfflineInvoiceMileageService _mileage = OfflineInvoiceMileageService();
+  final OfflineInvoicePaymentLedger _payments = OfflineInvoicePaymentLedger();
 
   bool _loading = true;
   bool _syncing = false;
-  static const int _syncStepCount = 19;
+  static const int _syncStepCount = 22;
   int _syncStep = 0;
   String? _syncStage;
   String? _error;
@@ -639,6 +643,20 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
     await attempt(
       'Estimate / invoice changes',
       () => _estimateInvoice.flush(widget.businessId),
+    );
+    // Invoice creation has to reconcile its local ID before any payment
+    // or mileage write can safely target the permanent server invoice.
+    await attempt(
+      'Invoice mileage changes',
+      () => _mileage.flush(widget.businessId),
+    );
+    await attempt(
+      'Received invoice payments',
+      () => _payments.flush(widget.businessId),
+    );
+    await attempt(
+      'Pending payment corrections',
+      () => _payments.flushPendingServerEdits(widget.businessId),
     );
     await attempt(
       tr('preInspection'),

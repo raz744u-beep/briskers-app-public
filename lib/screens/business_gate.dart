@@ -2,10 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/supabase_config.dart';
 import '../core/connection_mode.dart';
+import '../core/auto_sync_retry_policy.dart';
+import '../local/local_database_provider.dart';
 import '../services/briskers_api.dart';
 import '../services/appointment_sync_service.dart';
 import '../services/customer_vehicle_sync_service.dart';
@@ -39,7 +42,7 @@ class BusinessGate extends StatefulWidget {
   State<BusinessGate> createState() => _BusinessGateState();
 }
 
-class _BusinessGateState extends State<BusinessGate> {
+class _BusinessGateState extends State<BusinessGate> with WidgetsBindingObserver {
   static const _api = BriskersApi();
   final JobSyncService _jobSync = JobSyncService();
   final AppointmentSyncService _appointmentSync =
@@ -81,18 +84,32 @@ class _BusinessGateState extends State<BusinessGate> {
 
   List<Map<String, dynamic>>? _businesses;
   String? _error;
+  Timer? _autoRetryTimer;
+  bool _inForeground = true;
+  bool _inspectingPendingRetry = false;
+  int _stalledRetryAttempts = 0;
+  DateTime? _nextRetryAt;
+  final Map<String, Future<void>> _activeRefreshes = {};
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     BriskersConnectionModeController.instance.addListener(
       _connectionModeChanged,
+    );
+    // Retry only while foregrounded. Backoff prevents repeated server floods.
+    _autoRetryTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => unawaited(_retryPendingAutoSync()),
     );
     _load();
   }
 
   void _connectionModeChanged() {
     if (BriskersConnectionModeController.instance.forceOffline) return;
+    _stalledRetryAttempts = 0;
+    _nextRetryAt = null;
     final businesses = _businesses;
     if (businesses == null || businesses.isEmpty) return;
     final business = businesses.first;
@@ -111,11 +128,78 @@ class _BusinessGateState extends State<BusinessGate> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _inForeground = state == AppLifecycleState.resumed;
+    if (_inForeground && mounted) {
+      // Return to the app is an opportunity to recover an interrupted upload.
+      _nextRetryAt = null;
+      unawaited(_retryPendingAutoSync());
+    }
+  }
+
+  @override
   void dispose() {
+    _autoRetryTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     BriskersConnectionModeController.instance.removeListener(
       _connectionModeChanged,
     );
     super.dispose();
+  }
+
+  Future<int> _pendingUploadCount(String businessId) async {
+    final row = await localDatabase.customSelect(
+      "SELECT COUNT(*) AS n FROM sync_outbox "
+      "WHERE business_id=? AND state IN ('pending','inflight')",
+      variables: [Variable<String>(businessId)],
+    ).getSingle();
+    return row.read<int>('n');
+  }
+
+  Future<void> _retryPendingAutoSync() async {
+    if (_inspectingPendingRetry || !mounted || !_inForeground ||
+        BriskersConnectionModeController.instance.forceOffline) { return; }
+    final businesses = _businesses;
+    if (businesses == null || businesses.isEmpty) { return; }
+    final business = businesses.first;
+    final businessId =
+        '${business['business_id'] ?? business['id'] ?? ''}';
+    final roleCode =
+        '${business['role_code'] ?? business['role'] ?? ''}';
+    if (businessId.isEmpty || roleCode == 'kiosk') { return; }
+
+    _inspectingPendingRetry = true;
+    try {
+      final before = await _pendingUploadCount(businessId);
+      if (!mounted || !AutoSyncRetryPolicy.eligible(
+        inForeground: _inForeground,
+        forceOffline: BriskersConnectionModeController.instance.forceOffline,
+        busy: false,
+        pendingCount: before,
+        now: DateTime.now(),
+        notBefore: _nextRetryAt,
+      )) { return; }
+      await _refreshLocalData(businessId, roleCode: roleCode);
+      if (!mounted) { return; }
+      final after = await _pendingUploadCount(businessId);
+      _stalledRetryAttempts =
+          after < before ? 0 : _stalledRetryAttempts + 1;
+      _nextRetryAt = DateTime.now().add(
+        AutoSyncRetryPolicy.delayAfterStalledAttempt(
+          _stalledRetryAttempts,
+        ),
+      );
+    } catch (_) {
+      // The original network failure stays with the durable outbox entry.
+      _stalledRetryAttempts += 1;
+      _nextRetryAt = DateTime.now().add(
+        AutoSyncRetryPolicy.delayAfterStalledAttempt(
+          _stalledRetryAttempts,
+        ),
+      );
+    } finally {
+      _inspectingPendingRetry = false;
+    }
   }
 
   String? get _businessCacheKey {
@@ -234,7 +318,24 @@ class _BusinessGateState extends State<BusinessGate> {
     }
   }
 
+  // Startup may load cached and remote business context concurrently.
+  // Share the same upload pass rather than replaying it twice.
   Future<void> _refreshLocalData(
+    String businessId, {
+    required String roleCode,
+  }) {
+    final previous = _activeRefreshes[businessId];
+    if (previous != null) return previous;
+    final work = _runLocalRefresh(businessId, roleCode: roleCode);
+    _activeRefreshes[businessId] = work;
+    return work.whenComplete(() {
+      if (identical(_activeRefreshes[businessId], work)) {
+        _activeRefreshes.remove(businessId);
+      }
+    });
+  }
+
+  Future<void> _runLocalRefresh(
     String businessId, {
     required String roleCode,
   }) async {

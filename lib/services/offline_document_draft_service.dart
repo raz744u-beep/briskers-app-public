@@ -29,6 +29,8 @@ class OfflineDocumentDraftService {
   final LocalDocumentDetailCache _cache;
   final BriskersLocalDatabase _database;
   final LocalDocumentRepository _documents;
+  // Share each in-flight upload across Auto and manual Sync Now on this device.
+  static final Expando<Map<String, Future<void>>> _activeFlushes = Expando();
   final Random _random = Random.secure();
 
   bool isLocalDraftId(String id) => id.startsWith('local-estimate-') || id.startsWith('local-invoice-');
@@ -1186,7 +1188,18 @@ class OfflineDocumentDraftService {
     throw StateError('Converted invoice line reconciliation did not complete safely.');
   }
 
-  Future<void> flush(String businessId) async {
+  Future<void> flush(String businessId) {
+    final active = _activeFlushes[_database] ??= <String, Future<void>>{};
+    final existing = active[businessId];
+    if (existing != null) return existing;
+    final work = _flushInternal(businessId);
+    active[businessId] = work;
+    return work.whenComplete(() {
+      if (identical(active[businessId], work)) active.remove(businessId);
+    });
+  }
+
+  Future<void> _flushInternal(String businessId) async {
     final rows = await _database.customSelect(
       '''
       SELECT id, entity_id, payload_json
