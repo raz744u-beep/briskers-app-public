@@ -235,9 +235,14 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
                   style: const TextStyle(fontSize: 11.5,
                     fontWeight: FontWeight.w700)),
               ),
-              const Icon(Icons.chevron_right, size: 20),
             ]),
             const SizedBox(height: 13),
+            const Align(
+              alignment: Alignment.centerRight,
+              child: Text('Tap to view details',
+                style: TextStyle(fontSize: 10.5,
+                  color: Color(0xFF64748B)))),
+            const SizedBox(height: 5),
             Row(children: [
               _metric('Hours',
                 week.hasDraft ? week.hours.toStringAsFixed(1) : '—',
