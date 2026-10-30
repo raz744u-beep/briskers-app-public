@@ -131,64 +131,73 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
     final transferred=records.fold<int>(0,(sum,row)=>
       sum+(row['net_cents'] as int));
     if (!mounted) { return; }
-    await showDialog<void>(
-      context: context,
-      builder: (dialog) => StatefulBuilder(
-        builder: (dialog, updateDialog) => AlertDialog(
-        title: Text('Week of ' +
-          _date.format(LabPayrollWeekSource.dateForKey(week.weekKey))),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView(
-            shrinkWrap: true,
+    // Full-screen payroll history keeps task details readable on narrow phones.
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (routeContext) => StatefulBuilder(
+        builder: (context, updatePage) => Scaffold(
+          appBar: AppBar(
+            title: Text('Week of ' +
+              _date.format(LabPayrollWeekSource.dateForKey(week.weekKey))),
+          ),
+          body: SafeArea(child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
             children: [
-              if(records.isNotEmpty) ...[
-                Text('Gross pay: '+_money(gross),
-                  style:const TextStyle(fontWeight:FontWeight.w700)),
-                Text('Debt repaid: '+_money(repaid)),
-                Text('Transferred: '+_money(transferred)),
-                const Divider(),
+              const Text('2012 Hyundai Equus',
+                style: TextStyle(fontSize: 13,
+                  color: Color(0xFF64748B))),
+              const SizedBox(height: 10),
+              if (records.isNotEmpty) ...[
+                Text('Gross pay: ' + _money(gross),
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text('Debt repaid: ' + _money(repaid)),
+                Text('Transferred: ' + _money(transferred)),
+                const Divider(height: 22),
               ],
               if (rows.isEmpty)
                 const Text('No task-linked TEST payments for this week.'),
               for (final row in rows.take(visibleTaskCount))
-                ListTile(
-                  isThreeLine: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(row.read<String>('description'),
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: Text('J-24 · ' +
-                    row.read<double>('hours').toStringAsFixed(2) + ' hrs · ' +
-                    row.read<String>('method').toUpperCase() + '\n' +
-                    _date.format(DateTime.fromMillisecondsSinceEpoch(
-                      row.read<int>('paid_at'))) +
-                    (row.read<String>('note').isEmpty ? '' :
-                      '\n' + row.read<String>('note'))),
-                  trailing: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ExpansionTile(
+                    tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+                    title: Text(row.read<String>('description'),
+                      maxLines: 2, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                    subtitle: Text(
+                      row.read<double>('hours').toStringAsFixed(2) +
+                      ' hrs · ' + _money(row.read<int>('cents')) +
+                      ' · Paid\\nTap to expand',
+                      style: const TextStyle(fontSize: 11.5,
+                        color: Color(0xFF64748B))),
+                    childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                     children: [
-                      const Text('✓ Paid', style: TextStyle(
-                        fontSize: 11, fontWeight: FontWeight.w800,
-                        color: Color(0xFF117C56))),
-                      Text(_money(row.read<int>('cents'))),
+                      const Align(alignment: Alignment.centerLeft,
+                        child: Text('Job J-24 · Invoice #6342')),
+                      Align(alignment: Alignment.centerLeft,
+                        child: Text(
+                          row.read<String>('method').toUpperCase() + ' · ' +
+                          _date.format(DateTime.fromMillisecondsSinceEpoch(
+                            row.read<int>('paid_at'))))),
+                      if (row.read<String>('note').isNotEmpty)
+                        Align(alignment: Alignment.centerLeft,
+                          child: Text('Notes: ' + row.read<String>('note'))),
+                      const Align(alignment: Alignment.centerRight,
+                        child: Text('Tap to collapse',
+                          style: TextStyle(fontSize: 10.5,
+                            color: Color(0xFF64748B)))),
                     ],
                   ),
                 ),
               if (rows.length > visibleTaskCount)
                 TextButton(
                   key: const Key('paid-task-history-load-more'),
-                  onPressed: () => updateDialog(() => visibleTaskCount += 10),
+                  onPressed: () => updatePage(() => visibleTaskCount += 10),
                   child: Text('Load More · ${rows.length - visibleTaskCount} remaining')),
             ],
-          ),
+          )),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialog),
-            child: const Text('Close')),
-        ],
-      )),
-    );
+      ),
+    ));
   }
 
   Widget _card(LabPayrollWeek week) {
