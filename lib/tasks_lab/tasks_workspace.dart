@@ -465,7 +465,7 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
                 ['Active','All','Not Started','In Progress','Done'],
                 (v)=>setState(()=>_status=v))),
             ]),
-            const SizedBox(height:8),
+            const SizedBox(height:5),
             Row(children:[
               Expanded(child:_picker(_general?'Category':'Task Type',
                 _general?_category:_kind,
