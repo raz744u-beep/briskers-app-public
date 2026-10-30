@@ -862,7 +862,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
             child: const Text('Save Repayment (TEST)'),
           ),
           const SizedBox(height: 8),
-          const Text('Payroll deductions happen automatically during Verify Payment. '
+          const Text('Payroll deductions are optional during Verify Payment. '
             'Record separate cash, Zelle, check or ACH repayments here.',
             style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
           const Divider(height: 25),
