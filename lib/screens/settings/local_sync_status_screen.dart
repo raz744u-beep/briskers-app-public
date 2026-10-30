@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/briskers_i18n.dart';
@@ -578,6 +579,91 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   // recorded payment operations.  Do not refresh unrelated catalog/tax,
   // appointments or jobs when a single invoice is awaiting its number.
   // These services retain their original durable operation IDs.
+  // Owner-only and read-only. No network calls, mutations, or queue ACKs.
+  // Captures the exact four known Gloria outbox rows plus linked local tables.
+  Future<void> _copyGloriaRecoverySnapshot() async {
+    if (!widget.isOwner) return;
+    try {
+      const expected = <int, String>{
+        252: 'customer_create',
+        253: 'vehicle_create',
+        254: 'document_draft_create',
+        255: 'invoice_payment_received',
+      };
+      final operations = <Map<String, dynamic>>[];
+      for (final entry in expected.entries) {
+        final rows = await localDatabase.customSelect(
+          'SELECT * FROM sync_outbox WHERE business_id=? AND id=? AND entity_type=?',
+          variables: [
+            Variable<String>(widget.businessId),
+            Variable<int>(entry.key),
+            Variable<String>(entry.value),
+          ],
+        ).get();
+        if (rows.length != 1) {
+          throw StateError('Expected Gloria outbox #${entry.key} (${entry.value}) was not found. No export copied.');
+        }
+        operations.add(Map<String, dynamic>.from(rows.single.data));
+      }
+      final customerId = operations[0]['entity_id'].toString();
+      final vehicleId = operations[1]['entity_id'].toString();
+      final invoiceId = operations[2]['entity_id'].toString();
+      const knownCustomer = 'local-customer-1793301637612107';
+      const knownVehicle = 'local-vehicle-1793301794872090';
+      const knownInvoice = 'local-invoice-f9eaf3b3-3a9c-427a-8c8f-8f01d0fa6385';
+      if (customerId != knownCustomer ||
+          vehicleId != knownVehicle ||
+          invoiceId != knownInvoice) {
+        throw StateError('Gloria record identifiers have changed. Stop and inspect before exporting.');
+      }
+      Future<List<Map<String, dynamic>>> read(
+        String sql, List<Variable> params,
+      ) async => (await localDatabase.customSelect(sql, variables: params).get())
+          .map((row) => Map<String, dynamic>.from(row.data)).toList();
+      final customer = await read(
+        'SELECT * FROM local_customers WHERE business_id=? AND id=?',
+        [Variable<String>(widget.businessId), Variable<String>(customerId)],
+      );
+      final vehicle = await read(
+        'SELECT * FROM local_vehicles WHERE business_id=? AND id=?',
+        [Variable<String>(widget.businessId), Variable<String>(vehicleId)],
+      );
+      final documents = await read(
+        'SELECT * FROM local_documents WHERE business_id=? AND id=?',
+        [Variable<String>(widget.businessId), Variable<String>(invoiceId)],
+      );
+      final jobs = await read(
+        'SELECT * FROM local_jobs WHERE business_id=? AND id=?',
+        [Variable<String>(widget.businessId),
+          const Variable<String>('local-job-f9eaf3b3-3a9c-427a-8c8f-8f01d0fa6385')],
+      );
+      if (customer.length != 1 || vehicle.length != 1 || documents.length != 1) {
+        throw StateError('One of Gloria local source records is missing. Nothing exported.');
+      }
+      final evidence = <String, dynamic>{
+        'format': 'briskers-gloria-recovery-readonly-v1',
+        'purpose': 'Restricted private financial recovery; do not publicly share',
+        'business_id': widget.businessId,
+        'operations': operations,
+        'local_customer': customer.single,
+        'local_vehicle': vehicle.single,
+        'local_document': documents.single,
+        'local_jobs': jobs,
+      };
+      final snapshot = const JsonEncoder.withIndent('  ').convert(evidence);
+      await Clipboard.setData(ClipboardData(text: snapshot));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gloria recovery snapshot copied (${snapshot.length} characters). Paste into a private recovery message. No records changed.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gloria export stopped safely: $error')),
+      );
+    }
+  }
+
   Future<int> _pendingRecoveryOperations(String type) async {
     final row = await localDatabase.customSelect(
       "SELECT COUNT(*) AS n FROM sync_outbox "
@@ -1233,6 +1319,18 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                     ),
                   ],
                   const SizedBox(height: 14),
+                  if (widget.isOwner) ...[
+                    OutlinedButton.icon(
+                      onPressed: _copyGloriaRecoverySnapshot,
+                      icon: const Icon(Icons.copy_all_outlined),
+                      label: const Text('Copy Gloria recovery snapshot (read-only)'),
+                    ),
+                    const Text(
+                      'Copies private customer, invoice and payment recovery data. Share only in a private conversation. No upload or local changes.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   FilledButton.icon(
                     onPressed: _syncing ? null : _recoverPendingInvoices,
                     icon: const Icon(Icons.receipt_long_outlined),
