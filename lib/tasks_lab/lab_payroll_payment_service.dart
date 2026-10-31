@@ -88,6 +88,17 @@ class LabPayrollPaymentService {
       if (previous != null) {
         throw StateError('Weekly payment already finalized for this week');
       }
+      // The legacy hourly settlement flow can also pay the same week.
+      // Never let a flexible payment silently settle it a second time.
+      final existing = await localDatabase.customSelect(
+        'SELECT disbursement_id FROM lab_payroll_settlements '
+        'WHERE business_id=? AND employee_id=? AND week_key=? LIMIT 1',
+        variables: [const Variable<String>(_shop),
+          Variable<String>(employeeId), Variable<String>(weekKey)],
+      ).getSingleOrNull();
+      if (existing != null) {
+        throw StateError('This payroll week already has a settlement');
+      }
       final opening = await localDatabase.customSelect(
         'SELECT opening_cents FROM lab_employee_advance_balances '
         'WHERE business_id=? AND employee_id=?',
