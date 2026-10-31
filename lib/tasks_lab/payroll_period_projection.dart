@@ -55,6 +55,18 @@ class LabPayrollPeriodProjection {
       if(when==null||!inPeriod(when)||raw is! int||raw<0) {continue;}
       grossByWeek[key]=(grossByWeek[key]??0)+raw;
     }
+    // An advance deduction settles wages without transferring cash.
+    // Count it toward settled compensation, but never toward Paid cash.
+    var deducted = 0;
+    for (final record in settlements) {
+      if (record['employee_id'] != employeeId) continue;
+      final key = record['week_key']?.toString() ?? '';
+      final when = DateTime.tryParse(key);
+      final cents = record['debt_cents'];
+      if (when != null && inPeriod(when) && cents is int && cents > 0) {
+        deducted += cents;
+      }
+    }
     var paid = 0;
     for (final row in payments) {
       if (row['employee_id'] != employeeId || row['kind'] != 'pay' ||
@@ -74,7 +86,7 @@ class LabPayrollPeriodProjection {
         final gross = grossByWeek.values.fold<int>(0, (sum, n) => sum + n);
         return LabPayrollPeriodProjection(
           hours:null, grossCents:gross, paidCents:paid,
-          balanceCents:(gross-paid).clamp(0,1000000000).toInt());
+          balanceCents:(gross-paid-deducted).clamp(0,1000000000).toInt());
       }
       return LabPayrollPeriodProjection(
         hours:null,grossCents:null,paidCents:paid,balanceCents:null);
@@ -105,7 +117,7 @@ class LabPayrollPeriodProjection {
     }
     return LabPayrollPeriodProjection(
       hours:hrs,grossCents:gross,paidCents:paid,
-      balanceCents:(gross-paid).clamp(0,1000000000).toInt());
+      balanceCents:(gross-paid-deducted).clamp(0,1000000000).toInt());
 
   }
 }
