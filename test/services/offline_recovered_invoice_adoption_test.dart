@@ -120,6 +120,46 @@ void main() {
     return row.read<int>('n');
   }
 
+  test('successful adoption quarantines original financial operations',
+      () async {
+    await seed(withProvisionalJob:true);
+    await adopt();
+    final original = await db.customSelect(
+      "SELECT entity_type,state,entity_id,payload_json FROM sync_outbox "
+      "WHERE business_id=? ORDER BY id",
+      variables:[const Variable<String>(b)],
+    ).get();
+    expect(original.length,2);
+    expect(original.map((r) => r.read<String>('state')).toSet(),
+        {'conflict'});
+    expect(original.map((r) => r.read<String>('entity_type')).toSet(),
+        {'document_draft_create','invoice_payment_received'});
+    final paymentRow = original.singleWhere((r) =>
+        r.read<String>('entity_type') == 'invoice_payment_received');
+    final paymentPayload =
+        jsonDecode(paymentRow.read<String>('payload_json')) as Map;
+    expect(paymentPayload['operation_id'],receiptOp);
+    expect(paymentPayload['invoice_id'],si);
+    expect(paymentPayload['amount_cents'],3000);
+    final customer = await db.customSelect(
+      "SELECT id FROM local_customers WHERE business_id=?",
+      variables:[const Variable<String>(b)],
+    ).getSingle();
+    expect(customer.read<String>('id'),sc);
+    final vehicle = await db.customSelect(
+      "SELECT id FROM local_vehicles WHERE business_id=?",
+      variables:[const Variable<String>(b)],
+    ).getSingle();
+    expect(vehicle.read<String>('id'),sv);
+    final invoice = await db.customSelect(
+      "SELECT status,document_number FROM local_documents "
+      "WHERE business_id=? AND id=?",
+      variables:[const Variable<String>(b),const Variable<String>(si)],
+    ).getSingle();
+    expect(invoice.read<String>('status'),'issued');
+    expect(invoice.read<String>('document_number'),'T-100');
+  });
+
   test('non-Owner leaves all original queued operations unchanged', () async {
     await seed();
     await expectLater(adopt(owner:false),throwsStateError);
