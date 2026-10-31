@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:briskers_app/core/shop_payroll_preview.dart';
 import 'package:briskers_app/core/shop_workflow_status_policy.dart';
 
 void main() {
@@ -106,6 +107,30 @@ void main() {
     ]), isFalse);
     expect(ShopWorkflowStatusPolicy.hasUniquePayrollAllocationIds(['  ']),
         isFalse);
+  });
+
+  test('Payroll preview calculates gross and repayment in cents', () {
+    const work = ShopPayrollAllocation(
+      id: 'credit-1', employeeId: 'mechanic-1',
+      hoursHundredths: 250, rateCentsPerHour: 4000,
+      completed: true, alreadyPaid: false,
+    );
+    expect(work.grossCents, 10000);
+    expect(ShopPayrollPreview.grossCents(
+      owner: true, employeeId: 'mechanic-1', selected: [work],
+    ), 10000);
+    expect(ShopPayrollPreview.netCents(
+      grossCents: 10500, repaymentCents: 2000,
+    ), 8500);
+    expect(() => ShopPayrollPreview.grossCents(
+      owner: true, employeeId: 'mechanic-1', selected: [work, work],
+    ), throwsStateError);
+    expect(() => ShopPayrollPreview.grossCents(
+      owner: false, employeeId: 'mechanic-1', selected: [work],
+    ), throwsStateError);
+    expect(() => ShopPayrollPreview.netCents(
+      grossCents: 1000, repaymentCents: 1001,
+    ), throwsArgumentError);
   });
 
   test('Joint close requires Owner, finalized payment and finished work', () {
