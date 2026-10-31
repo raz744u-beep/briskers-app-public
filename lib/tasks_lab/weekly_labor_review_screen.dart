@@ -848,14 +848,27 @@ class _WeeklyLaborReviewLabState extends State<WeeklyLaborReviewLab> {
               ]),
             ),
             if (widget.rateCents == null || widget.rateCents! <= 0)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 9),
-                child: Text(
-                  'No hourly rate is configured. Review Flexible Weekly '
-                  'pay in the employee Payroll tab. This screen will not '
-                  'create an hourly payment.',
-                  style: TextStyle(fontSize: 11.5,
-                    color: Color(0xFF64748B))),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 9),
+                child: Column(children: [
+                  const Text(
+                    'No hourly rate is configured. Use Flexible Weekly '
+                    'pay to review the base and hourly supplement. '
+                    'No payment will be created here.',
+                    style: TextStyle(fontSize: 11.5,
+                      color: Color(0xFF64748B))),
+                  if (widget.embedded)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: () =>
+                          DefaultTabController.of(context).animateTo(1),
+                        icon: const Icon(Icons.account_balance_wallet_outlined,
+                          size: 18),
+                        label: const Text('Open Flexible Payroll'),
+                      ),
+                    ),
+                ]),
               ),
             const SizedBox(height: 9),
             Row(children: [
