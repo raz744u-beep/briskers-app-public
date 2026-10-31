@@ -106,11 +106,12 @@ class ShopPayrollPaymentProposal {
   ShopPayrollPaymentProposal({
     required this.operationId,
     required this.employeeId,
-    required this.allocationIds,
+    required List<String> allocationIds,
     required this.grossCents,
     required this.repaymentCents,
     required this.method,
-  }) : netCents = ShopPayrollPreview.netCents(
+  }) : allocationIds = List<String>.unmodifiable(allocationIds),
+       netCents = ShopPayrollPreview.netCents(
           grossCents: grossCents, repaymentCents: repaymentCents) {
     if (operationId.trim().isEmpty || employeeId.trim().isEmpty ||
         method.trim().isEmpty || allocationIds.isEmpty ||
