@@ -2824,9 +2824,18 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       task['status'] != 'done' && task['source_missing'] != 1).length;
     final completed = allRoleTasks.where((task) =>
       task['status'] == 'done' && task['source_missing'] != 1).length;
-    final unassigned = allRoleTasks.where((task) =>
-      task['status'] != 'done' && task['source_missing'] != 1 &&
-      (task['employee_id']?.toString() ?? '').isEmpty).length;
+    // A service line may be allocated through its per-mechanic rows even
+    // when its legacy employee_id is empty. Do not call it unassigned.
+    final unassigned = allRoleTasks.where((task) {
+      if (task['status'] == 'done' || task['source_missing'] == 1) {
+        return false;
+      }
+      if ((task['employee_id']?.toString() ?? '').isNotEmpty) return false;
+      final lineId = task['line_id']?.toString();
+      if (lineId != null &&
+          (allocationsByLine[lineId]?.isNotEmpty ?? false)) return false;
+      return true;
+    }).length;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
