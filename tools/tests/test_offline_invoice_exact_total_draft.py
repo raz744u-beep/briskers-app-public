@@ -3,6 +3,9 @@ from pathlib import Path
 import unittest
 
 SQL = Path("tools/recovery/offline_invoice_exact_total_v2_DRAFT.sql").read_text()
+API = Path("lib/services/briskers_api.dart").read_text()
+DRAFT = Path("lib/services/offline_document_draft_service.dart").read_text()
+STATUS = Path("lib/screens/settings/local_sync_status_screen.dart").read_text()
 D = Decimal
 CENT = D("0.01")
 RATE = D("0.0975")
@@ -63,6 +66,21 @@ class ExactOfflineInvoiceRecoveryContract(unittest.TestCase):
         self.assertIn("p_expected_net_cents bigint", SQL)
         self.assertIn("p_expected_tax_cents bigint", SQL)
         self.assertIn("rolling back", SQL.lower())
+
+    def test_client_routes_mismatch_only_through_explicit_owner_v2(self):
+        self.assertIn("syncOfflineQuickInvoiceExactTotal(", API)
+        self.assertIn("'briskers_sync_offline_quick_invoice_v2'", API)
+        self.assertIn("required int expectedNetCents", API)
+        self.assertIn("required int expectedTaxCents", API)
+        self.assertIn("required int expectedNetCents", API)
+        self.assertIn("bool exactTotalRecovery = false", DRAFT)
+        self.assertIn("final requiresExactTotal =", DRAFT)
+        self.assertIn("if (requiresExactTotal && !exactTotalRecovery)", DRAFT)
+        self.assertIn("requiresExactTotal\n                ? _api.syncOfflineQuickInvoiceExactTotal(", DRAFT)
+        self.assertIn(": _api.syncOfflineQuickInvoice(", DRAFT)
+        self.assertIn("if (!widget.isOwner)", STATUS)
+        self.assertIn("exactTotalRecovery: true", STATUS)
+        self.assertIn("await _documentDrafts.flush(widget.businessId)", STATUS)
 
     def test_never_posts_a_payment_or_deletes_original_data(self):
         self.assertNotIn("INSERT INTO briskers.invoice_pending_payments", SQL)
