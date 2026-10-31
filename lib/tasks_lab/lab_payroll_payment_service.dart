@@ -239,6 +239,16 @@ class LabPayrollPaymentService {
         throw StateError('Selected payroll task is missing; refresh first');
       }
     }
+    // Do not permit a single selected task to carry an empty identity.
+    // Empty IDs could otherwise collide with another task's paid ledger.
+    for (final task in selected) {
+      final documentId = task['document_id']?.toString() ?? '';
+      final lineId = task['line_id']?.toString() ?? '';
+      if (documentId.isEmpty || lineId.isEmpty ||
+          documentId == 'null' || lineId == 'null') {
+        throw StateError('Payroll task identity is missing; refresh first');
+      }
+    }
     final laborCents=(hours*hourlyRateCents).round();
     // Gross can include a separately approved adjustment, but it cannot
     // underpay the labor coverage being marked paid.
