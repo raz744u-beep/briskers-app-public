@@ -169,10 +169,17 @@ def validate_run(run, context, filename, name, workflow_id):
     path = run.get("path")
     if not isinstance(path, str) or path.split("@", 1)[0] != f".github/workflows/{filename}":
         raise GateError(f"Wrong workflow path for {filename}")
+    # Only the isolated Gloria regression is also triggered by branch pushes.
+    # Its workflow identity, source repository, exact SHA and branch must still
+    # match. Diagnostics/iOS keep their pull_request/manual-only event policy.
+    allowed_events = ALLOWED_EVENTS
+    if (filename == GLORIA_RECOVERY_WORKFLOW[0]
+            and context.branch == GLORIA_RECOVERY_BRANCH):
+        allowed_events = ALLOWED_EVENTS | {"push"}
     if (run.get("workflow_id") != workflow_id or run.get("name") != name
             or run.get("head_sha") != context.sha
             or run.get("head_branch") != context.branch
-            or run.get("event") not in ALLOWED_EVENTS):
+            or run.get("event") not in allowed_events):
         raise GateError(f"Wrong workflow, commit, branch or event for {filename}")
     for field in ("repository", "head_repository"):
         repository = run.get(field)
