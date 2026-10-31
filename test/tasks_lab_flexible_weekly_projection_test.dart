@@ -90,6 +90,29 @@ void main() {
     expect(result.paidCents, 8500);
   });
 
+  test('advance deduction settles wages without inflating cash paid', () {
+    final result = LabPayrollPeriodProjection.calculate(
+      employeeId: 'secretary',
+      from: from,
+      until: until,
+      hourlyRateCents: null,
+      drafts: const [],
+      payments: [
+        {'employee_id': 'secretary', 'kind': 'pay',
+         'paid_at': DateTime(2026, 10, 28).millisecondsSinceEpoch,
+         'cents': 8500},
+      ],
+      taskPayments: const [],
+      settlements: const [
+        {'employee_id': 'secretary', 'week_key': '2026-10-26',
+         'gross_cents': 10500, 'debt_cents': 2000},
+      ],
+    );
+    expect(result.grossCents, 10500);
+    expect(result.paidCents, 8500);
+    expect(result.balanceCents, 0);
+  });
+
   test('paid total excludes repayment and nonpositive pay entries', () {
     final result = LabPayrollPeriodProjection.calculate(
       employeeId: 'chris',
