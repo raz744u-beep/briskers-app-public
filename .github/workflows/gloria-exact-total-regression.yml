@@ -10,6 +10,9 @@ on:
       - "lib/services/briskers_api.dart"
       - "lib/services/offline_document_draft_service.dart"
       - "lib/screens/settings/local_sync_status_screen.dart"
+      - "tools/require_candidate_checks.py"
+      - "tools/tests/test_candidate_checks.py"
+      - ".github/workflows/android-debug.yml"
       - ".github/workflows/gloria-exact-total-regression.yml"
   pull_request:
     paths:
@@ -18,6 +21,9 @@ on:
       - "lib/services/briskers_api.dart"
       - "lib/services/offline_document_draft_service.dart"
       - "lib/screens/settings/local_sync_status_screen.dart"
+      - "tools/require_candidate_checks.py"
+      - "tools/tests/test_candidate_checks.py"
+      - ".github/workflows/android-debug.yml"
 jobs:
   source-and-decimal-check:
     runs-on: ubuntu-latest
