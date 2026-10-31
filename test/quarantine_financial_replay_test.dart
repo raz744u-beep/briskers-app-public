@@ -31,6 +31,25 @@ Map<String, dynamic> _detail(String id) => {
   'lines': <Map<String, dynamic>>[],
 };
 
+// A real local quick-invoice draft includes net, tax and service lines.
+// Quarantine tests need an internally consistent source snapshot so the
+// currency safety preflight can reach the intended late-receipt race.
+Map<String, dynamic> _validQuickInvoiceDetail(String id) => {
+  ..._detail(id),
+  'net_amount': 10,
+  'tax_amount': 0,
+  'total_amount': 10,
+  'lines': <Map<String, dynamic>>[
+    {
+      'name': 'Synthetic saved service',
+      'line_kind': 'item',
+      'quantity': 1,
+      'unit_price': 10,
+      'tax_rate': 0,
+    },
+  ],
+};
+
 class _ReplayApi extends BriskersApi {
   final mutations = <String>[];
   final reads = <String>[];
@@ -433,6 +452,7 @@ void main() {
   test('late quick invoice ID never replaces the archived local draft', () async {
     const localId = 'local-invoice-test';
     await _seedDocument(db, localId);
+    await _cache.save(_business, localId, _validQuickInvoiceDetail(localId));
     final id = await _queue(db, 'document_draft_create', localId, {
       'kind': 'invoice', 'customer_id': 'customer-test',
       'operation_id': 'original-invoice-operation', 'document_date': '2026-10-13',
@@ -472,7 +492,7 @@ void main() {
     const localId = 'local-invoice-warranty';
     await _seedDocument(db, localId);
     await _cache.save(_business, localId, {
-      ..._detail(localId),
+      ..._validQuickInvoiceDetail(localId),
       'offline_warranty_detail': {
         'extended_warranty': true, 'warranty_company_name': 'Test warranty',
       },
