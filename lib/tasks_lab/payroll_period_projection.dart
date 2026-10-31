@@ -83,8 +83,15 @@ class LabPayrollPeriodProjection {
       } else if(hourlyRateCents!=null) {
         gross+=(entry.value*hourlyRateCents).round();
       } else {
+        // Preserve known confirmed settlements even when another week's
+        // task hours have no hourly rate. Never invent the missing wages
+        // or a zero balance for an incompletely priced period.
+        final confirmedGross = grossByWeek.values.fold<int>(
+          0, (sum, cents) => sum + cents);
         return LabPayrollPeriodProjection(
-          hours:hrs,grossCents:null,paidCents:paid,balanceCents:null);
+          hours:hrs,
+          grossCents:confirmedGross > 0 ? confirmedGross : null,
+          paidCents:paid, balanceCents:null);
       }
     }
     // Include confirmed weekly-base settlements even if that week has no
