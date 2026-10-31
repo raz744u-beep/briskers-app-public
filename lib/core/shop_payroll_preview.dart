@@ -98,3 +98,34 @@ class ShopPayrollPreview {
     return grossCents - repaymentCents;
   }
 }
+
+/// Immutable local Verify Payment proposal; not a posted payment.
+/// A repository transaction must atomically persist the operation ID, credits,
+/// repayment and paid-work ledger before the UI may show Paid.
+class ShopPayrollPaymentProposal {
+  ShopPayrollPaymentProposal({
+    required this.operationId,
+    required this.employeeId,
+    required this.allocationIds,
+    required this.grossCents,
+    required this.repaymentCents,
+    required this.method,
+  }) : netCents = ShopPayrollPreview.netCents(
+          grossCents: grossCents, repaymentCents: repaymentCents) {
+    if (operationId.trim().isEmpty || employeeId.trim().isEmpty ||
+        method.trim().isEmpty || allocationIds.isEmpty ||
+        allocationIds.any((id) => id.trim().isEmpty) ||
+        allocationIds.toSet().length != allocationIds.length) {
+      throw ArgumentError('Invalid payroll proposal identity or selection');
+    }
+  }
+
+  final String operationId;
+  final String employeeId;
+  final List<String> allocationIds;
+  final int grossCents;
+  final int repaymentCents;
+  final int netCents;
+  final String method;
+}
+
