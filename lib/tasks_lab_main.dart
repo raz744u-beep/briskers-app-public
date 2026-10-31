@@ -2830,10 +2830,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       if (task['status'] == 'done' || task['source_missing'] == 1) {
         return false;
       }
-      if ((task['employee_id']?.toString() ?? '').isNotEmpty) return false;
+      if ((task['employee_id']?.toString() ?? '').isNotEmpty) {
+        return false;
+      }
       final lineId = task['line_id']?.toString();
       if (lineId != null &&
-          (allocationsByLine[lineId]?.isNotEmpty ?? false)) return false;
+          (allocationsByLine[lineId]?.isNotEmpty ?? false)) {
+        return false;
+      }
       return true;
     }).length;
     return ListView(
