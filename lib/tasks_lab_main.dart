@@ -2836,9 +2836,6 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     final allUnfinished = allRoleTasks.where((task) =>
       task['source_missing'] != 1 && task['status'] != 'done').toList();
     final unassigned = allUnfinished.where((task) {
-      if (task['status'] == 'done' || task['source_missing'] == 1) {
-        return false;
-      }
       if ((task['employee_id']?.toString() ?? '').isNotEmpty) {
         return false;
       }
