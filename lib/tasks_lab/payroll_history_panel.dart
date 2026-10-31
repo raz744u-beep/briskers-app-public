@@ -16,6 +16,7 @@ class LabPayrollHistoryPanel extends StatefulWidget {
     required this.rateCents, required this.drafts,
     required this.payments, required this.onWeekTap,
     this.taskPayments=const [],this.settlements=const [],
+    this.onOpenJob, this.onOpenInvoice,
   });
   final String employeeId;
   final int? rateCents;
@@ -24,6 +25,8 @@ class LabPayrollHistoryPanel extends StatefulWidget {
   final List<Map<String,dynamic>> taskPayments;
   final List<Map<String,dynamic>> settlements;
   final void Function(DateTime) onWeekTap;
+  final VoidCallback? onOpenJob;
+  final VoidCallback? onOpenInvoice;
 
   @override
   State<LabPayrollHistoryPanel> createState() =>
@@ -171,8 +174,28 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
                         color: Color(0xFF64748B))),
                     childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                     children: [
-                      const Align(alignment: Alignment.centerLeft,
-                        child: Text('Job J-24 · Invoice #6342')),
+                      Row(children: [
+                        const Text('Job '),
+                        InkWell(
+                          onTap: widget.onOpenJob,
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 3, vertical: 7),
+                            child: Text('J-24',
+                              style: TextStyle(fontWeight: FontWeight.w700,
+                                color: Color(0xFF334155),
+                                decoration: TextDecoration.underline)))),
+                        const Text('  ·  Invoice '),
+                        InkWell(
+                          onTap: widget.onOpenInvoice,
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 3, vertical: 7),
+                            child: Text('#6342',
+                              style: TextStyle(fontWeight: FontWeight.w700,
+                                color: Color(0xFF334155),
+                                decoration: TextDecoration.underline)))),
+                      ]),
                       Align(alignment: Alignment.centerLeft,
                         child: Text(
                           row.read<String>('method').toUpperCase() + ' · ' +
