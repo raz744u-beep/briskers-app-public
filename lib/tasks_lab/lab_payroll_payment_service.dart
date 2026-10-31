@@ -209,6 +209,16 @@ class LabPayrollPaymentService {
     if(hours<=0||selected.isEmpty || !hours.isFinite) {
       throw ArgumentError('No valid labor hours selected');
     }
+    // The input list can contain duplicate task rows after a refresh.
+    // Treat identical document/line IDs as one task, not two payables.
+    final seenTaskIds = <String>{};
+    for (final task in selected) {
+      final taskKey = task['document_id'].toString() + ':' +
+        task['line_id'].toString();
+      if (!seenTaskIds.add(taskKey)) {
+        throw StateError('Duplicate task in payroll selection; refresh first');
+      }
+    }
     // Reject invalid per-task values before any database write.
     for (final task in selected) {
       final key = task['document_id'].toString() + ':' +
