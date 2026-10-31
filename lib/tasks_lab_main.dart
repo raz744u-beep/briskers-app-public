@@ -2826,6 +2826,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       task['status'] == 'done' && task['source_missing'] != 1).length;
     // A service line may be allocated through its per-mechanic rows even
     // when its legacy employee_id is empty. Do not call it unassigned.
+    final inProgress = allRoleTasks.where((task) =>
+      task['status'] == 'in_progress' && task['source_missing'] != 1).length;
+    final notStarted = allRoleTasks.where((task) =>
+      task['status'] == 'planned' && task['source_missing'] != 1).length;
     final unassigned = allRoleTasks.where((task) {
       if (task['status'] == 'done' || task['source_missing'] == 1) {
         return false;
@@ -2854,7 +2858,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         Card(child: ListTile(
           leading: const Icon(Icons.rule_outlined),
           title: Text('$active tasks not done · $completed completed'),
-          subtitle: const Text('Tasks from this isolated test device'),
+          subtitle: Text('$inProgress in progress · $notStarted not started'
+            ' · Local TEST tasks'),
           onTap: () => _navigate(3),
         )),
         if (secretary) ...[
