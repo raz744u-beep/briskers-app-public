@@ -683,6 +683,12 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
   }
 
   Future<void> _recoverPendingInvoices() async {
+    if (!widget.isOwner) {
+      setState(() {
+        _error = 'Only the Owner can run exact-total invoice recovery.';
+      });
+      return;
+    }
     if (_syncing) { return; }
     if (BriskersConnectionModeController.instance.forceOffline) {
       setState(() {
@@ -727,7 +733,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         if (mounted) { setState(() => _syncStep = 1); }
 
         if (mounted) { setState(() => _syncStage = '2/3 Invoice upload'); }
-        if (invoice > 0) { await _documentDrafts.flush(widget.businessId); }
+        if (invoice > 0) {
+          await _documentDrafts.flush(
+            widget.businessId, exactTotalRecovery: true);
+        }
         if (await _pendingRecoveryOperations('document_draft_create') > 0) {
           throw StateError(
             'Invoice is still awaiting server confirmation. '
@@ -1337,7 +1346,8 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                     const SizedBox(height: 12),
                   ],
                   FilledButton.icon(
-                    onPressed: _syncing ? null : _recoverPendingInvoices,
+                    onPressed: (_syncing || !widget.isOwner)
+                        ? null : _recoverPendingInvoices,
                     icon: const Icon(Icons.receipt_long_outlined),
                     label: const Text('Recover pending invoices'),
                   ),
