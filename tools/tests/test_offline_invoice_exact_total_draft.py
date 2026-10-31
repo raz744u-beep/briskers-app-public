@@ -44,6 +44,10 @@ class ExactOfflineInvoiceRecoveryContract(unittest.TestCase):
         self.assertIn("briskers_sync_offline_quick_invoice_v2(", SQL)
         self.assertIn("briskers.require_permission(p_business_id,'invoices.create')", SQL)
         self.assertIn("briskers.require_permission(p_business_id,'jobs.create')", SQL)
+        self.assertIn("FROM briskers.memberships m", SQL)
+        self.assertIn("AND m.user_id=auth.uid()", SQL)
+        self.assertIn("AND m.role_code='owner'", SQL)
+        self.assertIn("Only the Owner may recover exact-total offline invoices", SQL)
         self.assertIn("REVOKE ALL ON FUNCTION public.briskers_sync_offline_quick_invoice_v2(", SQL)
         self.assertIn("TO authenticated", SQL)
 
