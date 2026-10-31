@@ -161,3 +161,42 @@ class ShopPayrollReplayPolicy {
       previous.operationId == request.operationId &&
       !sameProposal(previous, request);
 }
+
+/// Pure transaction preflight. Only a database transaction can make these
+/// checks atomic with payroll-credit updates and durable outbox insertion.
+class ShopPayrollTransactionPreflight {
+  const ShopPayrollTransactionPreflight._();
+
+  static bool isValid({
+    required bool owner,
+    required ShopPayrollPaymentProposal proposal,
+    required Iterable<ShopPayrollAllocation> selectedCredits,
+    required int outstandingAdvanceCents,
+    required bool operationIdUnused,
+  }) {
+    if (!owner || !operationIdUnused) return false;
+    try {
+      final credits = selectedCredits.toList(growable: false);
+      final gross = ShopPayrollPreview.grossCents(
+        owner: owner,
+        employeeId: proposal.employeeId,
+        selected: credits,
+      );
+      if (gross != proposal.grossCents ||
+          credits.length != proposal.allocationIds.length ||
+          credits.any((credit) => !proposal.allocationIds.contains(credit.id))) {
+        return false;
+      }
+      ShopPayrollPreview.verifiedRepaymentCents(
+        grossCents: gross,
+        outstandingAdvanceCents: outstandingAdvanceCents,
+        requestedRepaymentCents: proposal.repaymentCents,
+      );
+      return true;
+    } on ArgumentError {
+      return false;
+    } on StateError {
+      return false;
+    }
+  }
+}
