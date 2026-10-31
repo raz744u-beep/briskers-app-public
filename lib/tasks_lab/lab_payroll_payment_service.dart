@@ -202,6 +202,18 @@ class LabPayrollPaymentService {
     final now=DateTime.now().millisecondsSinceEpoch;
     final weekKey=LabPayrollPeriodProjection.weekKey(week);
     await localDatabase.transaction(() async {
+      // A flexible weekly settlement covers the whole employee/week.
+      // Hourly task payments may still be partial within a week, but may
+      // not silently overlap a confirmed flexible weekly settlement.
+      final flexible = await localDatabase.customSelect(
+        'SELECT disbursement_id FROM lab_flexible_weekly_confirmations '
+        'WHERE business_id=? AND employee_id=? AND week_key=? LIMIT 1',
+        variables: [const Variable<String>(_shop),
+          Variable<String>(employeeId), Variable<String>(weekKey)],
+      ).getSingleOrNull();
+      if (flexible != null) {
+        throw StateError('This week already has a flexible payroll payment');
+      }
       final rows=await localDatabase.customSelect(
         'SELECT document_id,line_id,SUM(hours) AS paid_hours '
         'FROM lab_payroll_task_payments WHERE business_id=? '
