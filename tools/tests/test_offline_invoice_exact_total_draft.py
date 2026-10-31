@@ -80,7 +80,7 @@ class ExactOfflineInvoiceRecoveryContract(unittest.TestCase):
         self.assertIn(": _api.syncOfflineQuickInvoice(", DRAFT)
         self.assertIn("if (!widget.isOwner)", STATUS)
         self.assertIn("exactTotalRecovery: true", STATUS)
-        self.assertIn("await _documentDrafts.flush(widget.businessId)", STATUS)
+        self.assertIn("() => _documentDrafts.flush(widget.businessId)", STATUS)
 
     def test_never_posts_a_payment_or_deletes_original_data(self):
         self.assertNotIn("INSERT INTO briskers.invoice_pending_payments", SQL)
