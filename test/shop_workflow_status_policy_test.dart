@@ -173,6 +173,24 @@ void main() {
     ), throwsArgumentError);
   });
 
+  test('Verify Payment proposal freezes allocation IDs and net amount', () {
+    final ids = <String>['credit-a'];
+    final proposal = ShopPayrollPaymentProposal(
+      operationId: 'local-op-1', employeeId: 'mechanic-1',
+      allocationIds: ids, grossCents: 10500, repaymentCents: 2000,
+      method: 'Zelle',
+    );
+    ids.add('credit-b');
+    expect(proposal.allocationIds, ['credit-a']);
+    expect(proposal.netCents, 8500);
+    expect(() => proposal.allocationIds.add('credit-c'), throwsUnsupportedError);
+    expect(() => ShopPayrollPaymentProposal(
+      operationId: 'local-op-2', employeeId: 'mechanic-1',
+      allocationIds: ['a', 'a'], grossCents: 10000,
+      repaymentCents: 0, method: 'Zelle',
+    ), throwsArgumentError);
+  });
+
   test('Joint close requires Owner, finalized payment and finished work', () {
     bool allowed({bool owner = true, bool paid = true,
       bool unresolved = false, bool done = true}) =>
