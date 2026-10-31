@@ -70,6 +70,19 @@ void main() {
           );
       expect(await stage(proposal()), isTrue);
       expect(await stage(proposal()), isFalse);
+      final visible = await repository.stagedForEmployee(
+        businessId: 'test-shop', employeeId: 'mechanic',
+      );
+      expect(visible, hasLength(1));
+      expect(visible.single['state'], 'staged');
+      expect(visible.single['net_cents'], 8000);
+      expect(await repository.stagedForEmployee(
+        businessId: 'another-shop', employeeId: 'mechanic',
+      ), isEmpty);
+      expect(await repository.stagedForEmployee(
+        businessId: 'test-shop', employeeId: 'another-mechanic',
+      ), isEmpty);
+
       await expectLater(stage(proposal(method: 'Cash')), throwsStateError);
       await expectLater(stage(proposal(operation: 'op2')), throwsA(isA<Exception>()));
       final operations = await db.customSelect(
