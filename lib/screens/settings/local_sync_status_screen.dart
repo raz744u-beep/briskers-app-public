@@ -640,6 +640,10 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
       if (customer.length != 1 || vehicle.length != 1 || documents.length != 1) {
         throw StateError('One of Gloria local source records is missing. Nothing exported.');
       }
+      final invoiceDetail = await const LocalDocumentDetailCache().load(widget.businessId, invoiceId);
+      if (invoiceDetail == null || invoiceDetail['lines'] is! List || (invoiceDetail['lines'] as List).isEmpty) {
+        throw StateError('Gloria invoice line details are unavailable. Nothing copied.');
+      }
       final evidence = <String, dynamic>{
         'format': 'briskers-gloria-recovery-readonly-v1',
         'purpose': 'Restricted private financial recovery; do not publicly share',
@@ -648,7 +652,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         'local_customer': customer.single,
         'local_vehicle': vehicle.single,
         'local_document': documents.single,
-        'local_invoice_detail': await const LocalDocumentDetailCache().load(widget.businessId, invoiceId),
+        'local_invoice_detail': invoiceDetail,
         'local_jobs': jobs,
       };
       final snapshot = const JsonEncoder.withIndent('  ').convert(evidence);
