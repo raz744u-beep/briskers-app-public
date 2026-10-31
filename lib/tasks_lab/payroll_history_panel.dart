@@ -146,10 +146,14 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
           body: SafeArea(child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 22),
             children: [
-              const Text('2012 Hyundai Equus',
-                style: TextStyle(fontSize: 13,
-                  color: Color(0xFF64748B))),
-              const SizedBox(height: 10),
+              // Only task-linked records refer to a vehicle. A flexible
+              // weekly-base payment for office staff has no vehicle.
+              if (rows.isNotEmpty) ...[
+                const Text('2012 Hyundai Equus',
+                  style: TextStyle(fontSize: 13,
+                    color: Color(0xFF64748B))),
+                const SizedBox(height: 10),
+              ],
               if (records.isNotEmpty) ...[
                 Text('Gross pay: ' + _money(gross),
                   style: const TextStyle(fontWeight: FontWeight.w700)),
