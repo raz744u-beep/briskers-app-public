@@ -18,6 +18,15 @@ void main() {
     expect(source,contains('Text(chosen,maxLines:1,overflow:TextOverflow.ellipsis'));
   });
 
+  test('General Tasks show an independent, compact status pill', () {
+    final source = File('lib/tasks_lab/tasks_workspace.dart')
+        .readAsStringSync();
+    expect(source, contains("child: Text(_statusName(task['status'])"));
+    expect(source, contains("task['status'] == 'in_progress'"));
+    expect(source, contains("BorderRadius.circular(12)"));
+    expect(source, contains("onEmployeeTap"));
+  });
+
   testWidgets('All four quick filters fit a 360px Note 9 width on both tabs',
       (tester) async {
     tester.view.devicePixelRatio=1;
