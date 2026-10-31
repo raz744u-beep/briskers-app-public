@@ -194,6 +194,11 @@ class LabPayrollPaymentService {
       throw ArgumentError('No labor hours selected');
     }
     final laborCents=(hours*hourlyRateCents).round();
+    // Gross can include a separately approved adjustment, but it cannot
+    // underpay the labor coverage being marked paid.
+    if (grossCents < laborCents) {
+      throw ArgumentError('Gross payment is below selected labor earnings');
+    }
     final now=DateTime.now().millisecondsSinceEpoch;
     final weekKey=LabPayrollPeriodProjection.weekKey(week);
     await localDatabase.transaction(() async {
