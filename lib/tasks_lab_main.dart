@@ -2824,6 +2824,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       task['status'] != 'done' && task['source_missing'] != 1).length;
     final completed = allRoleTasks.where((task) =>
       task['status'] == 'done' && task['source_missing'] != 1).length;
+    final unassigned = allRoleTasks.where((task) =>
+      task['status'] != 'done' && task['source_missing'] != 1 &&
+      (task['employee_id']?.toString() ?? '').isEmpty).length;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -2842,6 +2845,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           onTap: () => _navigate(3),
         )),
         if (secretary) ...[
+          Card(child: ListTile(
+            leading: const Icon(Icons.assignment_ind_outlined),
+            title: Text('$unassigned unassigned tasks'),
+            subtitle: const Text('Review assignments in Tasks'),
+            onTap: () => _navigate(3),
+          )),
           Card(child: ListTile(
             leading: const Icon(Icons.calendar_month_outlined),
             title: const Text('Appointments'),
