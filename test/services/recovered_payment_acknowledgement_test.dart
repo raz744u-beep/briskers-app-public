@@ -91,6 +91,21 @@ void main() {
     await expectLater(acknowledge(_ReadOnlyApi(details)),throwsStateError);
     expect(await remaining(),1);
   });
+  test('server read outage preserves quarantined financial operation',() async {
+    await seed();
+    final api=_ReadOnlyApi(server()..remove('payments'));
+    await expectLater(acknowledge(api),throwsStateError);
+    expect(api.reads,1);
+    expect(await remaining(),1);
+    final state=await db.customSelect(
+      "SELECT state,payload_json FROM sync_outbox WHERE business_id=?",
+      variables:[const Variable<String>(b)],
+    ).getSingle();
+    expect(state.read<String>('state'),'conflict');
+    final original=jsonDecode(state.read<String>('payload_json')) as Map;
+    expect(original['operation_id'],operation);
+    expect(original['amount_cents'],3000);
+  });
   test('unquarantined payment remains untouched',() async {
     await seed(state:'pending');
     await expectLater(acknowledge(_ReadOnlyApi(server())),throwsStateError);
