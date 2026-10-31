@@ -46,4 +46,26 @@ void main() {
     expect(result.grossCents, 56000);
     expect(result.balanceCents, 56000);
   });
+  test('known settlement remains visible when separate hours lack a rate', () {
+    final result = LabPayrollPeriodProjection.calculate(
+      employeeId: 'adam',
+      from: DateTime(2026, 10, 26),
+      until: DateTime(2026, 11, 9),
+      hourlyRateCents: null,
+      drafts: const [],
+      payments: const [],
+      taskPayments: const [
+        {'employee_id': 'adam', 'week_key': '2026-10-26',
+         'hours': 3.0},
+      ],
+      settlements: const [
+        {'employee_id': 'adam', 'week_key': '2026-11-02',
+         'gross_cents': 50000},
+      ],
+    );
+    expect(result.hours, 3.0);
+    expect(result.grossCents, 50000);
+    expect(result.balanceCents, isNull);
+  });
+
 }
