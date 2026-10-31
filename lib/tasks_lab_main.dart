@@ -2199,6 +2199,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     generalTasks: shopTasks,
     allocationsByLine: allocationsByLine,
     employeeName: _employeeName,
+    onEmployeeTap: _employeeQuickLinks,
     serviceTaskCard: _taskCard,
     onAddService: _addRecheckWork,
     onAddGeneral: _addInternalShopTask,
