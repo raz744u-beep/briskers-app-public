@@ -240,7 +240,8 @@ class LabPayrollPaymentService {
         'INSERT INTO local_lab_payroll_disbursements '
         '(business_id,employee_id,cents,kind,method,note,paid_at,created_at) '
         'VALUES (?,?,?,?,?,?,?,?)',
-        [_shop,employeeId,grossCents,'pay',method,note.trim(),now,now],
+        // Actual transfer excludes an advance deducted from gross wages.
+        [_shop,employeeId,grossCents-debtCents,'pay',method,note.trim(),now,now],
       );
       final idRow=await localDatabase.customSelect(
         'SELECT last_insert_rowid() AS disbursement_id').getSingle();
