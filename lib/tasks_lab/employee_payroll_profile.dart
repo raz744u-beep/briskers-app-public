@@ -785,7 +785,13 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
       ));
     if (!mounted || method == null) return;
     final grossCents = (gross * 100).round();
-    final advance = await _ledger.read(_shop, widget.employeeId);
+    LabAdvanceSnapshot advance;
+    try {
+      advance = await _ledger.read(_shop, widget.employeeId);
+    } catch (error) {
+      if (mounted) _snack('Unable to load advance balance: $error');
+      return;
+    }
     if (!mounted) return;
     final deductionInput = TextEditingController(text: '0.00');
     final deduction = await showDialog<int>(
