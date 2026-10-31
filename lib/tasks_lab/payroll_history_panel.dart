@@ -108,6 +108,7 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
 
   Future<void> _showTaskHistory(LabPayrollWeek week) async {
     var visibleTaskCount = 10;
+    final expandedPaymentKeys = <String>{};
     await localDatabase.customStatement('CREATE TABLE IF NOT EXISTS lab_payroll_task_payments ('
       'id INTEGER PRIMARY KEY AUTOINCREMENT, business_id TEXT NOT NULL, employee_id TEXT NOT NULL, '
       'document_id TEXT NOT NULL, line_id TEXT NOT NULL, week_key TEXT NOT NULL, '
@@ -162,6 +163,15 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
                 Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ExpansionTile(
+                    key: ValueKey('history-' +
+                      row.read<String>('line_id') + '-' +
+                      row.read<int>('paid_at').toString()),
+                    onExpansionChanged: (expanded) => updatePage(() {
+                      final key = row.read<String>('line_id') + ':' +
+                        row.read<int>('paid_at').toString();
+                      if (expanded) { expandedPaymentKeys.add(key); }
+                      else { expandedPaymentKeys.remove(key); }
+                    }),
                     tilePadding: const EdgeInsets.symmetric(horizontal: 12),
                     title: Text(row.read<String>('description'),
                       maxLines: 2, overflow: TextOverflow.ellipsis,
@@ -169,7 +179,11 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
                     subtitle: Text(
                       row.read<double>('hours').toStringAsFixed(2) +
                       ' hrs · ' + _money(row.read<int>('cents')) +
-                      ' · Paid\\nTap to expand',
+                      ' · Paid\\n' +
+                      (expandedPaymentKeys.contains(
+                        row.read<String>('line_id') + ':' +
+                        row.read<int>('paid_at').toString())
+                          ? 'Tap to collapse' : 'Tap to expand'),
                       style: const TextStyle(fontSize: 11.5,
                         color: Color(0xFF64748B))),
                     childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -204,10 +218,6 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
                       if (row.read<String>('note').isNotEmpty)
                         Align(alignment: Alignment.centerLeft,
                           child: Text('Notes: ' + row.read<String>('note'))),
-                      const Align(alignment: Alignment.centerRight,
-                        child: Text('Tap to collapse',
-                          style: TextStyle(fontSize: 10.5,
-                            color: Color(0xFF64748B)))),
                     ],
                   ),
                 ),
