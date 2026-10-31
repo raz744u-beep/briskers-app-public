@@ -17,7 +17,9 @@ void main() {
     expect(recovery, isNot(contains('DELETE FROM')));
     expect(recovery, isNot(contains('UPDATE sync_outbox')));
     expect(recovery, contains('_customerVehicleAdmin.flush(widget.businessId)'));
-    expect(recovery, contains('_documentDrafts.flush(widget.businessId)'));
+    expect(recovery, contains('_documentDrafts.flush('));
+    expect(recovery, contains('exactTotalRecovery: true'));
+    expect(recovery, contains('if (!widget.isOwner)'));
     expect(recovery, contains('_payments.flush(widget.businessId)'));
 
     final parent = recovery.indexOf('_customerVehicleAdmin.flush(');
@@ -39,6 +41,6 @@ void main() {
 
     expect(source, contains('Recover pending invoices'));
     expect(source, contains('_syncStep / (_targetedRecovery ? 3 : _syncStepCount)'));
-    expect(source, contains('onPressed: _syncing ? null : _recoverPendingInvoices'));
+    expect(source, contains('onPressed: (_syncing || !widget.isOwner)'));
   });
 }

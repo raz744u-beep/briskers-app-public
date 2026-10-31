@@ -476,6 +476,14 @@ class OfflineDocumentDraftService {
   num _number(Object? raw) =>
       num.tryParse(raw?.toString() ?? '') ?? 0;
 
+  int _strictMoneyCents(Object? raw) {
+    final value = num.tryParse(raw?.toString() ?? '');
+    if (value == null || !value.isFinite || value < 0 || value > 1e12) {
+      throw StateError('Local invoice amount is missing or invalid.');
+    }
+    return (value * 100).round();
+  }
+
   /// Create a quote locally without creating any Job. Operation UUID is
   /// replayed atomically on the server with its lines and notes.
   Future<String> createStandaloneEstimate(
@@ -1188,18 +1196,18 @@ class OfflineDocumentDraftService {
     throw StateError('Converted invoice line reconciliation did not complete safely.');
   }
 
-  Future<void> flush(String businessId) {
+  Future<void> flush(String businessId, {bool exactTotalRecovery = false}) {
     final active = _activeFlushes[_database] ??= <String, Future<void>>{};
     final existing = active[businessId];
     if (existing != null) return existing;
-    final work = _flushInternal(businessId);
+    final work = _flushInternal(businessId, exactTotalRecovery: exactTotalRecovery);
     active[businessId] = work;
     return work.whenComplete(() {
       if (identical(active[businessId], work)) active.remove(businessId);
     });
   }
 
-  Future<void> _flushInternal(String businessId) async {
+  Future<void> _flushInternal(String businessId, {bool exactTotalRecovery = false}) async {
     final rows = await _database.customSelect(
       '''
       SELECT id, entity_id, payload_json
@@ -1317,18 +1325,67 @@ class OfflineDocumentDraftService {
           if (operationId.isEmpty || customerId.isEmpty) {
             throw StateError('Offline invoice is missing its sync identity.');
           }
+          final sourceLines = _lines(localDetail);
+          final expectedNetCents = _strictMoneyCents(
+            localDetail['net_amount']);
+          final expectedTaxCents = _strictMoneyCents(
+            localDetail['tax_amount']);
+          var serverLineNetCents = 0;
+          var serverLineTaxCents = 0;
+          for (final line in sourceLines) {
+            if (line['line_kind'] == 'discount') {
+              throw StateError(
+                'Offline discounts require a separate reviewed recovery path.');
+            }
+            final qty = _number(line['quantity']);
+            final unitPrice = _number(line['unit_price']);
+            final rate = _number(line['tax_rate']);
+            if (!qty.isFinite || !unitPrice.isFinite || !rate.isFinite ||
+                qty <= 0 || unitPrice < 0 || rate < 0 || rate > 1) {
+              throw StateError('Invalid local invoice line in recovery.');
+            }
+            // Match PostgreSQL numeric(18,2) line net/tax rounding.
+            final cents = (qty * unitPrice * 100).round();
+            serverLineNetCents += cents;
+            serverLineTaxCents += (cents * rate).round();
+          }
+          final requiresExactTotal =
+              expectedNetCents != serverLineNetCents ||
+              expectedTaxCents != serverLineTaxCents;
+          if (requiresExactTotal && !exactTotalRecovery) {
+            throw StateError(
+              'Local invoice totals differ from standard per-line rounding. '
+              'Automatic v1 upload is blocked to prevent a financial mismatch; '
+              'use Owner > Recover pending invoices once the exact-total '
+              'recovery backend is installed.');
+          }
+          // Explicit Owner recovery uses verified exact net/tax cents.
+          // A missing or incompatible v2 RPC fails without v1 fallback:
+          // leave the existing outbox and recorded payment untouched.
           serverId = await LocalJobQuarantine.guardReplay(
             _database,
             businessId,
-            () => _api.syncOfflineQuickInvoice(
-              businessId,
-              customerId: customerId,
-              vehicleId: payload['vehicle_id']?.toString(),
-              operationId: operationId,
-              documentDate: payload['document_date']?.toString() ?? '',
-              lines: _lines(localDetail),
-              memo: localDetail['memo']?.toString(),
-            ),
+            () => requiresExactTotal
+                ? _api.syncOfflineQuickInvoiceExactTotal(
+                    businessId,
+                    customerId: customerId,
+                    vehicleId: payload['vehicle_id']?.toString(),
+                    operationId: operationId,
+                    documentDate: payload['document_date']?.toString() ?? '',
+                    lines: sourceLines,
+                    memo: localDetail['memo']?.toString(),
+                    expectedNetCents: expectedNetCents,
+                    expectedTaxCents: expectedTaxCents,
+                  )
+                : _api.syncOfflineQuickInvoice(
+                    businessId,
+                    customerId: customerId,
+                    vehicleId: payload['vehicle_id']?.toString(),
+                    operationId: operationId,
+                    documentDate: payload['document_date']?.toString() ?? '',
+                    lines: sourceLines,
+                    memo: localDetail['memo']?.toString(),
+                  ),
             outboxId: outboxId,
           );
           serverDetail = await _api.documentDetail(businessId,serverId);

@@ -110,6 +110,43 @@ class CandidateGateTests(unittest.TestCase):
                              clock=self.clock.time, sleep=self.clock.sleep,
                              log=self.messages.append)
 
+    def test_gloria_candidate_requires_three_exact_head_workflows(self):
+        self.assertEqual(gate.workflows_for_branch(CONTEXT.branch),
+                         gate.REQUIRED_WORKFLOWS)
+        guarded = gate.workflows_for_branch(gate.GLORIA_RECOVERY_BRANCH)
+        self.assertEqual(len(guarded), 3)
+        filename, name = gate.GLORIA_RECOVERY_WORKFLOW
+        self.assertEqual(guarded[filename], name)
+        self.assertIn(gate.GLORIA_RECOVERY_BRANCH, gate.CANDIDATE_BRANCHES)
+
+    def test_only_gloria_exact_head_push_regression_is_allowed(self):
+        filename, name = gate.GLORIA_RECOVERY_WORKFLOW
+        context = gate.Context(CONTEXT.repository, CONTEXT.repository_id,
+                               gate.GLORIA_RECOVERY_BRANCH, SHA)
+        run = run_fixture("diagnostics.yml")
+        run.update(workflow_id=30, name=name,
+                   path=f".github/workflows/{filename}",
+                   head_branch=gate.GLORIA_RECOVERY_BRANCH,
+                   event="push")
+        self.assertTrue(gate.validate_run(run, context, filename, name, 30))
+        # Diagnostics and iOS push runs can never satisfy the candidate gate.
+        standard_context = CONTEXT
+        for standard_file, workflow_id in WORKFLOW_IDS.items():
+            with self.subTest(file=standard_file):
+                standard_run = run_fixture(standard_file, event="push")
+                with self.assertRaises(gate.GateError):
+                    gate.validate_run(standard_run, standard_context,
+                                      standard_file,
+                                      gate.REQUIRED_WORKFLOWS[standard_file],
+                                      workflow_id)
+        # An exact test-name spoof from another branch cannot satisfy it.
+        with self.assertRaises(gate.GateError):
+            gate.validate_run(run, standard_context, filename, name, 30)
+        # Wrong SHA is always rejected, including an allowed push event.
+        with self.assertRaises(gate.GateError):
+            gate.validate_run({**run, "head_sha": OTHER_SHA},
+                              context, filename, name, 30)
+
     def test_both_exact_sha_workflows_succeed(self):
         self.wait()
         self.assertEqual(self.clock.sleeps, [])
