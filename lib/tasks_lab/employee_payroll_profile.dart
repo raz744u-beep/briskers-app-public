@@ -749,7 +749,79 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     }
   }
 
-  // TEST preview: these inputs never post payroll or alter task coverage.
+  Future<void> _finalizeFlexibleWeekly() async {
+    if (_savingFlexible) return;
+    final base = double.tryParse(_weeklyBasePreview.text.trim());
+    final rate = double.tryParse(_hourlySupplementPreview.text.trim());
+    final adjustment = double.tryParse(_weeklyAdjustmentPreview.text.trim());
+    final hours = double.tryParse(_approvedSupplementHours.text.trim());
+    if (base == null || rate == null || adjustment == null ||
+        hours == null || ![base, rate, adjustment, hours]
+          .every((v) => v.isFinite) ||
+        base < 0 || rate < 0 || hours < 0 || hours > 168 ||
+        base > 1000000 || rate > 100000 ||
+        adjustment.abs() > 1000000) {
+      _snack('Enter valid weekly pay and approved hours');
+      return;
+    }
+    final gross = base + adjustment +
+      (_laborAdditionalToBase ? hours * rate : 0);
+    if (!gross.isFinite || gross <= 0 || gross > 1000000) {
+      _snack('Weekly gross must be greater than zero');
+      return;
+    }
+    // Use the selected payroll week; never silently pay every tracked hour.
+    final weekKey = LabPayrollPeriodProjection.weekKey(_week);
+    final method = await showDialog<String>(
+      context: context, builder: (dialogContext) => SimpleDialog(
+        title: const Text('Payment method · TEST'),
+        children: [
+          for (final choice in const ['zelle', 'cash', 'check', 'ach'])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialogContext, choice),
+              child: Text(choice.toUpperCase()),
+            ),
+        ],
+      ));
+    if (!mounted || method == null) return;
+    final grossCents = (gross * 100).round();
+    final confirmed = await showDialog<bool>(
+      context: context, builder: (dialogContext) => AlertDialog(
+        title: const Text('Finalize weekly pay · TEST'),
+        content: Text('Employee: ${widget.nickname}\n'
+          'Week: $weekKey\n'
+          'Gross: ${_currency.format(gross)}\n'
+          'Approved supplemental hours: ${hours.toStringAsFixed(2)}\n'
+          'Method: ${method.toUpperCase()}\n\n'
+          'This saves one local TEST payment for the selected week. '
+          'It does not pay or alter mechanic task allocations. '
+          'Advance repayment, if needed, must be recorded separately.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Confirm TEST Payment')),
+        ],
+      ));
+    if (!mounted || confirmed != true) return;
+    setState(() => _savingFlexible = true);
+    try {
+      await LabPayrollPaymentService.recordFlexibleWeekly(
+        employeeId: widget.employeeId, week: _week,
+        grossCents: grossCents, debtCents: 0,
+        method: method,
+        note: 'Flexible weekly base and approved supplement · TEST',
+      );
+      await _refreshPayrollData();
+      if (mounted) _snack('Weekly TEST payment finalized locally');
+    } catch (error) {
+      if (mounted) _snack('Weekly payment not recorded: $error');
+    } finally {
+      if (mounted) setState(() => _savingFlexible = false);
+    }
+  }
+
+  // TEST preview: input fields do not post money until Owner confirms.
   Widget _flexibleWeeklyPreview(double trackedHours) {
     double value(TextEditingController input) =>
       double.tryParse(input.text.trim()) ?? 0;
@@ -836,7 +908,14 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
           'saved as payable coverage. Review actual unpaid labor before '
           'verifying any payment.',
           style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-        const Text('Settings only; does not verify payment.',
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _savingFlexible || !validPreview || total <= 0
+            ? null : _finalizeFlexibleWeekly,
+          icon: const Icon(Icons.verified_outlined),
+          label: const Text('Verify Weekly Payment · TEST')),
+        const Text('Owner confirmation records one local TEST settlement '
+          'for the selected week. Existing mechanic task hours are unchanged.',
           style: TextStyle(fontSize: 11,
             color: Color(0xFF64748B))),
       ],
