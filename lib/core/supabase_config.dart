@@ -29,8 +29,13 @@ void verifySyntheticAppIdentity(String actualPackageId) {
 void verifySupabaseEnvironment() {
   if (isSyntheticTestBuild &&
       (supabaseUrl != syntheticSandboxUrl ||
-          supabasePublishableKey.isEmpty ||
-          !supabasePublishableKey.startsWith('sb_publishable_'))) {
+          supabasePublishableKey == 'sb_publishable_ci_placeholder' ||
+          supabasePublishableKey == 'sb_publishable_placeholder' ||
+          supabasePublishableKey == 'sb_publishable_test' ||
+          supabasePublishableKey == 'sb_publishable_' ||
+          supabasePublishableKey == 'sb_publishable_tY4v9OoY0nkbeFl-5cnGbA_FoWzD9aP' ||
+          !supabasePublishableKey.startsWith('sb_publishable_') ||
+          supabasePublishableKey.length < 30)) {
     throw StateError('Invalid isolated Briskers TEST configuration.');
   }
 }
