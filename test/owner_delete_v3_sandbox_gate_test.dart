@@ -42,9 +42,22 @@ void main() {
     }
   });
 
-  test('unconfigured synthetic app must fail before initialization', () {
-    if (isSyntheticTestBuild && supabasePublishableKey.isEmpty) {
+  test('synthetic app rejects placeholder and production publishable keys', () {
+    if (!isSyntheticTestBuild) return;
+    const rejected = {
+      '',
+      'sb_publishable_',
+      'sb_publishable_ci_placeholder',
+      'sb_publishable_placeholder',
+      'sb_publishable_test',
+      productionSupabasePublishableKey,
+    };
+    if (rejected.contains(supabasePublishableKey) ||
+        supabasePublishableKey.length < 30 ||
+        !supabasePublishableKey.startsWith('sb_publishable_')) {
       expect(verifySupabaseEnvironment, throwsStateError);
+    } else {
+      expect(verifySupabaseEnvironment, returnsNormally);
     }
   });
 }
