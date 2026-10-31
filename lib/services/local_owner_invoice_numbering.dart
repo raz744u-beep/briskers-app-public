@@ -81,6 +81,20 @@ class LocalOwnerInvoiceNumbering {
              AND entity_id=? AND state='pending' ''',
         [businessId,invoiceId],
       );
+      // Keep the customer and vehicle create records intact, but prevent
+      // any of the original recovery chain from auto-uploading later.
+      await _db.customStatement(
+        '''UPDATE sync_outbox SET state='conflict',
+             last_error='Owner local recovery is authoritative; sync disabled'
+           WHERE business_id=? AND state='pending'
+             AND ((entity_type='customer_create' AND entity_id IN (
+                  SELECT customer_id FROM local_documents
+                  WHERE business_id=? AND id=?))
+               OR (entity_type='vehicle_create' AND entity_id IN (
+                  SELECT vehicle_id FROM local_jobs
+                  WHERE business_id=? AND id=?)))''',
+        [businessId,businessId,invoiceId,businessId,jobId],
+      );
       await _db.customStatement(
         '''UPDATE local_documents SET document_number=?,status='issued',
             display_status_code='open'
