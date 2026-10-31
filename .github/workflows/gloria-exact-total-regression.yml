@@ -1,0 +1,31 @@
+name: Gloria exact-total recovery regression (draft)
+on:
+  push:
+    branches:
+      - fix/gloria-rounding-preflight-20261030
+    paths:
+      - "tools/recovery/offline_invoice_exact_total_v2_DRAFT.sql"
+      - "tools/tests/test_offline_invoice_exact_total_draft.py"
+      - "tools/diagnostics/gloria_rounding_preflight.py"
+      - "lib/services/briskers_api.dart"
+      - "lib/services/offline_document_draft_service.dart"
+      - "lib/screens/settings/local_sync_status_screen.dart"
+      - ".github/workflows/gloria-exact-total-regression.yml"
+  pull_request:
+    paths:
+      - "tools/recovery/offline_invoice_exact_total_v2_DRAFT.sql"
+      - "tools/tests/test_offline_invoice_exact_total_draft.py"
+      - "lib/services/briskers_api.dart"
+      - "lib/services/offline_document_draft_service.dart"
+      - "lib/screens/settings/local_sync_status_screen.dart"
+jobs:
+  source-and-decimal-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exact-total source contract tests
+        run: python3 -m unittest discover -s tools/tests -p 'test_offline_invoice_exact_total_draft.py' -v
+      - name: Original invoice decimal reproduction
+        run: python3 tools/diagnostics/gloria_rounding_preflight.py
