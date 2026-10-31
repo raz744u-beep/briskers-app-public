@@ -283,7 +283,8 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   // Lab-only long presses reveal combined Tasks/history and Payroll/Settings upward.
   Widget _bottomNav() => BriskersModuleDock(
     selectedIndex: _selectedDock,
-    destinations: const [
+    destinations: [
+      for (final item in const <BriskersDockDestination>[
       BriskersDockDestination(
         label: 'Home', icon: Icons.home_outlined,
         color: BriskersColors.today),
@@ -308,6 +309,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       BriskersDockDestination(
         label: 'More', icon: Icons.more_horiz,
         color: BriskersColors.more),
+      ]) BriskersDockDestination(
+        label: _compactDock ? item.label.substring(0, 1) : item.label,
+        icon: item.icon, color: item.color, count: item.count),
     ],
     onSelected: (index) => _navigate(_dockPages[index]),
     onLongPressed: (index, globalPosition) {
