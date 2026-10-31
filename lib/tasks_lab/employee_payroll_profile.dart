@@ -662,6 +662,10 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     final period = _periodBounds();
     final current = _projectPeriod(period.from, period.until);
     final overall = _projectPeriod(DateTime(2000), DateTime(2100));
+    // Read-only task allocation total is independent of salary/rate and
+    // never changes payable coverage or records a payment.
+    final trackedAssignedHours = _employeeTasks.fold<double>(0,
+      (sum, task) => sum + _hours(task));
     final previous = overall.balanceCents == null || current.balanceCents == null
       ? null : (overall.balanceCents! - current.balanceCents!)
         .clamp(0, 1000000000).toInt();
@@ -706,6 +710,16 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
               _financeMetric('Balance', _moneyNullable(current.balanceCents),
                 color: const Color(0xFFCC6222)),
             ]),
+            if (widget.rateCents == null && trackedAssignedHours > 0) ...[
+              const SizedBox(height: 9),
+              Text('Tracked task allocations (all weeks): ' +
+                trackedAssignedHours.toStringAsFixed(2) + ' hrs',
+                style: const TextStyle(fontSize: 12,
+                  color: Color(0xFF475569))),
+              const Text('For reference only · no hourly wage calculated',
+                style: TextStyle(fontSize: 11,
+                  color: Color(0xFF64748B))),
+            ],
             const SizedBox(height: 12),
             Builder(builder: (tabContext) => SizedBox(
               height: 41,
