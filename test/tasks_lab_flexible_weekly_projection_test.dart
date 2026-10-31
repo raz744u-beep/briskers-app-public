@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/tasks_lab/payroll_period_projection.dart';
+import 'package:briskers_app/tasks_lab/payroll_period_projection.dart';
 
 void main() {
   final from = DateTime(2026, 10, 26);
