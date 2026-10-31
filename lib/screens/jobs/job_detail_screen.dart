@@ -3405,8 +3405,9 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _deleteUnusedJob() async {
-    // No live Delete action until the verified sandbox-only v3 feed is enabled.
-    if (!JobSyncService.deletionFeedEnabled || !_owner || _busy) return;
+    // Owner may remove a provably never-uploaded local Job without a server.
+    // Synced or uncertain Jobs remain blocked until verified reconciliation.
+    if (!_owner || _busy) return;
     final actorId = supabase.auth.currentUser?.id;
     if (actorId == null) {
       if (mounted) setState(() => _error = 'Sign in before reviewing Job deletion.');
@@ -3446,6 +3447,15 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
             : 'Local deletion is pending safe cleanup and server reconciliation.'),
         ));
         Navigator.pop(context, true);
+        return;
+      }
+      if (!JobSyncService.deletionFeedEnabled) {
+        if (mounted) {
+          setState(() => _error =
+            'This Job may have reached another device or the server. '
+            'Only never-uploaded Jobs can be deleted locally right now. '
+            'Nothing was deleted.');
+        }
         return;
       }
       final deletion = OwnerJobDeletionServiceV3();
@@ -5053,7 +5063,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     title: Text('Assign / unassign mechanic'),
                   ),
                 ),
-              if (_owner && JobSyncService.deletionFeedEnabled) ...[
+              if (_owner) ...[
                 const PopupMenuDivider(),
                 PopupMenuItem(
                   enabled: !_busy,
