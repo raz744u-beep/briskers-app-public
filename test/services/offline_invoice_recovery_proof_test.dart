@@ -12,6 +12,7 @@ void main() {
   };
   Map<String, dynamic> payment() => {
     'invoice_id': 'test-invoice',
+    'id': 'server-receipt-test',
     'operation_id': 'test-payment-operation',
     'amount': 30.00,
     'method_id': 'method-test',
@@ -59,6 +60,12 @@ void main() {
           throwsStateError));
   test('rejects changed payment method', () =>
       expect(() => verify(receipts: [payment()..['method_id'] = 'other']),
+          throwsStateError));
+  test('rejects missing server payment ID', () =>
+      expect(() => verify(receipts: [payment()..remove('id')]),
+          throwsStateError));
+  test('rejects projected local payment', () =>
+      expect(() => verify(receipts: [payment()..['_local_pending_payment'] = true]),
           throwsStateError));
   test('rejects duplicate payments', () =>
       expect(() => verify(receipts: [payment(), payment()]), throwsStateError));
