@@ -483,10 +483,22 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                     size:19,color:current=='done'
                       ? const Color(0xFF159B6A):const Color(0xFF667C8B)),
                   const SizedBox(width:8),
-                  Expanded(child:Text(_employeeName(mechanicId),
-                    overflow:TextOverflow.ellipsis,
-                    style:const TextStyle(fontSize:13.5,
-                      fontWeight:FontWeight.w700))),
+                  Expanded(child:Align(
+                     alignment: Alignment.centerLeft,
+                     child: InkWell(
+                       onTap: () => _employeeQuickLinks(mechanicId),
+                       child: Padding(
+                         padding: const EdgeInsets.symmetric(
+                           vertical: 5, horizontal: 2),
+                         child: Text(_employeeName(mechanicId),
+                           overflow: TextOverflow.ellipsis,
+                           style: const TextStyle(fontSize: 13.5,
+                             color: Color(0xFF334155),
+                             decoration: TextDecoration.underline,
+                             fontWeight: FontWeight.w700)),
+                       ),
+                     ),
+                   )),
                   if(hours!=null)
                     Text('${hours.toStringAsFixed(1)} hrs',
                       style:const TextStyle(fontSize:12,
