@@ -104,6 +104,8 @@ class LabPayrollPeriodProjection {
         // or a zero balance for an incompletely priced period.
         final confirmedGross = grossByWeek.values.fold<int>(
           0, (sum, cents) => sum + cents);
+        // The gross displayed here is confirmed only; unpriced task
+        // labor remains unknown, so the outstanding balance stays unknown.
         return LabPayrollPeriodProjection(
           hours:hrs,
           grossCents:confirmedGross > 0 ? confirmedGross : null,
