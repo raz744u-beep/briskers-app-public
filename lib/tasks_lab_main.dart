@@ -1317,7 +1317,15 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         employee['role'] == 'owner')
                       DropdownMenuItem(
                         value: employee['id']!,
-                        child: Text(_employeeName(employee['id'])),
+                        child: Row(mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(employee['role'] == 'owner'
+                              ? Icons.shield_outlined
+                              : Icons.engineering_outlined,
+                              size: 19, color: BriskersColors.jobs),
+                            const SizedBox(width: 9),
+                            Text(_employeeName(employee['id'])),
+                          ]),
                       ),
                 ],
                 onChanged: (id) => setSheetState(
@@ -1999,7 +2007,15 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                         employee['role'] == 'owner')
                       DropdownMenuItem(
                         value: employee['id']!,
-                        child: Text(_employeeName(employee['id'])),
+                        child: Row(mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(employee['role'] == 'owner'
+                              ? Icons.shield_outlined
+                              : Icons.engineering_outlined,
+                              size: 19, color: BriskersColors.jobs),
+                            const SizedBox(width: 9),
+                            Text(_employeeName(employee['id'])),
+                          ]),
                       ),
                 ],
                 onChanged: (v) => update(() => assignee = v ?? ''),
