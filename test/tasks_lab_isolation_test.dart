@@ -31,6 +31,15 @@ void main() {
     }
   });
 
+  test('TEST startup page preference persists locally', () {
+    final main = File('lib/tasks_lab_main.dart').readAsStringSync();
+    expect(main, contains('lab_navigation_preferences'));
+    expect(main, contains('await _loadStartupPreference();'));
+    expect(main, contains('page = _startupPage;'));
+    expect(main, contains('INSERT INTO lab_navigation_preferences'));
+    expect(main, contains("title: const Text('Startup page')"));
+  });
+
   test('Recheck sheet pins Add action above Android navigation', () {
     final main = File('lib/tasks_lab_main.dart').readAsStringSync();
     final sheet = main.split('Future<void> _addRecheckWork() async {').last
