@@ -2260,9 +2260,27 @@ class _TasksLabHomeState extends State<TasksLabHome> {
               BriskersColors.jobs),
           title: Text(task['description']?.toString()??'',
             style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: Text(_employeeName(task['employee_id']?.toString())+
-            ' · '+(status=='done' ? 'Done' :
-              status=='in_progress' ? 'In Progress' : 'Not Started')),
+          subtitle: Row(children: [
+            Flexible(child: InkWell(
+              onTap: () {
+                final employeeId = task['employee_id']?.toString() ?? '';
+                if (employeeId.isNotEmpty) _employeeQuickLinks(employeeId);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Text(_employeeName(task['employee_id']?.toString()),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF334155),
+                    decoration: TextDecoration.underline)),
+              ),
+            )),
+            const SizedBox(width: 8),
+            Text(status=='done' ? 'Done' :
+              status=='in_progress' ? 'In Progress' : 'Not Started',
+              style: const TextStyle(fontSize: 11.5,
+                color: Color(0xFF64748B))),
+          ]),
           trailing: PopupMenuButton<String>(
             tooltip: 'Change General Task progress',
             onSelected: (value) async {
