@@ -36,6 +36,8 @@ void main() {
     expect(main, contains('lab_dashboard_role_preference'));
     expect(main, contains('Secretary dashboard · TEST'));
     expect(main, contains('Mechanic dashboard · TEST'));
+    expect(main, contains('...tasks, ...shopTasks'));
+    expect(main, contains("task['source_missing'] != 1"));
     expect(main, contains('Local TEST display only · does not grant access'));
     expect(main, contains("if (_dashboardRole != 'owner')"));
   });
