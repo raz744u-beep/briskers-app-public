@@ -19,6 +19,7 @@ class TasksWorkspaceLab extends StatefulWidget {
     required this.onAddGeneral,
     required this.onGeneralStatus,
     required this.onOpenJob,
+    required this.onEmployeeTap,
     this.initialGeneral = false,
   });
 
@@ -31,6 +32,7 @@ class TasksWorkspaceLab extends StatefulWidget {
   final VoidCallback onAddGeneral;
   final Future<void> Function(int taskId, String status) onGeneralStatus;
   final VoidCallback onOpenJob;
+  final ValueChanged<String> onEmployeeTap;
   final bool initialGeneral;
 
   @override
@@ -371,13 +373,36 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
                   const Color(0xFF167A54):BriskersColors.jobs),
               title:Text(task['description']?.toString()??'',
                 style:const TextStyle(fontWeight:FontWeight.w700)),
-              subtitle:Text(widget.employeeName(
-                task['employee_id']?.toString())+
-                ' · '+_statusName(task['status'])+
-                ' · '+(task['category']?.toString()??'General')+
-                ((task['due_at'] is int) ? ' · Due '+DateFormat('MMM d')
-                  .format(DateTime.fromMillisecondsSinceEpoch(
-                    task['due_at'] as int)) : '')),
+              subtitle:Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if ((task['employee_id']?.toString() ?? '').isNotEmpty)
+                    Align(alignment: Alignment.centerLeft,
+                      child: InkWell(
+                        onTap: () => widget.onEmployeeTap(
+                          task['employee_id'].toString()),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Text(widget.employeeName(
+                            task['employee_id']?.toString()),
+                            style: const TextStyle(
+                              color: Color(0xFF334155),
+                              fontWeight: FontWeight.w700,
+                              decoration: TextDecoration.underline)),
+                        ),
+                      ),
+                    )
+                  else
+                    const Text('Unassigned'),
+                  Text(_statusName(task['status']) + ' · ' +
+                    (task['category']?.toString() ?? 'General') +
+                    ((task['due_at'] is int) ? ' · Due ' +
+                      DateFormat('MMM d').format(
+                        DateTime.fromMillisecondsSinceEpoch(
+                          task['due_at'] as int)) : ''),
+                    style: const TextStyle(
+                      fontSize: 11.5, color: Color(0xFF64748B))),
+                ]),
               trailing:PopupMenuButton<String>(
                 tooltip:'Task progress',
                 onOpened:()=>FocusManager.instance.primaryFocus?.unfocus(),
