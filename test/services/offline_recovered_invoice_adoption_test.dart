@@ -160,6 +160,32 @@ void main() {
     expect(invoice.read<String>('document_number'),'T-100');
   });
 
+  test('repeat adoption is rejected without reviving payment replay',
+      () async {
+    await seed(withProvisionalJob:true);
+    await adopt();
+    await expectLater(adopt(), throwsStateError);
+    final rows = await db.customSelect(
+      "SELECT entity_type,state,payload_json FROM sync_outbox "
+      "WHERE business_id=? ORDER BY id",
+      variables:[const Variable<String>(b)],
+    ).get();
+    expect(rows.length,2);
+    expect(rows.map((r) => r.read<String>('state')).toSet(),
+        {'conflict'});
+    final receipt = rows.singleWhere((r) =>
+        r.read<String>('entity_type') == 'invoice_payment_received');
+    final payload = jsonDecode(receipt.read<String>('payload_json')) as Map;
+    expect(payload['operation_id'], receiptOp);
+    expect(payload['amount_cents'],3000);
+    final local = await db.customSelect(
+      "SELECT COUNT(*) AS n FROM local_documents "
+      "WHERE business_id=? AND id=?",
+      variables:[const Variable<String>(b),const Variable<String>(si)],
+    ).getSingle();
+    expect(local.read<int>('n'),1);
+  });
+
   test('non-Owner leaves all original queued operations unchanged', () async {
     await seed();
     await expectLater(adopt(owner:false),throwsStateError);
