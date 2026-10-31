@@ -1873,6 +1873,34 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                   style: TextStyle(fontSize: 12,
                     color: Color(0xFF667085))),
               ),
+              if (firstVehicle) Padding(
+                padding: const EdgeInsets.fromLTRB(5, 6, 5, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(children: [
+                      Expanded(child: Text(
+                        '$completed of $activeTasks tasks done',
+                        style: const TextStyle(fontSize: 12,
+                          fontWeight: FontWeight.w700))),
+                      Text(activeTasks == 0 ? '0%' :
+                        '${(completed * 100 / activeTasks).round()}%',
+                        style: const TextStyle(fontSize: 12,
+                          color: Color(0xFF64748B))),
+                    ]),
+                    const SizedBox(height: 5),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: activeTasks == 0 ? 0 :
+                          completed / activeTasks,
+                        minHeight: 6,
+                        backgroundColor: const Color(0xFFDCE6EA),
+                        color: BriskersColors.jobs),
+                    ),
+                  ],
+                ),
+              ),
               if (firstVehicle) ...[
                 const Divider(height: 1),
                 ListTile(
