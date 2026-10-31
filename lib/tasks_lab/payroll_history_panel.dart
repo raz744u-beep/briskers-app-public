@@ -196,7 +196,7 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
                     subtitle: Text(
                       row.read<double>('hours').toStringAsFixed(2) +
                       ' hrs · ' + _money(row.read<int>('cents')) +
-                      ' · Paid\\n' +
+                      ' · Paid\n' +
                       (expandedPaymentKeys.contains(
                         row.read<String>('line_id') + ':' +
                         row.read<int>('paid_at').toString())
