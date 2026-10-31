@@ -648,6 +648,7 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
         'local_customer': customer.single,
         'local_vehicle': vehicle.single,
         'local_document': documents.single,
+        'local_invoice_detail': await const LocalDocumentDetailCache().load(widget.businessId, invoiceId),
         'local_jobs': jobs,
       };
       final snapshot = const JsonEncoder.withIndent('  ').convert(evidence);
