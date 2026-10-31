@@ -29,6 +29,7 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
   String? _cameraPhotoPath;
   bool _torchOn = false;
   bool _barcodeHandled = false;
+  bool _allowUnverified = false;
 
   @override
   void dispose() {
@@ -71,6 +72,7 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
       _error = null;
       _barcodeHandled = false;
       _torchOn = false;
+      _allowUnverified = false;
     });
   }
 
@@ -81,6 +83,7 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
       _candidates = const [];
       _vin.clear();
       _error = null;
+      _allowUnverified = false;
     });
   }
 
@@ -134,14 +137,21 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
 
   void _review(List<String> values) {
     if (!mounted) return;
+    // A checksum mismatch must not be silently presented as a verified scan.
+    // Keep the image-based candidate visible for the owner's correction.
+    final ranked = VinCaptureParser.preferVerified(values);
     setState(() {
       _stage = _CaptureStage.review;
-      _candidates = values;
-      _vin.text = values.isEmpty ? '' : values.first;
+      _candidates = ranked;
+      _allowUnverified = false;
+      _vin.text = ranked.isEmpty ? '' : ranked.first;
       _vin.selection = TextSelection.collapsed(offset: _vin.text.length);
-      _error = values.isEmpty
+      _error = ranked.isEmpty
           ? 'No complete VIN recognized. Retake the picture or type it.'
-          : null;
+          : VinCaptureParser.hasValidCheckDigit(ranked.first)
+              ? null
+              : 'VIN check digit does not match. The camera may have '
+                  'misread characters. Compare against the vehicle label.';
     });
   }
 
@@ -196,6 +206,19 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
         _error = candidate.length != 17
             ? 'A modern VIN has exactly 17 characters. Found ${candidate.length}.'
             : 'VIN cannot contain I, O, or Q. Check letters against the label.';
+      });
+      return;
+    }
+    // A modern US-market VIN includes a calculated check digit. Explicit
+    // second confirmation is required for unverified imported VINs, never
+    // automatic acceptance of an OCR guess.
+    if (!VinCaptureParser.hasValidCheckDigit(candidate) &&
+        !_allowUnverified) {
+      setState(() {
+        _allowUnverified = true;
+        _error = 'VIN check digit does not match. Double-check all '
+            'characters against the vehicle, especially the first three. '
+            'Tap Use unverified VIN only if you have checked it manually.';
       });
       return;
     }
@@ -385,7 +408,10 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
                 : const Icon(Icons.circle_outlined),
             onTap: () => setState(() {
               _vin.text = candidate;
-              _error = null;
+              _allowUnverified = false;
+              _error = VinCaptureParser.hasValidCheckDigit(candidate)
+                  ? null
+                  : 'VIN check digit does not match. Check the label.';
             }),
           ),
       ],
@@ -396,7 +422,7 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
         keyboardType: TextInputType.visiblePassword,
         autocorrect: false,
         enableSuggestions: false,
-        maxLength: 30,
+        maxLength: 17,
         decoration: const InputDecoration(
           border: OutlineInputBorder(),
           labelText: 'VIN — check all 17 characters',
@@ -404,7 +430,10 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
           helperText: 'Letters I, O, and Q are not used in modern VINs',
         ),
         onChanged: (_) {
-          if (_error != null) setState(() => _error = null);
+          setState(() {
+            _allowUnverified = false;
+            _error = null;
+          });
         },
       ),
       if (_error != null) _errorNotice(),
@@ -412,7 +441,7 @@ class _VinScannerScreenState extends State<VinScannerScreen> {
       FilledButton.icon(
         onPressed: _confirm,
         icon: const Icon(Icons.check_circle_outline),
-        label: const Text('Use this VIN'),
+        label: Text(_allowUnverified ? 'Use unverified VIN' : 'Use this VIN'),
       ),
       const SizedBox(height: 8),
       OutlinedButton.icon(

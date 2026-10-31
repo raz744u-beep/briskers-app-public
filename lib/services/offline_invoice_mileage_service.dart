@@ -186,10 +186,19 @@ class OfflineInvoiceMileageService {
           );
         });
       } catch (error) {
+        // A stale invoice revision is a permanent optimistic-concurrency
+        // conflict, not a transient transport failure. Preserve the exact
+        // queued operation for Owner review instead of re-sending it on every
+        // Auto refresh and exhausting PostgREST connections.
+        final message = error.toString();
+        final versionConflict = message.contains('40001') ||
+            message.contains('Invoice changed elsewhere');
         await _database.customStatement(
-          """UPDATE sync_outbox SET last_attempt_at=?,last_error=?
-             WHERE id=? AND business_id=? AND entity_type=?""",
-          [_now(),error.toString(),id,businessId,_type],
+          """UPDATE sync_outbox SET state=?,last_attempt_at=?,last_error=?
+             WHERE id=? AND business_id=? AND entity_type=?
+               AND state='pending'""",
+          [versionConflict ? 'conflict' : 'pending',
+           _now(),message,id,businessId,_type],
         );
         break;
       }
