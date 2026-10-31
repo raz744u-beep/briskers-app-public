@@ -1,0 +1,106 @@
+name: Briskers sandbox-connected Android test APK
+
+# Manual only. Separate from compile-only CI and never a production release.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SANDBOX_PUBLISHABLE_KEY: ${{ secrets.BRISKERS_SYNTHETIC_PUBLISHABLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Fail closed if sandbox key is missing
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          key = os.environ.get("SANDBOX_PUBLISHABLE_KEY", "")
+          if not (key.startswith("sb_publishable_") and len(key) >= 30):
+              raise SystemExit("Sandbox publishable key missing or malformed")
+          if key in ("sb_publishable_ci_placeholder", "sb_publishable_placeholder", "sb_publishable_test"):
+              raise SystemExit("Placeholder key rejected")
+          print("Sandbox key format verified (value not printed)")
+          PY
+
+      - name: Generate isolated Android project
+        shell: bash
+        run: |
+          mkdir generated
+          cd generated
+          flutter create --platforms=android --org com.briskers --project-name briskers_app .
+          rm -rf lib test
+          cp -R ../lib ./lib
+          cp -R ../test ./test
+          if [ -d ../assets ]; then cp -R ../assets ./assets; fi
+          cp ../pubspec.yaml ./pubspec.yaml
+          cp ../analysis_options.yaml ./analysis_options.yaml
+
+      - name: Bind separate Android package ID
+        working-directory: generated
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          paths=[p for p in (Path("android/app/build.gradle.kts"),Path("android/app/build.gradle")) if p.exists()]
+          assert len(paths)==1
+          p=paths[0]
+          source=p.read_text()
+          pattern=r'(applicationId\s*(?:=\s*)?["\x27])com\.briskers\.briskers_app(["\x27])'
+          changed,count=re.subn(pattern,r'\g<1>com.briskers.briskers_test\g<2>',source)
+          assert count==1, "Cannot verify separate application ID"
+          p.write_text(changed)
+          assert 'com.briskers.briskers_test' in p.read_text()
+          PY
+
+      - name: Generate sandbox-only Dart configuration
+        working-directory: generated
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          key=os.environ["SANDBOX_PUBLISHABLE_KEY"]
+          Path("sandbox-defines.json").write_text(json.dumps({
+            "BRISKERS_SYNTHETIC_BUILD":"true",
+            "BRISKERS_SYNTHETIC_PUBLISHABLE_KEY":key,
+            "BRISKERS_OWNER_DELETE_V3_FEED":"false"
+          }))
+          PY
+
+      - name: Resolve dependencies and generate local database
+        working-directory: generated
+        run: |
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build isolated TEST APK (deletion off)
+        working-directory: generated
+        run: flutter build apk --debug --dart-define-from-file=sandbox-defines.json
+
+      - name: Confirm APK exists
+        working-directory: generated
+        run: test -s build/app/outputs/flutter-apk/app-debug.apk
+
+      - name: Remove temporary configuration
+        if: always()
+        working-directory: generated
+        run: rm -f sandbox-defines.json
+
+      - name: Save sandbox TEST APK (not a production release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-sandbox-connected-TEST-delete-disabled
+          path: generated/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 3
