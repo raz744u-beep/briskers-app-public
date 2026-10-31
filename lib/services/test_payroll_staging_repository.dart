@@ -31,6 +31,38 @@ class TestPayrollStagingRepository {
     ''');
   }
 
+  /// Read-only TEST staging summary for a future Employee Payroll preview.
+  /// Never displays these proposals as completed or paid.
+  Future<List<Map<String, Object?>>> stagedForEmployee({
+    required String businessId,
+    required String employeeId,
+  }) async {
+    if (businessId.trim().isEmpty || employeeId.trim().isEmpty) {
+      throw ArgumentError('Business and employee required');
+    }
+    await _prepare();
+    final rows = await _db.customSelect(
+      'SELECT operation_id, payload_json, state FROM test_payroll_staging '
+      'WHERE business_id = ? ORDER BY operation_id',
+      variables: [Variable<String>(businessId)],
+    ).get();
+    return rows.map((row) {
+      final payload = jsonDecode(row.read<String>('payload_json'));
+      if (payload is! Map<String, dynamic> ||
+          payload['employee_id'] != employeeId) {
+        return null;
+      }
+      return <String, Object?>{
+        'operation_id': row.read<String>('operation_id'),
+        'state': row.read<String>('state'),
+        'gross_cents': payload['gross_cents'],
+        'repayment_cents': payload['repayment_cents'],
+        'net_cents': payload['net_cents'],
+        'method': payload['method'],
+      };
+    }).whereType<Map<String, Object?>>().toList(growable: false);
+  }
+
   /// Returns false only for an exact existing replay; conflicting replays and
   /// allocations reserved by another operation fail the entire transaction.
   Future<bool> stage({
