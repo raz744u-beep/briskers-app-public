@@ -1,14 +1,19 @@
 name: Briskers sandbox-connected Android test APK
 
-# Manual only. Separate from compile-only CI and never a production release.
+# Sandbox-only CI. Runs only for the in-repository Owner Delete draft branch.
+# Never a production release.
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/owner-delete-connected-android.yml'
 
 permissions:
   contents: read
 
 jobs:
   sandbox-apk:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feat/oct28-owner-delete-v3-current-main'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
