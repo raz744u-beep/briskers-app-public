@@ -180,6 +180,19 @@ DECLARE
 BEGIN
   PERFORM briskers.require_permission(p_business_id,'invoices.create');
   PERFORM briskers.require_permission(p_business_id,'jobs.create');
+  -- Recovery bypasses standard per-line rounding only for an Owner.
+  -- Permissions alone are insufficient: a Secretary could have both
+  -- invoices.create and jobs.create in the normal operational role.
+  IF NOT EXISTS (
+    SELECT 1 FROM briskers.memberships m
+    WHERE m.business_id=p_business_id
+      AND m.user_id=auth.uid()
+      AND m.active
+      AND m.role_code='owner'
+  ) THEN
+    RAISE EXCEPTION 'Only the Owner may recover exact-total offline invoices'
+      USING ERRCODE='42501';
+  END IF;
   IF p_operation_id IS NULL THEN
     RAISE EXCEPTION 'Offline invoice operation ID is required'
       USING ERRCODE='22023';
