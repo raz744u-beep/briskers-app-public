@@ -712,11 +712,20 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     final base = double.tryParse(_weeklyBasePreview.text.trim());
     final hourly = double.tryParse(_hourlySupplementPreview.text.trim());
     final adjustment = double.tryParse(_weeklyAdjustmentPreview.text.trim());
+    final previewHours = double.tryParse(_approvedSupplementHours.text.trim());
     if (base == null || hourly == null || adjustment == null ||
+        previewHours == null || !previewHours.isFinite ||
+        previewHours < 0 || previewHours > 168 ||
         !base.isFinite || !hourly.isFinite || !adjustment.isFinite ||
         base < 0 || hourly < 0 || base > 1000000 ||
         hourly > 100000 || adjustment.abs() > 1000000) {
       _snack('Enter valid weekly amounts and rates');
+      return;
+    }
+    final estimate = base + adjustment +
+      (_laborAdditionalToBase ? previewHours * hourly : 0.0);
+    if (!estimate.isFinite || estimate < 0 || estimate > 1000000) {
+      _snack('Weekly gross preview must be between $0 and $1,000,000');
       return;
     }
     setState(() => _savingFlexible = true);
