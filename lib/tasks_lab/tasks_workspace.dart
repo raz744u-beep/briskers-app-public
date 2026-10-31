@@ -394,14 +394,37 @@ class _TasksWorkspaceLabState extends State<TasksWorkspaceLab> {
                     )
                   else
                     const Text('Unassigned'),
-                  Text(_statusName(task['status']) + ' · ' +
-                    (task['category']?.toString() ?? 'General') +
-                    ((task['due_at'] is int) ? ' · Due ' +
-                      DateFormat('MMM d').format(
-                        DateTime.fromMillisecondsSinceEpoch(
-                          task['due_at'] as int)) : ''),
-                    style: const TextStyle(
-                      fontSize: 11.5, color: Color(0xFF64748B))),
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: task['status'] == 'done'
+                          ? const Color(0xFFE2F5E9)
+                          : task['status'] == 'in_progress'
+                            ? const Color(0xFFE0F1F4)
+                            : const Color(0xFFEDF1F5),
+                        borderRadius: BorderRadius.circular(12)),
+                      child: Text(_statusName(task['status']),
+                        style: TextStyle(
+                          fontSize: 11, fontWeight: FontWeight.w700,
+                          color: task['status'] == 'done'
+                            ? const Color(0xFF167A54)
+                            : task['status'] == 'in_progress'
+                              ? const Color(0xFF126C73)
+                              : const Color(0xFF566979))),
+                    ),
+                    const SizedBox(width: 7),
+                    Flexible(child: Text(
+                      (task['category']?.toString() ?? 'General') +
+                      ((task['due_at'] is int) ? ' · Due ' +
+                        DateFormat('MMM d').format(
+                          DateTime.fromMillisecondsSinceEpoch(
+                            task['due_at'] as int)) : ''),
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11.5,
+                        color: Color(0xFF64748B)))),
+                  ]),
                 ]),
               trailing:PopupMenuButton<String>(
                 tooltip:'Task progress',
