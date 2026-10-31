@@ -96,7 +96,7 @@ class OfflineRecoveredInvoiceAdoption {
           row.read<String>('entity_type') == 'customer_create');
       final customerPayload=jsonDecode(customerEntry.read<String>('payload_json'));
       if (customerPayload is! Map ||
-          customerPayload['operation_id']?.toString().isEmpty != false) {
+          (customerPayload['operation_id']?.toString().isNotEmpty != true)) {
         throw StateError('Original customer operation identity missing');
       }
       final vehicleQueue=operation('vehicle_create',localVehicleId,null);
