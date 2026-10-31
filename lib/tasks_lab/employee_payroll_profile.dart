@@ -717,7 +717,9 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
             )),
           ],
         )),
-        _panel(Column(
+        // No large empty balance panel when nothing positive is owed.
+        if ((overall.balanceCents ?? 0) > 0)
+          _panel(Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text('Outstanding balance (all weeks)',
