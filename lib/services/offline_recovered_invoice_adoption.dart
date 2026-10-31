@@ -92,6 +92,13 @@ class OfflineRecoveredInvoiceAdoption {
         return matches.single.read<int>('id');
       }
       final customerQueue=operation('customer_create',localCustomerId,null);
+      final customerEntry=queue.singleWhere((row) =>
+          row.read<String>('entity_type') == 'customer_create');
+      final customerPayload=jsonDecode(customerEntry.read<String>('payload_json'));
+      if (customerPayload is! Map ||
+          customerPayload['operation_id']?.toString().isEmpty != false) {
+        throw StateError('Original customer operation identity missing');
+      }
       final vehicleQueue=operation('vehicle_create',localVehicleId,null);
       final vehicleEntry=queue.singleWhere((row) =>
           row.read<String>('entity_type') == 'vehicle_create');
@@ -102,6 +109,15 @@ class OfflineRecoveredInvoiceAdoption {
         throw StateError('Original vehicle operation is not safe to adopt');
       }
       final invoiceQueue=operation('document_draft_create',localInvoiceId,invoiceOperationId);
+      final invoiceEntry=queue.singleWhere((row) =>
+          row.read<int>('id') == invoiceQueue);
+      final invoicePayload=jsonDecode(invoiceEntry.read<String>('payload_json'));
+      if (invoicePayload is! Map ||
+          invoicePayload['customer_id'] != localCustomerId ||
+          invoicePayload['vehicle_id'] != localVehicleId ||
+          invoicePayload['kind'] != 'invoice') {
+        throw StateError('Original invoice dependencies changed');
+      }
       final paymentQueue=operation(
           'invoice_payment_received',localInvoiceId,paymentOperationId);
       final paymentEntry=queue.singleWhere((row) =>
