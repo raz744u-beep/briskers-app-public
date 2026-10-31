@@ -1423,16 +1423,20 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     return PopupMenuButton<String>(
       tooltip: 'Change job status',
       onSelected: _changeJobStatus,
+      // Open/In Progress are derived from local task activity.
+      // Only completing or reopening a job is an explicit Owner action.
       itemBuilder: (context) => [
-        for (final option in _jobStatusChoices)
-          PopupMenuItem<String>(
-            value: option.$1,
-            child: Row(children: [
-              Icon(option.$3, color: option.$4, size: 20),
-              const SizedBox(width: 8),
-              Text(option.$2),
-            ]),
-          ),
+        PopupMenuItem<String>(
+          value: jobStatusCode == 'completed' ? 'in_progress' : 'completed',
+          child: Row(children: [
+            Icon(jobStatusCode == 'completed'
+                ? Icons.restart_alt : Icons.task_alt,
+              color: BriskersColors.jobs, size: 20),
+            const SizedBox(width: 8),
+            Text(jobStatusCode == 'completed'
+              ? 'Reopen Job' : 'Mark Job Complete'),
+          ]),
+        ),
       ],
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
