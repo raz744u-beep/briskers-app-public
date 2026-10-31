@@ -299,7 +299,7 @@ void main() {
     expect(taskCardSection, contains('_ownerCorrectEarnedHours(task)'));
     expect(taskCardSection, isNot(contains("onTap: () => _editTask(task)")));
     expect(taskCardSection, contains('record != null'));
-    expect(taskCardSection, contains('credit.mechanics'));
+    expect(taskCardSection, contains('_linkedMechanics(task, record)'));
     expect(taskCardSection, contains('credit.hours'));
     expect(taskCardSection, contains('corrections.isNotEmpty'));
     expect(main, contains('Pay mechanic for this task'));
