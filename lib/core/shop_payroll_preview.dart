@@ -68,6 +68,24 @@ class ShopPayrollPreview {
       methodSelected &&
       !alreadyCommitted;
 
+  /// A repayment is applied only during explicit verification. The amount
+  /// must not exceed either the gross payroll or the employee's outstanding
+  /// advance balance. The preview never mutates that balance.
+  static int verifiedRepaymentCents({
+    required int grossCents,
+    required int outstandingAdvanceCents,
+    required int requestedRepaymentCents,
+  }) {
+    if (grossCents < 0 ||
+        outstandingAdvanceCents < 0 ||
+        requestedRepaymentCents < 0 ||
+        requestedRepaymentCents > grossCents ||
+        requestedRepaymentCents > outstandingAdvanceCents) {
+      throw ArgumentError('Invalid repayment against outstanding advance');
+    }
+    return requestedRepaymentCents;
+  }
+
   /// A payroll deduction never changes gross taxable work credit.
   /// A deduction above gross is rejected rather than generating negative pay.
   static int netCents({
