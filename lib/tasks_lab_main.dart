@@ -69,7 +69,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   bool loading = true;
   String? error;
 
-  static const _dockPages = [0, 1, 2, 7, 8, 9, 10, 11];
+  static const _dockPages = [0, 1, 2, 3, 5, 8, 9, 11];
 
   @override
   void initState() {
@@ -215,8 +215,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   }
 
   int get _selectedDock {
-    if (page == 3 || page == 4 || page == 12) return 2;
-    if (page == 5 || page == 6) return 7;
+    if (page == 4 || page == 12) return 3;
+    if (page == 6) return 4;
+    if (page == 7) return 5;
+    if (page == 10) return 7;
     final idx = _dockPages.indexOf(page);
     return idx < 0 ? 0 : idx;
   }
@@ -236,8 +238,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         label: 'Jobs', icon: Icons.build_outlined,
         color: BriskersColors.jobs),
       BriskersDockDestination(
-        label: 'Estimates', icon: Icons.description_outlined,
-        color: BriskersColors.estimates),
+        label: 'Tasks', icon: Icons.rule_outlined,
+        color: BriskersColors.jobs),
+      BriskersDockDestination(
+        label: 'Payroll', icon: Icons.account_balance_wallet_outlined,
+        color: BriskersColors.invoices),
       BriskersDockDestination(
         label: 'Invoices', icon: Icons.receipt_long_outlined,
         color: BriskersColors.invoices),
@@ -245,15 +250,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         label: 'Schedule', icon: Icons.calendar_month_outlined,
         color: BriskersColors.schedule),
       BriskersDockDestination(
-        label: 'Expenses', icon: Icons.account_balance_wallet_outlined,
-        color: BriskersColors.expenses),
-      BriskersDockDestination(
         label: 'More', icon: Icons.more_horiz,
         color: BriskersColors.more),
     ],
     onSelected: (index) => _navigate(_dockPages[index]),
     onLongPressed: (index, globalPosition) {
-      if (index == 2 || index == 7) {
+      if (index == 3 || index == 4) {
         _toggleMenu(index, globalPosition);
       }
     },
@@ -288,11 +290,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (index == 2) ...[
+          if (index == 3) ...[
             _menuEntry(Icons.rule_outlined, 'Job J-24 tasks', 3),
             _menuEntry(Icons.cleaning_services_outlined, 'General Tasks', 4),
           ],
-          if (index == 7) ...[
+          if (index == 4) ...[
             _menuEntry(Icons.account_balance_wallet_outlined, 'Payroll', 5),
             const Divider(height: 1),
             _menuEntry(Icons.settings_outlined, 'Settings', 6),
