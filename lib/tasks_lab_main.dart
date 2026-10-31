@@ -62,6 +62,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   List<Map<String, dynamic>> earnedCorrections = const [];
   int invoiceTestTab = 0;
   int page = 0;
+  int _startupPage = 0;
   int? expandedMenu;
   double menuAnchorX = 180;
   int selectedVehicle = 0;
@@ -79,6 +80,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
 
   Future<void> _initialize() async {
     try {
+      await _loadStartupPreference();
       await store.reconcileDocument(
         businessId: BriskersLabFixture.businessId,
         jobId: BriskersLabFixture.jobId,
@@ -104,6 +106,35 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           error = 'Local test setup failed: $e';
         });
       }
+    }
+  }
+
+  Future<void> _loadStartupPreference() async {
+    await localDatabase.customStatement(
+      'CREATE TABLE IF NOT EXISTS lab_navigation_preferences ('
+      'id INTEGER PRIMARY KEY CHECK (id=1), startup_page INTEGER NOT NULL)');
+    final rows = await localDatabase.customSelect(
+      'SELECT startup_page FROM lab_navigation_preferences WHERE id=1')
+      .getSingleOrNull();
+    final requested = rows?.read<int>('startup_page') ?? 0;
+    if (!mounted) return;
+    setState(() {
+      _startupPage = const [0, 2, 3, 5].contains(requested) ? requested : 0;
+      page = _startupPage;
+    });
+  }
+
+  Future<void> _setStartupPage(int destination) async {
+    if (!const [0, 2, 3, 5].contains(destination)) return;
+    try {
+      await localDatabase.customStatement(
+        'INSERT INTO lab_navigation_preferences(id,startup_page) VALUES(1,?) '
+        'ON CONFLICT(id) DO UPDATE SET startup_page=excluded.startup_page',
+        [destination]);
+      if (mounted) setState(() => _startupPage = destination);
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save startup page: $error')));
     }
   }
 
@@ -2622,6 +2653,24 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Widget _settingsPage() => ListView(
     children: [
       _sectionHeader('Test Settings'),
+      ListTile(
+        leading: const Icon(Icons.home_outlined),
+        title: const Text('Startup page'),
+        subtitle: const Text('Saved locally on this TEST device'),
+        trailing: DropdownButton<int>(
+          value: _startupPage,
+          items: const [
+            DropdownMenuItem(value: 0, child: Text('Home')),
+            DropdownMenuItem(value: 2, child: Text('Jobs')),
+            DropdownMenuItem(value: 3, child: Text('Tasks')),
+            DropdownMenuItem(value: 5, child: Text('Payroll')),
+          ],
+          onChanged: (value) {
+            if (value != null) unawaited(_setStartupPage(value));
+          },
+        ),
+      ),
+
       ListTile(
         leading: const Icon(Icons.badge_outlined),
         title: const Text('Edit employee names'),
