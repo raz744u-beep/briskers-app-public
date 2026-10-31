@@ -93,8 +93,27 @@ class OfflineRecoveredInvoiceAdoption {
       }
       final customerQueue=operation('customer_create',localCustomerId,null);
       final vehicleQueue=operation('vehicle_create',localVehicleId,null);
+      final vehicleEntry=queue.singleWhere((row) =>
+          row.read<String>('entity_type') == 'vehicle_create');
+      final vehiclePayload=jsonDecode(vehicleEntry.read<String>('payload_json'));
+      if (vehiclePayload is! Map ||
+          vehiclePayload['idempotent_v1'] != true ||
+          vehiclePayload['customer_id'] != localCustomerId) {
+        throw StateError('Original vehicle operation is not safe to adopt');
+      }
       final invoiceQueue=operation('document_draft_create',localInvoiceId,invoiceOperationId);
-      operation('invoice_payment_received',localInvoiceId,paymentOperationId);
+      final paymentQueue=operation(
+          'invoice_payment_received',localInvoiceId,paymentOperationId);
+      final paymentEntry=queue.singleWhere((row) =>
+          row.read<int>('id') == paymentQueue);
+      final receiptPayload=jsonDecode(paymentEntry.read<String>('payload_json'));
+      if (receiptPayload is! Map ||
+          receiptPayload['invoice_id'] != localInvoiceId ||
+          receiptPayload['amount_cents'] != paymentCents ||
+          receiptPayload['method_id'] != paymentMethodId ||
+          receiptPayload['payment_date'] != paymentDate) {
+        throw StateError('Original local payment payload differs from proof');
+      }
       final local = await _db.customSelect(
         '''SELECT total,job_id,customer_id,sync_state FROM local_documents
            WHERE business_id=? AND id=?''',
@@ -119,18 +138,25 @@ class OfflineRecoveredInvoiceAdoption {
           businessId,localInvoiceId,serverInvoiceId);
       await LocalDocumentRepository(database:_db).upsertFromServer(
           businessId,[serverInvoice]);
-      // Keep the original local invoice, payment outbox and snapshot.
-      // A separate, verified acknowledgement step must retire them only
-      // after the server receipt appears in the authorized detail feed.
+      // Put the already-recovered payment in a non-replayable hold.
+      // Keeping it pending would let the normal background sender issue
+      // another network request before final receipt acknowledgement.
+      // The original operation UUID and payload are preserved intact.
+      // An Owner-only verified follow-up may retire this hold later.
       await _db.customStatement(
-        '''UPDATE sync_outbox SET state='pending',
-           last_error='Adopted server invoice; payment acknowledgement required'
-           WHERE business_id=? AND entity_type='invoice_payment_received'
-             AND entity_id=?''',
-        [businessId,serverInvoiceId],
+        '''UPDATE sync_outbox SET state='conflict',
+           last_error='Existing server receipt requires Owner verification before queue retirement'
+           WHERE business_id=? AND id=? AND state='pending'
+             AND entity_type='invoice_payment_received' ''',
+        [businessId,paymentQueue],
       );
+      // Retain the original invoice operation too. Without a separately
+      // durable cache and alias commit the operation is recovery evidence.
+      // Hold it instead of allowing a later automatic duplicate replay.
       await _db.customStatement(
-        'DELETE FROM sync_outbox WHERE business_id=? AND id=?',
+        '''UPDATE sync_outbox SET state='conflict',
+           last_error='Server invoice adopted; Owner review required to retire original operation'
+           WHERE business_id=? AND id=? AND state='pending' ''',
         [businessId,invoiceQueue],
       );
     });
