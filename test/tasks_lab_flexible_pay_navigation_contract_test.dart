@@ -11,12 +11,14 @@ void main() {
     expect(weekly, contains('widget.rateCents! <= 0 ? null : _verifyPayment'));
   });
 
-  test('flexible pay remains a locally stored preview, not an implicit payout', () {
+  test('flexible pay requires explicit confirmation before a local payout', () {
     final profile = File('lib/tasks_lab/employee_payroll_profile.dart')
         .readAsStringSync();
     expect(profile, contains('lab_flexible_weekly_defaults'));
     expect(profile, contains('Save weekly defaults · TEST'));
-    expect(profile, contains('Settings only; does not verify payment.'));
+    expect(profile, contains('Verify Weekly Payment · TEST'));
+    expect(profile, contains('Confirm TEST Payment'));
+    expect(profile, contains('recordFlexibleWeekly('));
     expect(profile, contains('_approvedSupplementHours'));
   });
 }
