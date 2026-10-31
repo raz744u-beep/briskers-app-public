@@ -39,6 +39,7 @@ void main() {
     'offline_operation_id': invoiceOp,
   };
   final remoteReceipt = <String, dynamic>{
+    'id': 'server-receipt-test',
     'invoice_id': si,
     'operation_id': receiptOp,
     'amount': 30.00,
