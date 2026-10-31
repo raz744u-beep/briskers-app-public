@@ -68,4 +68,33 @@ void main() {
     expect(result.balanceCents, isNull);
   });
 
+  test('paid total excludes repayment and nonpositive pay entries', () {
+    final result = LabPayrollPeriodProjection.calculate(
+      employeeId: 'chris',
+      from: from,
+      until: until,
+      hourlyRateCents: 4000,
+      drafts: const [],
+      payments: [
+        {'employee_id': 'chris', 'kind': 'pay',
+         'paid_at': DateTime(2026, 10, 28).millisecondsSinceEpoch,
+         'cents': 8500},
+        {'employee_id': 'chris', 'kind': 'repayment',
+         'paid_at': DateTime(2026, 10, 28).millisecondsSinceEpoch,
+         'cents': 2000},
+        {'employee_id': 'chris', 'kind': 'pay',
+         'paid_at': DateTime(2026, 10, 28).millisecondsSinceEpoch,
+         'cents': -500},
+      ],
+      taskPayments: const [
+        {'employee_id': 'chris', 'week_key': '2026-10-26',
+         'hours': 2.5},
+      ],
+    );
+    expect(result.hours, 2.5);
+    expect(result.grossCents, 10000);
+    expect(result.paidCents, 8500);
+    expect(result.balanceCents, 1500);
+  });
+
 }
