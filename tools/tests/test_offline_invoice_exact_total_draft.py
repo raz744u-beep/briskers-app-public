@@ -97,6 +97,17 @@ class ExactOfflineInvoiceRecoveryContract(unittest.TestCase):
         self.assertEqual(sum(bases) + sum(taxes), D("7882.11"))
         self.assertTrue(all(value == cents(value) for value in taxes))
 
+    def test_edit_reallocates_tax_without_rounding_drift(self):
+        updated_lines = LINES.copy()
+        updated_lines[0] = ("2", "1700.01")
+        edited_tax = allocation(updated_lines)
+        edited_bases = [cents(D(qty) * D(price))
+                        for qty, price in updated_lines]
+        expected_whole_tax = cents(sum(base * RATE for base in edited_bases))
+        self.assertEqual(sum(edited_tax), expected_whole_tax)
+        self.assertTrue(all(value == cents(value) for value in edited_tax))
+        self.assertNotEqual(sum(edited_tax), sum(allocation(LINES)))
+
     def test_allocation_zero_tax_and_stable_replay(self):
         self.assertEqual(allocation(LINES, D("0")), [D("0")]*len(LINES))
         self.assertEqual(allocation(LINES), allocation(LINES))
