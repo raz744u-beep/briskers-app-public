@@ -1059,7 +1059,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
                               builder: (dialog) => AlertDialog(
                                 title: const Text('Move to General Tasks?'),
                                 content: const Text(
-                                  'This unpaid, unfinished internal task '
+                                  'This nonpayable, unfinished internal task '
                                   'will no longer appear under Job J-24.'),
                                 actions: [
                                   TextButton(
