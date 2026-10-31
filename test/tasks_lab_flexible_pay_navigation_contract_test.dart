@@ -11,6 +11,15 @@ void main() {
     expect(weekly, contains('widget.rateCents! <= 0 ? null : _verifyPayment'));
   });
 
+  test('hourly and weekly payroll cannot overlap the same week', () {
+    final service = File('lib/tasks_lab/lab_payroll_payment_service.dart')
+        .readAsStringSync();
+    expect(service, contains('CREATE TABLE IF NOT EXISTS lab_flexible_weekly_confirmations'));
+    expect(service, contains('This week already has a flexible payroll payment'));
+    expect(service, contains('This payroll week already has a settlement'));
+    expect(service, contains('grossCents-debtCents'));
+  });
+
   test('flexible pay requires explicit confirmation before a local payout', () {
     final profile = File('lib/tasks_lab/employee_payroll_profile.dart')
         .readAsStringSync();
