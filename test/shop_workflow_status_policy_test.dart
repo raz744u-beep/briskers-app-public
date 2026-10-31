@@ -191,6 +191,33 @@ void main() {
     ), throwsArgumentError);
   });
 
+  test('Exact payroll retry is recognized; changed retry conflicts', () {
+    ShopPayrollPaymentProposal proposal({
+      String operationId = 'op-1',
+      List<String> credits = const ['a', 'b'],
+      int repayment = 2000,
+      String method = 'Zelle',
+    }) => ShopPayrollPaymentProposal(
+      operationId: operationId,
+      employeeId: 'mechanic-1',
+      allocationIds: credits,
+      grossCents: 10500,
+      repaymentCents: repayment,
+      method: method,
+    );
+    final saved = proposal();
+    expect(ShopPayrollReplayPolicy.sameProposal(
+      saved, proposal(credits: ['b', 'a'])), isTrue);
+    expect(ShopPayrollReplayPolicy.conflictingReplay(
+      saved, proposal(repayment: 1000)), isTrue);
+    expect(ShopPayrollReplayPolicy.conflictingReplay(
+      saved, proposal(method: 'Cash')), isTrue);
+    expect(ShopPayrollReplayPolicy.conflictingReplay(
+      saved, proposal(credits: ['a'])), isTrue);
+    expect(ShopPayrollReplayPolicy.conflictingReplay(
+      saved, proposal(operationId: 'op-2')), isFalse);
+  });
+
   test('Joint close requires Owner, finalized payment and finished work', () {
     bool allowed({bool owner = true, bool paid = true,
       bool unresolved = false, bool done = true}) =>
