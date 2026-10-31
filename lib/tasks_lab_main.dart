@@ -2645,7 +2645,20 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         const Text('Standalone offline copy · Real shop data is not connected',
           style: TextStyle(fontSize: 12,
             color: BriskersColors.jobs, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
+        // Owner's high-frequency actions stay above the other shop modules.
+        Row(children: [
+          Expanded(child: FilledButton.icon(
+            onPressed: () => _navigate(3),
+            icon: const Icon(Icons.rule_outlined, size: 18),
+            label: const Text('Tasks'))),
+          const SizedBox(width: 9),
+          Expanded(child: FilledButton.tonalIcon(
+            onPressed: () => _navigate(5),
+            icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
+            label: const Text('Payroll'))),
+        ]),
+        const SizedBox(height: 12),
         tileRow(
           _homeTile('Customers', '1 Test customer',
             Icons.people_outline, BriskersColors.customers,
