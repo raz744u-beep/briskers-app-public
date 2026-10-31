@@ -7,6 +7,12 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/briskers_colors.dart';
 import '../../core/connection_mode.dart';
+import '../../core/supabase_config.dart';
+import '../../services/owner_job_deletion_service_v3.dart';
+import '../../services/owner_job_deletion_v3_contract.dart';
+import '../../services/owner_local_job_purge_service.dart';
+import 'offline_job_purge_dialog.dart';
+import 'owner_job_delete_v3_dialog.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/employee_role_style.dart';
 import '../../core/job_status_style.dart';
@@ -3399,53 +3405,91 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
   }
 
   Future<void> _deleteUnusedJob() async {
-    if (!_owner || !_onlineReady || _busy ||
-        BriskersConnectionModeController.instance.forceOffline) {
+    // No live Delete action until the verified sandbox-only v3 feed is enabled.
+    if (!JobSyncService.deletionFeedEnabled || !_owner || _busy) return;
+    final actorId = supabase.auth.currentUser?.id;
+    if (actorId == null) {
+      if (mounted) setState(() => _error = 'Sign in before reviewing Job deletion.');
       return;
     }
+    final online = !BriskersConnectionModeController.instance.forceOffline;
+    setState(() { _busy = true; _error = null; });
     try {
-      final plan = await _api.jobDeletionPlan(widget.businessId,widget.jobId);
-      if (!mounted) return;
-      final number=plan['job_number']?.toString() ?? '';
-      final permitted=plan['can_delete'] == true;
-      final invoices=(plan['invoices'] as List?) ?? const [];
-      final estimates=(plan['estimates_preserved'] as List?) ?? const [];
-      final confirmed=await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Delete Job?'),
-          content: Text(permitted
-              ? 'Delete Job $number and ${invoices.length} unpaid invoice'
-                '${invoices.length == 1 ? '' : 's'}? '
-                '${estimates.length} estimate'
-                '${estimates.length == 1 ? ' will' : 's will'} be kept.'
-              : 'Job $number cannot be deleted: '
-                '${plan['reason'] ?? 'Protected related records'}.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext,false),
-              child: const Text('Cancel'),
-            ),
-            if (permitted)
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext,true),
-                child: const Text('Delete Job'),
-              ),
-          ],
-        ),
+      // A never-uploaded local Job has a different, guarded cancellation path.
+      final localService = OwnerLocalJobPurgeService();
+      final localPreview = await localService.eligiblePreview(
+        widget.businessId,
+        widget.jobId,
+        actorId: actorId,
+        isOwner: _owner,
       );
-      if (confirmed != true || !mounted) return;
-      setState(() => _busy=true);
-      try {
-        await _api.deleteJobWithUnpaidInvoices(
-          widget.businessId,widget.jobId,
+      if (localPreview != null) {
+        if (!mounted) return;
+        final rows = localPreview.items.where((row) => row['kind'] == 'local_jobs');
+        final label = rows.isEmpty ? 'this Job' :
+          (rows.first['label']?.toString() ?? 'this Job');
+        final confirmed = await showOfflineJobPurgeConfirmation(
+          context, jobLabel: label, items: localPreview.items,
         );
-        if (mounted) Navigator.pop(context,true);
-      } finally {
-        if (mounted) setState(() => _busy=false);
+        if (!confirmed || !mounted) return;
+        if (!_owner || supabase.auth.currentUser?.id != actorId) {
+          throw StateError('Your access changed. Reopen Delete Job to review.');
+        }
+        final cleanup = await localService.confirm(
+          localPreview, actorId: actorId, isOwner: _owner,
+          online: !BriskersConnectionModeController.instance.forceOffline,
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(cleanup.completed
+            ? 'The local test Job was deleted and queued uploads cancelled.'
+            : 'Local deletion is pending safe cleanup and server reconciliation.'),
+        ));
+        Navigator.pop(context, true);
+        return;
+      }
+      final deletion = OwnerJobDeletionServiceV3();
+      final preview = await deletion.preview(
+        widget.businessId,
+        widget.jobId,
+        actorId: actorId,
+        isOwner: _owner,
+        online: online,
+      );
+      if (!mounted) return;
+      final confirmed = await showOwnerJobDeleteV3Confirmation(
+        context, preview: preview,
+      );
+      if (!confirmed || !mounted) return;
+      // The backend checks Owner access, graph identity, posted money,
+      // and the exact linked-record confirmation again under database locks.
+      if (!_owner || supabase.auth.currentUser?.id != actorId) {
+        throw StateError('Your access changed. Reopen Delete Job to review.');
+      }
+      final outcome = await deletion.queueConfirmed(
+        preview,
+        actorId: actorId,
+        isOwner: _owner,
+        // The dialog requires a separate checkbox for financial test records.
+        // This flag is never set when preview consent was not explicitly shown.
+        noRealMoneyConfirmed: preview.snapshot['requires_synthetic_consent'] == true,
+        online: !BriskersConnectionModeController.instance.forceOffline,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(outcome.message)),
+      );
+      if (outcome.state == 'rejected') {
+        await _load();
+      } else {
+        Navigator.pop(context, true);
       }
     } catch (error) {
-      if (mounted) setState(() => _error=error.toString());
+      if (mounted) {
+        setState(() => _error = deletionV3FailureMessage(error));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -5009,19 +5053,16 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
                     title: Text('Assign / unassign mechanic'),
                   ),
                 ),
-              if (_owner) ...[
+              if (_owner && JobSyncService.deletionFeedEnabled) ...[
                 const PopupMenuDivider(),
                 PopupMenuItem(
-                  enabled: _onlineReady && !_busy &&
-                      !BriskersConnectionModeController.instance.forceOffline,
+                  enabled: !_busy,
                   value: 'delete_unused',
-                  child: ListTile(
+                  child: const ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.delete_outline, color: Colors.red),
-                    title: Text(_onlineReady
-                        ? 'Delete Job'
-                        : 'Delete Job (waiting for online verification)'),
+                    leading: Icon(Icons.delete_outline, color: Colors.red),
+                    title: Text('Delete Job'),
                   ),
                 ),
               ],

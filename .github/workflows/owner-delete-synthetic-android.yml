@@ -1,0 +1,79 @@
+name: Briskers synthetic Android compile
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'test/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/owner-delete-synthetic-android.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate isolated Android application
+        shell: bash
+        run: |
+          mkdir generated
+          cd generated
+          flutter create --platforms=android --org com.briskers --project-name briskers_app .
+          rm -rf lib test
+          cp -R ../lib ./lib
+          cp -R ../test ./test
+          if [ -d ../assets ]; then cp -R ../assets ./assets; fi
+          cp ../pubspec.yaml ./pubspec.yaml
+          cp ../analysis_options.yaml ./analysis_options.yaml
+      - name: Set and verify distinct test package ID
+        working-directory: generated
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          candidates = [Path("android/app/build.gradle.kts"), Path("android/app/build.gradle")]
+          paths = [p for p in candidates if p.exists()]
+          assert len(paths) == 1, "Expected exactly one Android app Gradle file"
+          p = paths[0]
+          src = p.read_text()
+          pattern = r'(applicationId\s*(?:=\s*)?["\x27])com\.briskers\.briskers_app(["\x27])'
+          replaced, n = re.subn(pattern, r'\g<1>com.briskers.briskers_test\g<2>', src)
+          assert n == 1, "Expected one standard Flutter Android application ID"
+          p.write_text(replaced)
+          assert "com.briskers.briskers_test" in p.read_text()
+          assert not re.search(pattern, p.read_text())
+          print("Verified isolated applicationId=com.briskers.briskers_test")
+          PY
+      - name: Resolve packages and generate database code
+        working-directory: generated
+        run: |
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+      - name: Compile isolated Android debug APK (do not deploy)
+        working-directory: generated
+        run: >-
+          flutter build apk --debug
+          --dart-define=BRISKERS_SYNTHETIC_BUILD=true
+          --dart-define=BRISKERS_SYNTHETIC_PUBLISHABLE_KEY=sb_publishable_ci_placeholder
+          --dart-define=BRISKERS_OWNER_DELETE_V3_FEED=false
+      - name: Confirm generated APK exists
+        working-directory: generated
+        run: test -s build/app/outputs/flutter-apk/app-debug.apk
+      - name: Retain compile-only APK for inspection (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-synthetic-android-COMPILE-ONLY
+          path: generated/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 3
+# This APK uses a placeholder key, keeps deletion disabled, and must not be
+# installed as a working test app or published as a production release.

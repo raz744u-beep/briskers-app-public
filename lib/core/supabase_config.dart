@@ -1,8 +1,47 @@
 import 'connection_mode.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-const supabaseUrl = 'https://coensavcnuwuqaeszohb.supabase.co';
-const supabasePublishableKey = 'sb_publishable_tY4v9OoY0nkbeFl-5cnGbA_FoWzD9aP';
+// The regular shop app ALWAYS uses its existing production configuration.
+// A synthetic test build uses a different Supabase project and MUST receive
+// its own publishable key at build time; no fallback to production is allowed.
+const isSyntheticTestBuild = bool.fromEnvironment(
+  'BRISKERS_SYNTHETIC_BUILD', defaultValue: false,
+);
+const productionSupabaseUrl = 'https://coensavcnuwuqaeszohb.supabase.co';
+const syntheticSandboxUrl = 'https://tjptzpgnpqwzhsbrzwpo.supabase.co';
+const supabaseUrl =
+    isSyntheticTestBuild ? syntheticSandboxUrl : productionSupabaseUrl;
+const supabasePublishableKey = isSyntheticTestBuild
+    ? String.fromEnvironment('BRISKERS_SYNTHETIC_PUBLISHABLE_KEY')
+    : productionSupabasePublishableKey;
+
+const productionSupabasePublishableKey =
+    'sb_publishable_tY4v9OoY0nkbeFl-5cnGbA_FoWzD9aP';
+
+const syntheticAndroidAppId = 'com.briskers.briskers_test';
+
+void verifySyntheticAppIdentity(String actualPackageId) {
+  if (isSyntheticTestBuild && actualPackageId != syntheticAndroidAppId) {
+    throw StateError(
+      'Briskers TEST must be installed as a separate application. '
+      'The regular shop app cannot be used for synthetic deletion tests.',
+    );
+  }
+}
+
+void verifySupabaseEnvironment() {
+  if (isSyntheticTestBuild &&
+      (supabaseUrl != syntheticSandboxUrl ||
+          supabasePublishableKey == 'sb_publishable_ci_placeholder' ||
+          supabasePublishableKey == 'sb_publishable_placeholder' ||
+          supabasePublishableKey == 'sb_publishable_test' ||
+          supabasePublishableKey == 'sb_publishable_' ||
+          supabasePublishableKey == productionSupabasePublishableKey ||
+          !supabasePublishableKey.startsWith('sb_publishable_') ||
+          supabasePublishableKey.length < 30)) {
+    throw StateError('Invalid isolated Briskers TEST configuration.');
+  }
+}
 
 SupabaseClient get supabase => Supabase.instance.client;
 

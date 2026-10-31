@@ -12,6 +12,7 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: ^0.20.2
+  crypto: ^3.0.6
   package_info_plus: ^8.3.1
   image_picker: ^1.2.0
   image: ^4.10.1
