@@ -8,6 +8,7 @@ on:
       - 'test/**'
       - '.github/workflows/diagnostics.yml'
       - '.github/workflows/android-debug.yml'
+      - '.github/workflows/android-tasks-test.yml'
       - 'tools/require_candidate_checks.py'
       - 'tools/tests/test_candidate_checks.py'
       - 'tools/tests/test_apk_certificate_verification.py'

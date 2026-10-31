@@ -19,8 +19,8 @@ from urllib.parse import quote, urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-CANDIDATE_BRANCH = "fix/b2326-cache-navigation-performance-20261020"
-BUILD_WORKFLOW = ".github/workflows/android-debug.yml"
+CANDIDATE_BRANCH = "lab/richard-isolated-vertical-b2327-20261020"
+BUILD_WORKFLOW = ".github/workflows/android-tasks-test.yml"
 REQUIRED_WORKFLOWS = {
     "diagnostics.yml": "Briskers Diagnostics",
     "ios-compile.yml": "Briskers iOS compile check",
