@@ -88,6 +88,7 @@ void main() {
     await queue('vehicle_create',lv,'update',{'idempotent_v1':true,'customer_id':lc});
     await queue('document_draft_create',li,'create_quick_invoice',{
       'operation_id':invoiceOp,'customer_id':lc,'vehicle_id':lv,
+      'kind':'invoice',
     });
     await queue('invoice_payment_received',li,'record_received_payment',{
       'operation_id':receiptOp,'invoice_id':li,'amount_cents':3000,
