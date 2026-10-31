@@ -413,14 +413,22 @@ class _BusinessGateState extends State<BusinessGate> {
               const SizedBox(height: 16),
               Text('Account ready', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 8),
-              const Text(
-                'This login is not linked to the Briskers development business yet. Return to ChatGPT and the account can be attached as Owner.',
+              Text(
+                _error != null && _error!.toLowerCase().contains('permission denied')
+                    ? 'You are signed in, but the TEST database has not authorized business lookup. This is not a password error. The sandbox administrator must correct its access permissions.'
+                    : 'You are signed in, but this test account is not yet linked to a Briskers business. The sandbox administrator must assign your business membership.',
               ),
               if (_error != null) ...[
                 const SizedBox(height: 16),
                 Text(_error!),
               ],
               const Spacer(),
+              OutlinedButton.icon(
+                onPressed: _load,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try loading business again'),
+              ),
+              const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: () => supabase.auth.signOut(),
                 icon: const Icon(Icons.logout),
