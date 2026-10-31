@@ -759,7 +759,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
       base <= 1000000 && rate <= 100000 &&
       adjustment.abs() <= 1000000;
     final supplement = _laborAdditionalToBase && validHours
-      ? approvedHours! * rate : 0.0;
+      ? approvedHours * rate : 0.0;
     final total = base + supplement + adjustment;
     final validPreview = validHours && validMoney &&
       total.isFinite && total >= 0;
@@ -801,7 +801,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
           contentPadding: EdgeInsets.zero,
           title: const Text('Add tracked labor to base'),
           subtitle: Text(_laborAdditionalToBase
-            ? '${validHours ? approvedHours!.toStringAsFixed(2) : 'Invalid'} approved hours × rate'
+            ? '${validHours ? approvedHours.toStringAsFixed(2) : 'Invalid'} approved hours × rate'
             : 'Labor included in base · no double counting'),
           value: _laborAdditionalToBase,
           onChanged: (v) => setState(() => _laborAdditionalToBase = v),
