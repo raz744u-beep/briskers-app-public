@@ -30,16 +30,48 @@ begin
       using errcode='55000';
   end if;
 
+  -- The actual tax_amount column is numeric(18,2): writing six decimals
+  -- would silently round each line, re-introducing Gloria's +$0.01.
+  -- Preserve ordinary invoices exactly as before, then allocate rounded
+  -- whole-invoice tax cents only for this explicitly opted-in recovery source.
   update briskers.sales_document_lines l
   set net_amount=round(l.quantity*l.unit_price,2),
-      tax_amount=CASE
-        WHEN x.source_metadata->>'offline_tax_rounding'='invoice_total_unrounded'
-        THEN round(round(l.quantity*l.unit_price,2)*l.tax_rate,6)
-        ELSE round(round(l.quantity*l.unit_price,2)*l.tax_rate,2)
-      END
+      tax_amount=round(round(l.quantity*l.unit_price,2)*l.tax_rate,2)
   where l.business_id=b
     and l.document_id=d
     and l.line_kind<>'discount';
+
+  if x.source_metadata->>'offline_tax_rounding'='invoice_total_unrounded' then
+    with fractional_tax as (
+      select l.id,
+             floor(l.net_amount*l.tax_rate*100)::bigint as base_cents,
+             row_number() over (
+               order by (l.net_amount*l.tax_rate*100
+                         -floor(l.net_amount*l.tax_rate*100)) desc,
+                        l.position, l.id
+             ) as penny_rank,
+             round(sum(l.net_amount*l.tax_rate) over (),2)*100
+               as target_cents,
+             sum(floor(l.net_amount*l.tax_rate*100)::bigint) over ()
+               as base_total_cents
+      from briskers.sales_document_lines l
+      where l.business_id=b
+        and l.document_id=d
+        and l.line_kind<>'discount'
+    ),
+    allocated as (
+      select id,
+             (base_cents + case
+               when penny_rank <= target_cents-base_total_cents then 1
+               else 0
+             end)::numeric / 100 as tax_cents_exact
+      from fractional_tax
+    )
+    update briskers.sales_document_lines l
+       set tax_amount=a.tax_cents_exact
+    from allocated a
+    where l.business_id=b and l.id=a.id;
+  end if;
 
   select coalesce(sum(l.net_amount),0),
          coalesce(sum(l.tax_amount),0)
@@ -168,9 +200,11 @@ BEGIN
     IF EXISTS (
       SELECT 1 FROM briskers.sales_documents
       WHERE business_id=p_business_id AND id=v_document
+        AND customer_id=p_customer_id
+        AND vehicle_id IS NOT DISTINCT FROM p_vehicle_id
         AND source_metadata->>'offline_tax_rounding'='invoice_total_unrounded'
         AND source_metadata->>'offline_payload_signature'=md5(
-          p_lines::text||'|'||coalesce(p_memo,'')||'|'||p_document_date::text
+          p_lines::text||'|'||coalesce(p_memo,'')||'|'||coalesce(p_document_date::text,'<null>')
         )
         AND round(net_amount*100)::bigint=p_expected_net_cents
         AND round(tax_amount*100)::bigint=p_expected_tax_cents
@@ -214,7 +248,7 @@ BEGIN
       'offline_operation_id',p_operation_id::text,
       'offline_tax_rounding','invoice_total_unrounded',
       'offline_payload_signature',md5(
-        p_lines::text||'|'||coalesce(p_memo,'')||'|'||p_document_date::text
+        p_lines::text||'|'||coalesce(p_memo,'')||'|'||coalesce(p_document_date::text,'<null>')
       )
     ),
     auth.uid()
