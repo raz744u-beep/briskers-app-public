@@ -16,3 +16,6 @@ assert "UPDATE " not in method
 assert "_api." not in method
 assert "if (widget.isOwner)" in SOURCE
 print("Gloria recovery export owner/read-only contract: PASS")
+
+assert "'local_invoice_detail': invoiceDetail" in method
+assert "invoiceDetail['lines'] is! List" in method
