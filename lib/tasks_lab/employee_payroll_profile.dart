@@ -784,6 +784,9 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
         ],
       ));
     if (!mounted || method == null) return;
+    // Freeze the selected payroll week before opening confirmation dialogs.
+    // Navigating between periods must not retarget a confirmed payment.
+    final paymentWeek = _week;
     final grossCents = (gross * 100).round();
     LabAdvanceSnapshot advance;
     try {
@@ -850,7 +853,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     setState(() => _savingFlexible = true);
     try {
       await LabPayrollPaymentService.recordFlexibleWeekly(
-        employeeId: widget.employeeId, week: _week,
+        employeeId: widget.employeeId, week: paymentWeek,
         grossCents: grossCents, debtCents: deduction,
         method: method,
         note: 'Flexible weekly base and approved supplement · TEST',
