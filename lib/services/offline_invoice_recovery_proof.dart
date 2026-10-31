@@ -42,6 +42,11 @@ class OfflineInvoiceRecoveryProof {
         payment['pending_sync'] != true).toList();
     check(payments.length == 1 && matched.length == 1,
         'payment identity or count mismatch');
+    check(matched.single['id']?.toString().isNotEmpty == true &&
+        matched.single['id']?.toString().startsWith('local-') != true,
+        'authoritative payment ID missing');
+    check(matched.single['_local_pending_payment'] != true,
+        'projected payment cannot acknowledge server receipt');
     check(cents(matched.single['amount']) == paymentCents,
         'payment amount mismatch');
     check(matched.single['method_id'] == paymentMethodId,
