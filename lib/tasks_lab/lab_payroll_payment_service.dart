@@ -44,6 +44,107 @@ class LabPayrollPaymentService {
     ''');
   }
 
+  /// Store one confirmed weekly-base/supplement payment on this device.
+  /// It deliberately does not mark any mechanic-task allocation as paid.
+  /// A unique employee/week key prevents accidental second finalization.
+  static Future<LabPayrollPaymentResult> recordFlexibleWeekly({
+    required String employeeId,
+    required DateTime week,
+    required int grossCents,
+    required int debtCents,
+    required String method,
+    required String note,
+  }) async {
+    if (employeeId.trim().isEmpty || grossCents <= 0 ||
+        grossCents > 100000000 || debtCents < 0 ||
+        debtCents > grossCents ||
+        !const {'zelle', 'cash', 'check', 'ach'}.contains(method)) {
+      throw ArgumentError('Invalid flexible TEST payment');
+    }
+    await ensure();
+    final advance = await LabAdvanceLedger(localDatabase)
+      .read(_shop, employeeId);
+    if (debtCents > advance.remainingCents) {
+      throw StateError('Repayment exceeds remaining advance');
+    }
+    await localDatabase.customStatement('''
+      CREATE TABLE IF NOT EXISTS lab_flexible_weekly_confirmations (
+        business_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        week_key TEXT NOT NULL,
+        disbursement_id INTEGER NOT NULL,
+        PRIMARY KEY (business_id, employee_id, week_key)
+      )
+    ''');
+    final weekKey = LabPayrollPeriodProjection.weekKey(week);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await localDatabase.transaction(() async {
+      final previous = await localDatabase.customSelect(
+        'SELECT disbursement_id FROM lab_flexible_weekly_confirmations '
+        'WHERE business_id=? AND employee_id=? AND week_key=?',
+        variables: [const Variable<String>(_shop),
+          Variable<String>(employeeId), Variable<String>(weekKey)],
+      ).getSingleOrNull();
+      if (previous != null) {
+        throw StateError('Weekly payment already finalized for this week');
+      }
+      final opening = await localDatabase.customSelect(
+        'SELECT opening_cents FROM lab_employee_advance_balances '
+        'WHERE business_id=? AND employee_id=?',
+        variables: [const Variable<String>(_shop),
+          Variable<String>(employeeId)],
+      ).getSingleOrNull();
+      final repayments = await localDatabase.customSelect(
+        'SELECT COALESCE(SUM(cents),0) AS repaid '
+        'FROM lab_employee_advance_repayments '
+        'WHERE business_id=? AND employee_id=?',
+        variables: [const Variable<String>(_shop),
+          Variable<String>(employeeId)],
+      ).getSingle();
+      final remaining = (opening?.read<int>('opening_cents') ?? 0) -
+        repayments.read<int>('repaid');
+      if (debtCents > remaining) {
+        throw StateError('Employee debt changed; reconfirm repayment');
+      }
+      await localDatabase.customStatement(
+        'INSERT INTO local_lab_payroll_disbursements '
+        '(business_id,employee_id,cents,kind,method,note,paid_at,created_at) '
+        'VALUES (?,?,?,?,?,?,?,?)',
+        [_shop, employeeId, grossCents, 'pay', method,
+          note.trim(), now, now],
+      );
+      final idRow = await localDatabase.customSelect(
+        'SELECT last_insert_rowid() AS disbursement_id').getSingle();
+      final id = idRow.read<int>('disbursement_id');
+      if (debtCents > 0) {
+        await localDatabase.customStatement(
+          'INSERT INTO lab_employee_advance_repayments '
+          '(business_id,employee_id,cents,method,note,paid_at,'
+          'remaining_after_cents,created_at) VALUES (?,?,?,?,?,?,?,?)',
+          [_shop,employeeId,debtCents,'Payroll deduction',note.trim(),
+            now,remaining-debtCents,now],
+        );
+      }
+      await localDatabase.customStatement(
+        'INSERT INTO lab_payroll_settlements '
+        '(disbursement_id,business_id,employee_id,week_key,gross_cents,'
+        'labor_cents,debt_cents,net_cents,created_at) '
+        'VALUES (?,?,?,?,?,?,?,?,?)',
+        [id,_shop,employeeId,weekKey,grossCents,0,
+          debtCents,grossCents-debtCents,now],
+      );
+      await localDatabase.customStatement(
+        'INSERT INTO lab_flexible_weekly_confirmations '
+        '(business_id,employee_id,week_key,disbursement_id) '
+        'VALUES (?,?,?,?)',
+        [_shop,employeeId,weekKey,id],
+      );
+    });
+    return LabPayrollPaymentResult(
+      grossCents:grossCents,debtCents:debtCents,
+      netCents:grossCents-debtCents,hours:0);
+  }
+
   static Future<LabPayrollPaymentResult> record({
     required String employeeId,
     required DateTime week,
