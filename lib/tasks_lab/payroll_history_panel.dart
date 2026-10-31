@@ -134,6 +134,8 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
       sum+(row['debt_cents'] as int));
     final transferred=records.fold<int>(0,(sum,row)=>
       sum+(row['net_cents'] as int));
+    final taskLinkedGross=rows.fold<int>(0,(sum,row)=>
+      sum+row.read<int>('cents'));
     if (!mounted) { return; }
     // Full-screen payroll history keeps task details readable on narrow phones.
     await Navigator.of(context).push<void>(MaterialPageRoute(
@@ -155,11 +157,21 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
                 const SizedBox(height: 10),
               ],
               if (records.isNotEmpty) ...[
-                Text('Gross pay: ' + _money(gross),
+                Text('Confirmed settlement gross: ' + _money(gross),
                   style: const TextStyle(fontWeight: FontWeight.w700)),
                 Text('Debt repaid: ' + _money(repaid)),
                 Text('Transferred: ' + _money(transferred)),
                 const Divider(height: 22),
+              ],
+              if (rows.isNotEmpty) ...[
+                Text('Task-linked payments: ' + _money(taskLinkedGross),
+                  style: const TextStyle(fontSize: 12,
+                    color: Color(0xFF475569))),
+                const Text('Task-linked amounts and weekly settlement '
+                  'totals may have different scopes; do not add both.',
+                  style: TextStyle(fontSize: 11,
+                    color: Color(0xFF64748B))),
+                const SizedBox(height: 9),
               ],
               if (rows.isEmpty)
                 const Text('No task-linked TEST payments for this week.'),
