@@ -163,6 +163,7 @@ class _LabPayrollHistoryPanelState extends State<LabPayrollHistoryPanel> {
                 Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ExpansionTile(
+                    showTrailingIcon: false,
                     key: ValueKey('history-' +
                       row.read<String>('line_id') + '-' +
                       row.read<int>('paid_at').toString()),
