@@ -68,6 +68,30 @@ class ShopWorkflowStatusPolicy {
   }) =>
       owner && mechanicPortionDone && !alreadyPaid && !alreadySelected;
 
+  /// Evaluate one mechanic's credit independently of their coworkers.
+  /// A shared task may still be In Progress when one mechanic finishes.
+  static bool eligibleSharedTaskPortionForPayroll({
+    required bool owner,
+    required ShopTaskProgress mechanicProgress,
+    required bool alreadyPaid,
+    required bool alreadySelected,
+  }) => eligibleForPayrollSelection(
+        owner: owner,
+        mechanicPortionDone: mechanicProgress == ShopTaskProgress.done,
+        alreadyPaid: alreadyPaid,
+        alreadySelected: alreadySelected,
+      );
+
+  /// No task credit may be selected twice within the same weekly batch.
+  /// IDs must represent immutable mechanic work allocations, not just job IDs.
+  static bool hasUniquePayrollAllocationIds(Iterable<String> allocationIds) {
+    final seen = <String>{};
+    for (final id in allocationIds) {
+      if (id.trim().isEmpty || !seen.add(id)) return false;
+    }
+    return true;
+  }
+
   /// Internal eligibility for the Owner's Complete Job action.
   /// This does NOT close anything: the backend must independently verify
   /// payment, durable task/job state, permission and an acknowledged close.
