@@ -827,7 +827,9 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
           'Week: $weekKey\n'
           'Gross: ${_currency.format(gross)}\n'
           'Approved supplemental hours: ${hours.toStringAsFixed(2)}\n'
-          'Method: ${method.toUpperCase()}\n\n'
+          'Method: ${method.toUpperCase()}\n'
+          'Advance deduction: ${_money(deduction)}\n'
+          'Net payment: ${_money(grossCents - deduction)}\n\n'
           'This saves one local TEST payment for the selected week. '
           'It does not pay or alter mechanic task allocations. '
           'The confirmed deduction is recorded separately in the advance ledger.'),
