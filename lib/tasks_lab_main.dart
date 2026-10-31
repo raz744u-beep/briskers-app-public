@@ -63,6 +63,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   int invoiceTestTab = 0;
   int page = 0;
   int _startupPage = 0;
+  bool _compactDock = false;
   int? expandedMenu;
   double menuAnchorX = 180;
   int selectedVehicle = 0;
@@ -117,9 +118,16 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       'SELECT startup_page FROM lab_navigation_preferences WHERE id=1')
       .getSingleOrNull();
     final requested = rows?.read<int>('startup_page') ?? 0;
+    await localDatabase.customStatement(
+      'CREATE TABLE IF NOT EXISTS lab_dock_preferences ('
+      'id INTEGER PRIMARY KEY CHECK(id=1), compact INTEGER NOT NULL)');
+    final dock = await localDatabase.customSelect(
+      'SELECT compact FROM lab_dock_preferences WHERE id=1')
+      .getSingleOrNull();
     if (!mounted) return;
     setState(() {
       _startupPage = const [0, 2, 3, 5].contains(requested) ? requested : 0;
+      _compactDock = dock?.read<int>('compact') == 1;
       page = _startupPage;
     });
   }
@@ -136,6 +144,21 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not save startup page: $error')));
+      }
+    }
+  }
+
+  Future<void> _setCompactDock(bool enabled) async {
+    try {
+      await localDatabase.customStatement(
+        'INSERT INTO lab_dock_preferences(id,compact) VALUES(1,?) '
+        'ON CONFLICT(id) DO UPDATE SET compact=excluded.compact',
+        [enabled ? 1 : 0]);
+      if (mounted) setState(() => _compactDock = enabled);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save navigation style: $error')));
       }
     }
   }
@@ -2655,6 +2678,13 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Widget _settingsPage() => ListView(
     children: [
       _sectionHeader('Test Settings'),
+      SwitchListTile(
+        secondary: const Icon(Icons.view_compact_outlined),
+        title: const Text('Compact navigation labels'),
+        subtitle: const Text('Hide bottom tab names until selected · TEST'),
+        value: _compactDock,
+        onChanged: (enabled) => unawaited(_setCompactDock(enabled)),
+      ),
       ListTile(
         leading: const Icon(Icons.home_outlined),
         title: const Text('Startup page'),
