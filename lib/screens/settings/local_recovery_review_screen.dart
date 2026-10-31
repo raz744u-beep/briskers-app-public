@@ -1,6 +1,8 @@
 import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/material.dart';
 
+import '../../core/connection_mode.dart';
+
 import '../../local/local_database_provider.dart';
 
 /// Read-only Owner diagnostic. No remote calls and no outbox mutations.
@@ -84,6 +86,16 @@ class _LocalRecoveryReviewScreenState extends State<LocalRecoveryReviewScreen> {
               trailing: Text('${_counts![entry.$1] ?? 0}')),
         ],
         const SizedBox(height: 16),
+        AnimatedBuilder(
+          animation: BriskersConnectionModeController.instance,
+          builder: (context, _) => Text(
+            BriskersConnectionModeController.instance.forceOffline
+                ? 'Force Offline is enabled. No server verification or payment acknowledgment will run.'
+                : 'Auto mode is active. This review remains read-only and does not trigger synchronization.',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+        const SizedBox(height: 12),
         const Text('Recovery acknowledgment remains disabled until '
           'authoritative invoice and payment identities can be verified, '
           'and the full local transaction is tested.'),
