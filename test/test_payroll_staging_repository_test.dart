@@ -34,7 +34,7 @@ void main() {
       await expectLater(stage(proposal(operation: 'op2')), throwsA(isA<Exception>()));
       final operations = await db.customSelect(
         'SELECT operation_id FROM test_payroll_staging '
-        'WHERE business_id = ?', variables: [],
+        "WHERE business_id = 'test-shop'",
       ).get();
       expect(operations, hasLength(1));
       final allocations = await db.customSelect(
