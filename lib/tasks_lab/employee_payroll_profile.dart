@@ -29,6 +29,7 @@ class EmployeePayrollProfileLab extends StatefulWidget {
     required this.rateCents,
     this.initialTab = 0,
     this.initialWeek,
+    this.onOpenJob, this.onOpenInvoice,
   });
 
   final String employeeId;
@@ -42,6 +43,8 @@ class EmployeePayrollProfileLab extends StatefulWidget {
   final int? rateCents;
   final int initialTab;
   final DateTime? initialWeek;
+  final VoidCallback? onOpenJob;
+  final VoidCallback? onOpenInvoice;
 
   @override
   State<EmployeePayrollProfileLab> createState() =>
@@ -896,6 +899,8 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
       payments: _payments,
       taskPayments:_taskPayments,
       settlements:_settlements,
+      onOpenJob: widget.onOpenJob,
+      onOpenInvoice: widget.onOpenInvoice,
       onWeekTap: (date) {
         setState(() => _week = date);
         DefaultTabController.of(inner).animateTo(1);
