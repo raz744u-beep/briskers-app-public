@@ -57,6 +57,10 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   final _opening = TextEditingController();
   final _repayment = TextEditingController();
   final _note = TextEditingController();
+  final _weeklyBasePreview = TextEditingController(text: '0.00');
+  final _hourlySupplementPreview = TextEditingController(text: '0.00');
+  final _weeklyAdjustmentPreview = TextEditingController(text: '0.00');
+  bool _laborAdditionalToBase = false;
   DateTime _week = DateTime.now();
   List<Map<String, dynamic>> _drafts = const [];
   List<Map<String, dynamic>> _payments = const [];
@@ -267,6 +271,9 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     _opening.dispose();
     _repayment.dispose();
     _note.dispose();
+    _weeklyBasePreview.dispose();
+    _hourlySupplementPreview.dispose();
+    _weeklyAdjustmentPreview.dispose();
     super.dispose();
   }
 
@@ -658,6 +665,57 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     setState(() => _payrollPeriod = next);
   }
 
+  // TEST preview: these inputs never post payroll or alter task coverage.
+  Widget _flexibleWeeklyPreview(double trackedHours) {
+    double value(TextEditingController input) =>
+      double.tryParse(input.text.trim()) ?? 0;
+    final base = value(_weeklyBasePreview);
+    final rate = value(_hourlySupplementPreview);
+    final adjustment = value(_weeklyAdjustmentPreview);
+    final supplement = _laborAdditionalToBase ? trackedHours * rate : 0.0;
+    final total = base + supplement + adjustment;
+    Widget field(String label, TextEditingController controller) =>
+      TextField(
+        controller: controller,
+        keyboardType: const TextInputType.numberWithOptions(
+          signed: true, decimal: true),
+        onTap: () => _selectAmount(controller),
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(labelText: label,
+          prefixText: r'$ ', isDense: true,
+          border: const OutlineInputBorder()),
+      );
+    return _panel(Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('Flexible weekly pay · TEST preview',
+          style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 5),
+        const Text('Owner-adjustable estimate only. No payment is created.',
+          style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+        const SizedBox(height: 10),
+        field('Weekly base', _weeklyBasePreview),
+        const SizedBox(height: 8),
+        field('Hourly supplement rate', _hourlySupplementPreview),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Add tracked labor to base'),
+          subtitle: Text(_laborAdditionalToBase
+            ? '${trackedHours.toStringAsFixed(2)} hours × hourly rate'
+            : 'Labor included in base · no double counting'),
+          value: _laborAdditionalToBase,
+          onChanged: (v) => setState(() => _laborAdditionalToBase = v),
+        ),
+        field('Other weekly adjustment (+/-)', _weeklyAdjustmentPreview),
+        const SizedBox(height: 10),
+        Text('Preview gross: ${_currency.format(total)}',
+          style: const TextStyle(fontWeight: FontWeight.w800,
+            fontSize: 16)),
+      ],
+    ));
+  }
+
   Widget _payrollTab() {
     final period = _periodBounds();
     final current = _projectPeriod(period.from, period.until);
@@ -764,6 +822,8 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
                 color: Color(0xFFC76023))),
           ],
         )),
+        if (widget.rateCents == null)
+          _flexibleWeeklyPreview(trackedAssignedHours),
         _advancePanel(),
         const Padding(
           padding: EdgeInsets.all(7),
