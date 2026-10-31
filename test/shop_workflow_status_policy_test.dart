@@ -218,6 +218,36 @@ void main() {
       saved, proposal(operationId: 'op-2')), isFalse);
   });
 
+  test('Transaction preflight rejects mismatched amounts and paid work', () {
+    const credit = ShopPayrollAllocation(
+      id: 'credit-a', employeeId: 'mechanic',
+      hoursHundredths: 250, rateCentsPerHour: 4000,
+      completed: true, alreadyPaid: false,
+    );
+    ShopPayrollPaymentProposal proposal({int gross = 10000}) =>
+        ShopPayrollPaymentProposal(
+          operationId: 'op1', employeeId: 'mechanic',
+          allocationIds: ['credit-a'], grossCents: gross,
+          repaymentCents: 2000, method: 'Zelle',
+        );
+    bool valid({bool owner = true, bool unused = true, int gross = 10000,
+      int advance = 3000}) => ShopPayrollTransactionPreflight.isValid(
+        owner: owner, proposal: proposal(gross: gross),
+        selectedCredits: [credit], outstandingAdvanceCents: advance,
+        operationIdUnused: unused,
+      );
+    expect(valid(), isTrue);
+    expect(valid(owner: false), isFalse);
+    expect(valid(unused: false), isFalse);
+    expect(valid(gross: 9900), isFalse);
+    expect(valid(advance: 1000), isFalse);
+    expect(ShopPayrollTransactionPreflight.isValid(
+      owner: true, proposal: proposal(),
+      selectedCredits: const [], outstandingAdvanceCents: 3000,
+      operationIdUnused: true,
+    ), isFalse);
+  });
+
   test('Joint close requires Owner, finalized payment and finished work', () {
     bool allowed({bool owner = true, bool paid = true,
       bool unresolved = false, bool done = true}) =>
