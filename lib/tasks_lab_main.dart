@@ -64,6 +64,7 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   int page = 0;
   int _startupPage = 0;
   bool _compactDock = false;
+  String _dashboardRole = 'owner';
   int? expandedMenu;
   double menuAnchorX = 180;
   int selectedVehicle = 0;
@@ -121,6 +122,12 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     await localDatabase.customStatement(
       'CREATE TABLE IF NOT EXISTS lab_dock_preferences ('
       'id INTEGER PRIMARY KEY CHECK(id=1), compact INTEGER NOT NULL)');
+    await localDatabase.customStatement(
+      'CREATE TABLE IF NOT EXISTS lab_dashboard_role_preference ('
+      'id INTEGER PRIMARY KEY CHECK(id=1), role TEXT NOT NULL)');
+    final roleRow = await localDatabase.customSelect(
+      'SELECT role FROM lab_dashboard_role_preference WHERE id=1')
+      .getSingleOrNull();
     final dock = await localDatabase.customSelect(
       'SELECT compact FROM lab_dock_preferences WHERE id=1')
       .getSingleOrNull();
@@ -128,6 +135,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     setState(() {
       _startupPage = const [0, 2, 3, 5].contains(requested) ? requested : 0;
       _compactDock = dock?.read<int>('compact') == 1;
+      final role = roleRow?.read<String>('role') ?? 'owner';
+      _dashboardRole = const ['owner', 'secretary', 'mechanic']
+        .contains(role) ? role : 'owner';
       page = _startupPage;
     });
   }
@@ -159,6 +169,22 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not save navigation style: $error')));
+      }
+    }
+  }
+
+  Future<void> _setDashboardRole(String role) async {
+    if (!const ['owner', 'secretary', 'mechanic'].contains(role)) return;
+    try {
+      await localDatabase.customStatement(
+        'INSERT INTO lab_dashboard_role_preference(id,role) VALUES(1,?) '
+        'ON CONFLICT(id) DO UPDATE SET role=excluded.role',
+        [role]);
+      if (mounted) setState(() => _dashboardRole = role);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save dashboard preview: $error')));
       }
     }
   }
@@ -2682,6 +2708,23 @@ class _TasksLabHomeState extends State<TasksLabHome> {
   Widget _settingsPage() => ListView(
     children: [
       _sectionHeader('Test Settings'),
+      ListTile(
+        leading: const Icon(Icons.dashboard_customize_outlined),
+        title: const Text('Dashboard role preview'),
+        subtitle: const Text('Local TEST display only · does not grant access'),
+        trailing: DropdownButton<String>(
+          value: _dashboardRole,
+          items: const [
+            DropdownMenuItem(value: 'owner', child: Text('Owner')),
+            DropdownMenuItem(value: 'secretary', child: Text('Secretary')),
+            DropdownMenuItem(value: 'mechanic', child: Text('Mechanic')),
+          ],
+          onChanged: (value) {
+            if (value != null) unawaited(_setDashboardRole(value));
+          },
+        ),
+      ),
+
       SwitchListTile(
         secondary: const Icon(Icons.view_compact_outlined),
         title: const Text('Compact navigation labels'),
@@ -2774,7 +2817,58 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     ),
   );
 
+  Widget _roleDashboardPreview() {
+    final secretary = _dashboardRole == 'secretary';
+    final active = tasks.where((task) => task['status'] != 'done').length;
+    final completed = tasks.where((task) => task['status'] == 'done').length;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text(secretary ? 'Secretary dashboard · TEST'
+          : 'Mechanic dashboard · TEST',
+          style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 5),
+        const Text('Offline role preview only. This is not a security '
+          'or permissions system.',
+          style: TextStyle(color: Color(0xFF64748B))),
+        const SizedBox(height: 15),
+        Card(child: ListTile(
+          leading: const Icon(Icons.rule_outlined),
+          title: Text('$active tasks not done · $completed completed'),
+          subtitle: const Text('Tasks from this isolated test device'),
+          onTap: () => _navigate(3),
+        )),
+        if (secretary) ...[
+          Card(child: ListTile(
+            leading: const Icon(Icons.calendar_month_outlined),
+            title: const Text('Appointments'),
+            subtitle: const Text('Not populated in the sanitized TEST copy'),
+            onTap: () => _navigate(9),
+          )),
+          Card(child: ListTile(
+            leading: const Icon(Icons.people_outline),
+            title: const Text('Customers'),
+            onTap: () => _navigate(1),
+          )),
+        ] else ...[
+          Card(child: ListTile(
+            leading: const Icon(Icons.build_outlined),
+            title: const Text('My service work'),
+            subtitle: const Text('Use employee filters in Tasks'),
+            onTap: () => _navigate(3),
+          )),
+          Card(child: ListTile(
+            leading: const Icon(Icons.history_outlined),
+            title: const Text('Work history'),
+            onTap: () => _navigate(12),
+          )),
+        ],
+      ],
+    );
+  }
+
   Widget _overviewPage() {
+    if (_dashboardRole != 'owner') return _roleDashboardPreview();
     Widget tileRow(Widget first, Widget second) => Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(children: [
