@@ -130,3 +130,34 @@ class ShopPayrollPaymentProposal {
   final String method;
 }
 
+
+/// A deterministic replay comparison used by the future transactional outbox.
+/// An operation ID alone is not proof that a retry has identical contents.
+class ShopPayrollReplayPolicy {
+  const ShopPayrollReplayPolicy._();
+
+  static bool sameProposal(
+    ShopPayrollPaymentProposal original,
+    ShopPayrollPaymentProposal retry,
+  ) {
+    if (original.operationId != retry.operationId ||
+        original.employeeId != retry.employeeId ||
+        original.grossCents != retry.grossCents ||
+        original.repaymentCents != retry.repaymentCents ||
+        original.method != retry.method ||
+        original.allocationIds.length != retry.allocationIds.length) {
+      return false;
+    }
+    final originalIds = original.allocationIds.toSet();
+    return retry.allocationIds.every(originalIds.contains);
+  }
+
+  /// Distinct requests are not replays; an existing operation ID with
+  /// changed contents must be rejected by durable persistence.
+  static bool conflictingReplay(
+    ShopPayrollPaymentProposal previous,
+    ShopPayrollPaymentProposal request,
+  ) =>
+      previous.operationId == request.operationId &&
+      !sameProposal(previous, request);
+}
