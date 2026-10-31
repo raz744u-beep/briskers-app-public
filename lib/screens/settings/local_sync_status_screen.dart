@@ -1,4 +1,5 @@
 import 'local_recovery_review_screen.dart';
+import 'owner_offline_numbering_screen.dart';
 import 'dart:convert';
 import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/material.dart';
@@ -1347,6 +1348,20 @@ class _LocalSyncStatusScreenState extends State<LocalSyncStatusScreen> {
                       ),
                       icon: const Icon(Icons.fact_check_outlined),
                       label: const Text('Review pending records (local only)'),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => OwnerOfflineNumberingScreen(
+                            businessId: widget.businessId,
+                            isOwner: widget.isOwner,
+                          ),
+                        ),
+                      ),
+                      icon: const Icon(Icons.numbers),
+                      label: const Text('Assign local invoice and Job numbers'),
                     ),
                     const SizedBox(height: 12),
                     OutlinedButton.icon(
