@@ -63,6 +63,15 @@ class LabPayrollPeriodProjection {
       if (inPeriod(date)) { paid += row['cents'] as int; }
     }
     if(hoursByWeek.isEmpty) {
+      // Fixed-weekly employees may have a confirmed settlement without any
+      // invoice-linked mechanic hours. A missing rate must not hide their
+      // recorded gross pay or pretend that payment itself created labor.
+      if (grossByWeek.isNotEmpty) {
+        final gross = grossByWeek.values.fold<int>(0, (sum, n) => sum + n);
+        return LabPayrollPeriodProjection(
+          hours:null, grossCents:gross, paidCents:paid,
+          balanceCents:(gross-paid).clamp(0,1000000000).toInt());
+      }
       return LabPayrollPeriodProjection(
         hours:null,grossCents:null,paidCents:paid,balanceCents:null);
     }
@@ -77,6 +86,11 @@ class LabPayrollPeriodProjection {
         return LabPayrollPeriodProjection(
           hours:hrs,grossCents:null,paidCents:paid,balanceCents:null);
       }
+    }
+    // Include confirmed weekly-base settlements even if that week has no
+    // task-linked hours; they are distinct from labor allocations.
+    for (final entry in grossByWeek.entries) {
+      if (!hoursByWeek.containsKey(entry.key)) gross += entry.value;
     }
     return LabPayrollPeriodProjection(
       hours:hrs,grossCents:gross,paidCents:paid,
