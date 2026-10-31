@@ -110,6 +110,15 @@ class CandidateGateTests(unittest.TestCase):
                              clock=self.clock.time, sleep=self.clock.sleep,
                              log=self.messages.append)
 
+    def test_gloria_candidate_requires_three_exact_head_workflows(self):
+        self.assertEqual(gate.workflows_for_branch(CONTEXT.branch),
+                         gate.REQUIRED_WORKFLOWS)
+        guarded = gate.workflows_for_branch(gate.GLORIA_RECOVERY_BRANCH)
+        self.assertEqual(len(guarded), 3)
+        filename, name = gate.GLORIA_RECOVERY_WORKFLOW
+        self.assertEqual(guarded[filename], name)
+        self.assertIn(gate.GLORIA_RECOVERY_BRANCH, gate.CANDIDATE_BRANCHES)
+
     def test_both_exact_sha_workflows_succeed(self):
         self.wait()
         self.assertEqual(self.clock.sleeps, [])
