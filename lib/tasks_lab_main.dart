@@ -2833,7 +2833,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
     // Track only actual finished work; missing source rows are not work done.
     final total = active + completed;
     final completionRatio = total == 0 ? 0.0 : completed / total;
-    final unassigned = allRoleTasks.where((task) {
+    final allUnfinished = allRoleTasks.where((task) =>
+      task['source_missing'] != 1 && task['status'] != 'done').toList();
+    final unassigned = allUnfinished.where((task) {
       if (task['status'] == 'done' || task['source_missing'] == 1) {
         return false;
       }
