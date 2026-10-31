@@ -59,6 +59,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   final _note = TextEditingController();
   final _weeklyBasePreview = TextEditingController(text: '0.00');
   final _hourlySupplementPreview = TextEditingController(text: '0.00');
+  final _approvedSupplementHours = TextEditingController(text: '0.00');
   final _weeklyAdjustmentPreview = TextEditingController(text: '0.00');
   bool _laborAdditionalToBase = false;
   bool _savingFlexible = false;
@@ -275,6 +276,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     _note.dispose();
     _weeklyBasePreview.dispose();
     _hourlySupplementPreview.dispose();
+    _approvedSupplementHours.dispose();
     _weeklyAdjustmentPreview.dispose();
     super.dispose();
   }
@@ -745,7 +747,11 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     final base = value(_weeklyBasePreview);
     final rate = value(_hourlySupplementPreview);
     final adjustment = value(_weeklyAdjustmentPreview);
-    final supplement = _laborAdditionalToBase ? trackedHours * rate : 0.0;
+    final approvedHours = value(_approvedSupplementHours);
+    // Never automatically add all tracked/historical hours to weekly pay.
+    // Owner must specify supplemental hours and review prior paid coverage.
+    final supplement = _laborAdditionalToBase && approvedHours > 0
+      ? approvedHours * rate : 0.0;
     final total = base + supplement + adjustment;
     Widget field(String label, TextEditingController controller) =>
       TextField(
@@ -771,15 +777,29 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
         const SizedBox(height: 8),
         field('Hourly supplement rate', _hourlySupplementPreview),
         const SizedBox(height: 8),
+        TextField(
+          controller: _approvedSupplementHours,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          onTap: () => _selectAmount(_approvedSupplementHours),
+          onChanged: (_) => setState(() {}),
+          decoration: const InputDecoration(
+            labelText: 'Approved supplemental hours this week',
+            isDense: true, border: OutlineInputBorder()),
+        ),
+        const SizedBox(height: 8),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Add tracked labor to base'),
           subtitle: Text(_laborAdditionalToBase
-            ? '${trackedHours.toStringAsFixed(2)} hours × hourly rate'
+            ? '${approvedHours.toStringAsFixed(2)} approved hours × rate'
             : 'Labor included in base · no double counting'),
           value: _laborAdditionalToBase,
           onChanged: (v) => setState(() => _laborAdditionalToBase = v),
         ),
+        const Text('Tracked task allocations across all weeks: '
+          'reference only; prior paid hours must not be counted again.',
+          style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+        const SizedBox(height: 8),
         field('Other weekly adjustment (+/-)', _weeklyAdjustmentPreview),
         const SizedBox(height: 10),
         Text('Preview gross: ${_currency.format(total)}',
