@@ -199,8 +199,20 @@ class LabPayrollPaymentService {
       final key=task['document_id'].toString()+':'+task['line_id'].toString();
       return sum+(hoursByTask[key]??0);
     });
-    if(hours<=0||selected.isEmpty) {
-      throw ArgumentError('No labor hours selected');
+    if(hours<=0||selected.isEmpty || !hours.isFinite) {
+      throw ArgumentError('No valid labor hours selected');
+    }
+    // Reject invalid per-task values before any database write.
+    for (final task in selected) {
+      final key = task['document_id'].toString() + ':' +
+        task['line_id'].toString();
+      final requested = hoursByTask[key]!;
+      final assigned = assignedHours(task);
+      if (!requested.isFinite || !assigned.isFinite ||
+          requested <= 0 || assigned <= 0 ||
+          requested > assigned + 0.00001) {
+        throw ArgumentError('Selected labor hours are invalid');
+      }
     }
     final laborCents=(hours*hourlyRateCents).round();
     // Gross can include a separately approved adjustment, but it cannot
