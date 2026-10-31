@@ -57,6 +57,17 @@ class ShopWorkflowStatusPolicy {
     return ShopTaskProgress.notStarted;
   }
 
+  /// A completed individual mechanic portion can enter a weekly payroll
+  /// selection only once. This pure gate never posts or mutates payroll.
+  /// Reopening a task cannot make previously paid hours payable again.
+  static bool eligibleForPayrollSelection({
+    required bool owner,
+    required bool mechanicPortionDone,
+    required bool alreadyPaid,
+    required bool alreadySelected,
+  }) =>
+      owner && mechanicPortionDone && !alreadyPaid && !alreadySelected;
+
   /// Internal eligibility for the Owner's Complete Job action.
   /// This does NOT close anything: the backend must independently verify
   /// payment, durable task/job state, permission and an acknowledged close.
