@@ -373,7 +373,7 @@ class HTTPClientTests(unittest.TestCase):
 
 class WorkflowWiringTests(unittest.TestCase):
     def test_candidate_gate_precedes_all_android_work(self):
-        workflow = (ROOT / ".github/workflows/android-debug.yml").read_text()
+        workflow = (ROOT / ".github/workflows/android-tasks-test.yml").read_text()
         self.assertIn("needs: candidate-prerequisites", workflow)
         self.assertIn("needs.candidate-prerequisites.result == 'success'", workflow)
         self.assertIn("${{ !cancelled() &&", workflow)
@@ -393,7 +393,7 @@ class WorkflowWiringTests(unittest.TestCase):
     def test_prerequisite_path_filters_cover_gate_changes(self):
         for filename in gate.REQUIRED_WORKFLOWS:
             workflow = (ROOT / ".github/workflows" / filename).read_text()
-            for changed in [".github/workflows/android-debug.yml", "tools/require_candidate_checks.py",
+            for changed in [".github/workflows/android-tasks-test.yml", "tools/require_candidate_checks.py",
                             "tools/tests/test_candidate_checks.py"]:
                 self.assertIn(f"      - '{changed}'", workflow)
         diagnostics = (ROOT / ".github/workflows/diagnostics.yml").read_text()

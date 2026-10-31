@@ -1,0 +1,371 @@
+name: Build isolated Briskers Tasks TEST APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lab/richard-isolated-vertical-b2327-20261020]
+    paths-ignore:
+      - '.github/workflows/**'
+
+# Build/test commands never transmit Flutter or Dart analytics.
+env:
+  CI: 'true'
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-prerequisites:
+    if: github.ref == 'refs/heads/lab/richard-isolated-vertical-b2327-20261020'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out exact candidate source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Test fail-closed candidate gate
+        run: python3 tools/tests/test_candidate_checks.py
+
+      - name: Require exact-head Diagnostics and iOS success
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/require_candidate_checks.py --timeout-seconds 2400
+
+  build:
+    needs: candidate-prerequisites
+    # A skipped candidate-only gate preserves every existing branch's behavior.
+    # Cancellation/failure can never enable the isolated candidate build.
+    if: >-
+      ${{ !cancelled() &&
+          (github.ref != 'refs/heads/lab/richard-isolated-vertical-b2327-20261020' ||
+           needs.candidate-prerequisites.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    env:
+      ANDROID_USER_HOME: ${{ github.workspace }}/.android
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Revalidate exact-head checks before Android work
+        if: github.ref == 'refs/heads/lab/richard-isolated-vertical-b2327-20261020'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/require_candidate_checks.py --timeout-seconds 30
+
+      - name: Install Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Create Android project shell
+        run: |
+          mkdir generated
+          cd generated
+          flutter create --platforms=android --org com.briskers --project-name briskers_app .
+          rm -rf lib test
+          cp -R ../lib ./lib
+          cp -R ../test ./test
+          if [ -d ../assets ]; then cp -R ../assets ./assets; fi
+          cp ../pubspec.yaml ./pubspec.yaml
+          # Standalone OFFLINE entrypoint. Never invoke live Briskers auth or API.
+          cp ../lib/tasks_lab_main.dart ./lib/main.dart
+          python3 - <<'PY'
+          from pathlib import Path
+          app = Path('android/app/build.gradle.kts')
+          gradle = app.read_text()
+          old = 'applicationId = "com.briskers.briskers_app"'
+          if old not in gradle:
+              raise SystemExit('Test isolation failed: expected applicationId not found')
+          app.write_text(gradle.replace(old, 'applicationId = "com.briskers.tasks_lab"'))
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          xml = manifest.read_text()
+          old_label = 'android:label="briskers_app"'
+          if old_label not in xml:
+              raise SystemExit('Test isolation failed: generated app label changed')
+          manifest.write_text(xml.replace(old_label, 'android:label="Briskers Tasks TEST"'))
+          PY
+          cp ../analysis_options.yaml ./analysis_options.yaml
+
+          cat > android/app/src/main/kotlin/com/briskers/briskers_app/MainActivity.kt <<'KOTLIN'
+          package com.briskers.briskers_app
+
+          import io.flutter.embedding.android.FlutterActivity
+
+          // Offline Tasks TEST only. No production document/file method channels.
+          class MainActivity : FlutterActivity()
+          KOTLIN
+
+          mkdir -p android/app/src/main/res/xml
+          cat > android/app/src/main/res/xml/briskers_file_paths.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths xmlns:android="http://schemas.android.com/apk/res/android">
+              <cache-path
+                  name="briskers_warranty_email"
+                  path="warranty-email/" />
+              <cache-path
+                  name="briskers_pdf_open"
+                  path="pdf-open/" />
+          </paths>
+          XML
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          provider = '''
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/briskers_file_paths" />
+                  </provider>
+          '''
+          s = s.replace("</application>", provider + "\n    </application>", 1)
+          p.write_text(s)
+          PY
+
+          # The offline Tasks TEST should not inherit sensitive permissions
+          # from plugins bundled for the separate production Briskers app.
+          # These are removed during manifest merge, not merely hidden in UI.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          xml = p.read_text()
+          origin = '<manifest xmlns:android="http://schemas.android.com/apk/res/android"'
+          if origin not in xml:
+              raise SystemExit('Cannot safely identify generated Android manifest')
+          xml = xml.replace(origin,
+              origin + ' xmlns:tools="http://schemas.android.com/tools"', 1)
+          disallowed = (
+              'android.permission.CAMERA',
+              'android.permission.INTERNET',
+              'android.permission.ACCESS_NETWORK_STATE',
+              'android.permission.POST_NOTIFICATIONS',
+              'android.permission.RECEIVE_BOOT_COMPLETED',
+              'android.permission.FOREGROUND_SERVICE',
+              'android.permission.FOREGROUND_SERVICE_SHORT_SERVICE',
+              'android.permission.WAKE_LOCK',
+          )
+          removals = '\n'.join(
+              f'    <uses-permission android:name="{permission}" tools:node="remove" />'
+              for permission in disallowed
+          ) + '\n'
+          if '<application' not in xml:
+              raise SystemExit('Cannot find manifest application element')
+          xml = xml.replace('<application', removals + '    <application', 1)
+          p.write_text(xml)
+          print('Offline Tasks TEST removes',len(disallowed),'unused merged permissions')
+          PY
+
+      - name: Configure persistent Android signing
+        working-directory: generated
+        env:
+          BRISKERS_KEYSTORE_BASE64: ${{ secrets.BRISKERS_KEYSTORE_BASE64 }}
+          BRISKERS_KEYSTORE_PASSWORD: ${{ secrets.BRISKERS_KEYSTORE_PASSWORD }}
+          BRISKERS_KEY_ALIAS: ${{ secrets.BRISKERS_KEY_ALIAS }}
+          BRISKERS_KEY_PASSWORD: ${{ secrets.BRISKERS_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$BRISKERS_KEYSTORE_BASE64" | base64 --decode > android/app/briskers-release.jks
+          cat > android/key.properties <<EOF
+          storePassword=$BRISKERS_KEYSTORE_PASSWORD
+          keyPassword=$BRISKERS_KEY_PASSWORD
+          keyAlias=$BRISKERS_KEY_ALIAS
+          storeFile=briskers-release.jks
+          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("android/app/build.gradle.kts")
+          s = p.read_text()
+          s = 'import java.util.Properties\nimport java.io.FileInputStream\n' + s
+          marker = 'android {'
+          setup = '''val keystoreProperties = Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+          }
+
+          '''
+          s = s.replace(marker, setup + marker, 1)
+          s = s.replace(
+              '    buildTypes {',
+              '''    signingConfigs {
+                  create("briskersRelease") {
+                      keyAlias = keystoreProperties["keyAlias"] as String
+                      keyPassword = keystoreProperties["keyPassword"] as String
+                      storeFile = file(keystoreProperties["storeFile"] as String)
+                      storePassword = keystoreProperties["storePassword"] as String
+                  }
+              }
+
+              buildTypes {''',
+              1,
+          )
+          s = s.replace(
+              '            signingConfig = signingConfigs.getByName("debug")',
+              '            signingConfig = signingConfigs.getByName("briskersRelease")',
+              1,
+          )
+          p.write_text(s)
+          PY
+
+      - name: Validate permanent signing keystore
+        working-directory: generated
+        env:
+          BRISKERS_KEYSTORE_PASSWORD: ${{ secrets.BRISKERS_KEYSTORE_PASSWORD }}
+          BRISKERS_KEY_ALIAS: ${{ secrets.BRISKERS_KEY_ALIAS }}
+        run: |
+          keytool -list -v \
+            -keystore android/app/briskers-release.jks \
+            -storepass "$BRISKERS_KEYSTORE_PASSWORD" \
+            -alias "$BRISKERS_KEY_ALIAS" \
+            | grep -E "Alias name:|Owner:|SHA256:"
+          echo "Permanent Briskers keystore validated."
+
+      - name: Verify test app has no production entrypoint
+        working-directory: generated
+        run: |
+          grep -q 'TASKS TEST' lib/main.dart
+          grep -q 'applicationId = "com.briskers.tasks_lab"' android/app/build.gradle.kts
+          grep -q 'Briskers Tasks TEST' android/app/src/main/AndroidManifest.xml
+          # No running app code may initialize Supabase or request production auth.
+          ! grep -E 'Supabase.initialize|networkSupabase|BriskersApi|supabaseUrl' lib/main.dart
+
+      - name: Resolve packages
+        working-directory: generated
+        run: flutter pub get
+
+      - name: Generate local database code
+        working-directory: generated
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Audit UI action placeholders
+        run: python3 tools/audit_ui_actions.py
+
+      - name: Analyze Dart
+        working-directory: generated
+        run: flutter analyze
+
+      - name: Run tests
+        working-directory: generated
+        run: flutter test
+
+      - name: Build permanently signed Android APK
+        working-directory: generated
+        run: |
+          VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
+          BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
+
+          # Native-asset downloads (notably sqlite3) occasionally arrive
+          # corrupted from the upstream CDN. Clean only generated/native
+          # build state and retry the release build a few times.
+          for attempt in 1 2 3; do
+            echo "Android release build attempt $attempt of 3"
+
+            rm -rf .dart_tool/hooks_runner
+            rm -rf build/native_assets
+            rm -rf build/.dart_tool
+
+            if flutter build apk --release               --build-name "$VERSION"               --build-number "$BUILD_NUMBER"               --dart-define="BRISKERS_BUILD_NUMBER=$BUILD_NUMBER"               --dart-define="BRISKERS_SOURCE=${GITHUB_SHA:0:12}"; then
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              echo "Build failed; clearing transient native asset caches before retry..."
+              find "$PUB_CACHE" -type d -path "*/sqlite3-*/android*" -prune -exec rm -rf {} + 2>/dev/null || true
+              find "$PUB_CACHE" -type f -name "libsqlite3*.so" -delete 2>/dev/null || true
+              sleep 8
+              flutter pub get
+            fi
+          done
+
+          echo "Android release build failed after 3 attempts."
+          exit 1
+
+      - name: Verify offline TEST APK requests no unrelated runtime permissions
+        working-directory: generated
+        run: |
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          test -n "$AAPT"
+          "$AAPT" dump permissions build/app/outputs/flutter-apk/app-release.apk | tee /tmp/tasks-test-permissions.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('/tmp/tasks-test-permissions.txt').read_text()
+          banned = [
+              'android.permission.CAMERA',
+              'android.permission.INTERNET',
+              'android.permission.ACCESS_NETWORK_STATE',
+              'android.permission.POST_NOTIFICATIONS',
+              'android.permission.RECEIVE_BOOT_COMPLETED',
+              'android.permission.FOREGROUND_SERVICE',
+              'android.permission.FOREGROUND_SERVICE_SHORT_SERVICE',
+              'android.permission.WAKE_LOCK',
+          ]
+          found = [p for p in banned if "name='" + p + "'" in text]
+          if found:
+              raise SystemExit('Forbidden permissions in isolated TEST APK: '+str(found))
+          print('Isolated TEST runtime permissions audited: PASS')
+          PY
+
+      - name: Verify APK is signed
+        working-directory: generated
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          CERTS="$("$APKSIGNER" verify --print-certs build/app/outputs/flutter-apk/app-release.apk)"
+          printf '%s\n' "$CERTS"
+          EXPECTED_CERT="82075a34ef748541a270af4172dd3ddc37f3e464d9ac9f20eeef7f40a029ff08"
+          python3 ../tools/tests/test_apk_certificate_verification.py
+          printf '%s\n' "$CERTS" | python3 ../tools/verify_apk_certificate.py --expected "$EXPECTED_CERT"
+          if printf '%s\n' "$CERTS" | grep -q "CN=Android Debug"; then
+            echo "ERROR: APK was signed with a temporary Android Debug certificate."
+            exit 1
+          fi
+
+      - name: Name APK by version
+        working-directory: generated
+        run: |
+          VERSION="$(awk '/^version:/ {print $2}' pubspec.yaml | cut -d+ -f1)"
+          BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
+          APK="build/app/outputs/flutter-apk/Briskers-Tasks-TEST-v${VERSION}-b${BUILD_NUMBER}.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$APK"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          printf '%s\n' "$BADGING" | head -1
+          printf '%s\n' "$BADGING" | grep -q "package: name='com.briskers.tasks_lab' versionCode='$BUILD_NUMBER' versionName='$VERSION'" || { echo "Unexpected APK identity"; exit 1; }
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          {
+            echo "source_commit=$GITHUB_SHA"
+            echo "run_url=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "filename=$(basename "$APK")"
+            echo "bytes=$(stat -c%s "$APK")"
+            sha256sum "$APK"
+            "$APKSIGNER" verify --verbose --print-certs "$APK"
+            printf '%s\n' "$BADGING" | head -1
+          } > "${APK%.apk}.verification.txt"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-tasks-test-android
+          path: |
+            generated/build/app/outputs/flutter-apk/Briskers-Tasks-TEST-v*.apk
+            generated/build/app/outputs/flutter-apk/Briskers-Tasks-TEST-v*.verification.txt
+          if-no-files-found: error
+          retention-days: 30
+
