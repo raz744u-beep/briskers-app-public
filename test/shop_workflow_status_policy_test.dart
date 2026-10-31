@@ -67,6 +67,47 @@ void main() {
     expect(eligible(done: true, paid: true), isFalse);
   });
 
+  test('Shared work credits finished mechanic before coworkers finish', () {
+    expect(ShopWorkflowStatusPolicy.sharedTask([
+      ShopTaskProgress.done, ShopTaskProgress.inProgress,
+    ]), ShopTaskProgress.inProgress);
+    expect(ShopWorkflowStatusPolicy.eligibleSharedTaskPortionForPayroll(
+      owner: true,
+      mechanicProgress: ShopTaskProgress.done,
+      alreadyPaid: false,
+      alreadySelected: false,
+    ), isTrue);
+    expect(ShopWorkflowStatusPolicy.eligibleSharedTaskPortionForPayroll(
+      owner: true,
+      mechanicProgress: ShopTaskProgress.inProgress,
+      alreadyPaid: false,
+      alreadySelected: false,
+    ), isFalse);
+    expect(ShopWorkflowStatusPolicy.eligibleSharedTaskPortionForPayroll(
+      owner: true,
+      mechanicProgress: ShopTaskProgress.done,
+      alreadyPaid: true,
+      alreadySelected: false,
+    ), isFalse);
+    expect(ShopWorkflowStatusPolicy.eligibleSharedTaskPortionForPayroll(
+      owner: false,
+      mechanicProgress: ShopTaskProgress.done,
+      alreadyPaid: false,
+      alreadySelected: false,
+    ), isFalse);
+  });
+
+  test('Weekly payroll cannot contain duplicate or blank allocation IDs', () {
+    expect(ShopWorkflowStatusPolicy.hasUniquePayrollAllocationIds([
+      'job-1/chris', 'job-1/kam', 'job-2/chris',
+    ]), isTrue);
+    expect(ShopWorkflowStatusPolicy.hasUniquePayrollAllocationIds([
+      'job-1/chris', 'job-1/chris',
+    ]), isFalse);
+    expect(ShopWorkflowStatusPolicy.hasUniquePayrollAllocationIds(['  ']),
+        isFalse);
+  });
+
   test('Joint close requires Owner, finalized payment and finished work', () {
     bool allowed({bool owner = true, bool paid = true,
       bool unresolved = false, bool done = true}) =>
