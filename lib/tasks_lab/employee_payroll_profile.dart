@@ -725,7 +725,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     final estimate = base + adjustment +
       (_laborAdditionalToBase ? previewHours * hourly : 0.0);
     if (!estimate.isFinite || estimate < 0 || estimate > 1000000) {
-      _snack('Weekly gross preview must be between $0 and $1,000,000');
+      _snack('Weekly gross preview must be between 0 and 1,000,000 dollars');
       return;
     }
     setState(() => _savingFlexible = true);
