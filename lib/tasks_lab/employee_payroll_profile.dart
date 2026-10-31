@@ -771,7 +771,8 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
       return;
     }
     // Use the selected payroll week; never silently pay every tracked hour.
-    final weekKey = LabPayrollPeriodProjection.weekKey(_week);
+    final paymentWeek = _week;
+    final weekKey = LabPayrollPeriodProjection.weekKey(paymentWeek);
     final method = await showDialog<String>(
       context: context, builder: (dialogContext) => SimpleDialog(
         title: const Text('Payment method · TEST'),
@@ -784,9 +785,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
         ],
       ));
     if (!mounted || method == null) return;
-    // Freeze the selected payroll week before opening confirmation dialogs.
-    // Navigating between periods must not retarget a confirmed payment.
-    final paymentWeek = _week;
+    // Week identity is frozen before any confirmation dialog appears.
     final grossCents = (gross * 100).round();
     LabAdvanceSnapshot advance;
     try {
