@@ -68,4 +68,12 @@ jobs:
       - name: Confirm generated APK exists
         working-directory: generated
         run: test -s build/app/outputs/flutter-apk/app-debug.apk
-# No upload or release: a placeholder test key means this is a compile-only artifact.
+      - name: Retain compile-only APK for inspection (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-synthetic-android-COMPILE-ONLY
+          path: generated/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 3
+# This APK uses a placeholder key, keeps deletion disabled, and must not be
+# installed as a working test app or published as a production release.
