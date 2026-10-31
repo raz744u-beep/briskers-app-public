@@ -3563,6 +3563,40 @@ class BriskersApi {
     );
   }
 
+  /// Exact-total recovery is separate from the normal v1 sync path.
+  /// Call this only from Owner's targeted recovery after confirming the
+  /// source snapshot. A missing v2 backend function must fail closed.
+  Future<String> syncOfflineQuickInvoiceExactTotal(
+    String businessId, {
+    required String customerId,
+    String? vehicleId,
+    required String operationId,
+    required String documentDate,
+    required List<Map<String, dynamic>> lines,
+    String? memo,
+    required int expectedNetCents,
+    required int expectedTaxCents,
+  }) async {
+    if (expectedNetCents < 0 || expectedTaxCents < 0) {
+      throw StateError('Invalid exact-total invoice recovery amounts.');
+    }
+    final id = await networkSupabase.rpc(
+      'briskers_sync_offline_quick_invoice_v2',
+      params: {
+        'p_business_id': businessId,
+        'p_customer_id': customerId,
+        'p_vehicle_id': vehicleId,
+        'p_operation_id': operationId,
+        'p_document_date': documentDate,
+        'p_lines': lines,
+        'p_memo': memo,
+        'p_expected_net_cents': expectedNetCents,
+        'p_expected_tax_cents': expectedTaxCents,
+      },
+    );
+    return id.toString();
+  }
+
   /// Upload an offline invoice atomically. Repeating the same UUID is safe.
   Future<String> syncOfflineQuickInvoice(
     String businessId, {
