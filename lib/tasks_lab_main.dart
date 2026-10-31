@@ -2830,6 +2830,9 @@ class _TasksLabHomeState extends State<TasksLabHome> {
       task['status'] == 'in_progress' && task['source_missing'] != 1).length;
     final notStarted = allRoleTasks.where((task) =>
       task['status'] == 'planned' && task['source_missing'] != 1).length;
+    // Track only actual finished work; missing source rows are not work done.
+    final total = active + completed;
+    final completionRatio = total == 0 ? 0.0 : completed / total;
     final unassigned = allRoleTasks.where((task) {
       if (task['status'] == 'done' || task['source_missing'] == 1) {
         return false;
@@ -2862,6 +2865,26 @@ class _TasksLabHomeState extends State<TasksLabHome> {
             ' · Local TEST tasks'),
           onTap: () => _navigate(3),
         )),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 2, 8, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('$completed of $total tasks complete',
+                style: const TextStyle(fontSize: 12,
+                  color: Color(0xFF64748B))),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  value: completionRatio,
+                  minHeight: 6,
+                  backgroundColor: const Color(0xFFDCE6EA),
+                  color: BriskersColors.jobs),
+              ),
+            ],
+          ),
+        ),
         if (secretary) ...[
           Card(child: ListTile(
             leading: const Icon(Icons.assignment_ind_outlined),
