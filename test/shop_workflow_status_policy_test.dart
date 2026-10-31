@@ -133,6 +133,28 @@ void main() {
     ), throwsArgumentError);
   });
 
+  test('Verify Payment requires selected work, Owner and method', () {
+    bool allowed({
+      bool owner = true,
+      bool hasWork = true,
+      bool current = true,
+      bool method = true,
+      bool committed = false,
+    }) => ShopPayrollPreview.canVerifyPayment(
+      owner: owner,
+      hasSelectedWork: hasWork,
+      localAllocationsCurrent: current,
+      methodSelected: method,
+      alreadyCommitted: committed,
+    );
+    expect(allowed(), isTrue);
+    expect(allowed(owner: false), isFalse);
+    expect(allowed(hasWork: false), isFalse);
+    expect(allowed(current: false), isFalse);
+    expect(allowed(method: false), isFalse);
+    expect(allowed(committed: true), isFalse);
+  });
+
   test('Joint close requires Owner, finalized payment and finished work', () {
     bool allowed({bool owner = true, bool paid = true,
       bool unresolved = false, bool done = true}) =>
