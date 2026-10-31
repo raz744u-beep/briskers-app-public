@@ -2819,8 +2819,11 @@ class _TasksLabHomeState extends State<TasksLabHome> {
 
   Widget _roleDashboardPreview() {
     final secretary = _dashboardRole == 'secretary';
-    final active = tasks.where((task) => task['status'] != 'done').length;
-    final completed = tasks.where((task) => task['status'] == 'done').length;
+    final allRoleTasks = <Map<String, dynamic>>[...tasks, ...shopTasks];
+    final active = allRoleTasks.where((task) =>
+      task['status'] != 'done' && task['source_missing'] != 1).length;
+    final completed = allRoleTasks.where((task) =>
+      task['status'] == 'done' && task['source_missing'] != 1).length;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
