@@ -2526,6 +2526,14 @@ class _TasksLabHomeState extends State<TasksLabHome> {
           rateCents: testHourlyRates[employeeId],
           initialTab: tab,
           initialWeek: week,
+          onOpenJob: () {
+            Navigator.of(context).popUntil((route) => route.isFirst);
+            _openVehicleJob(0);
+          },
+          onOpenInvoice: () {
+            Navigator.of(context).popUntil((route) => route.isFirst);
+            _navigate(8);
+          },
         ),
       ),
     );
