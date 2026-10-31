@@ -32,6 +32,7 @@ void main() {
         generalTasks:const [],
         allocationsByLine:const {},
         employeeName:(id)=>id??'Unassigned',
+        onEmployeeTap:(id){},
         serviceTaskCard:(task)=>const SizedBox.shrink(),
         onAddService:(){},
         onAddGeneral:(){},
