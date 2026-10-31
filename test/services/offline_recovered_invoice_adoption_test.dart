@@ -187,6 +187,38 @@ void main() {
     expect(local.read<int>('n'),1);
   });
 
+  test('missing original customer operation identity rolls back safely',
+      () async {
+    await seed(withProvisionalJob:true);
+    await db.customStatement(
+      """UPDATE sync_outbox SET payload_json='{}'
+         WHERE business_id=? AND entity_type='customer_create'""",
+      [b],
+    );
+    await expectLater(adopt(), throwsStateError);
+    final rows=await db.customSelect(
+      "SELECT COUNT(*) AS n FROM sync_outbox WHERE business_id=? AND state='pending'",
+      variables:[const Variable<String>(b)],
+    ).getSingle();
+    expect(rows.read<int>('n'),4);
+  });
+
+  test('mismatched invoice dependencies cannot be adopted', () async {
+    await seed(withProvisionalJob:true);
+    await db.customStatement(
+      """UPDATE sync_outbox SET payload_json=?
+         WHERE business_id=? AND entity_type='document_draft_create'""",
+      [jsonEncode({'operation_id':invoiceOp,'kind':'invoice',
+        'customer_id':'different-customer','vehicle_id':lv}),b],
+    );
+    await expectLater(adopt(), throwsStateError);
+    final rows=await db.customSelect(
+      "SELECT COUNT(*) AS n FROM sync_outbox WHERE business_id=? AND state='pending'",
+      variables:[const Variable<String>(b)],
+    ).getSingle();
+    expect(rows.read<int>('n'),4);
+  });
+
   test('non-Owner leaves all original queued operations unchanged', () async {
     await seed();
     await expectLater(adopt(owner:false),throwsStateError);
