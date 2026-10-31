@@ -133,8 +133,10 @@ class _TasksLabHomeState extends State<TasksLabHome> {
         [destination]);
       if (mounted) setState(() => _startupPage = destination);
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save startup page: $error')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save startup page: $error')));
+      }
     }
   }
 
