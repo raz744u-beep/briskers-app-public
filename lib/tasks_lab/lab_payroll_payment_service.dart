@@ -110,7 +110,9 @@ class LabPayrollPaymentService {
         'INSERT INTO local_lab_payroll_disbursements '
         '(business_id,employee_id,cents,kind,method,note,paid_at,created_at) '
         'VALUES (?,?,?,?,?,?,?,?)',
-        [_shop, employeeId, grossCents, 'pay', method,
+        // Disbursement is money actually transferred; gross belongs in
+        // the settlement, and the deduction in the advance ledger.
+        [_shop, employeeId, grossCents - debtCents, 'pay', method,
           note.trim(), now, now],
       );
       final idRow = await localDatabase.customSelect(
