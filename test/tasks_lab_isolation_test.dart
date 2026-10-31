@@ -230,7 +230,7 @@ void main() {
     expect(main, contains('bottomNavigationBar: _bottomNav()'));
     expect(main, contains('BriskersModuleDock('));
     expect(main, contains('onLongPressed: (index, globalPosition)'));
-    expect(main, contains("if (index == 2 || index == 7) {"));
+    expect(main, contains("if (index == 3 || index == 4) {"));
     expect(main, contains('jobDetailsOpen'));
     expect(main, contains('Assign main job mechanic'));
     expect(main, contains('Add job recheck · Not on Invoice'));
