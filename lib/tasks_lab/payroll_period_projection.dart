@@ -59,8 +59,12 @@ class LabPayrollPeriodProjection {
     for (final row in payments) {
       if (row['employee_id'] != employeeId || row['kind'] != 'pay' ||
           row['paid_at'] is! int || row['cents'] is! int) { continue; }
+      final cents = row['cents'] as int;
+      // Repayment and adjustments have separate ledger entries. The paid
+      // figure must represent actual positive payroll disbursements only.
+      if (cents <= 0) { continue; }
       final date = DateTime.fromMillisecondsSinceEpoch(row['paid_at'] as int);
-      if (inPeriod(date)) { paid += row['cents'] as int; }
+      if (inPeriod(date)) { paid += cents; }
     }
     if(hoursByWeek.isEmpty) {
       // Fixed-weekly employees may have a confirmed settlement without any
