@@ -815,9 +815,11 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
           value: _laborAdditionalToBase,
           onChanged: (v) => setState(() => _laborAdditionalToBase = v),
         ),
-        const Text('Tracked task allocations across all weeks: '
-          'reference only; prior paid hours must not be counted again.',
-          style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+        Text('Tracked task allocations (all weeks): '
+          '${trackedHours.toStringAsFixed(2)} hrs · Reference only. '
+          'Previously paid hours must not be paid again.',
+          style: const TextStyle(fontSize: 11,
+            color: Color(0xFF64748B))),
         const SizedBox(height: 8),
         field('Other weekly adjustment (+/-)', _weeklyAdjustmentPreview),
         const SizedBox(height: 10),
