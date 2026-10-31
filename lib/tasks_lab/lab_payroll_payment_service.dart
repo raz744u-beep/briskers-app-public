@@ -191,6 +191,13 @@ class LabPayrollPaymentService {
     if(debtCents>advance.remainingCents) {
       throw StateError('Debt repayment exceeds amount currently owed');
     }
+    // Validate every requested entry, not only those selected by a >0
+    // filter. Negative or nonfinite hours must never silently disappear.
+    for (final hours in hoursByTask.values) {
+      if (!hours.isFinite || hours < 0) {
+        throw ArgumentError('Requested payroll hours must be finite and nonnegative');
+      }
+    }
     final selected=tasks.where((task){
       final key=task['document_id'].toString()+':'+task['line_id'].toString();
       return (hoursByTask[key]??0)>0;
