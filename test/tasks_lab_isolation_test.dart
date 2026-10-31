@@ -31,6 +31,15 @@ void main() {
     }
   });
 
+  test('TEST role dashboards are explicit local previews', () {
+    final main = File('lib/tasks_lab_main.dart').readAsStringSync();
+    expect(main, contains('lab_dashboard_role_preference'));
+    expect(main, contains('Secretary dashboard · TEST'));
+    expect(main, contains('Mechanic dashboard · TEST'));
+    expect(main, contains('Local TEST display only · does not grant access'));
+    expect(main, contains("if (_dashboardRole != 'owner')"));
+  });
+
   test('TEST startup page preference persists locally', () {
     final main = File('lib/tasks_lab_main.dart').readAsStringSync();
     expect(main, contains('lab_navigation_preferences'));
