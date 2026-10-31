@@ -44,6 +44,29 @@ void main() {
       ShopTaskProgress.notStarted);
   });
 
+  test('Payroll selects only completed unpaid mechanic portions once', () {
+    bool eligible({
+      bool owner = true,
+      bool done = true,
+      bool paid = false,
+      bool selected = false,
+    }) => ShopWorkflowStatusPolicy.eligibleForPayrollSelection(
+      owner: owner,
+      mechanicPortionDone: done,
+      alreadyPaid: paid,
+      alreadySelected: selected,
+    );
+
+    expect(eligible(), isTrue);
+    expect(eligible(owner: false), isFalse);
+    expect(eligible(done: false), isFalse);
+    expect(eligible(paid: true), isFalse);
+    expect(eligible(selected: true), isFalse);
+    // Even if previously paid work is reopened and completed again,
+    // its frozen payroll credit must never be offered for selection.
+    expect(eligible(done: true, paid: true), isFalse);
+  });
+
   test('Joint close requires Owner, finalized payment and finished work', () {
     bool allowed({bool owner = true, bool paid = true,
       bool unresolved = false, bool done = true}) =>
