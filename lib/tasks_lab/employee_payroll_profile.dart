@@ -785,6 +785,41 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
       ));
     if (!mounted || method == null) return;
     final grossCents = (gross * 100).round();
+    final advance = await _ledger.read(_shop, widget.employeeId);
+    if (!mounted) return;
+    final deductionInput = TextEditingController(text: '0.00');
+    final deduction = await showDialog<int>(
+      context: context, builder: (dialogContext) => AlertDialog(
+        title: const Text('Advance deduction · TEST'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Remaining advance: ${_money(advance.remainingCents)}'),
+          const SizedBox(height: 10),
+          TextField(
+            controller: deductionInput,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Deduct from this payment',
+              prefixText: r'$ ', border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () {
+            final amount = double.tryParse(deductionInput.text.trim());
+            if (amount == null || !amount.isFinite || amount < 0 ||
+                (amount * 100).round() > advance.remainingCents ||
+                (amount * 100).round() > grossCents) {
+              ScaffoldMessenger.of(dialogContext).showSnackBar(
+                const SnackBar(content: Text('Invalid advance deduction')));
+              return;
+            }
+            Navigator.pop(dialogContext, (amount * 100).round());
+          }, child: const Text('Continue')),
+        ],
+      ));
+    deductionInput.dispose();
+    if (!mounted || deduction == null) return;
     final confirmed = await showDialog<bool>(
       context: context, builder: (dialogContext) => AlertDialog(
         title: const Text('Finalize weekly pay · TEST'),
@@ -795,7 +830,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
           'Method: ${method.toUpperCase()}\n\n'
           'This saves one local TEST payment for the selected week. '
           'It does not pay or alter mechanic task allocations. '
-          'Advance repayment, if needed, must be recorded separately.'),
+          'The confirmed deduction is recorded separately in the advance ledger.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel')),
@@ -808,11 +843,12 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     try {
       await LabPayrollPaymentService.recordFlexibleWeekly(
         employeeId: widget.employeeId, week: _week,
-        grossCents: grossCents, debtCents: 0,
+        grossCents: grossCents, debtCents: deduction,
         method: method,
         note: 'Flexible weekly base and approved supplement · TEST',
       );
       await _refreshPayrollData();
+      await _loadLedger();
       if (mounted) _snack('Weekly TEST payment finalized locally');
     } catch (error) {
       if (mounted) _snack('Weekly payment not recorded: $error');
