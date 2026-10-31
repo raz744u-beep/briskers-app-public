@@ -229,6 +229,11 @@ void main() {
     expect(main, contains('LocalJobTasksLabStore'));
     expect(main, contains('bottomNavigationBar: _bottomNav()'));
     expect(main, contains('BriskersModuleDock('));
+    expect(main, contains(
+      'static const _dockPages = [0, 1, 2, 3, 5, 8, 9, 11]'));
+    expect(main, contains("label: 'Tasks', icon: Icons.rule_outlined"));
+    expect(main, contains(
+      "label: 'Payroll', icon: Icons.account_balance_wallet_outlined"));
     expect(main, contains('onLongPressed: (index, globalPosition)'));
     expect(main, contains("if (index == 3 || index == 4) {"));
     expect(main, contains('jobDetailsOpen'));
