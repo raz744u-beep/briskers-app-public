@@ -61,6 +61,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
   final _hourlySupplementPreview = TextEditingController(text: '0.00');
   final _weeklyAdjustmentPreview = TextEditingController(text: '0.00');
   bool _laborAdditionalToBase = false;
+  bool _savingFlexible = false;
   DateTime _week = DateTime.now();
   List<Map<String, dynamic>> _drafts = const [];
   List<Map<String, dynamic>> _payments = const [];
@@ -96,6 +97,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     _payments = widget.payments;
     _generalTasks = widget.generalTasks;
     _loadLedger();
+    _loadFlexiblePaySettings();
     _refreshPayrollData();
   }
 
@@ -665,6 +667,77 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     setState(() => _payrollPeriod = next);
   }
 
+  // Store editable TEST compensation defaults locally; no payroll posting.
+  Future<void> _ensureFlexiblePayTable() async {
+    await localDatabase.customStatement(
+      'CREATE TABLE IF NOT EXISTS lab_flexible_weekly_defaults ('
+      'business_id TEXT NOT NULL, employee_id TEXT NOT NULL, '
+      'base_cents INTEGER NOT NULL, hourly_cents INTEGER NOT NULL, '
+      'adjustment_cents INTEGER NOT NULL, add_labor INTEGER NOT NULL, '
+      'PRIMARY KEY (business_id, employee_id))');
+  }
+
+  Future<void> _loadFlexiblePaySettings() async {
+    try {
+      await _ensureFlexiblePayTable();
+      final rows = await localDatabase.customSelect(
+        'SELECT base_cents, hourly_cents, adjustment_cents, add_labor '
+        'FROM lab_flexible_weekly_defaults '
+        'WHERE business_id=? AND employee_id=?',
+        variables: [
+          const Variable<String>(_shop),
+          Variable<String>(widget.employeeId),
+        ],
+      ).get();
+      if (!mounted || rows.isEmpty) return;
+      final row = rows.first;
+      setState(() {
+        _weeklyBasePreview.text =
+          (row.read<int>('base_cents') / 100).toStringAsFixed(2);
+        _hourlySupplementPreview.text =
+          (row.read<int>('hourly_cents') / 100).toStringAsFixed(2);
+        _weeklyAdjustmentPreview.text =
+          (row.read<int>('adjustment_cents') / 100).toStringAsFixed(2);
+        _laborAdditionalToBase = row.read<int>('add_labor') == 1;
+      });
+    } catch (error) {
+      _snack('Could not load flexible pay settings: $error');
+    }
+  }
+
+  Future<void> _saveFlexiblePaySettings() async {
+    if (_savingFlexible) return;
+    final base = double.tryParse(_weeklyBasePreview.text.trim());
+    final hourly = double.tryParse(_hourlySupplementPreview.text.trim());
+    final adjustment = double.tryParse(_weeklyAdjustmentPreview.text.trim());
+    if (base == null || hourly == null || adjustment == null ||
+        !base.isFinite || !hourly.isFinite || !adjustment.isFinite ||
+        base < 0 || hourly < 0 || base > 1000000 ||
+        hourly > 100000 || adjustment.abs() > 1000000) {
+      _snack('Enter valid weekly amounts and rates');
+      return;
+    }
+    setState(() => _savingFlexible = true);
+    try {
+      await _ensureFlexiblePayTable();
+      await localDatabase.customStatement(
+        'INSERT OR REPLACE INTO lab_flexible_weekly_defaults '
+        '(business_id,employee_id,base_cents,hourly_cents,'
+        'adjustment_cents,add_labor) VALUES (?,?,?,?,?,?)',
+        [
+          _shop, widget.employeeId, (base * 100).round(),
+          (hourly * 100).round(), (adjustment * 100).round(),
+          _laborAdditionalToBase ? 1 : 0,
+        ],
+      );
+      if (mounted) _snack('Flexible weekly defaults saved locally · TEST');
+    } catch (error) {
+      _snack('Could not save flexible weekly defaults: $error');
+    } finally {
+      if (mounted) setState(() => _savingFlexible = false);
+    }
+  }
+
   // TEST preview: these inputs never post payroll or alter task coverage.
   Widget _flexibleWeeklyPreview(double trackedHours) {
     double value(TextEditingController input) =>
@@ -712,6 +785,13 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
         Text('Preview gross: ${_currency.format(total)}',
           style: const TextStyle(fontWeight: FontWeight.w800,
             fontSize: 16)),
+        const SizedBox(height: 10),
+        FilledButton(
+          onPressed: _savingFlexible ? null : _saveFlexiblePaySettings,
+          child: const Text('Save weekly defaults · TEST')),
+        const Text('Settings only; does not verify payment.',
+          style: TextStyle(fontSize: 11,
+            color: Color(0xFF64748B))),
       ],
     ));
   }
