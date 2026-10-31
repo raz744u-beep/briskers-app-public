@@ -33,6 +33,15 @@ class LabPayrollPaymentService {
       )
     ''');
     await localDatabase.customStatement('''
+      CREATE TABLE IF NOT EXISTS lab_flexible_weekly_confirmations (
+        business_id TEXT NOT NULL,
+        employee_id TEXT NOT NULL,
+        week_key TEXT NOT NULL,
+        disbursement_id INTEGER NOT NULL,
+        PRIMARY KEY (business_id, employee_id, week_key)
+      )
+    ''');
+    await localDatabase.customStatement('''
       CREATE TABLE IF NOT EXISTS lab_payroll_settlements (
         disbursement_id INTEGER PRIMARY KEY,
         business_id TEXT NOT NULL, employee_id TEXT NOT NULL,
