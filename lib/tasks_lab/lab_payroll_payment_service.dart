@@ -231,6 +231,14 @@ class LabPayrollPaymentService {
         throw ArgumentError('Selected labor hours are invalid');
       }
     }
+    // Unknown selections are never silently ignored: a stale task list
+    // must be refreshed before the Owner verifies any payment.
+    for (final entry in hoursByTask.entries) {
+      if (entry.value <= 0) continue;
+      if (!seenTaskIds.contains(entry.key)) {
+        throw StateError('Selected payroll task is missing; refresh first');
+      }
+    }
     final laborCents=(hours*hourlyRateCents).round();
     // Gross can include a separately approved adjustment, but it cannot
     // underpay the labor coverage being marked paid.
