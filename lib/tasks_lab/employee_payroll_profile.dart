@@ -747,12 +747,22 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
     final base = value(_weeklyBasePreview);
     final rate = value(_hourlySupplementPreview);
     final adjustment = value(_weeklyAdjustmentPreview);
-    final approvedHours = value(_approvedSupplementHours);
-    // Never automatically add all tracked/historical hours to weekly pay.
-    // Owner must specify supplemental hours and review prior paid coverage.
-    final supplement = _laborAdditionalToBase && approvedHours > 0
+    final approvedHours = double.tryParse(
+      _approvedSupplementHours.text.trim());
+    // Never automatically add historical or previously paid hours.
+    // A preview is invalid until the Owner enters safe supplemental hours.
+    final validHours = approvedHours != null &&
+      approvedHours.isFinite && approvedHours >= 0 &&
+      approvedHours <= 168;
+    final validMoney = [base, rate, adjustment].every((n) => n.isFinite) &&
+      base >= 0 && rate >= 0 &&
+      base <= 1000000 && rate <= 100000 &&
+      adjustment.abs() <= 1000000;
+    final supplement = _laborAdditionalToBase && validHours
       ? approvedHours * rate : 0.0;
     final total = base + supplement + adjustment;
+    final validPreview = validHours && validMoney &&
+      total.isFinite && total >= 0;
     Widget field(String label, TextEditingController controller) =>
       TextField(
         controller: controller,
@@ -791,7 +801,7 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
           contentPadding: EdgeInsets.zero,
           title: const Text('Add tracked labor to base'),
           subtitle: Text(_laborAdditionalToBase
-            ? '${approvedHours.toStringAsFixed(2)} approved hours × rate'
+            ? '${validHours ? approvedHours.toStringAsFixed(2) : 'Invalid'} approved hours × rate'
             : 'Labor included in base · no double counting'),
           value: _laborAdditionalToBase,
           onChanged: (v) => setState(() => _laborAdditionalToBase = v),
@@ -802,13 +812,19 @@ class _EmployeePayrollProfileLabState extends State<EmployeePayrollProfileLab> {
         const SizedBox(height: 8),
         field('Other weekly adjustment (+/-)', _weeklyAdjustmentPreview),
         const SizedBox(height: 10),
-        Text('Preview gross: ${_currency.format(total)}',
+        Text(validPreview
+            ? 'Preview gross: ${_currency.format(total)}'
+            : 'Preview unavailable · check amounts and hours',
           style: const TextStyle(fontWeight: FontWeight.w800,
             fontSize: 16)),
         const SizedBox(height: 10),
         FilledButton(
           onPressed: _savingFlexible ? null : _saveFlexiblePaySettings,
           child: const Text('Save weekly defaults · TEST')),
+        const Text('Approved hours are a temporary preview and are not '
+          'saved as payable coverage. Review actual unpaid labor before '
+          'verifying any payment.',
+          style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
         const Text('Settings only; does not verify payment.',
           style: TextStyle(fontSize: 11,
             color: Color(0xFF64748B))),
