@@ -5,6 +5,46 @@ import 'package:briskers_app/core/shop_payroll_preview.dart';
 import 'package:briskers_app/services/test_payroll_staging_repository.dart';
 
 void main() {
+  test('two-credit staging rolls back if one credit is reserved', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    try {
+      final repository = TestPayrollStagingRepository(database: db);
+      const first = ShopPayrollAllocation(
+        id: 'a', employeeId: 'employee', hoursHundredths: 100,
+        rateCentsPerHour: 4000, completed: true, alreadyPaid: false,
+      );
+      const second = ShopPayrollAllocation(
+        id: 'b', employeeId: 'employee', hoursHundredths: 100,
+        rateCentsPerHour: 4000, completed: true, alreadyPaid: false,
+      );
+      ShopPayrollPaymentProposal proposal(String op, List<String> ids, int gross) =>
+          ShopPayrollPaymentProposal(
+            operationId: op, employeeId: 'employee', allocationIds: ids,
+            grossCents: gross, repaymentCents: 0, method: 'Zelle',
+          );
+      expect(await repository.stage(
+        businessId: 'test-shop', proposal: proposal('first', ['b'], 4000),
+        owner: true, credits: [second], outstandingAdvanceCents: 0,
+      ), isTrue);
+      await expectLater(repository.stage(
+        businessId: 'test-shop',
+        proposal: proposal('second', ['a', 'b'], 8000),
+        owner: true, credits: [first, second], outstandingAdvanceCents: 0,
+      ), throwsA(isA<Exception>()));
+      final staged = await db.customSelect(
+        'SELECT operation_id FROM test_payroll_staging',
+      ).get();
+      expect(staged, hasLength(1));
+      final credits = await db.customSelect(
+        'SELECT allocation_id FROM test_payroll_staged_credits',
+      ).get();
+      expect(credits, hasLength(1));
+      expect(credits.single.read<String>('allocation_id'), 'b');
+    } finally {
+      await db.close();
+    }
+  });
+
   test('staging is atomic, exactly replayable and rejects conflicts', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     try {
