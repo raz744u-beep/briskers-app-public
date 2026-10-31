@@ -155,6 +155,24 @@ void main() {
     expect(allowed(committed: true), isFalse);
   });
 
+  test('Repayment cannot exceed current advance or gross pay', () {
+    expect(ShopPayrollPreview.verifiedRepaymentCents(
+      grossCents: 10500,
+      outstandingAdvanceCents: 3000,
+      requestedRepaymentCents: 2000,
+    ), 2000);
+    expect(() => ShopPayrollPreview.verifiedRepaymentCents(
+      grossCents: 10500,
+      outstandingAdvanceCents: 1000,
+      requestedRepaymentCents: 2000,
+    ), throwsArgumentError);
+    expect(() => ShopPayrollPreview.verifiedRepaymentCents(
+      grossCents: 1000,
+      outstandingAdvanceCents: 3000,
+      requestedRepaymentCents: 2000,
+    ), throwsArgumentError);
+  });
+
   test('Joint close requires Owner, finalized payment and finished work', () {
     bool allowed({bool owner = true, bool paid = true,
       bool unresolved = false, bool done = true}) =>
