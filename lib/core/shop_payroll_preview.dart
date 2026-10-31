@@ -54,6 +54,20 @@ class ShopPayrollPreview {
     return total;
   }
 
+  /// A preview is not a payment receipt. Verify Payment must explicitly
+  /// specify the payment method and confirm against authoritative state.
+  static bool canVerifyPayment({
+    required bool owner,
+    required bool hasSelectedWork,
+    required bool localAllocationsCurrent,
+    required bool methodSelected,
+    required bool alreadyCommitted,
+  }) => owner &&
+      hasSelectedWork &&
+      localAllocationsCurrent &&
+      methodSelected &&
+      !alreadyCommitted;
+
   /// A payroll deduction never changes gross taxable work credit.
   /// A deduction above gross is rejected rather than generating negative pay.
   static int netCents({
