@@ -4,6 +4,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:briskers_app/local/briskers_local_database.dart';
 import 'package:briskers_app/services/local_owner_invoice_numbering.dart';
+import 'package:briskers_app/services/local_document_repository.dart';
 
 void main() {
   late BriskersLocalDatabase db;
@@ -56,6 +57,18 @@ void main() {
     expect(rows.length,4);
     expect(rows.every((x)=>x.read<String>('state')=='conflict'),true);
     expect(rows.any((x)=>jsonDecode(x.read<String>('payload_json'))['operation_id']=='synthetic-payment'),true);
+  });
+  test('numbered local invoice remains visible and issued in offline list',() async {
+    await seed();
+    await assign();
+    final docs = await LocalDocumentRepository(database:db)
+        .listByKind(business,kind:'invoice');
+    final local = docs.singleWhere((d)=>d['id']=='local-invoice-test');
+    expect(local['document_number'],'8101');
+    expect(local['job_number'],'J-8101');
+    expect(local['status'],'issued');
+    expect(local['display_status'],'Open');
+    expect(local['_local_snapshot'],true);
   });
   test('missing recorded payment never assigns invoice number',() async {
     await seed();
