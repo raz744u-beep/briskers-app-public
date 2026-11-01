@@ -31,14 +31,19 @@ class LocalPurgeRegistrationGateway {
 
 class OwnerLocalJobPurgeService {
   OwnerLocalJobPurgeService({BriskersLocalDatabase? database,
-    LocalPurgeRegistrationGateway gateway = const LocalPurgeRegistrationGateway()})
-    : _db = database ?? localDatabase, _gateway = gateway;
+    LocalPurgeRegistrationGateway gateway = const LocalPurgeRegistrationGateway(),
+    Map<String, dynamic>? Function()? ownerIdentityProvider})
+    : _db = database ?? localDatabase,
+      _gateway = gateway,
+      _ownerIdentityProvider = ownerIdentityProvider ??
+          (() => LocalOwnerSecurity.instance.unlockedIdentity);
   final BriskersLocalDatabase _db;
   final LocalPurgeRegistrationGateway _gateway;
+  final Map<String, dynamic>? Function() _ownerIdentityProvider;
   static final _flights = Expando<Map<String, Future<void>>>('local_job_cancellation_registration');
 
   void _assertLocalOwnerBusiness(String business, String actorId) {
-    final owner = LocalOwnerSecurity.instance.unlockedIdentity;
+    final owner = _ownerIdentityProvider();
     if (owner == null ||
         owner['actor_id'] != actorId ||
         owner['business_id'] != business ||
