@@ -155,6 +155,21 @@ class LocalOwnerInvoiceNumbering {
            WHERE business_id=? AND id=? AND sync_state='pending' ''',
         [job,businessId,jobId],
       );
+      final verifiedInvoice = await _db.customSelect(
+        '''SELECT document_number,status FROM local_documents
+           WHERE business_id=? AND id=?''',
+        variables:[Variable<String>(businessId),Variable<String>(invoiceId)],
+      ).getSingle();
+      final verifiedJob = await _db.customSelect(
+        '''SELECT job_number FROM local_jobs
+           WHERE business_id=? AND id=?''',
+        variables:[Variable<String>(businessId),Variable<String>(jobId)],
+      ).getSingle();
+      if (verifiedInvoice.readNullable<String>('document_number') != number ||
+          verifiedInvoice.readNullable<String>('status') != 'issued' ||
+          verifiedJob.readNullable<String>('job_number') != job) {
+        throw StateError('Local numbering verification failed; no changes saved');
+      }
     });
   }
 }
