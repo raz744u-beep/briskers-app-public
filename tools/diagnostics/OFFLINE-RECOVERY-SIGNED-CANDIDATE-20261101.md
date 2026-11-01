@@ -5,3 +5,5 @@ Build only from this exact branch using existing permanent signing, package ID a
 Signed release request: exact-head CI verified on 2026-11-01. Build must preserve permanent certificate and package identity; do not alter local records.
 
 Release candidate: restore display of preserved Owner-recovery payments; require exact-head Diagnostics, iOS, signed APK certificate and identity verification. Original payment remains quarantined from sync.
+
+2026-11-01 signed candidate: reconciliation proof with exact original payment operation ID and date; preserve quarantined payment and all existing local records. The production APK requires original keystore and package verification.
