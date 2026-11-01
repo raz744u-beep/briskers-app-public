@@ -69,9 +69,9 @@ class _TestLocalPayrollTaskListState extends State<TestLocalPayrollTaskList> {
               ),
             ),
             TestPayrollTaskSelector(
-          employeeId: widget.employeeId,
-          isOwner: widget.isOwner,
-          allocations: snapshot.data!,
+              employeeId: widget.employeeId,
+              isOwner: widget.isOwner,
+              allocations: snapshot.data!,
             ),
           ],
         );
