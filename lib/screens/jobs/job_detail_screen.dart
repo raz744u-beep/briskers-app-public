@@ -10,6 +10,8 @@ import '../../core/connection_mode.dart';
 import '../../services/owner_job_deletion_v3_contract.dart';
 import '../../services/owner_local_job_purge_service.dart';
 import '../../services/local_owner_security.dart';
+import '../../services/local_job_graph_delete.dart';
+import '../../local/local_database_provider.dart';
 import 'offline_job_purge_dialog.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/employee_role_style.dart';
@@ -3450,15 +3452,32 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         Navigator.pop(context, true);
         return;
       }
-      // Local-first rollout: never route this button to server deletion.
-      // A synced or uncertain Job must wait for a separately verified
-      // device-local graph reconciler. No records were changed.
-      if (mounted) {
-        setState(() => _error =
-          'This Job has existing sync history or cannot be proven local-only. '
-          'Local deletion of this Job is not available yet. '
-          'Nothing was deleted.');
+      // Locally stored synchronized Jobs follow a device-only graph deletion.
+      // The reviewed inventory must remain unchanged through confirmation.
+      final graphDelete = LocalJobGraphDelete(localDatabase);
+      final reviewed = await graphDelete.preview(
+        businessId: widget.businessId, jobId: widget.jobId);
+      if (!mounted) return;
+      final confirmed = await showOfflineJobPurgeConfirmation(
+        context,
+        jobLabel: _job?['job_number']?.toString() ?? 'this Job',
+        items: reviewed,
+      );
+      if (!confirmed || !mounted) return;
+      final identity = LocalOwnerSecurity.instance.unlockedIdentity;
+      if (!_owner || identity?['actor_id'] != actorId ||
+          identity?['business_id'] != widget.businessId ||
+          identity?['role_code'] != 'owner') {
+        throw StateError('Owner identity changed. Review Delete Job again.');
       }
+      await graphDelete.confirm(
+        businessId: widget.businessId, jobId: widget.jobId,
+        reviewed: reviewed);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Job deleted locally. Sync deletion is pending.'),
+      ));
+      Navigator.pop(context, true);
     } catch (error) {
       if (mounted) {
         setState(() => _error = deletionV3FailureMessage(error));
