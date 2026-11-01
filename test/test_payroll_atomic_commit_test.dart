@@ -120,6 +120,10 @@ void main() {
         '(business_id, employee_id, balance_cents) VALUES (?, ?, ?)',
         ['sandbox', 'employee-1', 3000],
       );
+      await expectLater(settlement.finalizeSynthetic(
+        businessId: 'other-business', operationId: 'op-1',
+        owner: true, syntheticTestMode: true,
+      ), throwsStateError);
       expect(await settlement.finalizeSynthetic(
         businessId: 'sandbox', operationId: 'op-1', owner: true, syntheticTestMode: true), isTrue);
       expect(await settlement.finalizeSynthetic(
