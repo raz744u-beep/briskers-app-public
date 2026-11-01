@@ -28,6 +28,9 @@ void main() {
         ),
         credits: [work], outstandingAdvanceCents: 3000,
       );
+      await expectLater(settlement.finalizeSynthetic(
+        businessId: 'sandbox', operationId: 'op-1', owner: true),
+        throwsStateError);
       await db.customStatement(
         'INSERT INTO test_payroll_advances '
         '(business_id, employee_id, balance_cents) VALUES (?, ?, ?)',
