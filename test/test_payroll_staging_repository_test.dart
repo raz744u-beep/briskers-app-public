@@ -5,6 +5,23 @@ import 'package:briskers_app/core/shop_payroll_preview.dart';
 import 'package:briskers_app/services/test_payroll_staging_repository.dart';
 
 void main() {
+  test('Integrity check detects orphaned staging allocation', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    try {
+      final repo = TestPayrollStagingRepository(database: db);
+      expect(await repo.stagingIntegrityOk('test-shop'), isTrue);
+      await db.customStatement(
+        "INSERT INTO test_payroll_staged_credits "
+        "(business_id, allocation_id, operation_id) "
+        "VALUES ('test-shop', 'orphan', 'missing-operation')",
+      );
+      expect(await repo.stagingIntegrityOk('test-shop'), isFalse);
+      expect(await repo.stagingIntegrityOk('different-shop'), isTrue);
+    } finally {
+      await db.close();
+    }
+  });
+
   test('non-Owner cannot stage a payroll proposal', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     try {
