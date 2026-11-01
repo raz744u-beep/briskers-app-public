@@ -12,18 +12,33 @@ void main() {
   const business='synthetic-business';
   Future<void> seed() async {
     await db.customStatement(
-      '''INSERT INTO local_jobs(id,business_id,access_scope,title,status,sync_state)
-      VALUES('local-job-test',?,'full','Test job','open','pending')''',[business]);
+      '''INSERT INTO local_jobs(id,business_id,access_scope,title,status,sync_state,vehicle_id)
+      VALUES('local-job-test',?,'full','Test job','open','pending','local-vehicle-test')''',[business]);
     await db.customStatement(
       '''INSERT INTO local_documents
-      (id,business_id,job_id,kind,status,total,sync_state)
-      VALUES('local-invoice-test',?,'local-job-test','invoice','issued',100,'pending')''',[business]);
-    for(final type in const ['document_draft_create','invoice_payment_received']){
+      (id,business_id,job_id,customer_id,kind,status,total,sync_state)
+      VALUES('local-invoice-test',?,'local-job-test','local-customer-test','invoice','issued',100,'pending')''',[business]);
+    final records=<String, Map<String,dynamic>>{
+      'customer_create':{'operation_id':'synthetic-customer'},
+      'vehicle_create':{'idempotent_v1':true,'customer_id':'local-customer-test'},
+      'document_draft_create':{'operation_id':'synthetic-invoice','kind':'invoice'},
+      'invoice_payment_received':{
+        'operation_id':'synthetic-payment','invoice_id':'local-invoice-test',
+        'amount_cents':3000,'method_id':'synthetic-card',
+        'payment_date':'2026-10-19',
+      },
+    };
+    for(final entry in records.entries){
+      final entity= switch(entry.key){
+        'customer_create'=>'local-customer-test',
+        'vehicle_create'=>'local-vehicle-test',
+        _=>'local-invoice-test',
+      };
       await db.customStatement(
         '''INSERT INTO sync_outbox(business_id,entity_type,entity_id,
           operation,payload_json,state,attempt_count,created_at)
-          VALUES(?,?,'local-invoice-test','create',?,'pending',0,1793301845)''',
-        [business,type,jsonEncode({'operation_id':'synthetic-operation'})]);
+          VALUES(?,?,?,'create',?,'pending',0,1793301845)''',
+        [business,entry.key,entity,jsonEncode(entry.value)]);
     }
   }
   Future<void> assign({bool owner=true,String invoice='8101',String job='J-8101'}) =>
@@ -38,9 +53,9 @@ void main() {
     await seed();await assign();
     expect((await invoice())['document_number'],'8101');
     final rows=await db.customSelect('SELECT state,payload_json FROM sync_outbox').get();
-    expect(rows.length,2);
+    expect(rows.length,4);
     expect(rows.every((x)=>x.read<String>('state')=='conflict'),true);
-    expect(rows.every((x)=>jsonDecode(x.read<String>('payload_json'))['operation_id']=='synthetic-operation'),true);
+    expect(rows.any((x)=>jsonDecode(x.read<String>('payload_json'))['operation_id']=='synthetic-payment'),true);
   });
   test('non-Owner cannot change numbers',() async {
     await seed();await expectLater(assign(owner:false),throwsStateError);
