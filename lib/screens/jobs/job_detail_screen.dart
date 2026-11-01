@@ -3456,7 +3456,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       // The reviewed inventory must remain unchanged through confirmation.
       final graphDelete = LocalJobGraphDelete(localDatabase);
       final reviewed = await graphDelete.preview(
-        businessId: widget.businessId, jobId: widget.jobId);
+        businessId: widget.businessId, jobId: widget.jobId,
+        actorId: actorId);
       if (!mounted) return;
       final confirmed = await showOfflineJobPurgeConfirmation(
         context,
