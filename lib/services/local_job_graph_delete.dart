@@ -170,6 +170,9 @@ class LocalJobGraphDelete {
           'DELETE FROM $table WHERE business_id=? AND $field=?',
           [businessId, entry['id']]);
       }
+      // An Owner switch mid-transaction must roll back both data removals
+      // and the corresponding tombstones; never commit half a deletion.
+      _assertOwner(businessId, actorId);
     });
     LocalJobDeletionV3.notifyLocalPurge(db, businessId, jobId);
   }
