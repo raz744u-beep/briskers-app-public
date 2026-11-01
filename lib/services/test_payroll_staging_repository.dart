@@ -43,8 +43,12 @@ class TestPayrollStagingRepository {
     await _prepare();
     final rows = await _db.customSelect(
       'SELECT operation_id, payload_json, state FROM test_payroll_staging '
-      'WHERE business_id = ? ORDER BY operation_id',
-      variables: [Variable<String>(businessId)],
+      "WHERE business_id = ? AND json_extract(payload_json, '\$.employee_id') = ? "
+      'ORDER BY operation_id',
+      variables: [
+        Variable<String>(businessId),
+        Variable<String>(employeeId),
+      ],
     ).get();
     return rows.map((row) {
       final payload = jsonDecode(row.read<String>('payload_json'));
