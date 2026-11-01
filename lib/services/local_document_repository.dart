@@ -249,7 +249,8 @@ class LocalDocumentRepository {
 
     String displayStatus(QueryRow row) {
       if (row.read<String>('id').startsWith('local-invoice-') &&
-          row.read<String>('sync_state') == 'pending') {
+          row.read<String>('sync_state') == 'pending' &&
+          (row.readNullable<String>('document_number')?.trim().isEmpty ?? true)) {
         return 'Pending sync';
       }
       final raw =
