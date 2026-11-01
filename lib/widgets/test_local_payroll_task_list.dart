@@ -57,10 +57,23 @@ class _TestLocalPayrollTaskListState extends State<TestLocalPayrollTaskList> {
         if (!snapshot.hasData) {
           return const Text('Loading local TEST task credits...');
         }
-        return TestPayrollTaskSelector(
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                tooltip: 'Refresh local TEST task credits',
+                icon: const Icon(Icons.refresh),
+                onPressed: () => setState(_load),
+              ),
+            ),
+            TestPayrollTaskSelector(
           employeeId: widget.employeeId,
           isOwner: widget.isOwner,
           allocations: snapshot.data!,
+            ),
+          ],
         );
       },
     );
