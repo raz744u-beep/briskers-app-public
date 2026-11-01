@@ -24,7 +24,8 @@ Future<void> main() async {
   await BriskersConnectionModeController.instance.initialize();
   // An enrolled Owner always starts local-only. Synchronization is a
   // separate, explicitly enabled workflow and must not begin at startup.
-  if (await LocalOwnerSecurity.instance.isConfigured) {
+  if (isSyntheticTestBuild ||
+      await LocalOwnerSecurity.instance.isConfigured) {
     await BriskersConnectionModeController.instance
         .setMode(BriskersConnectionMode.offline);
   }
