@@ -123,6 +123,10 @@ void main() {
       expect(allocations, hasLength(1));
       expect(await repository.stagingIntegrityOk('test-shop'), isTrue);
       expect(await repository.stagingIntegrityOk('different-shop'), isTrue);
+      await db.customStatement(
+        "DELETE FROM test_payroll_staged_credits WHERE business_id = 'test-shop'",
+      );
+      expect(await repository.stagingIntegrityOk('test-shop'), isFalse);
     } finally {
       await db.close();
     }
