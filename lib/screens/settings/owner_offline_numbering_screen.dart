@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../core/connection_mode.dart';
 import '../../local/local_database_provider.dart';
 import '../../services/local_owner_invoice_numbering.dart';
+import '../../services/local_document_number_suggestions.dart';
 
 /// Owner-only local correction of existing invoice and linked Job numbers.
 /// No network calls, new documents, or payments.
@@ -28,6 +29,10 @@ class _OwnerOfflineNumberingScreenState extends State<OwnerOfflineNumberingScree
   String? _selectedInvoice;
   String? _selectedJob;
   String? _message;
+  String? _lastInvoice;
+  String? _lastJob;
+  String? _suggestedInvoice;
+  String? _suggestedJob;
   List<Map<String, dynamic>> _choices = const [];
 
   @override
@@ -57,8 +62,14 @@ class _OwnerOfflineNumberingScreenState extends State<OwnerOfflineNumberingScree
            ORDER BY d.created_at DESC LIMIT 30''',
         variables:[Variable<String>(widget.businessId)],
       ).get();
+      final suggestions = await LocalDocumentNumberSuggestions()
+          .suggest(widget.businessId);
       if (!mounted) return;
       setState(() {
+        _lastInvoice = suggestions.latestInvoice;
+        _lastJob = suggestions.latestJob;
+        _suggestedInvoice = suggestions.invoice;
+        _suggestedJob = suggestions.job;
         _choices = rows.map((r) => Map<String, dynamic>.from(r.data)).toList();
         _loading = false;
       });
@@ -132,6 +143,11 @@ class _OwnerOfflineNumberingScreenState extends State<OwnerOfflineNumberingScree
       else ...[
         if (!BriskersConnectionModeController.instance.forceOffline)
           const Text('Enable Force Offline before assigning numbers.'),
+        Text('Highest local invoice: ${_lastInvoice ?? 'Not available'} · '
+          'Suggested: ${_suggestedInvoice ?? 'Enter manually'}'),
+        Text('Highest local Job: ${_lastJob ?? 'Not available'} · '
+          'Suggested: ${_suggestedJob ?? 'Enter manually'}'),
+        const SizedBox(height: 12),
         DropdownButtonFormField<String>(
           key: ValueKey(_selectedInvoice),
           initialValue: _selectedInvoice,
@@ -147,8 +163,13 @@ class _OwnerOfflineNumberingScreenState extends State<OwnerOfflineNumberingScree
             setState(() {
               _selectedInvoice=id;
               _selectedJob=match?['job_id']?.toString();
-              _invoiceNumber.text=match?['document_number']?.toString() ?? '';
-              _jobNumber.text=match?['job_number']?.toString() ?? '';
+              final existingInvoice=match?['document_number']?.toString() ?? '';
+              final existingJob=match?['job_number']?.toString() ?? '';
+              _invoiceNumber.text=existingInvoice.trim().isNotEmpty
+                  ? existingInvoice : (_suggestedInvoice ?? '');
+              _jobNumber.text=existingJob.trim().isNotEmpty &&
+                  !existingJob.toUpperCase().startsWith('TEMP-')
+                  ? existingJob : (_suggestedJob ?? '');
             });
           },
         ),
