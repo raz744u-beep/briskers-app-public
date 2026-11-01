@@ -56,3 +56,25 @@ jobs:
       - name: Run diagnostic and regression tests
         working-directory: generated
         run: flutter test
+
+      - name: Run synthetic Owner Delete gate (disabled)
+        working-directory: generated
+        run: >-
+          flutter test test/owner_delete_v3_sandbox_gate_test.dart
+          --dart-define=BRISKERS_SYNTHETIC_BUILD=true
+          --dart-define=BRISKERS_SYNTHETIC_PUBLISHABLE_KEY=sb_publishable_ci_placeholder
+          --dart-define=BRISKERS_OWNER_DELETE_V3_FEED=false
+
+      - name: Run synthetic Owner Delete gate (test feed flag)
+        working-directory: generated
+        run: >-
+          flutter test test/owner_delete_v3_sandbox_gate_test.dart
+          --dart-define=BRISKERS_SYNTHETIC_BUILD=true
+          --dart-define=BRISKERS_SYNTHETIC_PUBLISHABLE_KEY=sb_publishable_ci_placeholder
+          --dart-define=BRISKERS_OWNER_DELETE_V3_FEED=true
+
+      - name: Verify production ignores deletion-feed flag
+        working-directory: generated
+        run: >-
+          flutter test test/owner_delete_v3_sandbox_gate_test.dart
+          --dart-define=BRISKERS_OWNER_DELETE_V3_FEED=true

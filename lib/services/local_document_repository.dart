@@ -2,12 +2,58 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
+import 'local_job_deletion_v3.dart';
+import 'job_sync_service.dart';
 
 class LocalDocumentRepository {
   LocalDocumentRepository({BriskersLocalDatabase? database})
       : _database = database ?? localDatabase;
 
   final BriskersLocalDatabase _database;
+
+  // Existing shop readers keep their legacy queries until a v3 sandbox
+  // identity scope is installed. When active, every read excludes deleted
+  // identities and stale authorization-scoped records.
+  Future<({int? generation, String docFilter, String rootJoin})>
+      _deletionReadScope(String businessId) async {
+    final present = await _database.customSelect(
+      "SELECT 1 FROM sqlite_master WHERE type='table' "
+      "AND name='local_job_deletion_v3_scope'",
+    ).get();
+    if (!JobSyncService.deletionFeedEnabled && present.isEmpty) {
+      return (generation: null, docFilter: '', rootJoin: '');
+    }
+    final generation =
+        await LocalJobDeletionV3.captureVisibilityGeneration(
+          _database, businessId,
+        );
+    // SQL contains only trusted static schema names, not user identifiers.
+    const docFilter = """AND NOT EXISTS (
+      SELECT 1 FROM local_job_deletion_v3_fences blocked
+      WHERE blocked.business_id = d.business_id
+        AND blocked.entity_kind = d.kind AND blocked.entity_id = d.id
+    )""";
+    const rootJoin = """AND NOT EXISTS (
+      SELECT 1 FROM local_job_deletion_v3_fences blocked
+      WHERE blocked.business_id = j.business_id
+        AND blocked.entity_kind = 'job' AND blocked.entity_id = j.id
+    )""";
+    return (
+      generation: generation,
+      docFilter: docFilter,
+      rootJoin: rootJoin,
+    );
+  }
+
+  Future<void> _checkDeletionRead(
+      String businessId, int? generation) async {
+    if (generation != null) {
+      await LocalJobDeletionV3.assertVisibilityGeneration(
+        _database, businessId, generation,
+      );
+    }
+  }
+
 
   Future<void> replaceFromServer(
     String businessId,
@@ -127,6 +173,7 @@ class LocalDocumentRepository {
     String businessId, {
     required String kind,
   }) async {
+    final visibility = await _deletionReadScope(businessId);
     final rows = await _database.customSelect(
       '''
       SELECT d.*, j.job_number, j.title AS job_title,
@@ -135,9 +182,11 @@ class LocalDocumentRepository {
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
+        ${visibility.rootJoin}
       LEFT JOIN local_customers c ON c.business_id=d.business_id
         AND c.id=d.customer_id
       WHERE d.business_id = ? AND d.kind = ?
+        ${visibility.docFilter}
       ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
       ''',
       variables: [
@@ -145,6 +194,8 @@ class LocalDocumentRepository {
         Variable<String>(kind),
       ],
     ).get();
+
+    await _checkDeletionRead(businessId, visibility.generation);
 
     String displayStatus(QueryRow row) {
       if (row.read<String>('id').startsWith('local-invoice-') &&
@@ -198,11 +249,13 @@ class LocalDocumentRepository {
     String businessId,
     String documentId,
   ) async {
+    final visibility = await _deletionReadScope(businessId);
     final rows = await _database.customSelect(
       '''
       SELECT created_at
-      FROM local_documents
-      WHERE business_id = ? AND id = ?
+      FROM local_documents d
+      WHERE d.business_id = ? AND d.id = ?
+        ${visibility.docFilter}
       LIMIT 1
       ''',
       variables: [
@@ -210,6 +263,7 @@ class LocalDocumentRepository {
         Variable<String>(documentId),
       ],
     ).get();
+    await _checkDeletionRead(businessId, visibility.generation);
     if (rows.isEmpty) return null;
     return _isoFromDb(rows.first.data['created_at']);
   }
@@ -218,13 +272,16 @@ class LocalDocumentRepository {
     String businessId,
     String jobId,
   ) async {
+    final visibility = await _deletionReadScope(businessId);
     final rows = await _database.customSelect(
       '''
       SELECT d.*, j.job_number, j.customer_name, j.vehicle_label
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
+        ${visibility.rootJoin}
       WHERE d.business_id = ? AND d.job_id = ?
+        ${visibility.docFilter}
       ORDER BY d.document_date DESC NULLS LAST, d.created_at DESC, d.id
       ''',
       variables: [
@@ -232,6 +289,8 @@ class LocalDocumentRepository {
         Variable<String>(jobId),
       ],
     ).get();
+
+    await _checkDeletionRead(businessId, visibility.generation);
 
     String displayStatus(QueryRow row) {
       if (row.read<String>('id').startsWith('local-invoice-') &&
@@ -280,36 +339,44 @@ class LocalDocumentRepository {
   }
 
   Future<int> openEstimateCount(String businessId) async {
+    final visibility = await _deletionReadScope(businessId);
     final row = await _database.customSelect(
       '''
       SELECT COUNT(*) AS count
-      FROM local_documents
-      WHERE business_id = ?
+      FROM local_documents d
+      WHERE d.business_id = ?
         AND kind = 'estimate'
         AND converted = 0
         AND lower(COALESCE(status, '')) NOT IN ('accepted', 'declined', 'expired', 'void')
+        ${visibility.docFilter}
       ''',
       variables: [Variable<String>(businessId)],
     ).getSingle();
+    await _checkDeletionRead(businessId, visibility.generation);
     return row.read<int>('count');
   }
 
-  Stream<int> watchOpenEstimateCount(String businessId) {
-    return _database
+  Stream<int> watchOpenEstimateCount(String businessId) async* {
+    final visibility = await _deletionReadScope(businessId);
+    final changes = _database
         .customSelect(
           '''
           SELECT COUNT(*) AS count
-          FROM local_documents
-          WHERE business_id = ?
+          FROM local_documents d
+          WHERE d.business_id = ?
             AND kind = 'estimate'
             AND converted = 0
             AND lower(COALESCE(status, '')) NOT IN ('accepted', 'declined', 'expired', 'void')
+            ${visibility.docFilter}
           ''',
           variables: [Variable<String>(businessId)],
           readsFrom: {_database.localDocuments},
         )
-        .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .watchSingle();
+    await for (final row in changes) {
+      await _checkDeletionRead(businessId, visibility.generation);
+      yield row.read<int>('count');
+    }
   }
 
   /// Read-only offline Home attention from the already-synced invoice index.
@@ -318,11 +385,13 @@ class LocalDocumentRepository {
     String businessId, {
     int limit = 25,
   }) async {
-    const where = '''
+    final visibility = await _deletionReadScope(businessId);
+    final where = '''
       d.business_id = ? AND d.kind = 'invoice'
       AND d.closed_at IS NULL
       AND lower(replace(coalesce(d.display_status_code, ''), ' ', '_'))
           IN ('pending_close', 'pendingclose')
+      ${visibility.docFilter}
     ''';
     final countRow = await _database.customSelect(
       'SELECT COUNT(*) AS count FROM local_documents d WHERE $where',
@@ -337,6 +406,7 @@ class LocalDocumentRepository {
       FROM local_documents d
       LEFT JOIN local_jobs j ON j.business_id = d.business_id
         AND j.id = d.job_id
+        ${visibility.rootJoin}
       LEFT JOIN local_customers c ON c.business_id = d.business_id
         AND c.id = d.customer_id
       WHERE $where
@@ -345,6 +415,7 @@ class LocalDocumentRepository {
       ''',
       variables: [Variable<String>(businessId),Variable<int>(limit)],
     ).get();
+    await _checkDeletionRead(businessId, visibility.generation);
     return {
       'count': countRow.read<int>('count'),
       'items': [
@@ -362,36 +433,44 @@ class LocalDocumentRepository {
   }
 
   Future<int> openInvoiceCount(String businessId) async {
+    final visibility = await _deletionReadScope(businessId);
     final row = await _database.customSelect(
       '''
       SELECT COUNT(*) AS count
-      FROM local_documents
-      WHERE business_id = ?
+      FROM local_documents d
+      WHERE d.business_id = ?
         AND kind = 'invoice'
         AND closed_at IS NULL
         AND lower(COALESCE(status, '')) <> 'void'
+        ${visibility.docFilter}
       ''',
       variables: [Variable<String>(businessId)],
     ).getSingle();
+    await _checkDeletionRead(businessId, visibility.generation);
     return row.read<int>('count');
   }
 
-  Stream<int> watchOpenInvoiceCount(String businessId) {
-    return _database
+  Stream<int> watchOpenInvoiceCount(String businessId) async* {
+    final visibility = await _deletionReadScope(businessId);
+    final changes = _database
         .customSelect(
           '''
           SELECT COUNT(*) AS count
-          FROM local_documents
-          WHERE business_id = ?
+          FROM local_documents d
+          WHERE d.business_id = ?
             AND kind = 'invoice'
             AND closed_at IS NULL
             AND lower(COALESCE(status, '')) <> 'void'
+            ${visibility.docFilter}
           ''',
           variables: [Variable<String>(businessId)],
           readsFrom: {_database.localDocuments},
         )
-        .watchSingle()
-        .map((row) => row.read<int>('count'));
+        .watchSingle();
+    await for (final row in changes) {
+      await _checkDeletionRead(businessId, visibility.generation);
+      yield row.read<int>('count');
+    }
   }
 
   Future<List<Map<String, dynamic>>> search(
@@ -399,6 +478,7 @@ class LocalDocumentRepository {
     String query, {
     int limit = 30,
   }) async {
+    final visibility = await _deletionReadScope(businessId);
     final value = query.trim().toLowerCase();
     if (value.isEmpty) return const [];
     final numeric = RegExp(r'^[0-9]+$').hasMatch(value);
@@ -409,7 +489,9 @@ class LocalDocumentRepository {
       FROM local_documents d
       LEFT JOIN local_jobs j
         ON j.business_id = d.business_id AND j.id = d.job_id
+        ${visibility.rootJoin}
       WHERE d.business_id = ?
+        ${visibility.docFilter}
         AND (
           (
             ? = 1 AND (
@@ -435,7 +517,9 @@ class LocalDocumentRepository {
         Variable<String>(value),
         Variable<String>('I-$value'),
         Variable<String>('MB-$value'),
-        Variable<int>(numeric ? 0 : 1),
+        // The nonnumeric LIKE branch uses '? = 0'. The old inverse flag
+        // accidentally hid alphanumeric estimate numbers from search.
+        Variable<int>(numeric ? 1 : 0),
         Variable<String>(like),
         Variable<String>(like),
         Variable<String>(like),
@@ -443,6 +527,7 @@ class LocalDocumentRepository {
       ],
     ).get();
 
+    await _checkDeletionRead(businessId, visibility.generation);
     return rows.map((row) => <String, dynamic>{
       'id': row.read<String>('id'),
       'job_id': row.readNullable<String>('job_id'),

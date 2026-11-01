@@ -28,9 +28,12 @@ import '../services/local_invoice_status_styles_cache.dart';
 import '../services/offline_work_findings_service.dart';
 import 'kiosk/kiosk_checkin_screen.dart';
 import 'shell_screen.dart';
+import 'local_owner_unlock_screen.dart';
+import '../services/local_owner_security.dart';
 
 class BusinessGate extends StatefulWidget {
-  const BusinessGate({super.key});
+  const BusinessGate({super.key, this.localOwnerIdentity});
+  final Map<String, dynamic>? localOwnerIdentity;
 
   @override
   State<BusinessGate> createState() => _BusinessGateState();
@@ -74,6 +77,7 @@ class _BusinessGateState extends State<BusinessGate> {
 
   List<Map<String, dynamic>>? _businesses;
   String? _error;
+  bool _deferredLocalEnrollment = false;
 
   @override
   void initState() {
@@ -81,11 +85,26 @@ class _BusinessGateState extends State<BusinessGate> {
     BriskersConnectionModeController.instance.addListener(
       _connectionModeChanged,
     );
-    _load();
+    if (widget.localOwnerIdentity != null) {
+      final identity = widget.localOwnerIdentity!;
+      if (LocalOwnerSecurity.instance.isUnlocked &&
+          identity['role_code'] == 'owner' &&
+          identity['business_id'] is String) {
+        _businesses = [identity];
+      } else {
+        _businesses = const [];
+        _error = 'Local Owner unlock is required.';
+      }
+    } else {
+      _load();
+    }
   }
 
   void _connectionModeChanged() {
-    if (BriskersConnectionModeController.instance.forceOffline) return;
+    if (widget.localOwnerIdentity != null ||
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     final businesses = _businesses;
     if (businesses == null || businesses.isEmpty) return;
     final business = businesses.first;
@@ -173,7 +192,8 @@ class _BusinessGateState extends State<BusinessGate> {
             '${cached['business_id'] ?? cached['id'] ?? ''}';
         final roleCode =
             '${cached['role_code'] ?? cached['role'] ?? ''}';
-        if (businessId.isNotEmpty) {
+        if (businessId.isNotEmpty &&
+            !BriskersConnectionModeController.instance.forceOffline) {
           unawaited(
             _refreshLocalData(
               businessId,
@@ -184,6 +204,20 @@ class _BusinessGateState extends State<BusinessGate> {
       }
     } catch (_) {
       cached = null;
+    }
+
+    // Offline navigation must never issue a Supabase business lookup.
+    // Retain the last verified business context; do not manufacture Owner
+    // privileges or clear existing local records when connectivity is absent.
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (cached == null && mounted) {
+        setState(() {
+          _businesses = const [];
+          _error = 'No locally cached business is available on this device. '
+              'Offline access requires a previously verified local profile.';
+        });
+      }
+      return;
     }
 
     try {
@@ -402,6 +436,9 @@ class _BusinessGateState extends State<BusinessGate> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_businesses!.isEmpty) {
+      if (widget.localOwnerIdentity != null) {
+        return Scaffold(body: Center(child: Text(_error ?? 'Local Owner unlock required.')));
+      }
       return Scaffold(
         appBar: AppBar(title: const Text('Briskers Setup')),
         body: Padding(
@@ -413,14 +450,22 @@ class _BusinessGateState extends State<BusinessGate> {
               const SizedBox(height: 16),
               Text('Account ready', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 8),
-              const Text(
-                'This login is not linked to the Briskers development business yet. Return to ChatGPT and the account can be attached as Owner.',
+              Text(
+                _error != null && _error!.toLowerCase().contains('permission denied')
+                    ? 'You are signed in, but the TEST database has not authorized business lookup. This is not a password error. The sandbox administrator must correct its access permissions.'
+                    : 'You are signed in, but this test account is not yet linked to a Briskers business. The sandbox administrator must assign your business membership.',
               ),
               if (_error != null) ...[
                 const SizedBox(height: 16),
                 Text(_error!),
               ],
               const Spacer(),
+              OutlinedButton.icon(
+                onPressed: _load,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try loading business again'),
+              ),
+              const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: () => supabase.auth.signOut(),
                 icon: const Icon(Icons.logout),
@@ -439,6 +484,38 @@ class _BusinessGateState extends State<BusinessGate> {
         '${business['business_name'] ?? business['name'] ?? 'Briskers'}';
     final roleCode =
         '${business['role_code'] ?? business['role'] ?? ''}';
+
+    // One-time enrollment is offered only to a previously verified Owner.
+    // Never turn an unverified cache or fresh installation into Owner access.
+    if (roleCode == 'owner' && widget.localOwnerIdentity == null &&
+        !_deferredLocalEnrollment) {
+      return FutureBuilder<bool>(
+        future: LocalOwnerSecurity.instance.isConfigured,
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          }
+          if (snapshot.data == false) {
+            return LocalOwnerSetupScreen(
+              onCompleted: () {
+                if (!mounted) return;
+                Navigator.of(context).pushReplacement(MaterialPageRoute<void>(
+                  builder: (_) => BusinessGate(
+                    localOwnerIdentity: LocalOwnerSecurity.instance.unlockedIdentity),
+                ));
+              },
+              onSkip: () {
+                if (mounted) setState(() => _deferredLocalEnrollment = true);
+              },
+            );
+          }
+          return ShellScreen(
+            businessId: businessId, businessName: businessName,
+            roleCode: roleCode,
+          );
+        },
+      );
+    }
 
     if (roleCode == 'kiosk') {
       return KioskCheckInScreen(
