@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
 import '../../widgets/test_employee_payroll_staging_panel.dart';
+import '../../widgets/test_payroll_task_selector.dart';
 
 class EmployeeEditScreen extends StatefulWidget {
   const EmployeeEditScreen({
@@ -715,9 +716,23 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                       children: [
                         Padding(
                           padding: const EdgeInsets.all(12),
-                          child: TestEmployeePayrollStagingPanel(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Completed task credits are not yet connected '
+                                'to the local task database.',
+                              ),
+                              TestPayrollTaskSelector(
+                                employeeId: widget.employeeId!,
+                                allocations: const [],
+                                isOwner: widget.isOwner,
+                              ),
+                              TestEmployeePayrollStagingPanel(
                             businessId: widget.businessId,
-                            employeeId: widget.employeeId!,
+                                employeeId: widget.employeeId!,
+                              ),
+                            ],
                           ),
                         ),
                       ],
