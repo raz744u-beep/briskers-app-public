@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:drift/drift.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
@@ -76,6 +77,30 @@ class TestPayrollAtomicCommit {
       final net = item.read<int>('net_cents');
       if (gross < 0 || repayment < 0 || net != gross - repayment) {
         throw StateError('Invalid payment totals');
+      }
+      // Confirm that the reserved credit set exactly matches the immutable
+      // proposal, not merely the same count or gross amount.
+      final decoded = jsonDecode(payload);
+      if (decoded is! Map<String, dynamic> ||
+          decoded['allocation_ids'] is! List) {
+        throw StateError('Invalid staged allocation payload');
+      }
+      final declared = decoded['allocation_ids'] as List;
+      if (declared.isEmpty ||
+          declared.any((id) => id is! String || id.trim().isEmpty) ||
+          declared.toSet().length != declared.length) {
+        throw StateError('Invalid staged credit identifiers');
+      }
+      final reservedIds = await _db.customSelect(
+        'SELECT allocation_id FROM test_payroll_staged_credits '
+        'WHERE business_id = ? AND operation_id = ?',
+        variables: [Variable<String>(businessId), Variable<String>(operationId)],
+      ).get();
+      final reserved = reservedIds
+          .map((row) => row.read<String>('allocation_id')).toSet();
+      if (reserved.length != declared.length ||
+          !declared.every((id) => reserved.contains(id))) {
+        throw StateError('Staged credits differ from proposal');
       }
       final credits = await _db.customSelect('''
         SELECT c.allocation_id, c.hours_hundredths, c.rate_cents
