@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import '../core/supabase_config.dart';
+import 'local_owner_security.dart';
 import '../local/briskers_local_database.dart';
 import '../local/local_database_provider.dart';
 import 'local_job_deletion_v3.dart';
@@ -11,7 +12,15 @@ import 'owner_job_deletion_v3_contract.dart';
 class LocalPurgeRegistrationGateway {
   const LocalPurgeRegistrationGateway();
   void assertActor(String actor) {
-    if (supabase.auth.currentUser?.id != actor) throw StateError('Account access changed.');
+    if (LocalOwnerSecurity.instance.isUnlocked) {
+      if (LocalOwnerSecurity.instance.unlockedActorId != actor) {
+        throw StateError('Local Owner access changed.');
+      }
+      return;
+    }
+    if (supabase.auth.currentUser?.id != actor) {
+      throw StateError('Owner access changed.');
+    }
   }
   Future<Map<String, dynamic>> register(String business, String job,
       String operation, Map<String, dynamic> confirmation) async =>
