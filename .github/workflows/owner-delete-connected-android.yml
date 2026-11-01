@@ -86,6 +86,7 @@ jobs:
       - name: Resolve dependencies and generate local database
         working-directory: generated
         run: |
+          python3 ../tools/configure_android_biometrics.py
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
 
