@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
+import '../core/supabase_config.dart';
 import 'local_job_deletion_v3.dart';
 import 'local_owner_security.dart';
 
@@ -103,6 +104,21 @@ class LocalJobGraphDelete {
       catch (_) { throw StateError('Pending changes need local reconciliation.'); }
       if (ids.contains(data['entity_id']) ||
           LocalJobDeletionV3.referencesAny(payload, ids)) {
+        // Only tagged, isolated synthetic payments are eligible for this test.
+        // Production financial entries continue to require reviewed handling.
+        if (isSyntheticTestBuild &&
+            data['entity_type'] == 'invoice_payment_received' &&
+            data['state'] == 'pending' && data['attempt_count'] == 0 &&
+            data['last_attempt_at'] == null &&
+            payload is Map && payload['synthetic_test_only'] == true &&
+            ids.contains(payload['invoice_id']) &&
+            payload['operation_id'] is String) {
+          found.add({'kind': 'payment', 'table': 'sync_outbox',
+            'id': payload['operation_id'],
+            'outbox_id': data['id'],
+            'label': 'FAKE payment • ${((payload['amount_cents'] as num) / 100).toStringAsFixed(2)} • ${payload['method_name']}'});
+          continue;
+        }
         throw StateError('This Job has pending local edits or payments. '
           'Resolve those linked changes before deletion.');
       }
@@ -117,6 +133,14 @@ class LocalJobGraphDelete {
       catch (_) { throw StateError('Financial cache needs review before deletion.'); }
       if (ids.any((id) => data['cache_key'].toString().contains(id)) ||
           LocalJobDeletionV3.referencesAny(payload, ids)) {
+        if (isSyntheticTestBuild && payload is Map &&
+            payload['synthetic_test_only'] == true &&
+            payload['job_id'] == job &&
+            data['cache_key'] == 'synthetic_payment_audit:$job') {
+          found.add({'kind': 'payment_edit_audit', 'table': 'local_financial_cache',
+            'id': data['cache_key'], 'label': 'FAKE payment edit audit'});
+          continue;
+        }
         throw StateError('Linked financial records need review before deletion.');
       }
     }
@@ -165,10 +189,20 @@ class LocalJobGraphDelete {
       for (final entry in current.reversed) {
         final kind = entry['kind'] as String;
         final table = entry['table'] as String;
-        final field = _owned[kind]?.$2 ?? 'id';
-        await db.customStatement(
-          'DELETE FROM $table WHERE business_id=? AND $field=?',
-          [businessId, entry['id']]);
+        if (kind == 'payment') {
+          await db.customStatement('DELETE FROM sync_outbox '
+            'WHERE business_id=? AND id=? AND state=? AND attempt_count=0',
+            [businessId, entry['outbox_id'], 'pending']);
+        } else if (kind == 'payment_edit_audit') {
+          await db.customStatement('DELETE FROM local_financial_cache '
+            'WHERE business_id=? AND cache_key=?',
+            [businessId, entry['id']]);
+        } else {
+          final field = _owned[kind]?.$2 ?? 'id';
+          await db.customStatement(
+            'DELETE FROM $table WHERE business_id=? AND $field=?',
+            [businessId, entry['id']]);
+        }
       }
       // An Owner switch mid-transaction must roll back both data removals
       // and the corresponding tombstones; never commit half a deletion.
