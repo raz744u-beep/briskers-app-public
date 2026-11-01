@@ -3473,7 +3473,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
       }
       await graphDelete.confirm(
         businessId: widget.businessId, jobId: widget.jobId,
-        reviewed: reviewed);
+        actorId: actorId, reviewed: reviewed);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Job deleted locally. Sync deletion is pending.'),
