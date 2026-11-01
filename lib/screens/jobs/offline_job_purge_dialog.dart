@@ -29,10 +29,28 @@ String offlinePurgeItemLabel(Map<String, dynamic> item) {
   final kind = item['kind'];
   final label = item['label']?.toString() ?? 'Linked record';
   if (kind == 'payment' || kind == 'transaction') {
+    // Some local graph previews already supply a human-readable label
+    // containing amount and payment method. Do not append invented
+    // "unavailable" values or duplicate those details.
     final cents = item['amount_cents'];
-    final amount = cents is num ? (cents / 100).toStringAsFixed(2) : item['amount']?.toString() ?? 'Amount unavailable';
-    final method = item['method_name'] ?? item['method_label'] ?? item['account_name'] ?? 'Method details unavailable';
-    return '$label · ${item['currency'] ?? ''} $amount · $method';
+    final rawAmount = item['amount'];
+    final amount = cents is num
+        ? (cents / 100).toStringAsFixed(2)
+        : rawAmount is num ? rawAmount.toStringAsFixed(2) : null;
+    final rawMethod = item['method_name'] ??
+        item['method_label'] ?? item['account_name'];
+    final method = rawMethod?.toString().trim();
+    if (amount == null && (method == null || method.isEmpty)) {
+      return label;
+    }
+    final currency = item['currency']?.toString().trim();
+    final pieces = <String>[
+      label,
+      if (amount != null)
+        '${currency == null || currency.isEmpty ? '' : '$currency '}$amount',
+      if (method != null && method.isNotEmpty) method,
+    ];
+    return pieces.join(' · ');
   }
   if (kind == 'local_documents') {
     final type = item['document_kind'] == 'estimate' ? 'Estimate' : item['document_kind'] == 'invoice' ? 'Invoice' : 'Document';
