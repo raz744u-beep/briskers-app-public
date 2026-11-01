@@ -7,6 +7,24 @@ import 'package:briskers_app/services/test_payroll_staging_repository.dart';
 import 'package:briskers_app/services/test_payroll_atomic_commit.dart';
 
 void main() {
+  test('non-owner cannot settle synthetic payroll or create ledger', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    try {
+      final settlement = TestPayrollAtomicCommit(database: db);
+      await expectLater(settlement.finalizeSynthetic(
+        businessId: 'sandbox', operationId: 'op', owner: false,
+        syntheticTestMode: true,
+      ), throwsStateError);
+      final rows = await db.customSelect(
+        "SELECT name FROM sqlite_master "
+        "WHERE name = 'test_payroll_paid_operations'",
+      ).get();
+      expect(rows, isEmpty);
+    } finally {
+      await db.close();
+    }
+  });
+
   test('synthetic settlement rejects ordinary app invocation', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     try {
