@@ -5,14 +5,27 @@ import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
 import 'local_job_deletion_v3.dart';
+import 'local_owner_security.dart';
 
 /// Device-authoritative deletion of a locally present Job. The sync history
 /// is not an eligibility requirement. This first adapter supports the local
 /// relational graph; ambiguous financial/outbox references are rejected rather
 /// than silently orphaned. No network calls are made.
 class LocalJobGraphDelete {
-  LocalJobGraphDelete(this.db);
+  LocalJobGraphDelete(this.db, {
+    Map<String, dynamic>? Function()? ownerIdentityProvider,
+  }) : _ownerIdentityProvider = ownerIdentityProvider ??
+      (() => LocalOwnerSecurity.instance.unlockedIdentity);
   final BriskersLocalDatabase db;
+  final Map<String, dynamic>? Function() _ownerIdentityProvider;
+
+  void _assertOwner(String business, String actorId) {
+    final owner = _ownerIdentityProvider();
+    if (owner == null || owner['role_code'] != 'owner' ||
+        owner['business_id'] != business || owner['actor_id'] != actorId) {
+      throw StateError('Unlock the Owner account for this business first.');
+    }
+  }
 
   static const _owned = <String, (String, String, String)>{
     'job': ('local_jobs', 'id', 'id'),
@@ -112,15 +125,19 @@ class LocalJobGraphDelete {
 
   Future<List<Map<String, dynamic>>> preview({
     required String businessId, required String jobId,
+    required String actorId,
   }) async {
+    _assertOwner(businessId, actorId);
     await LocalJobDeletionV3.ensureSchema(db);
     return db.transaction(() async => _inventory(businessId, jobId));
   }
 
   Future<void> confirm({
     required String businessId, required String jobId,
+    required String actorId,
     required List<Map<String, dynamic>> reviewed,
   }) async {
+    _assertOwner(businessId, actorId);
     await LocalJobDeletionV3.ensureSchema(db);
     final bytes = List<int>.generate(16, (_) => Random.secure().nextInt(256));
     bytes[6] = (bytes[6] & 15) | 64;
@@ -128,6 +145,7 @@ class LocalJobGraphDelete {
     final h = bytes.map((n) => n.toRadixString(16).padLeft(2, '0')).join();
     final operation = '${h.substring(0,8)}-${h.substring(8,12)}-${h.substring(12,16)}-${h.substring(16,20)}-${h.substring(20)}';
     await db.transaction(() async {
+      _assertOwner(businessId, actorId);
       final current = await _inventory(businessId, jobId);
       // Only exact identities and types are authoritative for a reviewed graph.
       String fingerprint(List<Map<String, dynamic>> rows) =>
@@ -135,6 +153,7 @@ class LocalJobGraphDelete {
       if (fingerprint(current) != fingerprint(reviewed)) {
         throw StateError('Linked records changed. Review Delete Job again.');
       }
+      _assertOwner(businessId, actorId);
       // Permanent local tombstones are committed in the SAME transaction as
       // deletion. Sync can propagate them later, without server approval.
       for (final entry in current) {
