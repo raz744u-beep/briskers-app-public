@@ -83,12 +83,18 @@ class TestPayrollStagingRepository {
       final operationId = row.read<String>('operation_id');
       final payload = jsonDecode(row.read<String>('payload_json'));
       if (payload is! Map<String, dynamic> ||
-          payload['allocation_ids'] is! List) return false;
+          payload['allocation_ids'] is! List) {
+        return false;
+      }
       final ids = payload['allocation_ids'] as List;
-      if (ids.isEmpty) return false;
+      if (ids.isEmpty) {
+        return false;
+      }
       for (final value in ids) {
         if (value is! String || value.trim().isEmpty ||
-            expected.containsKey(value)) return false;
+            expected.containsKey(value)) {
+          return false;
+        }
         expected[value] = operationId;
       }
     }
@@ -97,10 +103,14 @@ class TestPayrollStagingRepository {
       'WHERE business_id = ?',
       variables: [Variable<String>(businessId)],
     ).get();
-    if (reserved.length != expected.length) return false;
+    if (reserved.length != expected.length) {
+      return false;
+    }
     for (final row in reserved) {
       if (expected[row.read<String>('allocation_id')] !=
-          row.read<String>('operation_id')) return false;
+          row.read<String>('operation_id')) {
+        return false;
+      }
     }
     return true;
   }
