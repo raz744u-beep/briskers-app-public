@@ -37,9 +37,20 @@ class OwnerLocalJobPurgeService {
   final LocalPurgeRegistrationGateway _gateway;
   static final _flights = Expando<Map<String, Future<void>>>('local_job_cancellation_registration');
 
+  void _assertLocalOwnerBusiness(String business, String actorId) {
+    final owner = LocalOwnerSecurity.instance.unlockedIdentity;
+    if (owner == null ||
+        owner['actor_id'] != actorId ||
+        owner['business_id'] != business ||
+        owner['role_code'] != 'owner') {
+      throw StateError('Unlock the Owner account for this business first.');
+    }
+  }
+
   Future<OfflineJobPurgePreview?> eligiblePreview(String business, String job,
       {required String actorId, required bool isOwner}) async {
     if (!isOwner) throw StateError('Only the Owner can delete a Job.');
+    _assertLocalOwnerBusiness(business, actorId);
     _gateway.assertActor(actorId);
     try {
       return await OfflineJobPurge.preview(_db, businessId: business,
@@ -54,6 +65,7 @@ class OwnerLocalJobPurgeService {
   Future<LocalDeletionCleanupResult> confirm(OfflineJobPurgePreview preview,
       {required String actorId, required bool isOwner, required bool online}) async {
     if (!isOwner) throw StateError('Only the Owner can delete a Job.');
+    _assertLocalOwnerBusiness(preview.businessId, actorId);
     _gateway.assertActor(actorId);
     final result = await OfflineJobPurge.confirm(_db, preview,
       operationId: _operationId(), actorId: actorId, isOwner: isOwner);
