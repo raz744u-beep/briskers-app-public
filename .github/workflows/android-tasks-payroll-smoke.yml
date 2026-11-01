@@ -38,7 +38,26 @@ jobs:
           cp pubspec.yaml generated/pubspec.yaml
           cp analysis_options.yaml generated/analysis_options.yaml
           # Remove development network permission; synthetic tests need no network.
-          sed -i '/uses-permission.*android.permission.INTERNET/d' generated/android/app/src/debug/AndroidManifest.xml generated/android/app/src/profile/AndroidManifest.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          android = 'http://schemas.android.com/apk/res/android'
+          tools = 'http://schemas.android.com/tools'
+          ET.register_namespace('android', android)
+          ET.register_namespace('tools', tools)
+          for variant in ('main', 'debug', 'profile'):
+              path = Path(f'generated/android/app/src/{variant}/AndroidManifest.xml')
+              tree = ET.parse(path)
+              root = tree.getroot()
+              for node in list(root.findall('uses-permission')):
+                  if node.get(f'{{{android}}}name') == 'android.permission.INTERNET':
+                      root.remove(node)
+              ET.SubElement(root, 'uses-permission', {
+                  f'{{{android}}}name': 'android.permission.INTERNET',
+                  f'{{{tools}}}node': 'remove',
+              })
+              tree.write(path, encoding='unicode')
+          PY
           sed -i 's/android:label="tasks_payroll_test"/android:label="Briskers Tasks Payroll TEST"/' generated/android/app/src/main/AndroidManifest.xml
       - name: Resolve and generate database sources
         working-directory: generated
