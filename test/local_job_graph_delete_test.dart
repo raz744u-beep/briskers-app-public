@@ -8,6 +8,7 @@ const business = '10000000-0000-4000-8000-000000000001';
 const job = '10000000-0000-4000-8000-000000000002';
 const invoice = '10000000-0000-4000-8000-000000000003';
 const otherJob = '10000000-0000-4000-8000-000000000004';
+const actor = '10000000-0000-4000-8000-000000000005';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -16,7 +17,10 @@ void main() {
 
   setUp(() async {
     db = BriskersLocalDatabase(NativeDatabase.memory());
-    deletion = LocalJobGraphDelete(db);
+    deletion = LocalJobGraphDelete(db,
+      ownerIdentityProvider: () => {
+        'actor_id': actor, 'business_id': business, 'role_code': 'owner',
+      });
     await db.customStatement(
       "INSERT INTO local_jobs (id,business_id,access_scope,title,status,sync_state) "
       "VALUES (?,?,'full','Synced repair','open','synced')",
@@ -40,9 +44,9 @@ void main() {
       .read<int>('n');
 
   test('previously synced job deletes offline and records durable markers', () async {
-    final review = await deletion.preview(businessId: business, jobId: job);
+    final review = await deletion.preview(businessId: business, jobId: job, actorId: actor);
     expect(review.map((e) => e['kind']), containsAll(['job', 'invoice']));
-    await deletion.confirm(businessId: business, jobId: job, reviewed: review);
+    await deletion.confirm(businessId: business, jobId: job, actorId: actor, reviewed: review);
     expect(await count('local_jobs'), 1);
     expect(await count('local_documents'), 0);
     expect(await LocalJobDeletionV3.blockedJobIds(db, business), contains(job));
@@ -51,17 +55,29 @@ void main() {
   });
 
   test('reviewed inventory change rolls back without deleting anything', () async {
-    final review = await deletion.preview(businessId: business, jobId: job);
+    final review = await deletion.preview(businessId: business, jobId: job, actorId: actor);
     await db.customStatement(
       "INSERT INTO local_job_visits (id,business_id,job_id,visit_number,sync_state) "
       "VALUES ('visit-new',?,?,1,'synced')",
       [business, job],
     );
     await expectLater(deletion.confirm(
-      businessId: business, jobId: job, reviewed: review), throwsStateError);
+      businessId: business, jobId: job, actorId: actor, reviewed: review), throwsStateError);
     expect(await count('local_jobs'), 2);
     expect(await count('local_documents'), 1);
     expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  test('different business Owner cannot preview a synced job', () async {
+    final wrongOwner = LocalJobGraphDelete(db,
+      ownerIdentityProvider: () => {
+        'actor_id': actor,
+        'business_id': otherJob,
+        'role_code': 'owner',
+      });
+    await expectLater(wrongOwner.preview(
+      businessId: business, jobId: job, actorId: actor), throwsStateError);
+    expect(await count('local_jobs'), 2);
   });
 
   test('rejects linked queued edits without erasing any rows', () async {
@@ -71,7 +87,7 @@ void main() {
       [business, job, '{"job_id":"$job"}'],
     );
     await expectLater(
-      deletion.preview(businessId: business, jobId: job),
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
       throwsStateError,
     );
     expect(await count('local_jobs'), 2);
