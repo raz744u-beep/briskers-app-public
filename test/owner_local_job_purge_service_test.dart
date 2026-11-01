@@ -4,6 +4,7 @@ import 'package:briskers_app/services/local_job_deletion_v3.dart';
 import 'package:briskers_app/services/offline_job_purge.dart';
 import 'package:briskers_app/services/owner_local_job_purge_service.dart';
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -59,6 +60,26 @@ void main() {
     expect(preview,isNotNull);
     await OfflineJobPurge.confirm(db,preview!,operationId:operation,actorId:actor,isOwner:true);
   }
+  test('local Owner from a different business cannot preview deletion', () async {
+    final otherBusiness = OwnerLocalJobPurgeService(
+      database: db,
+      gateway: gateway,
+      ownerIdentityProvider: () => {
+        'actor_id': actor,
+        'business_id': '10000000-0000-4000-8000-000000000099',
+        'role_code': 'owner',
+      },
+    );
+    await expectLater(
+      otherBusiness.eligiblePreview(business, job, actorId: actor, isOwner: true),
+      throwsStateError,
+    );
+    expect((await db.customSelect(
+      'SELECT COUNT(*) AS count FROM local_jobs WHERE id=?',
+      variables: [Variable<String>(job)],
+    ).getSingle()).read<int>('count'), 1);
+  });
+
   test('verified matching registration acknowledges only minimal queued cancellation',() async {
     await prepare();
     await service.flushRegistrations(business,actorId:actor,isOwner:true);
