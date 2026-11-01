@@ -655,7 +655,8 @@ jobs:
               find "$PUB_CACHE" -type d -path "*/sqlite3-*/android*" -prune -exec rm -rf {} + 2>/dev/null || true
               find "$PUB_CACHE" -type f -name "libsqlite3*.so" -delete 2>/dev/null || true
               sleep 8
-              flutter pub get
+              python3 ../tools/configure_android_biometrics.py
+          flutter pub get
             fi
           done
 
