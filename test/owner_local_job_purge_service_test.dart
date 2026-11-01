@@ -60,6 +60,24 @@ void main() {
     expect(preview,isNotNull);
     await OfflineJobPurge.confirm(db,preview!,operationId:operation,actorId:actor,isOwner:true);
   }
+  test('Owner confirmation commits locally without calling registration gateway', () async {
+    // Any network dispatch is a regression: remote registration is reserved
+    // for a later, explicitly initiated synchronization process.
+    gateway.fail = true;
+    final review = await service.eligiblePreview(
+      business, job, actorId: actor, isOwner: true);
+    expect(review, isNotNull);
+    final outcome = await service.confirm(
+      review!, actorId: actor, isOwner: true);
+    expect(outcome.completed, isTrue);
+    expect(gateway.operations, isEmpty);
+    expect((await db.customSelect(
+      'SELECT COUNT(*) AS count FROM local_jobs WHERE id=?',
+      variables: const [Variable<String>(job)],
+    ).getSingle()).read<int>('count'), 0);
+    expect(await LocalJobDeletionV3.blockedJobIds(db, business), contains(job));
+  });
+
   test('local Owner from a different business cannot preview deletion', () async {
     final otherBusiness = OwnerLocalJobPurgeService(
       database: db,
