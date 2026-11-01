@@ -3440,9 +3440,6 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
         }
         final cleanup = await localService.confirm(
           localPreview, actorId: actorId, isOwner: _owner,
-          // Device-only first: do not require or attempt server registration
-          // to complete the Owner's local deletion.
-          online: false,
         );
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
