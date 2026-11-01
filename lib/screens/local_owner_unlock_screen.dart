@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/local_owner_security.dart';
+import '../core/connection_mode.dart';
 import 'business_gate.dart';
 
 class LocalOwnerUnlockScreen extends StatefulWidget {
@@ -30,6 +31,10 @@ class _LocalOwnerUnlockScreenState extends State<LocalOwnerUnlockScreen> {
             : 'Incorrect Owner password.');
         return;
       }
+      // Keep normal app operations local-only until sync is redesigned.
+      await BriskersConnectionModeController.instance
+          .setMode(BriskersConnectionMode.offline);
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(MaterialPageRoute<void>(
         builder: (_) => BusinessGate(localOwnerIdentity: security.unlockedIdentity),
       ));
@@ -105,6 +110,8 @@ class _LocalOwnerSetupScreenState extends State<LocalOwnerSetupScreen> {
       final security = LocalOwnerSecurity.instance;
       await security.enrollExistingOwner(_password.text);
       if (_enableBiometrics) await security.setBiometricsEnabled(true);
+      await BriskersConnectionModeController.instance
+          .setMode(BriskersConnectionMode.offline);
       if (mounted) widget.onCompleted();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
