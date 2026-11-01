@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/test_payroll_credit_repository.dart';
+import '../core/shop_payroll_preview.dart';
 import 'test_payroll_task_selector.dart';
 
 /// Reads only explicit TEST work credits; never production job planned hours.
@@ -19,7 +20,7 @@ class TestLocalPayrollTaskList extends StatefulWidget {
 }
 
 class _TestLocalPayrollTaskListState extends State<TestLocalPayrollTaskList> {
-  late Future<List<dynamic>> _credits;
+  late Future<List<ShopPayrollAllocation>> _credits;
 
   @override
   void initState() {
@@ -47,7 +48,7 @@ class _TestLocalPayrollTaskListState extends State<TestLocalPayrollTaskList> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder(
+    return FutureBuilder<List<ShopPayrollAllocation>>(
       future: _credits,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
@@ -59,7 +60,7 @@ class _TestLocalPayrollTaskListState extends State<TestLocalPayrollTaskList> {
         return TestPayrollTaskSelector(
           employeeId: widget.employeeId,
           isOwner: widget.isOwner,
-          allocations: snapshot.data!.cast(),
+          allocations: snapshot.data!,
         );
       },
     );
