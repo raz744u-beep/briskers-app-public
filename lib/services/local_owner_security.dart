@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../core/supabase_config.dart';
 
 /// Local Owner identity lives in Android Keystore / iOS Keychain-backed
 /// secure storage. Supabase is used ONLY to migrate an already verified Owner
@@ -46,8 +45,39 @@ class LocalOwnerSecurity {
     return base64Encode(result);
   }
 
-  /// An already signed-in, cached Owner account is required ONCE for migration.
-  /// Never allow installing a fresh app to self-assign Owner privileges.
+  /// Finds an Owner profile previously cached by this installation.
+  /// App-private preferences are not an enrollment credential by themselves:
+  /// one-time device PIN/biometric verification is also mandatory.
+  Future<Map<String, dynamic>?> cachedOwnerProfile() async {
+    final prefs = await SharedPreferences.getInstance();
+    final matches = <Map<String, dynamic>>[];
+    const prefix = 'briskers_business_context_';
+    for (final key in prefs.getKeys()) {
+      if (!key.startsWith(prefix)) continue;
+      final raw = prefs.getString(key);
+      if (raw == null) continue;
+      try {
+        final value = jsonDecode(raw);
+        final actorId = key.substring(prefix.length);
+        if (value is Map && value['role_code'] == 'owner' &&
+            value['business_id'] is String &&
+            (value['business_id'] as String).isNotEmpty &&
+            RegExp(r'^[a-fA-F0-9-]{36}$').hasMatch(actorId)) {
+          matches.add({
+            'actor_id': actorId,
+            'business_id': value['business_id'],
+            'business_name': value['business_name'] ?? 'Briskers',
+            'role_code': 'owner',
+          });
+        }
+      } catch (_) {
+        // Malformed context never authorizes Owner enrollment.
+      }
+    }
+    // Never guess which shop is authoritative on a multi-owner device.
+    return matches.length == 1 ? matches.single : null;
+  }
+
   Future<void> enrollExistingOwner(String password) async {
     if (await isConfigured) {
       throw StateError('An Owner password is already configured on this device.');
@@ -55,37 +85,27 @@ class LocalOwnerSecurity {
     if (password.length < 10) {
       throw StateError('Use an Owner password of at least 10 characters.');
     }
-    final user = supabase.auth.currentUser;
-    if (supabase.auth.currentSession == null || user == null) {
-      throw StateError('An existing verified Owner session is needed for one-time migration.');
+    final profile = await cachedOwnerProfile();
+    if (profile == null) {
+      throw StateError('No unique locally verified Owner profile is saved on this device.');
     }
-    final prefs = await SharedPreferences.getInstance();
-    final cached = prefs.getString('briskers_business_context_${user.id}');
-    if (cached == null) {
-      throw StateError('No verified Owner business was previously saved on this device.');
-    }
-    final decoded = jsonDecode(cached);
-    if (decoded is! Map || decoded['role_code'] != 'owner' ||
-        decoded['business_id'] is! String ||
-        (decoded['business_id'] as String).isEmpty) {
-      throw StateError('Existing local business context is not an Owner account.');
+    if (!await _auth.isDeviceSupported() ||
+        !await _auth.authenticate(
+          localizedReason: 'Verify this phone to enable Briskers Owner access',
+          options: const AuthenticationOptions(stickyAuth: true))) {
+      throw StateError('Device screen-lock verification is required.');
     }
     final salt = List<int>.generate(32, (_) => Random.secure().nextInt(256));
     final encodedSalt = base64Encode(salt);
     final digest = await compute(_hashPassword,
         {'password': password, 'salt': encodedSalt});
-    final identity = jsonEncode({
-      'actor_id': user.id,
-      'business_id': decoded['business_id'],
-      'business_name': decoded['business_name'] ?? 'Briskers',
-      'role_code': 'owner',
-    });
-    // Write credential before identity; an interrupted setup never
-    // exposes an unlocked Owner account.
+    final identity = jsonEncode(profile);
+    // Credential and identity reside in platform secure storage; no password
+    // or Owner profile is uploaded. Incomplete enrollment stays locked.
     await _store.write(key: _passwordKey,
         value: jsonEncode({'salt': encodedSalt, 'digest': digest}));
     await _store.write(key: _identityKey, value: identity);
-    _unlockedIdentity = Map<String, dynamic>.from(jsonDecode(identity) as Map);
+    _unlockedIdentity = Map<String, dynamic>.from(profile);
   }
 
   Future<bool> unlockWithPassword(String password) async {
