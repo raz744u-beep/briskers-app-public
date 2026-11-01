@@ -75,7 +75,8 @@ class _TestPayrollHomeState extends State<TestPayrollHome> {
         businessId: business, operationId: 'test-operation-1',
         owner: true, syntheticTestMode: true,
       );
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _message = committed
             ? 'Synthetic transaction recorded locally — NOT real payroll'
             : 'Same synthetic transaction already recorded';
