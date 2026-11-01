@@ -10,6 +10,7 @@ import '../../core/connection_mode.dart';
 import '../../core/supabase_config.dart';
 import '../../services/owner_job_deletion_v3_contract.dart';
 import '../../services/owner_local_job_purge_service.dart';
+import '../../services/local_owner_security.dart';
 import 'offline_job_purge_dialog.dart';
 import '../../core/briskers_i18n.dart';
 import '../../core/employee_role_style.dart';
@@ -3406,9 +3407,11 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     // Owner may remove a provably never-uploaded local Job without a server.
     // Synced or uncertain Jobs remain blocked until verified reconciliation.
     if (!_owner || _busy) return;
-    final actorId = supabase.auth.currentUser?.id;
+    final actorId = LocalOwnerSecurity.instance.unlockedActorId ??
+        supabase.auth.currentUser?.id;
     if (actorId == null) {
-      if (mounted) setState(() => _error = 'Sign in before reviewing Job deletion.');
+      if (mounted) setState(() => _error =
+          'Unlock your Owner account before reviewing Job deletion.');
       return;
     }
     final online = !BriskersConnectionModeController.instance.forceOffline;
@@ -3431,7 +3434,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           context, jobLabel: label, items: localPreview.items,
         );
         if (!confirmed || !mounted) return;
-        if (!_owner || supabase.auth.currentUser?.id != actorId) {
+        if (!_owner || (LocalOwnerSecurity.instance.unlockedActorId ??
+            supabase.auth.currentUser?.id) != actorId) {
           throw StateError('Your access changed. Reopen Delete Job to review.');
         }
         final cleanup = await localService.confirm(
