@@ -42,7 +42,7 @@ void main() {
         "WHERE business_id = 'sandbox' AND operation_id = 'op-a'",
       );
       await expectLater(settlement.finalizeSynthetic(
-        businessId: 'sandbox', operationId: 'op-a', owner: true,
+        businessId: 'sandbox', operationId: 'op-a', owner: true, syntheticTestMode: true,
       ), throwsStateError);
       final paid = await db.customSelect(
         'SELECT operation_id FROM test_payroll_paid_operations',
@@ -78,7 +78,7 @@ void main() {
         credits: [work], outstandingAdvanceCents: 3000,
       );
       await expectLater(settlement.finalizeSynthetic(
-        businessId: 'sandbox', operationId: 'op-1', owner: true),
+        businessId: 'sandbox', operationId: 'op-1', owner: true, syntheticTestMode: true),
         throwsStateError);
       await db.customStatement(
         'INSERT INTO test_payroll_advances '
@@ -86,9 +86,9 @@ void main() {
         ['sandbox', 'employee-1', 3000],
       );
       expect(await settlement.finalizeSynthetic(
-        businessId: 'sandbox', operationId: 'op-1', owner: true), isTrue);
+        businessId: 'sandbox', operationId: 'op-1', owner: true, syntheticTestMode: true), isTrue);
       expect(await settlement.finalizeSynthetic(
-        businessId: 'sandbox', operationId: 'op-1', owner: true), isFalse);
+        businessId: 'sandbox', operationId: 'op-1', owner: true, syntheticTestMode: true), isFalse);
       expect(await credits.completedUnpaid(
         businessId: 'sandbox', employeeId: 'employee-1'), isEmpty);
       final balance = await db.customSelect(
@@ -127,7 +127,7 @@ void main() {
         credits: [work], outstandingAdvanceCents: 1000,
       );
       await expectLater(settlement.finalizeSynthetic(
-        businessId: 'sandbox', operationId: 'op-2', owner: true),
+        businessId: 'sandbox', operationId: 'op-2', owner: true, syntheticTestMode: true),
         throwsStateError);
       expect(await credits.completedUnpaid(
         businessId: 'sandbox', employeeId: 'employee-1'), hasLength(1));
