@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/formatters.dart';
 import '../../services/briskers_api.dart';
+import '../../widgets/test_employee_payroll_staging_panel.dart';
 
 class EmployeeEditScreen extends StatefulWidget {
   const EmployeeEditScreen({
@@ -702,6 +703,25 @@ class _EmployeeEditScreenState extends State<EmployeeEditScreen> {
                         ),
                       ),
                     ],
+                  ],
+                  if (_editing && widget.isOwner) ...[
+                    const SizedBox(height: 16),
+                    ExpansionTile(
+                      initiallyExpanded: false,
+                      title: const Text('Payroll TEST — local staging'),
+                      subtitle: const Text(
+                        'Read-only proposals. Not paid or posted.',
+                      ),
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: TestEmployeePayrollStagingPanel(
+                            businessId: widget.businessId,
+                            employeeId: widget.employeeId!,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                   if (_error != null) ...[
                     const SizedBox(height: 8),
