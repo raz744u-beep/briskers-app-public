@@ -8,6 +8,7 @@ import 'core/connection_mode.dart';
 import 'core/supabase_config.dart';
 import 'local/local_database_provider.dart';
 import 'services/expenseiq_background_scheduler.dart';
+import 'services/local_owner_security.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,6 +22,12 @@ Future<void> main() async {
   await initializeLocalDatabase();
   await BriskersLanguageController.instance.initialize();
   await BriskersConnectionModeController.instance.initialize();
+  // An enrolled Owner always starts local-only. Synchronization is a
+  // separate, explicitly enabled workflow and must not begin at startup.
+  if (await LocalOwnerSecurity.instance.isConfigured) {
+    await BriskersConnectionModeController.instance
+        .setMode(BriskersConnectionMode.offline);
+  }
   await Supabase.initialize(
     url: supabaseUrl,
     publishableKey: supabasePublishableKey,
