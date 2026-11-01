@@ -102,7 +102,9 @@ class _BusinessGateState extends State<BusinessGate> {
 
   void _connectionModeChanged() {
     if (widget.localOwnerIdentity != null ||
-        BriskersConnectionModeController.instance.forceOffline) return;
+        BriskersConnectionModeController.instance.forceOffline) {
+      return;
+    }
     final businesses = _businesses;
     if (businesses == null || businesses.isEmpty) return;
     final business = businesses.first;
