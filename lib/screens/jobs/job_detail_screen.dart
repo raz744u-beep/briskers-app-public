@@ -3410,8 +3410,10 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     }
     final actorId = LocalOwnerSecurity.instance.unlockedActorId;
     if (actorId == null) {
-      if (mounted) setState(() => _error =
-          'Unlock your Owner account before reviewing Job deletion.');
+      if (mounted) {
+        setState(() => _error =
+            'Unlock your Owner account before reviewing Job deletion.');
+      }
       return;
     }
     setState(() { _busy = true; _error = null; });
