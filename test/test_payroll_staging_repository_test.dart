@@ -5,6 +5,33 @@ import 'package:briskers_app/core/shop_payroll_preview.dart';
 import 'package:briskers_app/services/test_payroll_staging_repository.dart';
 
 void main() {
+  test('non-Owner cannot stage a payroll proposal', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    try {
+      final repo = TestPayrollStagingRepository(database: db);
+      const credit = ShopPayrollAllocation(
+        id: 'restricted-credit', employeeId: 'mechanic',
+        hoursHundredths: 100, rateCentsPerHour: 4000,
+        completed: true, alreadyPaid: false,
+      );
+      await expectLater(repo.stage(
+        businessId: 'test-shop', owner: false,
+        proposal: ShopPayrollPaymentProposal(
+          operationId: 'restricted-op', employeeId: 'mechanic',
+          allocationIds: ['restricted-credit'], grossCents: 4000,
+          repaymentCents: 0, method: 'Cash',
+        ),
+        credits: [credit], outstandingAdvanceCents: 0,
+      ), throwsStateError);
+      final tables = await db.customSelect(
+        "SELECT name FROM sqlite_master WHERE name = 'test_payroll_staging'",
+      ).get();
+      expect(tables, isEmpty);
+    } finally {
+      await db.close();
+    }
+  });
+
   test('two-credit staging rolls back if one credit is reserved', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     try {
