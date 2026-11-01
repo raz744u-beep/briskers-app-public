@@ -7,6 +7,55 @@ import 'package:briskers_app/services/test_payroll_staging_repository.dart';
 import 'package:briskers_app/services/test_payroll_atomic_commit.dart';
 
 void main() {
+  test('changed reserved credit ID rejects settlement even at same gross', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    try {
+      final credits = TestPayrollCreditRepository(database: db);
+      final staging = TestPayrollStagingRepository(database: db);
+      final settlement = TestPayrollAtomicCommit(database: db);
+      for (final id in ['a', 'b']) {
+        await credits.seedSyntheticCredit(
+          businessId: 'sandbox',
+          credit: ShopPayrollAllocation(
+            id: id, employeeId: 'employee-1',
+            hoursHundredths: 100, rateCentsPerHour: 4000,
+            completed: true, alreadyPaid: false,
+          ),
+        );
+      }
+      const original = ShopPayrollAllocation(
+        id: 'a', employeeId: 'employee-1',
+        hoursHundredths: 100, rateCentsPerHour: 4000,
+        completed: true, alreadyPaid: false,
+      );
+      await staging.stage(
+        businessId: 'sandbox', owner: true,
+        proposal: ShopPayrollPaymentProposal(
+          operationId: 'op-a', employeeId: 'employee-1',
+          allocationIds: ['a'], grossCents: 4000,
+          repaymentCents: 0, method: 'Cash',
+        ),
+        credits: [original], outstandingAdvanceCents: 0,
+      );
+      await db.customStatement(
+        "UPDATE test_payroll_staged_credits SET allocation_id = 'b' "
+        "WHERE business_id = 'sandbox' AND operation_id = 'op-a'",
+      );
+      await expectLater(settlement.finalizeSynthetic(
+        businessId: 'sandbox', operationId: 'op-a', owner: true,
+      ), throwsStateError);
+      final paid = await db.customSelect(
+        'SELECT operation_id FROM test_payroll_paid_operations',
+      ).get();
+      expect(paid, isEmpty);
+      expect(await credits.completedUnpaid(
+        businessId: 'sandbox', employeeId: 'employee-1',
+      ), hasLength(2));
+    } finally {
+      await db.close();
+    }
+  });
+
   test('TEST-only atomic settlement and idempotent replay', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     try {
