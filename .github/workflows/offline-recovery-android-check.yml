@@ -1,0 +1,35 @@
+name: Offline recovery Android debug verification
+on:
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'test/services/local_owner_invoice_numbering_test.dart'
+      - 'test/services/local_numbered_document_overlay_test.dart'
+      - '.github/workflows/offline-recovery-android-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve packages
+        run: flutter pub get
+      - name: Generate local database code
+        run: dart run build_runner build --delete-conflicting-outputs
+      - name: Check targeted offline recovery tests
+        run: |
+          flutter test test/services/local_owner_invoice_numbering_test.dart
+          flutter test test/services/local_numbered_document_overlay_test.dart
+      - name: Compile Android debug APK
+        run: flutter build apk --debug
+      - name: Verify APK exists
+        run: test -s build/app/outputs/flutter-apk/app-debug.apk
