@@ -62,10 +62,10 @@ jobs:
           p=paths[0]
           source=p.read_text()
           pattern=r'(applicationId\s*(?:=\s*)?["\x27])com\.briskers\.briskers_app(["\x27])'
-          changed,count=re.subn(pattern,r'\g<1>com.briskers.briskers_test\g<2>',source)
+          changed,count=re.subn(pattern,r'\g<1>com.briskers.briskers_localtest\g<2>',source)
           assert count==1, "Cannot verify separate application ID"
           p.write_text(changed)
-          assert 'com.briskers.briskers_test' in p.read_text()
+          assert 'com.briskers.briskers_localtest' in p.read_text()
           PY
 
       - name: Generate sandbox-only Dart configuration
