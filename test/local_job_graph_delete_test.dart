@@ -68,6 +68,26 @@ void main() {
     expect(await count('local_offline_job_purge_entities'), 0);
   });
 
+  test('Owner identity change before commit rolls back rows and markers', () async {
+    final reviewed = await deletion.preview(
+      businessId: business, jobId: job, actorId: actor);
+    var checks = 0;
+    final switchingOwner = LocalJobGraphDelete(db, ownerIdentityProvider: () {
+      checks++;
+      return checks < 4
+          ? {'actor_id': actor, 'business_id': business, 'role_code': 'owner'}
+          : null;
+    });
+    await expectLater(
+      switchingOwner.confirm(businessId: business, jobId: job,
+          actorId: actor, reviewed: reviewed),
+      throwsStateError,
+    );
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
   test('different business Owner cannot preview a synced job', () async {
     final wrongOwner = LocalJobGraphDelete(db,
       ownerIdentityProvider: () => {
