@@ -40,11 +40,13 @@ class _TestPayrollTaskSelectorState extends State<TestPayrollTaskSelector> {
     final usable = eligible.where((a) =>
         a.id.trim().isNotEmpty && uniqueIds.add(a.id)).toList(growable: false);
     final selected = usable.where((a) => _selected.contains(a.id)).toList();
-    final gross = ShopPayrollPreview.grossCents(
-      owner: widget.isOwner,
-      employeeId: widget.employeeId,
-      selected: selected,
-    );
+    final gross = widget.isOwner
+        ? ShopPayrollPreview.grossCents(
+            owner: true,
+            employeeId: widget.employeeId,
+            selected: selected,
+          )
+        : 0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
