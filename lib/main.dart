@@ -9,6 +9,8 @@ import 'core/supabase_config.dart';
 import 'local/local_database_provider.dart';
 import 'services/expenseiq_background_scheduler.dart';
 import 'services/local_owner_security.dart';
+import 'services/synthetic_local_owner_fixture.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +35,13 @@ Future<void> main() async {
     url: supabaseUrl,
     publishableKey: supabasePublishableKey,
   );
+  if (isSyntheticTestBuild) {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('briskers_synthetic_fixture_initialized_v2') != true) {
+      await SyntheticLocalOwnerFixture.initializeForTestOnly();
+      await prefs.setBool('briskers_synthetic_fixture_initialized_v2', true);
+    }
+  }
   // A synthetic testing app must never run the production ExpenseIQ importer.
   if (!isSyntheticTestBuild) {
     await ExpenseIqBackgroundScheduler.initialize();
