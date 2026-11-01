@@ -51,6 +51,8 @@ class _TestPayrollTaskSelectorState extends State<TestPayrollTaskSelector> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text('TEST work selection — no payment will be recorded'),
+        if (usable.isEmpty)
+          const Text('No eligible local work credits available.'),
         for (final credit in usable)
           CheckboxListTile(
             value: _selected.contains(credit.id),
