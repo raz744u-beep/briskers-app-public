@@ -36,6 +36,30 @@ void main() {
       serverPaymentDate:'2026-10-19',
       serverLineCount:2,serverPaymentCount:count);
 
+  test('verified aliases are idempotent and keep payment held',() async {
+    await seed();
+    final service=OwnerRecoveryReconciliation(database:db);
+    Future<void> adopt(String serverId) => service.recordVerifiedAlias(
+      isOwner:true,businessId:'test',localInvoiceId:'local-invoice',
+      serverInvoiceId:serverId,serverJobId:'server-job',
+      invoiceNumber:'8008',jobNumber:'J-8',
+      totalCents:12500,paymentCents:3000,
+      serverPaymentOperationId:'synthetic-op',
+      serverPaymentDate:'2026-10-19',
+      serverLineCount:2,serverPaymentCount:1);
+    await adopt('server-invoice');
+    await adopt('server-invoice');
+    await expectLater(adopt('different-server-invoice'),throwsStateError);
+    final aliases=await db.customSelect(
+      'SELECT * FROM owner_recovery_aliases').get();
+    expect(aliases.length,1);
+    expect(aliases.single.read<String>('server_invoice_id'),'server-invoice');
+    final original=await db.customSelect(
+      'SELECT state,payload_json FROM sync_outbox').getSingle();
+    expect(original.read<String>('state'),'conflict');
+    expect(jsonDecode(original.read<String>('payload_json'))['operation_id'],
+      'synthetic-op');
+  });
   test('matching identities leave quarantined outbox unchanged',() async {
     await seed();
     expect(await check(),true);
