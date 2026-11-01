@@ -121,6 +121,8 @@ void main() {
         'SELECT allocation_id FROM test_payroll_staged_credits',
       ).get();
       expect(allocations, hasLength(1));
+      expect(await repository.stagingIntegrityOk('test-shop'), isTrue);
+      expect(await repository.stagingIntegrityOk('different-shop'), isTrue);
     } finally {
       await db.close();
     }
