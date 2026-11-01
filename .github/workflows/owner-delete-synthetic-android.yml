@@ -46,12 +46,12 @@ jobs:
           p = paths[0]
           src = p.read_text()
           pattern = r'(applicationId\s*(?:=\s*)?["\x27])com\.briskers\.briskers_app(["\x27])'
-          replaced, n = re.subn(pattern, r'\g<1>com.briskers.briskers_test\g<2>', src)
+          replaced, n = re.subn(pattern, r'\g<1>com.briskers.briskers_localtest\g<2>', src)
           assert n == 1, "Expected one standard Flutter Android application ID"
           p.write_text(replaced)
-          assert "com.briskers.briskers_test" in p.read_text()
+          assert "com.briskers.briskers_localtest" in p.read_text()
           assert not re.search(pattern, p.read_text())
-          print("Verified isolated applicationId=com.briskers.briskers_test")
+          print("Verified isolated applicationId=com.briskers.briskers_localtest")
           PY
       - name: Resolve packages and generate database code
         working-directory: generated
