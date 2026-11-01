@@ -497,7 +497,13 @@ class _BusinessGateState extends State<BusinessGate> {
           }
           if (snapshot.data == false) {
             return LocalOwnerSetupScreen(
-              onCompleted: () { if (mounted) setState(() {}); },
+              onCompleted: () {
+                if (!mounted) return;
+                Navigator.of(context).pushReplacement(MaterialPageRoute<void>(
+                  builder: (_) => BusinessGate(
+                    localOwnerIdentity: LocalOwnerSecurity.instance.unlockedIdentity),
+                ));
+              },
               onSkip: () {
                 if (mounted) setState(() => _deferredLocalEnrollment = true);
               },
