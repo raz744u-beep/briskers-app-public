@@ -100,6 +100,35 @@ void main() {
     expect(await count('local_jobs'), 2);
   });
 
+  test('linked financial payment cache blocks partial deletion', () async {
+    await db.customStatement(
+      'INSERT INTO local_financial_cache '
+      '(business_id,cache_key,payload_json) VALUES (?,?,?)',
+      [business, 'payments:invoice', '{"invoice_id":"$invoice","payments":[{"amount":3000}]}'],
+    );
+    await expectLater(
+      deletion.preview(businessId: business, jobId: job, actorId: actor),
+      throwsStateError,
+    );
+    expect(await count('local_jobs'), 2);
+    expect(await count('local_documents'), 1);
+    expect(await count('local_offline_job_purge_entities'), 0);
+  });
+
+  test('unrelated financial cache is preserved after local deletion', () async {
+    await db.customStatement(
+      'INSERT INTO local_financial_cache '
+      '(business_id,cache_key,payload_json) VALUES (?,?,?)',
+      [business, 'payments:other', '{"job_id":"$otherJob","amount":125}'],
+    );
+    final reviewed = await deletion.preview(
+      businessId: business, jobId: job, actorId: actor);
+    await deletion.confirm(businessId: business, jobId: job,
+      actorId: actor, reviewed: reviewed);
+    expect(await count('local_jobs'), 1);
+    expect(await count('local_financial_cache'), 1);
+  });
+
   test('rejects linked queued edits without erasing any rows', () async {
     await db.customStatement(
       "INSERT INTO sync_outbox (business_id,entity_type,entity_id,operation,payload_json) "
