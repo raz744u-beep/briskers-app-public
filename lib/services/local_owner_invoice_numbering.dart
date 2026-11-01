@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 
 import '../local/briskers_local_database.dart';
@@ -46,6 +48,53 @@ class LocalOwnerInvoiceNumbering {
           invoices.single.read<String>('sync_state') != 'pending' ||
           jobs.single.read<String>('sync_state') != 'pending') {
         throw StateError('Original pending invoice and Job must exist');
+      }
+      // Refuse to number an unrelated or incomplete invoice. The existing
+      // customer, vehicle, invoice and payment must all be present as local
+      // pending operations; never manufacture or replace a payment.
+      final chain = await _db.customSelect(
+        '''SELECT entity_type,entity_id,payload_json FROM sync_outbox
+           WHERE business_id=? AND state='pending'
+           AND entity_type IN ('customer_create','vehicle_create',
+             'document_draft_create','invoice_payment_received')''',
+        variables:[Variable<String>(businessId)],
+      ).get();
+      final customerId = await _db.customSelect(
+        '''SELECT customer_id FROM local_documents
+           WHERE business_id=? AND id=?''',
+        variables:[Variable<String>(businessId),Variable<String>(invoiceId)],
+      ).getSingle();
+      final vehicleId = await _db.customSelect(
+        '''SELECT vehicle_id FROM local_jobs
+           WHERE business_id=? AND id=?''',
+        variables:[Variable<String>(businessId),Variable<String>(jobId)],
+      ).getSingle();
+      final expected = <String, String>{
+        'customer_create':customerId.read<String>('customer_id'),
+        'vehicle_create':vehicleId.read<String>('vehicle_id'),
+        'document_draft_create':invoiceId,
+        'invoice_payment_received':invoiceId,
+      };
+      for (final entry in expected.entries) {
+        final matches = chain.where((row) =>
+          row.read<String>('entity_type') == entry.key &&
+          row.read<String>('entity_id') == entry.value).toList();
+        if (matches.length != 1) {
+          throw StateError('Original ${entry.key} record is missing or duplicated');
+        }
+      }
+      final paymentRow=chain.singleWhere((row) =>
+        row.read<String>('entity_type')=='invoice_payment_received' &&
+        row.read<String>('entity_id')==invoiceId);
+      final rawPayment=jsonDecode(paymentRow.read<String>('payload_json'));
+      if (rawPayment is! Map ||
+          rawPayment['invoice_id'] != invoiceId ||
+          rawPayment['operation_id']?.toString().isNotEmpty != true ||
+          rawPayment['amount_cents'] is! int ||
+          (rawPayment['amount_cents'] as int) <= 0 ||
+          rawPayment['method_id']?.toString().isNotEmpty != true ||
+          rawPayment['payment_date']?.toString().isNotEmpty != true) {
+        throw StateError('Original recorded payment failed local verification');
       }
       final invoiceConflicts = await _db.customSelect(
         '''SELECT id FROM local_documents
