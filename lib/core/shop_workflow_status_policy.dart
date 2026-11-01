@@ -1,0 +1,105 @@
+/// Pure status contract for the unified Briskers Tasks/Payroll TEST candidate.
+///
+/// Main customer-facing Job/Invoice status is *only* Open or Closed. Financial
+/// receipt finalization, mechanic task progress and internal attention flags
+/// must never create a third main status or silently finalize money.
+enum ShopMainStatus { open, closed }
+
+enum ShopPaymentStatus { unpaid, partial, paid }
+
+enum ShopTaskProgress { notStarted, inProgress, done }
+
+class ShopWorkflowStatusPolicy {
+  const ShopWorkflowStatusPolicy._();
+
+  static ShopMainStatus jobMain({required bool closureConfirmed}) =>
+      closureConfirmed ? ShopMainStatus.closed : ShopMainStatus.open;
+
+  static ShopMainStatus invoiceMain({required bool closureConfirmed}) =>
+      closureConfirmed ? ShopMainStatus.closed : ShopMainStatus.open;
+
+  /// Only posted/finalized payments can yield Paid. An entered but
+  /// unfinalized receipt must remain outside this calculation.
+  static ShopPaymentStatus payment({
+    required num invoiceTotal,
+    required num finalizedPayments,
+  }) {
+    if (!invoiceTotal.isFinite ||
+        !finalizedPayments.isFinite ||
+        invoiceTotal < 0 ||
+        finalizedPayments < 0) {
+      throw ArgumentError('Invalid invoice total or finalized payments');
+    }
+    if (invoiceTotal <= 0 || finalizedPayments < 0.005) {
+      return ShopPaymentStatus.unpaid;
+    }
+    if (finalizedPayments >= invoiceTotal - 0.005) {
+      return ShopPaymentStatus.paid;
+    }
+    return ShopPaymentStatus.partial;
+  }
+
+  /// Individual mechanic progress is independent. The overall task is Done
+  /// only when ALL assigned mechanics are Done. A missing assignment cannot
+  /// certify completion.
+  static ShopTaskProgress sharedTask(
+      Iterable<ShopTaskProgress> mechanics) {
+    final portions = mechanics.toList(growable: false);
+    if (portions.isEmpty) return ShopTaskProgress.notStarted;
+    if (portions.every((progress) => progress == ShopTaskProgress.done)) {
+      return ShopTaskProgress.done;
+    }
+    if (portions.any(
+      (progress) => progress != ShopTaskProgress.notStarted,
+    )) {
+      return ShopTaskProgress.inProgress;
+    }
+    return ShopTaskProgress.notStarted;
+  }
+
+  /// A completed individual mechanic portion can enter a weekly payroll
+  /// selection only once. This pure gate never posts or mutates payroll.
+  /// Reopening a task cannot make previously paid hours payable again.
+  static bool eligibleForPayrollSelection({
+    required bool owner,
+    required bool mechanicPortionDone,
+    required bool alreadyPaid,
+    required bool alreadySelected,
+  }) =>
+      owner && mechanicPortionDone && !alreadyPaid && !alreadySelected;
+
+  /// Evaluate one mechanic's credit independently of their coworkers.
+  /// A shared task may still be In Progress when one mechanic finishes.
+  static bool eligibleSharedTaskPortionForPayroll({
+    required bool owner,
+    required ShopTaskProgress mechanicProgress,
+    required bool alreadyPaid,
+    required bool alreadySelected,
+  }) => eligibleForPayrollSelection(
+        owner: owner,
+        mechanicPortionDone: mechanicProgress == ShopTaskProgress.done,
+        alreadyPaid: alreadyPaid,
+        alreadySelected: alreadySelected,
+      );
+
+  /// No task credit may be selected twice within the same weekly batch.
+  /// IDs must represent immutable mechanic work allocations, not just job IDs.
+  static bool hasUniquePayrollAllocationIds(Iterable<String> allocationIds) {
+    final seen = <String>{};
+    for (final id in allocationIds) {
+      if (id.trim().isEmpty || !seen.add(id)) return false;
+    }
+    return true;
+  }
+
+  /// Internal eligibility for the Owner's Complete Job action.
+  /// This does NOT close anything: the backend must independently verify
+  /// payment, durable task/job state, permission and an acknowledged close.
+  static bool eligibleForJointClose({
+    required bool owner,
+    required bool fullFinalizedPayment,
+    required bool unresolvedPayment,
+    required bool workReady,
+  }) =>
+      owner && fullFinalizedPayment && !unresolvedPayment && workReady;
+}
