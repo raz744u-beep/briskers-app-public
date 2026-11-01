@@ -17,7 +17,7 @@ class TasksPayrollTestApp extends StatelessWidget {
   const TasksPayrollTestApp({super.key});
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  Widget build(BuildContext context) => const MaterialApp(
     title: 'Briskers Tasks Payroll TEST',
     debugShowCheckedModeBanner: false,
     home: const TestPayrollHome(),
@@ -58,10 +58,12 @@ class _TestPayrollHomeState extends State<TestPayrollHome> {
         ),
         credits: [credit], outstandingAdvanceCents: 0,
       );
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _message = 'Synthetic work staged — NOT PAID';
         _refresh++;
-      });
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _message = 'TEST setup: $error');
     }
@@ -78,7 +80,8 @@ class _TestPayrollHomeState extends State<TestPayrollHome> {
             ? 'Synthetic transaction recorded locally — NOT real payroll'
             : 'Same synthetic transaction already recorded';
         _refresh++;
-      });
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _message = 'TEST settlement rejected: $error');
     }
@@ -106,7 +109,7 @@ class _TestPayrollHomeState extends State<TestPayrollHome> {
         OutlinedButton(onPressed: _settle,
           child: const Text('Verify synthetic payment only')),
         const Divider(),
-        Text('Employee: $employee'),
+        const Text('Employee: $employee'),
         TestLocalPayrollTaskList(
           key: ValueKey('credits-$_refresh'),
           businessId: business, employeeId: employee,
