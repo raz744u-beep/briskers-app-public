@@ -18,7 +18,7 @@ const supabasePublishableKey = isSyntheticTestBuild
 const productionSupabasePublishableKey =
     'sb_publishable_tY4v9OoY0nkbeFl-5cnGbA_FoWzD9aP';
 
-const syntheticAndroidAppId = 'com.briskers.briskers_test';
+const syntheticAndroidAppId = 'com.briskers.briskers_localtest';
 
 void verifySyntheticAppIdentity(String actualPackageId) {
   if (isSyntheticTestBuild && actualPackageId != syntheticAndroidAppId) {
