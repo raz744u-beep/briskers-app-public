@@ -47,7 +47,7 @@ class LocalJobGraphDelete {
             row['job_number'] ?? row['title'] ?? row[key]});
       }
     }
-    final inspections = found.where((r) => r['kind'] == 'pre_inspection');
+    final inspections = found.where((r) => r['kind'] == 'pre_inspection').toList();
     for (final inspection in inspections) {
       for (final row in await _rows('local_pre_inspection_photos',
           business, 'inspection_id', inspection['id'].toString())) {
