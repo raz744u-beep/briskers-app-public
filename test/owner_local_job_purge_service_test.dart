@@ -76,7 +76,7 @@ void main() {
     );
     expect((await db.customSelect(
       'SELECT COUNT(*) AS count FROM local_jobs WHERE id=?',
-      variables: [Variable<String>(job)],
+      variables: const [Variable<String>(job)],
     ).getSingle()).read<int>('count'), 1);
   });
 
