@@ -67,15 +67,16 @@ class OwnerLocalJobPurgeService {
     }
   }
 
+  /// Device-only deletion. Remote registration is a separate future sync task;
+  /// it can never delay, block, or change this local transaction.
   Future<LocalDeletionCleanupResult> confirm(OfflineJobPurgePreview preview,
-      {required String actorId, required bool isOwner, required bool online}) async {
+      {required String actorId, required bool isOwner}) async {
     if (!isOwner) throw StateError('Only the Owner can delete a Job.');
     _assertLocalOwnerBusiness(preview.businessId, actorId);
     _gateway.assertActor(actorId);
     final result = await OfflineJobPurge.confirm(_db, preview,
       operationId: _operationId(), actorId: actorId, isOwner: isOwner);
     LocalSyncStatusRepository.notifyStateChanged(preview.businessId);
-    if (online) await flushRegistrations(preview.businessId, actorId: actorId, isOwner: isOwner);
     return result;
   }
 
