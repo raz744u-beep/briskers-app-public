@@ -7,6 +7,23 @@ import 'package:briskers_app/services/test_payroll_staging_repository.dart';
 import 'package:briskers_app/services/test_payroll_atomic_commit.dart';
 
 void main() {
+  test('synthetic settlement rejects ordinary app invocation', () async {
+    final db = BriskersLocalDatabase(NativeDatabase.memory());
+    try {
+      final settlement = TestPayrollAtomicCommit(database: db);
+      await expectLater(settlement.finalizeSynthetic(
+        businessId: 'sandbox', operationId: 'op', owner: true,
+        syntheticTestMode: false,
+      ), throwsStateError);
+      final rows = await db.customSelect(
+        "SELECT name FROM sqlite_master WHERE name = 'test_payroll_paid_operations'",
+      ).get();
+      expect(rows, isEmpty);
+    } finally {
+      await db.close();
+    }
+  });
+
   test('changed reserved credit ID rejects settlement even at same gross', () async {
     final db = BriskersLocalDatabase(NativeDatabase.memory());
     try {
