@@ -3407,8 +3407,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
     // Owner may remove a provably never-uploaded local Job without a server.
     // Synced or uncertain Jobs remain blocked until verified reconciliation.
     if (!_owner || _busy) return;
-    final actorId = LocalOwnerSecurity.instance.unlockedActorId ??
-        supabase.auth.currentUser?.id;
+    final actorId = LocalOwnerSecurity.instance.unlockedActorId;
     if (actorId == null) {
       if (mounted) setState(() => _error =
           'Unlock your Owner account before reviewing Job deletion.');
@@ -3434,8 +3433,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
           context, jobLabel: label, items: localPreview.items,
         );
         if (!confirmed || !mounted) return;
-        if (!_owner || (LocalOwnerSecurity.instance.unlockedActorId ??
-            supabase.auth.currentUser?.id) != actorId) {
+        if (!_owner || LocalOwnerSecurity.instance.unlockedActorId != actorId) {
           throw StateError('Your access changed. Reopen Delete Job to review.');
         }
         final cleanup = await localService.confirm(
