@@ -59,6 +59,14 @@ jobs:
           python3 ../tools/configure_android_biometrics.py
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
+      - name: Verify synthetic payment deletion with no network
+        working-directory: generated
+        run: >-
+          flutter test test/local_job_graph_delete_test.dart
+          --dart-define=BRISKERS_SYNTHETIC_BUILD=true
+          --dart-define=BRISKERS_SYNTHETIC_PUBLISHABLE_KEY=sb_publishable_ci_placeholder
+          --dart-define=BRISKERS_OWNER_DELETE_V3_FEED=false
+
       - name: Compile isolated Android debug APK (do not deploy)
         working-directory: generated
         run: >-
