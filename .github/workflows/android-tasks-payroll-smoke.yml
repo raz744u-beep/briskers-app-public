@@ -1,0 +1,63 @@
+name: Tasks Payroll isolated Android TEST APK
+
+on:
+  push:
+    branches:
+      - feature/unified-tasks-payroll-status-test-20261028
+    paths:
+      - lib/**
+      - test/**
+      - pubspec.yaml
+      - .github/workflows/android-tasks-payroll-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CI: 'true'
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      DART_SUPPRESS_ANALYTICS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Create isolated Android TEST project
+        run: |
+          flutter create --platforms=android --org com.briskers.test --project-name tasks_payroll_test generated
+          rm -rf generated/lib generated/test
+          cp -R lib generated/lib
+          cp -R test generated/test
+          if [ -d assets ]; then cp -R assets generated/assets; fi
+          cp pubspec.yaml generated/pubspec.yaml
+          cp analysis_options.yaml generated/analysis_options.yaml
+          sed -i 's/^name: briskers_app/name: briskers_app/' generated/pubspec.yaml
+          sed -i 's/android:label="tasks_payroll_test"/android:label="Briskers Tasks Payroll TEST"/' generated/android/app/src/main/AndroidManifest.xml
+      - name: Resolve and generate database sources
+        working-directory: generated
+        run: |
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+      - name: Verify sources and tests
+        working-directory: generated
+        run: |
+          flutter analyze
+          flutter test test/test_payroll_atomic_commit_test.dart
+          flutter test test/test_payroll_staging_repository_test.dart
+          flutter test test/test_employee_payroll_staging_panel_test.dart
+      - name: Build distinct debug APK
+        working-directory: generated
+        run: |
+          flutter build apk --debug -t lib/tasks_payroll_smoke_main.dart
+          test -s build/app/outputs/flutter-apk/app-debug.apk
+      - name: Upload installable TEST APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: briskers-tasks-payroll-test-apk
+          path: generated/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 14
