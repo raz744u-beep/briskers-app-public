@@ -73,5 +73,9 @@ void main() {
     expect(find.textContaining('100.00'), findsOneWidget);
     expect(find.textContaining('Zelle'), findsOneWidget);
     expect(find.textContaining('Verify Payment'), findsNothing);
+    await tester.tap(find.byTooltip('Refresh local TEST payroll'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('80.00 net'), findsOneWidget);
+    expect(find.textContaining('Verify Payment'), findsNothing);
   });
 }
