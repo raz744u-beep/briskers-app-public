@@ -57,6 +57,24 @@ void main() {
     expect(rows.every((x)=>x.read<String>('state')=='conflict'),true);
     expect(rows.any((x)=>jsonDecode(x.read<String>('payload_json'))['operation_id']=='synthetic-payment'),true);
   });
+  test('missing recorded payment never assigns invoice number',() async {
+    await seed();
+    await db.customStatement(
+      "DELETE FROM sync_outbox WHERE entity_type='invoice_payment_received'",
+    );
+    await expectLater(assign(), throwsStateError);
+    expect((await invoice())['document_number'],null);
+  });
+  test('payment amount and UUID are preserved on local numbering',() async {
+    await seed();
+    await assign();
+    final row=await db.customSelect(
+      "SELECT payload_json FROM sync_outbox "
+      "WHERE entity_type='invoice_payment_received'").getSingle();
+    final original=jsonDecode(row.read<String>('payload_json')) as Map;
+    expect(original['amount_cents'],3000);
+    expect(original['operation_id'],'synthetic-payment');
+  });
   test('non-Owner cannot change numbers',() async {
     await seed();await expectLater(assign(owner:false),throwsStateError);
     expect((await invoice())['document_number'],null);
