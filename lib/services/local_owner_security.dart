@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -149,7 +148,9 @@ class LocalOwnerSecurity {
   Future<bool> unlockWithBiometrics() async {
     _unlockedIdentity = null;
     if (!await isConfigured || !await biometricsEnabled ||
-        !await hasEnrolledBiometrics) return false;
+        !await hasEnrolledBiometrics) {
+      return false;
+    }
     try {
       final valid = await _auth.authenticate(
         localizedReason: 'Unlock Briskers Owner access',
