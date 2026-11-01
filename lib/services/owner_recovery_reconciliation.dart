@@ -71,8 +71,78 @@ class OwnerRecoveryReconciliation {
         raw['payment_date'] != serverPaymentDate) {
       throw StateError('Original payment identity or amount mismatch');
     }
-    // Do not mark outbox rows synced or change local IDs here:
-    // server keys and local keys require a separate explicit alias migration.
+    // A verified match is recorded as an alias, never as a replayable upload.
+    // Keep the original held receipt and all phone-side keys intact.
     return true;
+  }
+
+  /// Stores an Owner-approved identity match. This has no network effects,
+  /// makes no payment, and deliberately does not unblock ordinary sync.
+  Future<void> recordVerifiedAlias({
+    required bool isOwner,
+    required String businessId,
+    required String localInvoiceId,
+    required String serverInvoiceId,
+    required String serverJobId,
+    required String invoiceNumber,
+    required String jobNumber,
+    required int totalCents,
+    required int paymentCents,
+    required String serverPaymentOperationId,
+    required String serverPaymentDate,
+    required int serverLineCount,
+    required int serverPaymentCount,
+  }) async {
+    await _db.transaction(() async {
+      await verify(
+        isOwner:isOwner,businessId:businessId,localInvoiceId:localInvoiceId,
+        serverInvoiceId:serverInvoiceId,serverJobId:serverJobId,
+        invoiceNumber:invoiceNumber,jobNumber:jobNumber,
+        totalCents:totalCents,paymentCents:paymentCents,
+        serverPaymentOperationId:serverPaymentOperationId,
+        serverPaymentDate:serverPaymentDate,
+        serverLineCount:serverLineCount,serverPaymentCount:serverPaymentCount,
+      );
+      await _db.customStatement(
+        """CREATE TABLE IF NOT EXISTS owner_recovery_aliases (
+          business_id TEXT NOT NULL,
+          local_invoice_id TEXT NOT NULL,
+          server_invoice_id TEXT NOT NULL,
+          server_job_id TEXT NOT NULL,
+          payment_operation_id TEXT NOT NULL,
+          invoice_number TEXT NOT NULL,
+          job_number TEXT NOT NULL,
+          total_cents INTEGER NOT NULL,
+          payment_cents INTEGER NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (business_id,local_invoice_id),
+          UNIQUE (business_id,server_invoice_id),
+          UNIQUE (business_id,payment_operation_id)
+        )""",
+      );
+      final prior = await _db.customSelect(
+        """SELECT server_invoice_id,server_job_id,payment_operation_id
+           FROM owner_recovery_aliases
+           WHERE business_id=? AND local_invoice_id=?""",
+        variables:[Variable<String>(businessId),Variable<String>(localInvoiceId)],
+      ).get();
+      if (prior.isNotEmpty) {
+        final match=prior.single;
+        if (match.read<String>('server_invoice_id') != serverInvoiceId ||
+            match.read<String>('server_job_id') != serverJobId ||
+            match.read<String>('payment_operation_id') != serverPaymentOperationId) {
+          throw StateError('Existing recovery identity cannot be overwritten');
+        }
+        return;
+      }
+      await _db.customStatement(
+        """INSERT INTO owner_recovery_aliases
+           (business_id,local_invoice_id,server_invoice_id,server_job_id,
+            payment_operation_id,invoice_number,job_number,total_cents,payment_cents)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        [businessId,localInvoiceId,serverInvoiceId,serverJobId,
+         serverPaymentOperationId,invoiceNumber,jobNumber,totalCents,paymentCents],
+      );
+    });
   }
 }
