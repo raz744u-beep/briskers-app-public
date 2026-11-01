@@ -1,3 +1,4 @@
+import '../../services/local_numbered_document_overlay.dart';
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:typed_data';
@@ -587,10 +588,12 @@ class _JobDocumentScreenState extends State<JobDocumentScreen>
       final repairedCached =
           await _detailCache.load(widget.businessId, widget.documentId) ??
               cached;
-      final datedCached = await _withLocalPayments(
+      final paymentProjected = await _withLocalPayments(
         await _withRecoveredDocumentDate(
           await _offlineInvoiceTax.projectPending(
               widget.businessId, widget.documentId, repairedCached)));
+      final datedCached = await LocalNumberedDocumentOverlay()
+          .apply(widget.businessId, widget.documentId, paymentProjected);
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _detail = datedCached;
