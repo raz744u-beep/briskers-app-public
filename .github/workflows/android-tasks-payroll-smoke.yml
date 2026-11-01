@@ -27,6 +27,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.9'
       - name: Create isolated Android TEST project
         run: |
           flutter create --platforms=android --org com.briskers.test --project-name tasks_payroll_test generated
@@ -36,7 +37,8 @@ jobs:
           if [ -d assets ]; then cp -R assets generated/assets; fi
           cp pubspec.yaml generated/pubspec.yaml
           cp analysis_options.yaml generated/analysis_options.yaml
-          sed -i 's/^name: briskers_app/name: briskers_app/' generated/pubspec.yaml
+          # Remove development network permission; synthetic tests need no network.
+          sed -i '/uses-permission.*android.permission.INTERNET/d' generated/android/app/src/debug/AndroidManifest.xml generated/android/app/src/profile/AndroidManifest.xml
           sed -i 's/android:label="tasks_payroll_test"/android:label="Briskers Tasks Payroll TEST"/' generated/android/app/src/main/AndroidManifest.xml
       - name: Resolve and generate database sources
         working-directory: generated
@@ -47,17 +49,37 @@ jobs:
         working-directory: generated
         run: |
           flutter analyze
-          flutter test test/test_payroll_atomic_commit_test.dart
-          flutter test test/test_payroll_staging_repository_test.dart
-          flutter test test/test_employee_payroll_staging_panel_test.dart
+          flutter test test/test_payroll_*_test.dart test/test_employee_payroll_staging_panel_test.dart test/shop_workflow_status_policy_test.dart
       - name: Build distinct debug APK
         working-directory: generated
         run: |
           flutter build apk --debug -t lib/tasks_payroll_smoke_main.dart
           test -s build/app/outputs/flutter-apk/app-debug.apk
+      - name: Verify APK identity signature and integrity
+        working-directory: generated
+        run: |
+          set -euo pipefail
+          mkdir -p verification
+          APK=build/app/outputs/flutter-apk/app-debug.apk
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | tee verification/apk-badging.txt
+          grep -q "package: name='com.briskers.test.tasks_payroll_test'" verification/apk-badging.txt
+          "$BUILD_TOOLS/aapt" dump permissions "$APK" | tee verification/permissions.txt
+          if grep -q android.permission.INTERNET verification/permissions.txt; then
+            echo "Unexpected network permission in synthetic APK"
+            exit 1
+          fi
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee verification/signature.txt
+          unzip -t "$APK" > verification/zip-integrity.txt
+          sha256sum "$APK" | tee verification/SHA256SUMS
+          git -C .. rev-parse HEAD | tee verification/COMMIT_SHA
+          flutter --version > verification/flutter-version.txt
       - name: Upload installable TEST APK
         uses: actions/upload-artifact@v4
         with:
           name: briskers-tasks-payroll-test-apk
-          path: generated/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          path: |
+            generated/build/app/outputs/flutter-apk/app-debug.apk
+            generated/verification/*
           retention-days: 14
