@@ -173,7 +173,8 @@ class _BusinessGateState extends State<BusinessGate> {
             '${cached['business_id'] ?? cached['id'] ?? ''}';
         final roleCode =
             '${cached['role_code'] ?? cached['role'] ?? ''}';
-        if (businessId.isNotEmpty) {
+        if (businessId.isNotEmpty &&
+            !BriskersConnectionModeController.instance.forceOffline) {
           unawaited(
             _refreshLocalData(
               businessId,
@@ -184,6 +185,20 @@ class _BusinessGateState extends State<BusinessGate> {
       }
     } catch (_) {
       cached = null;
+    }
+
+    // Offline navigation must never issue a Supabase business lookup.
+    // Retain the last verified business context; do not manufacture Owner
+    // privileges or clear existing local records when connectivity is absent.
+    if (BriskersConnectionModeController.instance.forceOffline) {
+      if (cached == null && mounted) {
+        setState(() {
+          _businesses = const [];
+          _error = 'No locally cached business is available on this device. '
+              'Offline access requires a previously verified local profile.';
+        });
+      }
+      return;
     }
 
     try {
